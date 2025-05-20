@@ -22,7 +22,7 @@ The application is built using:
 - <span class="font-semibold text-foreground">React</span>: Component library for interactive UI elements
 - <span class="font-semibold text-foreground">Shadcn UI</span>: UI component library built on Tailwind CSS
 - <span class="font-semibold text-foreground">SQLite</span>: Database for storing configuration and state
-- <span class="font-semibold text-foreground">Node.js</span>: Runtime environment for the backend
+- <span class="font-semibold text-foreground">Bun</span>: Runtime environment for the backend
 
 ## Architecture Diagram
 
@@ -30,7 +30,7 @@ The application is built using:
 graph TD
     subgraph "Gitea Mirror"
         Frontend["Frontend<br/>(Astro)"]
-        Backend["Backend<br/>(Node.js)"]
+        Backend["Backend<br/>(Bun)"]
         Database["Database<br/>(SQLite)"]
 
         Frontend <--> Backend
@@ -60,9 +60,9 @@ Key frontend components:
 - **Configuration**: Settings for GitHub and Gitea connections
 - **Activity Log**: Detailed log of mirroring operations
 
-### Backend (Node.js)
+### Backend (Bun)
 
-The backend is built with Node.js and provides API endpoints for the frontend to interact with. It handles:
+The backend is built with Bun and provides API endpoints for the frontend to interact with. It handles:
 
 - Authentication and user management
 - GitHub API integration

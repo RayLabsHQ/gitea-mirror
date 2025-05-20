@@ -63,9 +63,9 @@ Easily configure your GitHub and Gitea connections, set up automatic mirroring s
 
 See the [Quick Start Guide](docs/quickstart.md) for detailed instructions on getting up and running quickly.
 
-### Prerequisites
+-### Prerequisites
 
-- Node.js 22 or later
+- Bun 1.2.9 or later
 - A GitHub account with a personal access token
 - A Gitea instance with an access token
 
@@ -359,7 +359,7 @@ docker compose -f docker-compose.dev.yml up -d
 ## Technologies Used
 
 - **Frontend**: Astro, React, Shadcn UI, Tailwind CSS v4
-- **Backend**: Node.js
+ - **Backend**: Bun
 - **Database**: SQLite (default) or PostgreSQL
 - **Caching/Queue**: Redis
 - **API Integration**: GitHub API (Octokit), Gitea API

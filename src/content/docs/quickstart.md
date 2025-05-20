@@ -16,7 +16,7 @@ Before you begin, make sure you have:
 
 1. <span class="font-semibold text-foreground">A GitHub account with a personal access token</span>
 2. <span class="font-semibold text-foreground">A Gitea instance with an access token</span>
-3. <span class="font-semibold text-foreground">Docker and docker-compose (recommended) or Node.js 18+ installed</span>
+3. <span class="font-semibold text-foreground">Docker and docker-compose (recommended) or Bun 1.2.9+ installed</span>
 
 ## Installation Options
 

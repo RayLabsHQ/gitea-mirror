@@ -23,7 +23,7 @@ The following environment variables can be used to configure Gitea Mirror:
 
 | Variable | Description | Default Value | Example |
 |----------|-------------|---------------|---------|
-| `NODE_ENV` | Node environment (development, production, test) | `development` | `production` |
+| `NODE_ENV` | Runtime environment (development, production, test) | `development` | `production` |
 | `DATABASE_URL` | SQLite database URL | `sqlite://data/gitea-mirror.db` | `sqlite://path/to/your/database.db` |
 | `JWT_SECRET` | Secret key for JWT authentication | `your-secret-key-change-this-in-production` | `your-secure-random-string` |
 | `HOST` | Server host | `localhost` | `0.0.0.0` |

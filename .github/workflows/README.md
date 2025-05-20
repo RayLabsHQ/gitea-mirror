@@ -25,7 +25,7 @@ This workflow runs on all branches and pull requests. It:
 - On pull requests to any branch (except changes to README.md and docs)
 
 **Key features:**
-- Uses pnpm for faster dependency installation
+- Uses pnpm for dependency installation and Bun as the runtime
 - Caches dependencies to speed up builds
 - Uploads build artifacts for 7 days
 

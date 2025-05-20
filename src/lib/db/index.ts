@@ -1,6 +1,6 @@
 import { z } from "zod";
-import { createClient } from "@libsql/client";
-import { drizzle } from "drizzle-orm/libsql";
+import { Database } from "bun:sqlite";
+import { drizzle } from "drizzle-orm/bun-sqlite";
 import { sqliteTable, text, integer } from "drizzle-orm/sqlite-core";
 
 import path from "path";
@@ -11,11 +11,24 @@ const dataDir = path.join(process.cwd(), "data");
 const dbUrl =
   process.env.DATABASE_URL || `file:${path.join(dataDir, "gitea-mirror.db")}`;
 
-// Create a client connection to the database
-export const client = createClient({ url: dbUrl });
+// Create a SQLite database instance using Bun's native driver
+export const sqlite = new Database(dbUrl);
+
+// Simple async wrapper around Bun's SQLite API for compatibility
+export const client = {
+  async execute(sql: string, params?: any[]) {
+    const stmt = sqlite.query(sql);
+    if (/^\s*select/i.test(sql)) {
+      const rows = stmt.all(params ?? []);
+      return { rows } as { rows: any[] };
+    }
+    stmt.run(params ?? []);
+    return { rows: [] } as { rows: any[] };
+  },
+};
 
 // Create a drizzle instance
-export const db = drizzle(client);
+export const db = drizzle(sqlite);
 
 // Define the tables
 export const users = sqliteTable("users", {
