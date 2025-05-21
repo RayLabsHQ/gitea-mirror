@@ -475,6 +475,19 @@ Try the following steps:
 > - Connection event handling
 > - Proper timeout settings
 
+### Proxmox LXC Deployment
+
+Running the application inside a Proxmox LXC container is similar to a normal Linux environment. Create a Debian-based container with the **nesting** option enabled so Docker and Bun can run inside it. Then execute the provided setup script:
+
+```bash
+# Inside the LXC container
+git clone https://github.com/arunavo4/gitea-mirror.git
+cd gitea-mirror
+sudo ./scripts/proxmox-lxc-setup.sh
+```
+
+The script installs Bun and creates a systemd service that starts `gitea-mirror` on boot. Once started, visit `http://<container-ip>:4321` in your browser.
+
 
 ### Container Health Checks
 
