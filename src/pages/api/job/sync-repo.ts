@@ -4,6 +4,7 @@ import { db, configs, repositories } from "@/lib/db";
 import { eq, inArray } from "drizzle-orm";
 import { repositoryVisibilityEnum, repoStatusEnum } from "@/types/Repository";
 import { syncGiteaRepo } from "@/lib/gitea";
+import PQueue from "p-queue";
 import type { SyncRepoResponse } from "@/types/sync";
 
 export const POST: APIRoute = async ({ request }) => {
@@ -60,26 +61,30 @@ export const POST: APIRoute = async ({ request }) => {
       );
     }
 
-    // Start async mirroring in background
+    // Start async mirroring in background with limited concurrency
     setTimeout(async () => {
+      const queue = new PQueue({ concurrency: 3 });
       for (const repo of repos) {
-        try {
-          await syncGiteaRepo({
-            config,
-            repository: {
-              ...repo,
-              status: repoStatusEnum.parse(repo.status),
-              organization: repo.organization ?? undefined,
-              lastMirrored: repo.lastMirrored ?? undefined,
-              errorMessage: repo.errorMessage ?? undefined,
-              forkedFrom: repo.forkedFrom ?? undefined,
-              visibility: repositoryVisibilityEnum.parse(repo.visibility),
-            },
-          });
-        } catch (error) {
-          console.error(`Sync failed for repo ${repo.name}:`, error);
-        }
+        queue.add(async () => {
+          try {
+            await syncGiteaRepo({
+              config,
+              repository: {
+                ...repo,
+                status: repoStatusEnum.parse(repo.status),
+                organization: repo.organization ?? undefined,
+                lastMirrored: repo.lastMirrored ?? undefined,
+                errorMessage: repo.errorMessage ?? undefined,
+                forkedFrom: repo.forkedFrom ?? undefined,
+                visibility: repositoryVisibilityEnum.parse(repo.visibility),
+              },
+            });
+          } catch (error) {
+            console.error(`Sync failed for repo ${repo.name}:`, error);
+          }
+        });
       }
+      await queue.onIdle();
     }, 0);
 
     const responsePayload: SyncRepoResponse = {

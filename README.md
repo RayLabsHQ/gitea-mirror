@@ -41,6 +41,7 @@ See the [LXC Container Deployment Guide](scripts/README-lxc.md).
 - 🌟 Mirror your starred repositories
 - 🕹️ Modern user interface with toast notifications and smooth experience
 - 🧠 Smart filtering and job queue with detailed logs
+- ⚡ Concurrency queue processes multiple repositories in parallel
 - 🛠️ Works with personal access tokens (GitHub + Gitea)
 - 🔒 First-time user signup experience with secure authentication
 - 🐳 Fully Dockerized + can be self-hosted in minutes

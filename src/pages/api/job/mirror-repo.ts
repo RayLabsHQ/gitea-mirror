@@ -7,6 +7,7 @@ import {
   mirrorGithubRepoToGitea,
   mirrorGitHubOrgRepoToGiteaOrg,
 } from "@/lib/gitea";
+import PQueue from "p-queue";
 import { createGitHubClient } from "@/lib/github";
 
 export const POST: APIRoute = async ({ request }) => {
@@ -63,52 +64,56 @@ export const POST: APIRoute = async ({ request }) => {
       );
     }
 
-    // Start async mirroring in background
+    // Start async mirroring in background with limited concurrency
     setTimeout(async () => {
+      const queue = new PQueue({ concurrency: 3 });
       for (const repo of repos) {
-        if (!config.githubConfig.token) {
-          throw new Error("GitHub token is missing.");
-        }
-
-        const octokit = createGitHubClient(config.githubConfig.token);
-
-        try {
-          if (repo.organization && config.githubConfig.preserveOrgStructure) {
-            await mirrorGitHubOrgRepoToGiteaOrg({
-              config,
-              octokit,
-              orgName: repo.organization,
-              repository: {
-                ...repo,
-                status: repoStatusEnum.parse("imported"),
-                organization: repo.organization ?? undefined,
-                lastMirrored: repo.lastMirrored ?? undefined,
-                errorMessage: repo.errorMessage ?? undefined,
-                forkedFrom: repo.forkedFrom ?? undefined,
-                visibility: repositoryVisibilityEnum.parse(repo.visibility),
-                mirroredLocation: repo.mirroredLocation || "",
-              },
-            });
-          } else {
-            await mirrorGithubRepoToGitea({
-              octokit,
-              repository: {
-                ...repo,
-                status: repoStatusEnum.parse("imported"),
-                organization: repo.organization ?? undefined,
-                lastMirrored: repo.lastMirrored ?? undefined,
-                errorMessage: repo.errorMessage ?? undefined,
-                forkedFrom: repo.forkedFrom ?? undefined,
-                visibility: repositoryVisibilityEnum.parse(repo.visibility),
-                mirroredLocation: repo.mirroredLocation || "",
-              },
-              config,
-            });
+        queue.add(async () => {
+          if (!config.githubConfig.token) {
+            throw new Error("GitHub token is missing.");
           }
-        } catch (error) {
-          console.error(`Mirror failed for repo ${repo.name}:`, error);
-        }
+
+          const octokit = createGitHubClient(config.githubConfig.token);
+
+          try {
+            if (repo.organization && config.githubConfig.preserveOrgStructure) {
+              await mirrorGitHubOrgRepoToGiteaOrg({
+                config,
+                octokit,
+                orgName: repo.organization,
+                repository: {
+                  ...repo,
+                  status: repoStatusEnum.parse("imported"),
+                  organization: repo.organization ?? undefined,
+                  lastMirrored: repo.lastMirrored ?? undefined,
+                  errorMessage: repo.errorMessage ?? undefined,
+                  forkedFrom: repo.forkedFrom ?? undefined,
+                  visibility: repositoryVisibilityEnum.parse(repo.visibility),
+                  mirroredLocation: repo.mirroredLocation || "",
+                },
+              });
+            } else {
+              await mirrorGithubRepoToGitea({
+                octokit,
+                repository: {
+                  ...repo,
+                  status: repoStatusEnum.parse("imported"),
+                  organization: repo.organization ?? undefined,
+                  lastMirrored: repo.lastMirrored ?? undefined,
+                  errorMessage: repo.errorMessage ?? undefined,
+                  forkedFrom: repo.forkedFrom ?? undefined,
+                  visibility: repositoryVisibilityEnum.parse(repo.visibility),
+                  mirroredLocation: repo.mirroredLocation || "",
+                },
+                config,
+              });
+            }
+          } catch (error) {
+            console.error(`Mirror failed for repo ${repo.name}:`, error);
+          }
+        });
       }
+      await queue.onIdle();
     }, 0);
 
     const responsePayload: MirrorRepoResponse = {

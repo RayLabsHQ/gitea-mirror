@@ -10,6 +10,7 @@ import {
 import { createGitHubClient } from "@/lib/github";
 import { repoStatusEnum, repositoryVisibilityEnum } from "@/types/Repository";
 import type { RetryRepoRequest, RetryRepoResponse } from "@/types/retry";
+import PQueue from "p-queue";
 
 export const POST: APIRoute = async ({ request }) => {
   try {
@@ -65,69 +66,76 @@ export const POST: APIRoute = async ({ request }) => {
       );
     }
 
-    // Start background retry
+    // Start background retry with limited concurrency
     setTimeout(async () => {
+      const queue = new PQueue({ concurrency: 3 });
       for (const repo of repos) {
-        try {
-          const visibility = repositoryVisibilityEnum.parse(repo.visibility);
-          const status = repoStatusEnum.parse(repo.status);
-          const repoData = {
-            ...repo,
-            visibility,
-            status,
-            organization: repo.organization ?? undefined,
-            lastMirrored: repo.lastMirrored ?? undefined,
-            errorMessage: repo.errorMessage ?? undefined,
-            forkedFrom: repo.forkedFrom ?? undefined,
-          };
+        queue.add(async () => {
+          try {
+            const visibility = repositoryVisibilityEnum.parse(repo.visibility);
+            const status = repoStatusEnum.parse(repo.status);
+            const repoData = {
+              ...repo,
+              visibility,
+              status,
+              organization: repo.organization ?? undefined,
+              lastMirrored: repo.lastMirrored ?? undefined,
+              errorMessage: repo.errorMessage ?? undefined,
+              forkedFrom: repo.forkedFrom ?? undefined,
+            };
 
-          let owner = getGiteaRepoOwner({
-            config,
-            repository: repoData,
-          });
+            let owner = getGiteaRepoOwner({
+              config,
+              repository: repoData,
+            });
 
-          const present = await isRepoPresentInGitea({
-            config,
-            owner,
-            repoName: repo.name,
-          });
+            const present = await isRepoPresentInGitea({
+              config,
+              owner,
+              repoName: repo.name,
+            });
 
-          if (present) {
-            await syncGiteaRepo({ config, repository: repoData });
-            console.log(`Synced existing repo: ${repo.name}`);
-          } else {
-            if (!config.githubConfig.token) {
-              throw new Error("GitHub token is missing.");
-            }
-
-            console.log(`Importing repo: ${repo.name} ${owner}`);
-
-            const octokit = createGitHubClient(config.githubConfig.token);
-            if (repo.organization && config.githubConfig.preserveOrgStructure) {
-              await mirrorGitHubOrgRepoToGiteaOrg({
-                config,
-                octokit,
-                orgName: repo.organization,
-                repository: {
-                  ...repoData,
-                  status: repoStatusEnum.parse("imported"),
-                },
-              });
+            if (present) {
+              await syncGiteaRepo({ config, repository: repoData });
+              console.log(`Synced existing repo: ${repo.name}`);
             } else {
-              await mirrorGithubRepoToGitea({
-                config,
-                octokit,
-                repository: {
-                  ...repoData,
-                  status: repoStatusEnum.parse("imported"),
-                },
-              });
+              if (!config.githubConfig.token) {
+                throw new Error("GitHub token is missing.");
+              }
+
+              console.log(`Importing repo: ${repo.name} ${owner}`);
+
+              const octokit = createGitHubClient(config.githubConfig.token);
+              if (
+                repo.organization &&
+                config.githubConfig.preserveOrgStructure
+              ) {
+                await mirrorGitHubOrgRepoToGiteaOrg({
+                  config,
+                  octokit,
+                  orgName: repo.organization,
+                  repository: {
+                    ...repoData,
+                    status: repoStatusEnum.parse("imported"),
+                  },
+                });
+              } else {
+                await mirrorGithubRepoToGitea({
+                  config,
+                  octokit,
+                  repository: {
+                    ...repoData,
+                    status: repoStatusEnum.parse("imported"),
+                  },
+                });
+              }
             }
+          } catch (err) {
+            console.error(`Failed to retry repo ${repo.name}:`, err);
           }
-        } catch (err) {
-          console.error(`Failed to retry repo ${repo.name}:`, err);
-        }
+        });
       }
+      await queue.onIdle();
     }, 0);
 
     const responsePayload: RetryRepoResponse = {

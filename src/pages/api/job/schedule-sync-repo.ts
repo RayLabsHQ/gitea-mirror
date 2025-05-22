@@ -7,6 +7,7 @@ import type {
   ScheduleSyncRepoRequest,
   ScheduleSyncRepoResponse,
 } from "@/types/sync";
+import PQueue from "p-queue";
 
 export const POST: APIRoute = async ({ request }) => {
   try {
@@ -86,39 +87,43 @@ export const POST: APIRoute = async ({ request }) => {
       })
       .where(eq(configs.userId, userId));
 
-    // Start async sync in background
+    // Start async sync in background with limited concurrency
     setTimeout(async () => {
+      const queue = new PQueue({ concurrency: 3 });
       for (const repo of repos) {
-        try {
-          // Only check Gitea presence if the repo failed previously
-          if (repo.status === "failed") {
-            const isPresent = await isRepoPresentInGitea({
-              config,
-              owner: repo.owner,
-              repoName: repo.name,
-            });
+        queue.add(async () => {
+          try {
+            // Only check Gitea presence if the repo failed previously
+            if (repo.status === "failed") {
+              const isPresent = await isRepoPresentInGitea({
+                config,
+                owner: repo.owner,
+                repoName: repo.name,
+              });
 
-            if (!isPresent) {
-              continue; //silently skip if repo is not present in Gitea
+              if (!isPresent) {
+                return; // skip if repo is not present in Gitea
+              }
             }
-          }
 
-          await syncGiteaRepo({
-            config,
-            repository: {
-              ...repo,
-              status: repoStatusEnum.parse(repo.status),
-              organization: repo.organization ?? undefined,
-              lastMirrored: repo.lastMirrored ?? undefined,
-              errorMessage: repo.errorMessage ?? undefined,
-              forkedFrom: repo.forkedFrom ?? undefined,
-              visibility: repositoryVisibilityEnum.parse(repo.visibility),
-            },
-          });
-        } catch (error) {
-          console.error(`Sync failed for repo ${repo.name}:`, error);
-        }
+            await syncGiteaRepo({
+              config,
+              repository: {
+                ...repo,
+                status: repoStatusEnum.parse(repo.status),
+                organization: repo.organization ?? undefined,
+                lastMirrored: repo.lastMirrored ?? undefined,
+                errorMessage: repo.errorMessage ?? undefined,
+                forkedFrom: repo.forkedFrom ?? undefined,
+                visibility: repositoryVisibilityEnum.parse(repo.visibility),
+              },
+            });
+          } catch (error) {
+            console.error(`Sync failed for repo ${repo.name}:`, error);
+          }
+        });
       }
+      await queue.onIdle();
     }, 0);
 
     const resPayload: ScheduleSyncRepoResponse = {

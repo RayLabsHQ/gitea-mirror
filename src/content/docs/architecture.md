@@ -70,6 +70,7 @@ The backend is built with Bun and provides API endpoints for the frontend to int
 - Gitea API integration
 - Mirroring operations
 - Database interactions
+- Concurrency queue manages parallel mirroring tasks
 
 ### Database (SQLite + Drizzle ORM)
 

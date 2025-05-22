@@ -10,6 +10,7 @@ import superagent from "superagent";
 import { createMirrorJob } from "./helpers";
 import { db, organizations, repositories } from "./db";
 import { eq } from "drizzle-orm";
+import PQueue from "p-queue";
 
 export const getGiteaRepoOwner = ({
   config,
@@ -601,24 +602,34 @@ export async function mirrorGitHubOrgToGitea({
       .from(repositories)
       .where(eq(repositories.organization, organization.name));
 
+    const queue = new PQueue({ concurrency: 3 });
+
     for (const repo of orgRepos) {
-      await mirrorGitHubRepoToGiteaOrg({
-        octokit,
-        config,
-        repository: {
-          ...repo,
-          status: repo.status as RepoStatus,
-          visibility: repo.visibility as RepositoryVisibility,
-          lastMirrored: repo.lastMirrored ?? undefined,
-          errorMessage: repo.errorMessage ?? undefined,
-          organization: repo.organization ?? undefined,
-          forkedFrom: repo.forkedFrom ?? undefined,
-          mirroredLocation: repo.mirroredLocation || "",
-        },
-        giteaOrgId,
-        orgName: organization.name,
+      queue.add(async () => {
+        try {
+          await mirrorGitHubRepoToGiteaOrg({
+            octokit,
+            config,
+            repository: {
+              ...repo,
+              status: repo.status as RepoStatus,
+              visibility: repo.visibility as RepositoryVisibility,
+              lastMirrored: repo.lastMirrored ?? undefined,
+              errorMessage: repo.errorMessage ?? undefined,
+              organization: repo.organization ?? undefined,
+              forkedFrom: repo.forkedFrom ?? undefined,
+              mirroredLocation: repo.mirroredLocation || "",
+            },
+            giteaOrgId,
+            orgName: organization.name,
+          });
+        } catch (err) {
+          console.error(`Failed to mirror repo ${repo.name}:`, err);
+        }
       });
     }
+
+    await queue.onIdle();
 
     console.log(`Organization ${organization.name} mirrored successfully`);
 
