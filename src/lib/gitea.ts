@@ -80,8 +80,11 @@ export const checkRepoLocation = async ({
   expectedOwner: string;
 }): Promise<{ present: boolean; actualOwner: string }> => {
   // First check if we have a recorded mirroredLocation and if the repo exists there
-  if (repository.mirroredLocation && repository.mirroredLocation.trim() !== "") {
-    const [mirroredOwner] = repository.mirroredLocation.split('/');
+  if (
+    repository.mirroredLocation &&
+    repository.mirroredLocation.trim() !== ""
+  ) {
+    const [mirroredOwner] = repository.mirroredLocation.split("/");
     if (mirroredOwner) {
       const mirroredPresent = await isRepoPresentInGitea({
         config,
@@ -90,7 +93,9 @@ export const checkRepoLocation = async ({
       });
 
       if (mirroredPresent) {
-        console.log(`Repository found at recorded mirrored location: ${repository.mirroredLocation}`);
+        console.log(
+          `Repository found at recorded mirrored location: ${repository.mirroredLocation}`
+        );
         return { present: true, actualOwner: mirroredOwner };
       }
     }
@@ -162,7 +167,9 @@ export const mirrorGithubRepoToGitea = async ({
         status: "mirrored",
       });
 
-      console.log(`Repository ${repository.name} database status updated to mirrored`);
+      console.log(
+        `Repository ${repository.name} database status updated to mirrored`
+      );
       return;
     }
 
@@ -205,16 +212,27 @@ export const mirrorGithubRepoToGitea = async ({
 
     const apiUrl = `${config.giteaConfig.url}/api/v1/repos/migrate`;
 
-    const response = await httpPost(apiUrl, {
-      clone_addr: cloneAddress,
-      repo_name: repository.name,
-      mirror: true,
-      private: repository.isPrivate,
-      repo_owner: config.giteaConfig.username,
-      description: "",
-      service: "git",
-    }, {
-      "Authorization": `token ${config.giteaConfig.token}`,
+    const response = await httpPost(
+      apiUrl,
+      {
+        clone_addr: cloneAddress,
+        repo_name: repository.name,
+        mirror: true,
+        private: repository.isPrivate,
+        repo_owner: config.giteaConfig.username,
+        description: "",
+        service: "git",
+      },
+      {
+        Authorization: `token ${config.giteaConfig.token}`,
+      }
+    );
+
+    //mirror releases
+    await mirrorGitHubReleasesToGitea({
+      config,
+      octokit,
+      repository,
     });
 
     // clone issues
@@ -317,16 +335,22 @@ export async function getOrCreateGiteaOrg({
       }
     );
 
-    console.log(`Get org response status: ${orgRes.status} for org: ${orgName}`);
+    console.log(
+      `Get org response status: ${orgRes.status} for org: ${orgName}`
+    );
 
     if (orgRes.ok) {
       // Check if response is actually JSON
       const contentType = orgRes.headers.get("content-type");
       if (!contentType || !contentType.includes("application/json")) {
-        console.warn(`Expected JSON response but got content-type: ${contentType}`);
+        console.warn(
+          `Expected JSON response but got content-type: ${contentType}`
+        );
         const responseText = await orgRes.text();
         console.warn(`Response body: ${responseText}`);
-        throw new Error(`Invalid response format from Gitea API. Expected JSON but got: ${contentType}`);
+        throw new Error(
+          `Invalid response format from Gitea API. Expected JSON but got: ${contentType}`
+        );
       }
 
       // Clone the response to handle potential JSON parsing errors
@@ -334,14 +358,22 @@ export async function getOrCreateGiteaOrg({
 
       try {
         const org = await orgRes.json();
-        console.log(`Successfully retrieved existing org: ${orgName} with ID: ${org.id}`);
+        console.log(
+          `Successfully retrieved existing org: ${orgName} with ID: ${org.id}`
+        );
         // Note: Organization events are handled by the main mirroring process
         // to avoid duplicate events
         return org.id;
       } catch (jsonError) {
         const responseText = await orgResClone.text();
-        console.error(`Failed to parse JSON response for existing org: ${responseText}`);
-        throw new Error(`Failed to parse JSON response from Gitea API: ${jsonError instanceof Error ? jsonError.message : String(jsonError)}`);
+        console.error(
+          `Failed to parse JSON response for existing org: ${responseText}`
+        );
+        throw new Error(
+          `Failed to parse JSON response from Gitea API: ${
+            jsonError instanceof Error ? jsonError.message : String(jsonError)
+          }`
+        );
       }
     }
 
@@ -361,21 +393,29 @@ export async function getOrCreateGiteaOrg({
       }),
     });
 
-    console.log(`Create org response status: ${createRes.status} for org: ${orgName}`);
+    console.log(
+      `Create org response status: ${createRes.status} for org: ${orgName}`
+    );
 
     if (!createRes.ok) {
       const errorText = await createRes.text();
-      console.error(`Failed to create org ${orgName}. Status: ${createRes.status}, Response: ${errorText}`);
+      console.error(
+        `Failed to create org ${orgName}. Status: ${createRes.status}, Response: ${errorText}`
+      );
       throw new Error(`Failed to create Gitea org: ${errorText}`);
     }
 
     // Check if response is actually JSON
     const createContentType = createRes.headers.get("content-type");
     if (!createContentType || !createContentType.includes("application/json")) {
-      console.warn(`Expected JSON response but got content-type: ${createContentType}`);
+      console.warn(
+        `Expected JSON response but got content-type: ${createContentType}`
+      );
       const responseText = await createRes.text();
       console.warn(`Response body: ${responseText}`);
-      throw new Error(`Invalid response format from Gitea API. Expected JSON but got: ${createContentType}`);
+      throw new Error(
+        `Invalid response format from Gitea API. Expected JSON but got: ${createContentType}`
+      );
     }
 
     // Note: Organization creation events are handled by the main mirroring process
@@ -386,12 +426,20 @@ export async function getOrCreateGiteaOrg({
 
     try {
       const newOrg = await createRes.json();
-      console.log(`Successfully created new org: ${orgName} with ID: ${newOrg.id}`);
+      console.log(
+        `Successfully created new org: ${orgName} with ID: ${newOrg.id}`
+      );
       return newOrg.id;
     } catch (jsonError) {
       const responseText = await createResClone.text();
-      console.error(`Failed to parse JSON response for new org: ${responseText}`);
-      throw new Error(`Failed to parse JSON response from Gitea API: ${jsonError instanceof Error ? jsonError.message : String(jsonError)}`);
+      console.error(
+        `Failed to parse JSON response for new org: ${responseText}`
+      );
+      throw new Error(
+        `Failed to parse JSON response from Gitea API: ${
+          jsonError instanceof Error ? jsonError.message : String(jsonError)
+        }`
+      );
     }
   } catch (error) {
     const errorMessage =
@@ -399,7 +447,9 @@ export async function getOrCreateGiteaOrg({
         ? error.message
         : "Unknown error occurred in getOrCreateGiteaOrg.";
 
-    console.error(`Error in getOrCreateGiteaOrg for ${orgName}: ${errorMessage}`);
+    console.error(
+      `Error in getOrCreateGiteaOrg for ${orgName}: ${errorMessage}`
+    );
 
     await createMirrorJob({
       userId: config.userId,
@@ -469,7 +519,9 @@ export async function mirrorGitHubRepoToGiteaOrg({
         status: "mirrored",
       });
 
-      console.log(`Repository ${repository.name} database status updated to mirrored in organization ${orgName}`);
+      console.log(
+        `Repository ${repository.name} database status updated to mirrored in organization ${orgName}`
+      );
       return;
     }
 
@@ -506,14 +558,25 @@ export async function mirrorGitHubRepoToGiteaOrg({
 
     const apiUrl = `${config.giteaConfig.url}/api/v1/repos/migrate`;
 
-    const migrateRes = await httpPost(apiUrl, {
-      clone_addr: cloneAddress,
-      uid: giteaOrgId,
-      repo_name: repository.name,
-      mirror: true,
-      private: repository.isPrivate,
-    }, {
-      "Authorization": `token ${config.giteaConfig.token}`,
+    const migrateRes = await httpPost(
+      apiUrl,
+      {
+        clone_addr: cloneAddress,
+        uid: giteaOrgId,
+        repo_name: repository.name,
+        mirror: true,
+        private: repository.isPrivate,
+      },
+      {
+        Authorization: `token ${config.giteaConfig.token}`,
+      }
+    );
+
+    //mirror releases
+    await mirrorGitHubReleasesToGitea({
+      config,
+      octokit,
+      repository,
     });
 
     // Clone issues
@@ -677,9 +740,13 @@ export async function mirrorGitHubOrgToGitea({
       .where(eq(repositories.organization, organization.name));
 
     if (orgRepos.length === 0) {
-      console.log(`No repositories found for organization ${organization.name} - marking as successfully mirrored`);
+      console.log(
+        `No repositories found for organization ${organization.name} - marking as successfully mirrored`
+      );
     } else {
-      console.log(`Mirroring ${orgRepos.length} repositories for organization ${organization.name}`);
+      console.log(
+        `Mirroring ${orgRepos.length} repositories for organization ${organization.name}`
+      );
 
       // Import the processWithRetry function
       const { processWithRetry } = await import("@/lib/utils/concurrency");
@@ -701,7 +768,9 @@ export async function mirrorGitHubOrgToGitea({
           };
 
           // Log the start of mirroring
-          console.log(`Starting mirror for repository: ${repo.name} in organization ${organization.name}`);
+          console.log(
+            `Starting mirror for repository: ${repo.name} in organization ${organization.name}`
+          );
 
           // Mirror the repository
           await mirrorGitHubRepoToGiteaOrg({
@@ -721,12 +790,16 @@ export async function mirrorGitHubOrgToGitea({
           onProgress: (completed, total, result) => {
             const percentComplete = Math.round((completed / total) * 100);
             if (result) {
-              console.log(`Mirrored repository "${result.name}" in organization ${organization.name} (${completed}/${total}, ${percentComplete}%)`);
+              console.log(
+                `Mirrored repository "${result.name}" in organization ${organization.name} (${completed}/${total}, ${percentComplete}%)`
+              );
             }
           },
           onRetry: (repo, error, attempt) => {
-            console.log(`Retrying repository ${repo.name} in organization ${organization.name} (attempt ${attempt}): ${error.message}`);
-          }
+            console.log(
+              `Retrying repository ${repo.name} in organization ${organization.name} (attempt ${attempt}): ${error.message}`
+            );
+          },
         }
       );
     }
@@ -750,9 +823,10 @@ export async function mirrorGitHubOrgToGitea({
       organizationId: organization.id,
       organizationName: organization.name,
       message: `Successfully mirrored organization: ${organization.name}`,
-      details: orgRepos.length === 0
-        ? `Organization ${organization.name} was processed successfully (no repositories found).`
-        : `Organization ${organization.name} was mirrored to Gitea with ${orgRepos.length} repositories.`,
+      details:
+        orgRepos.length === 0
+          ? `Organization ${organization.name} was processed successfully (no repositories found).`
+          : `Organization ${organization.name} was mirrored to Gitea with ${orgRepos.length} repositories.`,
       status: repoStatusEnum.parse("mirrored"),
     });
   } catch (error) {
@@ -836,18 +910,20 @@ export const syncGiteaRepo = async ({
     const { present, actualOwner } = await checkRepoLocation({
       config,
       repository,
-      expectedOwner: repoOwner
+      expectedOwner: repoOwner,
     });
 
     if (!present) {
-      throw new Error(`Repository ${repository.name} not found in Gitea at any expected location`);
+      throw new Error(
+        `Repository ${repository.name} not found in Gitea at any expected location`
+      );
     }
 
     // Use the actual owner where the repo was found
     const apiUrl = `${config.giteaConfig.url}/api/v1/repos/${actualOwner}/${repository.name}/mirror-sync`;
 
     const response = await httpPost(apiUrl, undefined, {
-      "Authorization": `token ${config.giteaConfig.token}`,
+      Authorization: `token ${config.giteaConfig.token}`,
     });
 
     // Mark repo as "synced" in DB
@@ -951,9 +1027,11 @@ export const mirrorGitRepoIssuesToGitea = async ({
   );
 
   // Filter out pull requests
-  const filteredIssues = issues.filter(issue => !(issue as any).pull_request);
+  const filteredIssues = issues.filter((issue) => !(issue as any).pull_request);
 
-  console.log(`Mirroring ${filteredIssues.length} issues from ${repository.fullName}`);
+  console.log(
+    `Mirroring ${filteredIssues.length} issues from ${repository.fullName}`
+  );
 
   if (filteredIssues.length === 0) {
     console.log(`No issues to mirror for ${repository.fullName}`);
@@ -964,7 +1042,7 @@ export const mirrorGitRepoIssuesToGitea = async ({
   const giteaLabelsRes = await httpGet(
     `${config.giteaConfig.url}/api/v1/repos/${repoOrigin}/${repository.name}/labels`,
     {
-      "Authorization": `token ${config.giteaConfig.token}`,
+      Authorization: `token ${config.giteaConfig.token}`,
     }
   );
 
@@ -994,10 +1072,12 @@ export const mirrorGitRepoIssuesToGitea = async ({
         } else {
           try {
             const created = await httpPost(
-              `${config.giteaConfig!.url}/api/v1/repos/${repoOrigin}/${repository.name}/labels`,
+              `${config.giteaConfig!.url}/api/v1/repos/${repoOrigin}/${
+                repository.name
+              }/labels`,
               { name, color: "#ededed" }, // Default color
               {
-                "Authorization": `token ${config.giteaConfig!.token}`,
+                Authorization: `token ${config.giteaConfig!.token}`,
               }
             );
 
@@ -1029,10 +1109,12 @@ export const mirrorGitRepoIssuesToGitea = async ({
 
       // Create the issue in Gitea
       const createdIssue = await httpPost(
-        `${config.giteaConfig!.url}/api/v1/repos/${repoOrigin}/${repository.name}/issues`,
+        `${config.giteaConfig!.url}/api/v1/repos/${repoOrigin}/${
+          repository.name
+        }/issues`,
         issuePayload,
         {
-          "Authorization": `token ${config.giteaConfig!.token}`,
+          Authorization: `token ${config.giteaConfig!.token}`,
         }
       );
 
@@ -1054,12 +1136,14 @@ export const mirrorGitRepoIssuesToGitea = async ({
           comments,
           async (comment) => {
             await httpPost(
-              `${config.giteaConfig!.url}/api/v1/repos/${repoOrigin}/${repository.name}/issues/${createdIssue.data.number}/comments`,
+              `${config.giteaConfig!.url}/api/v1/repos/${repoOrigin}/${
+                repository.name
+              }/issues/${createdIssue.data.number}/comments`,
               {
                 body: `@${comment.user?.login} commented on GitHub:\n\n${comment.body}`,
               },
               {
-                "Authorization": `token ${config.giteaConfig!.token}`,
+                Authorization: `token ${config.giteaConfig!.token}`,
               }
             );
             return comment;
@@ -1069,8 +1153,10 @@ export const mirrorGitRepoIssuesToGitea = async ({
             maxRetries: 2,
             retryDelay: 1000,
             onRetry: (_comment, error, attempt) => {
-              console.log(`Retrying comment (attempt ${attempt}): ${error.message}`);
-            }
+              console.log(
+                `Retrying comment (attempt ${attempt}): ${error.message}`
+              );
+            },
           }
         );
       }
@@ -1084,14 +1170,69 @@ export const mirrorGitRepoIssuesToGitea = async ({
       onProgress: (completed, total, result) => {
         const percentComplete = Math.round((completed / total) * 100);
         if (result) {
-          console.log(`Mirrored issue "${result.title}" (${completed}/${total}, ${percentComplete}%)`);
+          console.log(
+            `Mirrored issue "${result.title}" (${completed}/${total}, ${percentComplete}%)`
+          );
         }
       },
       onRetry: (issue, error, attempt) => {
-        console.log(`Retrying issue "${issue.title}" (attempt ${attempt}): ${error.message}`);
-      }
+        console.log(
+          `Retrying issue "${issue.title}" (attempt ${attempt}): ${error.message}`
+        );
+      },
     }
   );
 
-  console.log(`Completed mirroring ${filteredIssues.length} issues for ${repository.fullName}`);
+  console.log(
+    `Completed mirroring ${filteredIssues.length} issues for ${repository.fullName}`
+  );
 };
+
+export async function mirrorGitHubReleasesToGitea({
+  octokit,
+  repository,
+  config,
+}: {
+  octokit: Octokit;
+  repository: Repository;
+  config: Partial<Config>;
+}) {
+  if (
+    !config.giteaConfig?.username ||
+    !config.giteaConfig?.token ||
+    !config.giteaConfig?.url
+  ) {
+    throw new Error("Gitea config is incomplete for mirroring releases.");
+  }
+
+  const repoOwner = getGiteaRepoOwner({
+    config,
+    repository,
+  });
+
+  const { url, token } = config.giteaConfig;
+
+  const releases = await octokit.rest.repos.listReleases({
+    owner: repository.owner,
+    repo: repository.name,
+  });
+
+  for (const release of releases.data) {
+    await httpPost(
+      `${url}/api/v1/repos/${repoOwner}/${repository.name}/releases`,
+      {
+        tag_name: release.tag_name,
+        target: release.target_commitish,
+        title: release.name || release.tag_name,
+        note: release.body || "",
+        draft: release.draft,
+        prerelease: release.prerelease,
+      },
+      {
+        Authorization: `token ${token}`,
+      }
+    );
+  }
+
+  console.log(`✅ Mirrored ${releases.data.length} GitHub releases to Gitea`);
+}

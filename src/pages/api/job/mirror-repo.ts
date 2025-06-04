@@ -129,15 +129,19 @@ export const POST: APIRoute = async ({ request }) => {
           checkpointInterval: 5, // Checkpoint every 5 repositories to reduce event frequency
           onProgress: (completed, total, result) => {
             const percentComplete = Math.round((completed / total) * 100);
-            console.log(`Mirroring progress: ${percentComplete}% (${completed}/${total})`);
+            console.log(
+              `Mirroring progress: ${percentComplete}% (${completed}/${total})`
+            );
 
             if (result) {
               console.log(`Successfully mirrored repository: ${result.name}`);
             }
           },
           onRetry: (repo, error, attempt) => {
-            console.log(`Retrying repository ${repo.name} (attempt ${attempt}): ${error.message}`);
-          }
+            console.log(
+              `Retrying repository ${repo.name} (attempt ${attempt}): ${error.message}`
+            );
+          },
         }
       );
 
@@ -168,7 +172,10 @@ export const POST: APIRoute = async ({ request }) => {
     // Enhanced error logging for better debugging
     console.error("=== ERROR MIRRORING REPOSITORIES ===");
     console.error("Error type:", error?.constructor?.name);
-    console.error("Error message:", error instanceof Error ? error.message : String(error));
+    console.error(
+      "Error message:",
+      error instanceof Error ? error.message : String(error)
+    );
 
     if (error instanceof Error) {
       console.error("Error stack:", error.stack);
@@ -181,9 +188,11 @@ export const POST: APIRoute = async ({ request }) => {
     console.error("- Headers:", Object.fromEntries(request.headers.entries()));
 
     // If it's a JSON parsing error, provide more context
-    if (error instanceof SyntaxError && error.message.includes('JSON')) {
+    if (error instanceof SyntaxError && error.message.includes("JSON")) {
       console.error("🚨 JSON PARSING ERROR DETECTED:");
-      console.error("This suggests the response from Gitea API is not valid JSON");
+      console.error(
+        "This suggests the response from Gitea API is not valid JSON"
+      );
       console.error("Common causes:");
       console.error("- Gitea server returned HTML error page instead of JSON");
       console.error("- Network connection interrupted");
@@ -196,12 +205,14 @@ export const POST: APIRoute = async ({ request }) => {
 
     return new Response(
       JSON.stringify({
-        error: error instanceof Error ? error.message : "An unknown error occurred",
+        error:
+          error instanceof Error ? error.message : "An unknown error occurred",
         errorType: error?.constructor?.name || "Unknown",
         timestamp: new Date().toISOString(),
-        troubleshooting: error instanceof SyntaxError && error.message.includes('JSON')
-          ? "JSON parsing error detected. Check Gitea server status and logs. Ensure Gitea is returning valid JSON responses."
-          : "Check application logs for more details"
+        troubleshooting:
+          error instanceof SyntaxError && error.message.includes("JSON")
+            ? "JSON parsing error detected. Check Gitea server status and logs. Ensure Gitea is returning valid JSON responses."
+            : "Check application logs for more details",
       }),
       { status: 500, headers: { "Content-Type": "application/json" } }
     );
