@@ -218,6 +218,7 @@ export const mirrorGithubRepoToGitea = async ({
         clone_addr: cloneAddress,
         repo_name: repository.name,
         mirror: true,
+        wiki: true, // will mirror wiki if it exists
         private: repository.isPrivate,
         repo_owner: config.giteaConfig.username,
         description: "",
@@ -565,6 +566,7 @@ export async function mirrorGitHubRepoToGiteaOrg({
         uid: giteaOrgId,
         repo_name: repository.name,
         mirror: true,
+        wiki: true, // will mirror wiki if it exists
         private: repository.isPrivate,
       },
       {
