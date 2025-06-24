@@ -1,0 +1,59 @@
+# Gitea Mirror deployment with Forward Authentication
+# Example configuration for reverse proxy authentication
+
+services:
+  gitea-mirror:
+    image: ${DOCKER_REGISTRY:-ghcr.io}/${DOCKER_IMAGE:-arunavo4/gitea-mirror}:${DOCKER_TAG:-latest}
+    container_name: gitea-mirror
+    restart: unless-stopped
+    # No external ports - access through reverse proxy only
+    expose:
+      - "4321"
+    volumes:
+      - gitea-mirror-data:/app/data
+    environment:
+      # Core Configuration
+      - NODE_ENV=production
+      - DATABASE_URL=file:data/gitea-mirror.db
+      - HOST=0.0.0.0
+      - PORT=4321
+      - JWT_SECRET=${JWT_SECRET:-}  # Auto-generated if empty
+      
+      # Authentication Configuration
+      - AUTH_METHOD=forward
+      - AUTH_ALLOW_LOCAL_FALLBACK=${AUTH_ALLOW_LOCAL_FALLBACK:-false}
+      
+      # Forward Auth Configuration
+      - AUTH_FORWARD_USER_HEADER=${AUTH_FORWARD_USER_HEADER:-X-Remote-User}
+      - AUTH_FORWARD_EMAIL_HEADER=${AUTH_FORWARD_EMAIL_HEADER:-X-Remote-Email}
+      - AUTH_FORWARD_NAME_HEADER=${AUTH_FORWARD_NAME_HEADER:-X-Remote-Name}
+      - AUTH_FORWARD_GROUPS_HEADER=${AUTH_FORWARD_GROUPS_HEADER:-X-Remote-Groups}
+      - AUTH_FORWARD_TRUSTED_PROXIES=${AUTH_FORWARD_TRUSTED_PROXIES:-}
+      - AUTH_FORWARD_AUTO_CREATE=${AUTH_FORWARD_AUTO_CREATE:-true}
+      
+      # Optional: GitHub/Gitea Mirror Config
+      - GITHUB_USERNAME=${GITHUB_USERNAME:-}
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - GITEA_URL=${GITEA_URL:-}
+      - GITEA_TOKEN=${GITEA_TOKEN:-}
+      - GITEA_USERNAME=${GITEA_USERNAME:-}
+      - GITEA_ORGANIZATION=${GITEA_ORGANIZATION:-github-mirrors}
+      
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=3", "--spider", "http://localhost:4321/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+    networks:
+      - proxy-network
+      - gitea-mirror
+
+volumes:
+  gitea-mirror-data:
+
+networks:
+  proxy-network:
+    external: true  # Assumes you have a proxy network
+  gitea-mirror:
+    driver: bridge
