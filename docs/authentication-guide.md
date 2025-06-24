@@ -5,6 +5,7 @@ Gitea Mirror supports multiple authentication methods to integrate with your exi
 ## Table of Contents
 - [Authentication Methods](#authentication-methods)
 - [Configuration](#configuration)
+- [UI Setup Wizard](#ui-setup-wizard)
 - [Local Authentication (Default)](#local-authentication-default)
 - [OIDC Authentication](#oidc-authentication)
 - [Forward Authentication](#forward-authentication)
@@ -21,9 +22,27 @@ Gitea Mirror supports three authentication methods:
 
 ## Configuration
 
-Authentication is configured through environment variables. The default method is local authentication, requiring no configuration.
+Authentication can be configured in two ways:
 
-### Basic Configuration
+1. **UI Setup Wizard** (Recommended) - Configure authentication through the web interface during initial setup
+2. **Environment Variables** - Pre-configure authentication before deployment
+
+The UI configuration takes precedence over environment variables, allowing you to change authentication settings without restarting the application.
+
+## UI Setup Wizard
+
+On first run, Gitea Mirror presents a setup wizard that allows you to:
+
+1. Choose your authentication method
+2. Configure the selected method with guided forms
+3. Test the configuration before saving
+4. Create your first admin account
+
+The setup wizard is accessible at `/setup` when no authentication is configured.
+
+### Environment Variable Configuration
+
+If you prefer to pre-configure authentication via environment variables:
 
 ```bash
 # Authentication method: local (default), oidc, forward
@@ -32,6 +51,8 @@ AUTH_METHOD=local
 # Allow fallback to local auth if external auth fails
 AUTH_ALLOW_LOCAL_FALLBACK=false
 ```
+
+Note: These can also be configured through the Admin Settings UI after initial setup.
 
 ## Local Authentication (Default)
 
@@ -57,6 +78,8 @@ OpenID Connect authentication for Single Sign-On (SSO) with providers like:
 - GitHub
 
 ### Configuration
+
+OIDC can be configured via the UI Setup Wizard or Admin Settings. For environment variable configuration:
 
 ```bash
 # Enable OIDC authentication
@@ -125,6 +148,8 @@ Header-based authentication for reverse proxy setups. Compatible with:
 - Any proxy that sets authentication headers
 
 ### Configuration
+
+Forward Auth can be configured via the UI Setup Wizard or Admin Settings. For environment variable configuration:
 
 ```bash
 # Enable forward authentication
@@ -285,30 +310,49 @@ JWT_SECRET=$(openssl rand -base64 32)
 - Verify `AUTH_METHOD` is set correctly
 - Clear browser cache and cookies
 
+## Managing Authentication Settings
+
+### Via Admin UI
+
+Admin users can modify authentication settings through the web interface:
+
+1. Navigate to `/admin/settings` 
+2. Click on the "Authentication" tab
+3. Modify settings as needed
+4. Test configuration before saving
+5. Changes take effect immediately without restart
+
+### Via Environment Variables
+
+Environment variables are checked on startup and used as defaults if no database configuration exists.
+
+### Configuration Precedence
+
+1. Database configuration (set via UI) takes highest precedence
+2. Environment variables are used as fallback
+3. Built-in defaults apply if neither is set
+
 ## Migration Guide
 
 ### Switching from Local to OIDC
 
-1. Enable OIDC while keeping local fallback:
-   ```bash
-   AUTH_METHOD=oidc
-   AUTH_ALLOW_LOCAL_FALLBACK=true
-   ```
+1. As an admin, go to `/admin/settings` → Authentication
+2. Enable "Allow Local Fallback" temporarily
+3. Configure OIDC settings and test
+4. Once verified, disable local fallback
 
-2. Test OIDC login with a new account
-
-3. Existing users can continue using passwords or switch to OIDC
-
-4. Once verified, disable local fallback:
-   ```bash
-   AUTH_ALLOW_LOCAL_FALLBACK=false
-   ```
+Alternatively, via environment variables:
+```bash
+AUTH_METHOD=oidc
+AUTH_ALLOW_LOCAL_FALLBACK=true
+# ... OIDC configuration ...
+```
 
 ### Adding Forward Auth to Existing Setup
 
 1. Configure your reverse proxy first
 2. Test headers are being set correctly
-3. Enable forward auth:
+3. Update authentication settings via UI or environment:
    ```bash
    AUTH_METHOD=forward
    AUTH_FORWARD_TRUSTED_PROXIES=your-proxy-ip

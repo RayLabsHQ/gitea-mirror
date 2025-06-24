@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- UI-based authentication configuration wizard for initial setup
+- Admin settings page for managing authentication configuration
+- Database storage for authentication settings (auth_configs table)
+- Setup wizard accessible at `/setup` for first-time configuration
+- Real-time authentication method switching without restart
+- Visual configuration forms for OIDC and Forward Auth
+- Configuration testing before saving changes
+- Migration guide for existing users
+
+### Changed
+- Authentication can now be configured via UI in addition to environment variables
+- UI configuration takes precedence over environment variables
+- Docker compose files updated to reflect optional auth environment variables
+- Documentation updated to emphasize UI-based configuration
+
+### Improved
+- Better user experience for non-technical users setting up SSO
+- Authentication configuration no longer requires editing configuration files
+- Clearer documentation about configuration precedence
+- Environment variables now serve as fallback/pre-configuration option
+
 ## [2.18.0] - 2025-06-24
 
 ### Added

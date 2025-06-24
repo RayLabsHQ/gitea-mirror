@@ -20,10 +20,12 @@ services:
       - JWT_SECRET=${JWT_SECRET:-}  # Auto-generated if empty
       
       # Authentication Configuration
+      # NOTE: Forward Auth can be configured via UI during initial setup!
+      # These env vars are optional and will pre-configure Forward Auth if set
       - AUTH_METHOD=forward
       - AUTH_ALLOW_LOCAL_FALLBACK=${AUTH_ALLOW_LOCAL_FALLBACK:-false}
       
-      # Forward Auth Configuration
+      # Forward Auth Configuration (can be configured via UI)
       - AUTH_FORWARD_USER_HEADER=${AUTH_FORWARD_USER_HEADER:-X-Remote-User}
       - AUTH_FORWARD_EMAIL_HEADER=${AUTH_FORWARD_EMAIL_HEADER:-X-Remote-Email}
       - AUTH_FORWARD_NAME_HEADER=${AUTH_FORWARD_NAME_HEADER:-X-Remote-Name}

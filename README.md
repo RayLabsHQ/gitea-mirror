@@ -30,7 +30,7 @@ First user signup becomes admin. No configuration needed to get started!
 - 🔁 Mirror public, private, and starred GitHub repos to Gitea
 - 🏢 Mirror entire organizations with flexible strategies
 - 🎯 Custom destination control for repos and organizations
-- 🔐 Multiple auth methods: Local, OIDC/SSO, Forward Auth
+- 🔐 Multiple auth methods with UI setup: Local, OIDC/SSO, Forward Auth
 - 📊 Real-time dashboard with activity logs
 - ⏱️ Scheduled automatic mirroring
 - 🐳 Dockerized with multi-arch support (AMD64/ARM64)
@@ -59,23 +59,24 @@ docker compose up -d
 
 ### Configuration Options
 
-Create a `.env` file for custom settings:
+Authentication can be configured through the UI during initial setup! You can also pre-configure using environment variables:
 
 ```bash
-# Authentication (optional - defaults to local)
-AUTH_METHOD=local              # Options: local, oidc, forward
-AUTH_ALLOW_LOCAL_FALLBACK=false
+# Create a .env file for custom settings (optional)
 
-# OIDC/SSO Configuration (if using AUTH_METHOD=oidc)
+# Pre-configure authentication method (or use UI setup wizard)
+AUTH_METHOD=local              # Options: local, oidc, forward
+
+# OIDC/SSO Configuration (can be set via UI)
 AUTH_OIDC_ISSUER_URL=https://your-provider.com/application/o/gitea-mirror/
 AUTH_OIDC_CLIENT_ID=gitea-mirror
 AUTH_OIDC_CLIENT_SECRET=your-secret
 
-# Forward Auth (if using AUTH_METHOD=forward)
+# Forward Auth (can be set via UI)
 AUTH_FORWARD_TRUSTED_PROXIES=10.0.0.1,10.0.0.2
 ```
 
-See [Authentication Guide](docs/authentication-guide.md) for SSO setup with Authentik, Keycloak, etc.
+See [Authentication Guide](docs/authentication-guide.md) for detailed SSO setup with Authentik, Keycloak, etc.
 
 ### LXC Container (Proxmox)
 
@@ -99,6 +100,7 @@ bun run dev
 
 1. **First Time Setup**
    - Navigate to http://localhost:4321
+   - Choose authentication method via setup wizard
    - Create admin account (first user)
    - Configure GitHub and Gitea connections
 

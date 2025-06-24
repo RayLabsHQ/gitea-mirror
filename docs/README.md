@@ -27,9 +27,16 @@ For advanced users and maintainers:
 
 ### [Authentication Guide](./authentication-guide.md)
 Detailed guide for setting up authentication:
+- UI-based setup wizard
 - OIDC/SSO with Authentik, Keycloak, Google
 - Forward Auth with reverse proxies
 - Security best practices
+
+### [Auth Migration Guide](./auth-migration-guide.md)
+For existing users migrating to UI-based auth:
+- Migration from environment variables
+- Backup and rollback procedures
+- Common scenarios and FAQ
 
 ## 🚀 Quick Links
 

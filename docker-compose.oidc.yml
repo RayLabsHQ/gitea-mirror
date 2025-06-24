@@ -19,13 +19,15 @@ services:
       - JWT_SECRET=${JWT_SECRET:-}  # Auto-generated if empty
       
       # Authentication Configuration
+      # NOTE: OIDC can be configured via UI during initial setup!
+      # These env vars are optional and will pre-configure OIDC if set
       - AUTH_METHOD=${AUTH_METHOD:-oidc}
       - AUTH_ALLOW_LOCAL_FALLBACK=${AUTH_ALLOW_LOCAL_FALLBACK:-false}
       
-      # OIDC Configuration
-      - AUTH_OIDC_ISSUER_URL=${AUTH_OIDC_ISSUER_URL}
-      - AUTH_OIDC_CLIENT_ID=${AUTH_OIDC_CLIENT_ID}
-      - AUTH_OIDC_CLIENT_SECRET=${AUTH_OIDC_CLIENT_SECRET}
+      # OIDC Configuration (can be configured via UI)
+      - AUTH_OIDC_ISSUER_URL=${AUTH_OIDC_ISSUER_URL:-}
+      - AUTH_OIDC_CLIENT_ID=${AUTH_OIDC_CLIENT_ID:-}
+      - AUTH_OIDC_CLIENT_SECRET=${AUTH_OIDC_CLIENT_SECRET:-}
       - AUTH_OIDC_REDIRECT_URI=${AUTH_OIDC_REDIRECT_URI:-}
       - AUTH_OIDC_SCOPES=${AUTH_OIDC_SCOPES:-openid,profile,email}
       - AUTH_OIDC_AUTO_CREATE=${AUTH_OIDC_AUTO_CREATE:-true}
