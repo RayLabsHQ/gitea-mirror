@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.19.0] - 2025-06-24
+
 ### Added
 - UI-based authentication configuration wizard for initial setup
 - Admin settings page for managing authentication configuration
@@ -16,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Visual configuration forms for OIDC and Forward Auth
 - Configuration testing before saving changes
 - Migration guide for existing users
+- Support for multiple authentication methods: Local, OIDC/SSO, and Forward Auth
+- JWKS utilities for JWT validation
+- Comprehensive authentication documentation
 
 ### Changed
 - Authentication can now be configured via UI in addition to environment variables
@@ -28,6 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Authentication configuration no longer requires editing configuration files
 - Clearer documentation about configuration precedence
 - Environment variables now serve as fallback/pre-configuration option
+- Enhanced security with proper OIDC token validation
+- Async validation for forward authentication
 
 ## [2.18.0] - 2025-06-24
 

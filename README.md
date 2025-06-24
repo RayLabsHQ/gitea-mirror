@@ -85,6 +85,8 @@ See [Authentication Guide](docs/authentication-guide.md) for detailed SSO setup 
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/gitea-mirror.sh)"
 ```
 
+See the [Proxmox VE Community Scripts](https://community-scripts.github.io/ProxmoxVE/scripts?id=gitea-mirror) for more details.
+
 ### Manual Installation
 
 ```bash
@@ -151,7 +153,4 @@ MIT License - see [LICENSE](LICENSE) file for details.
 - 📖 [Documentation](https://github.com/arunavo4/gitea-mirror/tree/main/docs)
 - 🐛 [Report Issues](https://github.com/arunavo4/gitea-mirror/issues)
 - 💬 [Discussions](https://github.com/arunavo4/gitea-mirror/discussions)
-
----
-
-<p align="center">Made with ❤️ by the open source community</p>
+- 🐧 [Proxmox VE Script](https://community-scripts.github.io/ProxmoxVE/scripts?id=gitea-mirror)
