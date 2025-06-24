@@ -43,7 +43,7 @@ See the [LXC Container Deployment Guide](scripts/README-lxc.md).
 - 🕹️ Modern user interface with toast notifications and smooth experience
 - 🧠 Smart filtering and job queue with detailed logs
 - 🛠️ Works with personal access tokens (GitHub + Gitea)
-- 🔒 First-time user signup experience with secure authentication
+- 🔒 Multiple authentication methods: Local, Forward Auth (Authentik/Authelia), and OIDC/OAuth2
 - 🐳 Fully Dockerized + can be self-hosted in minutes
 - 📊 Dashboard with real-time status updates
 - ⏱️ Scheduled automatic mirroring
@@ -314,6 +314,16 @@ Key configuration options include:
 - Gitea connection settings (URL, token, organization)
 - Mirroring options (issues, starred repositories, organizations)
 - Scheduling options for automatic mirroring
+
+### Authentication
+
+Gitea Mirror supports multiple authentication methods to integrate with your existing infrastructure:
+
+- **Local Authentication** - Traditional username/password (default)
+- **Forward Authentication** - Header-based auth for reverse proxies (Authentik, Authelia, etc.)
+- **OIDC/OAuth2** - OpenID Connect with external providers
+
+See the [Authentication Guide](docs/authentication.md) for detailed setup instructions.
 
 > [!IMPORTANT]
 > **SQLite is the only database required for Gitea Mirror**, handling both data storage and real-time event notifications.

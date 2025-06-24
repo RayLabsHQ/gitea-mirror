@@ -301,8 +301,19 @@ export const client = {
 export const users = sqliteTable("users", {
   id: text("id").primaryKey(),
   username: text("username").notNull(),
-  password: text("password").notNull(),
+  password: text("password"), // Made optional for external auth
   email: text("email").notNull(),
+  displayName: text("display_name"), // Full name from external providers
+
+  // External authentication fields
+  authProvider: text("auth_provider").notNull().default("local"), // local, forward, oidc
+  externalId: text("external_id"), // ID from external provider
+  externalUsername: text("external_username"), // Username from external provider
+
+  // Metadata
+  isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+  lastLoginAt: integer("last_login_at", { mode: "timestamp" }),
+
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
     .default(new Date()),

@@ -2,12 +2,26 @@ import { z } from "zod";
 import { repositoryVisibilityEnum, repoStatusEnum } from "@/types/Repository";
 import { membershipRoleEnum } from "@/types/organizations";
 
+// Authentication provider enum
+export const authProviderEnum = z.enum(["local", "forward", "oidc"]);
+
 // User schema
 export const userSchema = z.object({
   id: z.string().uuid().optional(),
   username: z.string().min(3),
-  password: z.string().min(8).optional(), // Hashed password
+  password: z.string().min(8).optional(), // Hashed password - optional for external auth
   email: z.string().email(),
+  displayName: z.string().optional(), // Full name from external providers
+
+  // External authentication fields
+  authProvider: authProviderEnum.default("local"),
+  externalId: z.string().optional(), // ID from external provider
+  externalUsername: z.string().optional(), // Username from external provider
+
+  // Metadata
+  isActive: z.boolean().default(true),
+  lastLoginAt: z.date().optional(),
+
   createdAt: z.date().default(() => new Date()),
   updatedAt: z.date().default(() => new Date()),
 });

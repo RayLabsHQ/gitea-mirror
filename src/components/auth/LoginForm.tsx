@@ -1,16 +1,63 @@
 'use client';
 
 import * as React from 'react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 
 import { toast, Toaster } from 'sonner';
 import { showErrorToast } from '@/lib/utils';
 
+interface AuthConfig {
+  primaryMethod: 'local' | 'forward' | 'oidc';
+  methods: {
+    local: boolean;
+    forward: boolean;
+    oidc: boolean;
+  };
+  allowLocalFallback: boolean;
+  oidcConfig?: {
+    redirectUri: string;
+  };
+}
 
 export function LoginForm() {
   const [isLoading, setIsLoading] = useState(false);
+  const [authConfig, setAuthConfig] = useState<AuthConfig | null>(null);
+  const [configLoading, setConfigLoading] = useState(true);
+
+  // Load authentication configuration
+  useEffect(() => {
+    async function loadAuthConfig() {
+      try {
+        const response = await fetch('/api/auth/config');
+        if (response.ok) {
+          const config = await response.json();
+          setAuthConfig(config);
+
+          // Auto-redirect for forward auth if it's the primary method
+          if (config.primaryMethod === 'forward' && config.methods.forward) {
+            // For forward auth, try to authenticate automatically
+            // If headers are present, the middleware should handle it
+            window.location.href = '/';
+            return;
+          }
+        }
+      } catch (error) {
+        console.error('Failed to load auth config:', error);
+        // Fallback to local auth
+        setAuthConfig({
+          primaryMethod: 'local',
+          methods: { local: true, forward: false, oidc: false },
+          allowLocalFallback: false,
+        });
+      } finally {
+        setConfigLoading(false);
+      }
+    }
+
+    loadAuthConfig();
+  }, []);
 
   async function handleLogin(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -55,6 +102,69 @@ export function LoginForm() {
     }
   }
 
+  async function handleOIDCLogin() {
+    setIsLoading(true);
+    try {
+      // Redirect to OIDC login endpoint
+      window.location.href = '/api/auth/oidc/login';
+    } catch (error) {
+      showErrorToast(error, toast);
+      setIsLoading(false);
+    }
+  }
+
+  // Show loading state while config is loading
+  if (configLoading) {
+    return (
+      <>
+        <Card className="w-full max-w-md">
+          <CardHeader className="text-center">
+            <div className="flex justify-center mb-4">
+              <img
+                src="/logo-light.svg"
+                alt="Gitea Mirror Logo"
+                className="h-10 w-10 dark:hidden"
+              />
+              <img
+                src="/logo-dark.svg"
+                alt="Gitea Mirror Logo"
+                className="h-10 w-10 hidden dark:block"
+              />
+            </div>
+            <CardTitle className="text-2xl">Gitea Mirror</CardTitle>
+            <CardDescription>Loading authentication options...</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex justify-center py-8">
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+            </div>
+          </CardContent>
+        </Card>
+        <Toaster />
+      </>
+    );
+  }
+
+  // Show error if config failed to load
+  if (!authConfig) {
+    return (
+      <>
+        <Card className="w-full max-w-md">
+          <CardHeader className="text-center">
+            <CardTitle className="text-2xl">Authentication Error</CardTitle>
+            <CardDescription>Failed to load authentication configuration</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button onClick={() => window.location.reload()} className="w-full">
+              Retry
+            </Button>
+          </CardContent>
+        </Card>
+        <Toaster />
+      </>
+    );
+  }
+
   return (
     <>
       <Card className="w-full max-w-md">
@@ -77,49 +187,92 @@ export function LoginForm() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form id="login-form" onSubmit={handleLogin}>
-            <div className="space-y-4">
-              <div>
-                <label htmlFor="username" className="block text-sm font-medium mb-1">
-                  Username
-                </label>
-                <input
-                  id="username"
-                  name="username"
-                  type="text"
-                  required
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                  placeholder="Enter your username"
-                  disabled={isLoading}
-                />
+          <div className="space-y-4">
+            {/* OIDC Login Button */}
+            {authConfig.methods.oidc && (
+              <Button
+                onClick={handleOIDCLogin}
+                className="w-full"
+                variant="outline"
+                disabled={isLoading}
+              >
+                {isLoading ? 'Redirecting...' : 'Login with OIDC'}
+              </Button>
+            )}
+
+            {/* Separator if both OIDC and local are available */}
+            {authConfig.methods.oidc && authConfig.methods.local && (
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t" />
+                </div>
+                <div className="relative flex justify-center text-xs uppercase">
+                  <span className="bg-background px-2 text-muted-foreground">
+                    Or continue with
+                  </span>
+                </div>
               </div>
-              <div>
-                <label htmlFor="password" className="block text-sm font-medium mb-1">
-                  Password
-                </label>
-                <input
-                  id="password"
-                  name="password"
-                  type="password"
-                  required
-                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                  placeholder="Enter your password"
-                  disabled={isLoading}
-                />
+            )}
+
+            {/* Local Login Form */}
+            {authConfig.methods.local && (
+              <form id="login-form" onSubmit={handleLogin}>
+                <div className="space-y-4">
+                  <div>
+                    <label htmlFor="username" className="block text-sm font-medium mb-1">
+                      Username
+                    </label>
+                    <input
+                      id="username"
+                      name="username"
+                      type="text"
+                      required
+                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      placeholder="Enter your username"
+                      disabled={isLoading}
+                    />
+                  </div>
+                  <div>
+                    <label htmlFor="password" className="block text-sm font-medium mb-1">
+                      Password
+                    </label>
+                    <input
+                      id="password"
+                      name="password"
+                      type="password"
+                      required
+                      className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                      placeholder="Enter your password"
+                      disabled={isLoading}
+                    />
+                  </div>
+                  <Button type="submit" className="w-full" disabled={isLoading}>
+                    {isLoading ? 'Logging in...' : 'Log In'}
+                  </Button>
+                </div>
+              </form>
+            )}
+
+            {/* Forward Auth Message */}
+            {authConfig.primaryMethod === 'forward' && !authConfig.methods.local && (
+              <div className="text-center py-8">
+                <p className="text-sm text-muted-foreground">
+                  Authentication is handled by your reverse proxy.
+                </p>
+                <p className="text-sm text-muted-foreground mt-2">
+                  If you're seeing this page, please check your proxy configuration.
+                </p>
               </div>
-            </div>
-          </form>
+            )}
+          </div>
         </CardContent>
-        <CardFooter>
-          <Button type="submit" form="login-form" className="w-full" disabled={isLoading}>
-            {isLoading ? 'Logging in...' : 'Log In'}
-          </Button>
-        </CardFooter>
-        <div className="px-6 pb-6 text-center">
-          <p className="text-sm text-muted-foreground">
-            Don't have an account? Contact your administrator.
-          </p>
-        </div>
+        {authConfig.methods.local && (
+          <div className="px-6 pb-6 text-center">
+            <p className="text-sm text-muted-foreground">
+              Don't have an account? Contact your administrator.
+            </p>
+          </div>
+        )}
       </Card>
       <Toaster />
     </>
