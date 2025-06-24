@@ -67,9 +67,15 @@ export const GET: APIRoute = async ({ url, request }) => {
     // Create authentication headers
     const authHeaders = createAuthHeaders(authResult.token);
     
-    // Clear OIDC state cookie
+    // Clear OIDC state and nonce cookies
     const headers = new Headers(authHeaders);
-    headers.append("Set-Cookie", "oidc_state=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0");
+    const isProduction = process.env.NODE_ENV === "production";
+    const cookieFlags = isProduction 
+      ? "HttpOnly; SameSite=Strict; Secure" 
+      : "HttpOnly; SameSite=Strict";
+    
+    headers.append("Set-Cookie", `oidc_state=; Path=/; ${cookieFlags}; Max-Age=0`);
+    headers.append("Set-Cookie", `oidc_nonce=; Path=/; ${cookieFlags}; Max-Age=0`);
     headers.set("Location", "/"); // Redirect to dashboard
 
     return new Response(null, {

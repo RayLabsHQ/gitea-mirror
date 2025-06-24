@@ -33,8 +33,13 @@ export const GET: APIRoute = async ({ url }) => {
 
     // Store state and nonce in cookies for validation
     const headers = new Headers();
-    headers.append("Set-Cookie", `oidc_state=${state}; Path=/; HttpOnly; SameSite=Strict; Max-Age=600`); // 10 minutes
-    headers.append("Set-Cookie", `oidc_nonce=${nonce}; Path=/; HttpOnly; SameSite=Strict; Max-Age=600`); // 10 minutes
+    const isProduction = process.env.NODE_ENV === "production";
+    const cookieFlags = isProduction 
+      ? "HttpOnly; SameSite=Strict; Secure" 
+      : "HttpOnly; SameSite=Strict";
+    
+    headers.append("Set-Cookie", `oidc_state=${state}; Path=/; ${cookieFlags}; Max-Age=600`); // 10 minutes
+    headers.append("Set-Cookie", `oidc_nonce=${nonce}; Path=/; ${cookieFlags}; Max-Age=600`); // 10 minutes
 
     // Redirect to OIDC provider
     headers.set("Location", authUrl);

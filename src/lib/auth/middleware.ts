@@ -168,8 +168,13 @@ export async function getAuthStatus(request: Request): Promise<{
  * Create authentication response headers
  */
 export function createAuthHeaders(token: string): Record<string, string> {
+  const isProduction = ENV.NODE_ENV === "production";
+  const cookieFlags = isProduction 
+    ? "HttpOnly; SameSite=Strict; Secure" 
+    : "HttpOnly; SameSite=Strict";
+  
   return {
-    "Set-Cookie": `token=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${60 * 60 * 24 * 7}`, // 7 days
+    "Set-Cookie": `token=${token}; Path=/; ${cookieFlags}; Max-Age=${60 * 60 * 24 * 7}`, // 7 days
   };
 }
 
@@ -177,8 +182,13 @@ export function createAuthHeaders(token: string): Record<string, string> {
  * Create logout response headers
  */
 export function createLogoutHeaders(): Record<string, string> {
+  const isProduction = ENV.NODE_ENV === "production";
+  const cookieFlags = isProduction 
+    ? "HttpOnly; SameSite=Strict; Secure" 
+    : "HttpOnly; SameSite=Strict";
+  
   return {
-    "Set-Cookie": "token=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0",
+    "Set-Cookie": `token=; Path=/; ${cookieFlags}; Max-Age=0`,
   };
 }
 

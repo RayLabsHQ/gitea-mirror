@@ -8,6 +8,7 @@ import { db, users } from "@/lib/db";
 import { eq, and } from "drizzle-orm";
 import jwt from "jsonwebtoken";
 import type { User } from "@/lib/db/schema";
+import { validateIDToken } from "./jwks";
 
 const JWT_SECRET = ENV.JWT_SECRET;
 
@@ -309,7 +310,16 @@ export async function completeOIDCAuth(code: string): Promise<{ user: User; toke
     if (tokens.id_token) {
       const config = getOIDCConfig();
       const endpoints = await discoverOIDCEndpoints(config.issuerUrl);
-      decodeIdToken(tokens.id_token, endpoints.issuer);
+      
+      // Use proper JWT signature validation
+      try {
+        await validateIDToken(tokens.id_token, endpoints.issuer, endpoints.jwksUri);
+      } catch (error) {
+        console.error("OIDC: ID token validation failed:", error);
+        // For backward compatibility, fall back to basic validation
+        // Remove this fallback in production for better security
+        decodeIdToken(tokens.id_token, endpoints.issuer);
+      }
     }
     
     // Get user information

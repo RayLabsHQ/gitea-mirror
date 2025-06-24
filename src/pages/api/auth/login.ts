@@ -83,11 +83,16 @@ export const POST: APIRoute = async ({ request }) => {
   const { password: _, ...userWithoutPassword } = user[0];
   const token = jwt.sign({ id: user[0].id }, JWT_SECRET, { expiresIn: "7d" });
 
+  const isProduction = process.env.NODE_ENV === "production";
+  const cookieFlags = isProduction 
+    ? "HttpOnly; SameSite=Strict; Secure" 
+    : "HttpOnly; SameSite=Strict";
+
   return new Response(JSON.stringify({ token, user: userWithoutPassword }), {
     status: 200,
     headers: {
       "Content-Type": "application/json",
-      "Set-Cookie": `token=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${
+      "Set-Cookie": `token=${token}; Path=/; ${cookieFlags}; Max-Age=${
         60 * 60 * 24 * 7
       }`,
     },
