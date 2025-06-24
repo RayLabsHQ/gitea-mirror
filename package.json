@@ -1,7 +1,7 @@
 {
   "name": "gitea-mirror",
   "type": "module",
-  "version": "2.19.0",
+  "version": "2.19.1",
   "engines": {
     "bun": ">=1.2.9"
   },
@@ -9,7 +9,7 @@
     "setup": "bun install && bun run manage-db init",
     "dev": "bunx --bun astro dev",
     "dev:clean": "bun run cleanup-db && bun run manage-db init && bunx --bun astro dev",
-    "build": "bunx --bun astro build",
+    "build": "NODE_ENV=production bunx --bun astro build",
     "cleanup-db": "rm -f gitea-mirror.db data/gitea-mirror.db",
     "manage-db": "bun scripts/manage-db.ts",
     "init-db": "bun scripts/manage-db.ts init",
@@ -23,12 +23,16 @@
     "test-shutdown": "bun scripts/test-graceful-shutdown.ts",
     "test-shutdown-cleanup": "bun scripts/test-graceful-shutdown.ts --cleanup",
     "preview": "bunx --bun astro preview",
-    "start": "bun dist/server/entry.mjs",
+    "start": "NODE_ENV=production bun dist/server/entry.mjs",
     "start:fresh": "bun run cleanup-db && bun run manage-db init && bun dist/server/entry.mjs",
     "test": "bun test",
     "test:watch": "bun test --watch",
     "test:coverage": "bun test --coverage",
-    "astro": "bunx --bun astro"
+    "astro": "bunx --bun astro",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "bun scripts/run-migrations.ts",
+    "db:push": "drizzle-kit push",
+    "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
     "@astrojs/check": "^0.9.4",
@@ -87,6 +91,7 @@
     "@types/jsonwebtoken": "^9.0.9",
     "@types/uuid": "^10.0.0",
     "@vitejs/plugin-react": "^4.5.2",
+    "drizzle-kit": "^0.31.2",
     "jsdom": "^26.1.0",
     "tsx": "^4.20.3",
     "vitest": "^3.2.3"

@@ -19,7 +19,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
     try {
       if (checkMigrationsNeeded()) {
         console.log('🔄 Database migrations needed, running...');
-        const migrationResult = runMigrations();
+        const migrationResult = await runMigrations();
         if (migrationResult) {
           console.log('✅ Database migrations completed successfully');
         } else {

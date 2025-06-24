@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.19.1] - 2025-06-24
+
+### Fixed
+- Fixed "jsxDEV is not a function" error in production builds by ensuring NODE_ENV=production is set
+- Fixed upgrade issue where existing installations (v2.16.3 and earlier) would incorrectly show setup wizard
+- Added automatic migration for auth_config table when upgrading from pre-v2.19.0 versions
+- Added fix-v2.19-upgrade.sh script to help users manually fix upgrade issues
+
+### Changed
+- Updated build commands to explicitly set NODE_ENV=production
+- Updated Dockerfile to set NODE_ENV during build stage
+- Enhanced migration system to handle auth_config creation for existing users
+
 ## [2.19.0] - 2025-06-24
 
 ### Added

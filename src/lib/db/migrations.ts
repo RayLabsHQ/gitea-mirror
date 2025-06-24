@@ -100,6 +100,71 @@ export function migrateUsersTableForAuth(): boolean {
 }
 
 /**
+ * Migration: Create auth_config for existing installations
+ */
+export async function migrateAuthConfigForExistingUsers(): Promise<boolean> {
+  try {
+    const dbPath = getDatabasePath();
+    const db = new Database(dbPath);
+    
+    // Check if auth_config table exists
+    const tables = db.query("SELECT name FROM sqlite_master WHERE type='table' AND name='auth_config'").all();
+    if (tables.length === 0) {
+      console.log("❌ auth_config table doesn't exist. Please run database initialization first.");
+      db.close();
+      return false;
+    }
+    
+    // Check if we have users but no auth config
+    const userCount = db.query("SELECT COUNT(*) as count FROM users").get() as { count: number };
+    const authConfigCount = db.query("SELECT COUNT(*) as count FROM auth_config").get() as { count: number };
+    
+    if (userCount.count > 0 && authConfigCount.count === 0) {
+      console.log("🔄 Creating auth_config for existing installation...");
+      
+      // Get the auth method from existing users (should be 'local' for pre-v2.19.0)
+      const firstUser = db.query("SELECT auth_provider FROM users LIMIT 1").get() as { auth_provider: string | null };
+      const authMethod = firstUser?.auth_provider || "local";
+      
+      // Create a default auth config
+      const { v4: uuidv4 } = await import("uuid");
+      const authConfig = {
+        id: uuidv4(),
+        method: authMethod,
+        isActive: 1,
+        allowLocalFallback: 0, // No fallback needed for local auth
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      };
+      
+      const insertQuery = db.prepare(`
+        INSERT INTO auth_config (id, method, is_active, allow_local_fallback, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+      `);
+      
+      insertQuery.run(
+        authConfig.id,
+        authConfig.method,
+        authConfig.isActive,
+        authConfig.allowLocalFallback,
+        authConfig.createdAt,
+        authConfig.updatedAt
+      );
+      
+      console.log(`✅ Created auth_config for ${authMethod} authentication`);
+      db.close();
+      return true;
+    }
+    
+    db.close();
+    return true;
+  } catch (error) {
+    console.error("❌ Failed to migrate auth_config:", error);
+    return false;
+  }
+}
+
+/**
  * Check if a table exists
  */
 function tableExists(db: Database, tableName: string): boolean {
@@ -150,7 +215,7 @@ export function createAuthConfigTable(): boolean {
 /**
  * Run all pending migrations
  */
-export function runMigrations(): boolean {
+export async function runMigrations(): Promise<boolean> {
   console.log("🔄 Running database migrations...");
   
   try {
@@ -160,7 +225,10 @@ export function runMigrations(): boolean {
     // Create auth_config table
     const authConfigResult = createAuthConfigTable();
     
-    if (usersResult && authConfigResult) {
+    // Migrate auth_config for existing installations
+    const authMigrationResult = await migrateAuthConfigForExistingUsers();
+    
+    if (usersResult && authConfigResult && authMigrationResult) {
       console.log("✅ All migrations completed successfully");
       return true;
     } else {

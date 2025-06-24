@@ -13,6 +13,7 @@ RUN bun install --frozen-lockfile
 # ----------------------------
 FROM deps AS builder
 COPY . .
+ENV NODE_ENV=production
 RUN bun run build
 RUN mkdir -p dist/scripts && \
     for script in scripts/*.ts; do \

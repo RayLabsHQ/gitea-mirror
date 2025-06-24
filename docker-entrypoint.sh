@@ -198,6 +198,15 @@ else
   else
     echo "Warning: Could not find mirror_jobs table update script."
   fi
+  
+  # Run auth config migration for existing installations
+  if [ -f "dist/scripts/migrate-auth-config.js" ]; then
+    echo "Checking auth config migration..."
+    bun dist/scripts/migrate-auth-config.js
+  elif [ -f "scripts/migrate-auth-config.ts" ]; then
+    echo "Checking auth config migration using TypeScript script..."
+    bun scripts/migrate-auth-config.ts
+  fi
 fi
 
 # Extract version from package.json and set as environment variable
