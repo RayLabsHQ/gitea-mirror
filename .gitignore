@@ -16,6 +16,9 @@ pnpm-debug.log*
 # environment variables
 .env
 .env.production
+.env.development
+.env.test
+.env.local
 
 # database files
 data/gitea-mirror.db
