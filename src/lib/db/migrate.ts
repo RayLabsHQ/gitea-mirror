@@ -24,21 +24,6 @@ export function getDatabasePath(): string {
   return dbUrl;
 }
 
-/**
- * Check if this is a v2.x database (no migration table)
- */
-export function isLegacyDatabase(db: Database): boolean {
-  try {
-    const tables = db.query("SELECT name FROM sqlite_master WHERE type='table'").all() as { name: string }[];
-    const hasMigrationTable = tables.some(t => t.name === MIGRATION_TABLE);
-    const hasUserTable = tables.some(t => t.name === "users");
-    
-    // Legacy database if it has users but no migration table
-    return hasUserTable && !hasMigrationTable;
-  } catch {
-    return false;
-  }
-}
 
 /**
  * Run database migrations
@@ -58,13 +43,6 @@ export async function runDrizzleMigrations(): Promise<void> {
   const db = drizzle(sqlite);
   
   try {
-    // Check if this is a legacy database
-    if (isLegacyDatabase(sqlite)) {
-      console.log("⚠️  Detected v2.x database. Please run the v3 migration script first.");
-      console.log("   Run: bun scripts/migrate-v2-to-v3.ts");
-      throw new Error("Legacy database detected - migration required");
-    }
-    
     // Run migrations
     await migrate(db, { migrationsFolder: "./drizzle" });
     console.log("✅ Migrations completed successfully");

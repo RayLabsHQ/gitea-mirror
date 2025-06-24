@@ -30,17 +30,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improved type safety with inferred types from schema
 
 ### Removed
-- Manual SQL table creation in multiple files
-- `manage-db.ts` script (replaced by migrations)
-- Raw SQL from docker-entrypoint.sh
-- Manual column checking and migration functions
+- All manual SQL table creation
+- Old migration system (`src/lib/db/migrations.ts`)
+- Legacy migration scripts (800+ lines removed)
+- Raw SQL queries throughout codebase
+- Complex upgrade scripts
+- One-time repair utilities
 
 ### Migration Guide
-1. Ensure you're on v2.19.1 before upgrading
-2. Create a backup of your database
-3. Run `bun scripts/migrate-v2-to-v3.ts`
-4. Update to v3.0.0
-5. Migrations will run automatically on startup
+Due to fundamental changes, v3.0.0 requires a fresh start:
+1. Export your configuration from v2.x
+2. Backup old database
+3. Install v3.0.0 fresh
+4. Reconfigure using exported settings
+See [v3 Upgrade Guide](docs/v3-upgrade-guide.md) for details
 
 ## [2.19.1] - 2025-06-24
 

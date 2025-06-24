@@ -12,8 +12,6 @@ let cleanupServiceStarted = false;
 let shutdownManagerInitialized = false;
 
 export const onRequest = defineMiddleware(async (context, next) => {
-  // Database migrations are now handled automatically in db/index.ts
-
   // Initialize shutdown manager and signal handlers
   if (!shutdownManagerInitialized) {
     try {
