@@ -100,6 +100,54 @@ export function migrateUsersTableForAuth(): boolean {
 }
 
 /**
+ * Check if a table exists
+ */
+function tableExists(db: Database, tableName: string): boolean {
+  try {
+    const result = db.query(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`).get(tableName) as any;
+    return result !== null;
+  } catch (error) {
+    console.error(`Error checking table ${tableName}:`, error);
+    return false;
+  }
+}
+
+/**
+ * Migration: Create auth_config table
+ */
+export function createAuthConfigTable(): boolean {
+  try {
+    const dbPath = getDatabasePath();
+    const db = new Database(dbPath);
+    
+    console.log("🔄 Creating auth_config table...");
+    
+    if (!tableExists(db, "auth_config")) {
+      db.exec(`
+        CREATE TABLE auth_config (
+          id TEXT PRIMARY KEY,
+          method TEXT NOT NULL DEFAULT 'local',
+          allowLocalFallback INTEGER NOT NULL DEFAULT 0,
+          forwardAuth TEXT,
+          oidc TEXT,
+          createdAt INTEGER NOT NULL,
+          updatedAt INTEGER NOT NULL
+        )
+      `);
+      console.log("✅ Created auth_config table");
+    } else {
+      console.log("✅ auth_config table already exists");
+    }
+    
+    db.close();
+    return true;
+  } catch (error) {
+    console.error("❌ Failed to create auth_config table:", error);
+    return false;
+  }
+}
+
+/**
  * Run all pending migrations
  */
 export function runMigrations(): boolean {
@@ -109,7 +157,10 @@ export function runMigrations(): boolean {
     // Run users table migration
     const usersResult = migrateUsersTableForAuth();
     
-    if (usersResult) {
+    // Create auth_config table
+    const authConfigResult = createAuthConfigTable();
+    
+    if (usersResult && authConfigResult) {
       console.log("✅ All migrations completed successfully");
       return true;
     } else {

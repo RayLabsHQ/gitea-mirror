@@ -9,15 +9,12 @@ import { toast, Toaster } from 'sonner';
 import { showErrorToast } from '@/lib/utils';
 
 interface AuthConfig {
-  primaryMethod: 'local' | 'forward' | 'oidc';
-  methods: {
-    local: boolean;
-    forward: boolean;
-    oidc: boolean;
-  };
+  method: 'local' | 'forward' | 'oidc';
   allowLocalFallback: boolean;
-  oidcConfig?: {
-    redirectUri: string;
+  isConfigured: boolean;
+  oidc?: {
+    issuerUrl: string;
+    clientId: string;
   };
 }
 
@@ -32,24 +29,26 @@ export function LoginForm() {
       try {
         const response = await fetch('/api/auth/config');
         if (response.ok) {
-          const config = await response.json();
-          setAuthConfig(config);
+          const data = await response.json();
+          if (data.success && data.config) {
+            setAuthConfig(data.config);
 
-          // Auto-redirect for forward auth if it's the primary method
-          if (config.primaryMethod === 'forward' && config.methods.forward) {
-            // For forward auth, try to authenticate automatically
-            // If headers are present, the middleware should handle it
-            window.location.href = '/';
-            return;
+            // Auto-redirect for forward auth if it's the primary method
+            if (data.config.method === 'forward' && data.config.isConfigured) {
+              // For forward auth, try to authenticate automatically
+              // If headers are present, the middleware should handle it
+              window.location.href = '/';
+              return;
+            }
           }
         }
       } catch (error) {
         console.error('Failed to load auth config:', error);
         // Fallback to local auth
         setAuthConfig({
-          primaryMethod: 'local',
-          methods: { local: true, forward: false, oidc: false },
+          method: 'local',
           allowLocalFallback: false,
+          isConfigured: true,
         });
       } finally {
         setConfigLoading(false);
@@ -189,19 +188,19 @@ export function LoginForm() {
         <CardContent>
           <div className="space-y-4">
             {/* OIDC Login Button */}
-            {authConfig.methods.oidc && (
+            {authConfig.method === 'oidc' && authConfig.isConfigured && (
               <Button
                 onClick={handleOIDCLogin}
                 className="w-full"
                 variant="outline"
                 disabled={isLoading}
               >
-                {isLoading ? 'Redirecting...' : 'Login with OIDC'}
+                {isLoading ? 'Redirecting...' : 'Login with SSO'}
               </Button>
             )}
 
             {/* Separator if both OIDC and local are available */}
-            {authConfig.methods.oidc && authConfig.methods.local && (
+            {authConfig.method === 'oidc' && authConfig.allowLocalFallback && (
               <div className="relative">
                 <div className="absolute inset-0 flex items-center">
                   <span className="w-full border-t" />
@@ -215,7 +214,7 @@ export function LoginForm() {
             )}
 
             {/* Local Login Form */}
-            {authConfig.methods.local && (
+            {(authConfig.method === 'local' || authConfig.allowLocalFallback) && (
               <form id="login-form" onSubmit={handleLogin}>
                 <div className="space-y-4">
                   <div>
@@ -266,7 +265,7 @@ export function LoginForm() {
             )}
           </div>
         </CardContent>
-        {authConfig.methods.local && (
+        {authConfig.method === 'local' && (
           <div className="px-6 pb-6 text-center">
             <p className="text-sm text-muted-foreground">
               Don't have an account? Contact your administrator.

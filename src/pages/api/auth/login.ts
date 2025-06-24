@@ -3,8 +3,9 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { db, users } from "@/lib/db";
 import { eq } from "drizzle-orm";
+import { ENV } from "@/lib/config";
 
-const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key";
+const JWT_SECRET = ENV.JWT_SECRET;
 
 export const POST: APIRoute = async ({ request }) => {
   const { username, password } = await request.json();
@@ -83,7 +84,7 @@ export const POST: APIRoute = async ({ request }) => {
   const { password: _, ...userWithoutPassword } = user[0];
   const token = jwt.sign({ id: user[0].id }, JWT_SECRET, { expiresIn: "7d" });
 
-  const isProduction = process.env.NODE_ENV === "production";
+  const isProduction = ENV.NODE_ENV === "production";
   const cookieFlags = isProduction 
     ? "HttpOnly; SameSite=Strict; Secure" 
     : "HttpOnly; SameSite=Strict";

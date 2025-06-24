@@ -2,14 +2,22 @@
 import '../styles/global.css';
 import ThemeScript from '@/components/theme/ThemeScript.astro';
 import { LoginForm } from '@/components/auth/LoginForm';
-import { client } from '../lib/db';
+import { hasUsers } from '@/lib/db/queries/users';
+import { hasAuthConfig } from '@/lib/db/queries/auth-config';
+
+// Check if auth configuration exists
+const authConfigExists = await hasAuthConfig();
+
+// Redirect to setup if no auth config exists
+if (!authConfigExists) {
+  return Astro.redirect('/setup');
+}
 
 // Check if any users exist in the database
-const userCountResult = await client.execute(`SELECT COUNT(*) as count FROM users`);
-const userCount = userCountResult.rows[0].count;
+const userCount = await hasUsers();
 
 // Redirect to signup if no users exist
-if (userCount === 0) {
+if (!userCount) {
   return Astro.redirect('/signup');
 }
 
@@ -26,7 +34,13 @@ const generator = Astro.generator;
     <ThemeScript />
   </head>
   <body>
-    <div class="h-dvh flex items-center justify-center bg-muted/30 p-4">
+    <div class="h-dvh flex flex-col items-center justify-center bg-muted/30 p-4">
+      <noscript>
+        <div class="text-center">
+          <h1 class="text-2xl font-bold mb-2">JavaScript Required</h1>
+          <p class="text-muted-foreground">Please enable JavaScript to use Gitea Mirror.</p>
+        </div>
+      </noscript>
       <LoginForm client:load />
     </div>
   </body>

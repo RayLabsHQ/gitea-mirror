@@ -2,12 +2,14 @@
  * Enhanced authentication middleware supporting multiple auth methods
  */
 
-import { ENV, AuthConfig } from "@/lib/config";
-import { db, users } from "@/lib/db";
-import { eq } from "drizzle-orm";
+import { ENV } from "@/lib/config";
+import { getActiveAuthConfig, isAuthMethodEnabled } from "@/lib/config/db-config";
+import { db, users, sqlite } from "@/lib/db";
 import jwt from "jsonwebtoken";
 import { authenticateForwardAuth } from "./forward-auth";
+import { hasUsers as checkHasUsers } from "@/lib/db/queries/users";
 import type { User } from "@/lib/db/schema";
+import { eq } from "drizzle-orm";
 
 const JWT_SECRET = ENV.JWT_SECRET;
 
@@ -31,14 +33,17 @@ async function authenticateJWT(request: Request): Promise<{ user: User; token: s
     if (authHeader?.startsWith("Bearer ")) {
       token = authHeader.split(" ")[1];
     } else if (cookieHeader) {
-      // Parse cookies to find token
-      const cookies = cookieHeader.split(";").reduce((acc, cookie) => {
-        const [key, value] = cookie.trim().split("=");
-        acc[key] = value;
+      // Parse cookies to find token - browser sends cookies as "name1=value1; name2=value2"
+      const cookies = cookieHeader.split("; ").reduce((acc, cookie) => {
+        const [key, ...valueParts] = cookie.split("=");
+        if (key && valueParts.length > 0) {
+          acc[key] = valueParts.join("="); // Handle values that contain =
+        }
         return acc;
       }, {} as Record<string, string>);
       
       token = cookies.token;
+      
     }
     
     if (!token) {
@@ -48,25 +53,40 @@ async function authenticateJWT(request: Request): Promise<{ user: User; token: s
     // Verify JWT token
     const decoded = jwt.verify(token, JWT_SECRET) as { id: string };
     
-    // Get user from database
-    const userResult = await db
-      .select()
-      .from(users)
-      .where(eq(users.id, decoded.id))
-      .limit(1);
+    // Get user from database - using simpler query for now
+    const query = sqlite.query(`
+      SELECT id, username, email
+      FROM users
+      WHERE id = ?
+      LIMIT 1
+    `);
     
-    if (!userResult.length) {
+    const user = query.get(decoded.id) as any;
+    
+    if (!user) {
       return null;
     }
     
-    const user = userResult[0];
+    // Add default values for missing fields
+    const fullUser: User = {
+      ...user,
+      password: undefined,
+      displayName: user.display_name || user.username,
+      authProvider: user.auth_provider || "local",
+      externalId: user.external_id || null,
+      externalUsername: user.external_username || null,
+      isActive: user.is_active !== undefined ? Boolean(user.is_active) : true,
+      lastLoginAt: user.last_login_at ? new Date(user.last_login_at) : null,
+      createdAt: user.created_at ? new Date(user.created_at) : new Date(),
+      updatedAt: user.updated_at ? new Date(user.updated_at) : new Date(),
+    };
     
-    // Check if user is active
-    if (!user.isActive) {
+    // Check if user is active (default to true for backward compatibility)
+    if (!fullUser.isActive) {
       return null;
     }
     
-    return { user, token };
+    return { user: fullUser, token };
     
   } catch (error) {
     // JWT verification failed or other error
@@ -78,12 +98,12 @@ async function authenticateJWT(request: Request): Promise<{ user: User; token: s
  * Main authentication function that tries different methods based on configuration
  */
 export async function authenticate(request: Request): Promise<AuthResult | null> {
-  const primaryMethod = AuthConfig.getPrimaryMethod();
+  const config = await getActiveAuthConfig();
   
   // Try primary authentication method first
-  switch (primaryMethod) {
+  switch (config.method) {
     case "forward":
-      if (AuthConfig.isMethodEnabled("forward")) {
+      if (await isAuthMethodEnabled("forward")) {
         const forwardResult = await authenticateForwardAuth(request);
         if (forwardResult) {
           return { ...forwardResult, method: "forward" };
@@ -103,7 +123,7 @@ export async function authenticate(request: Request): Promise<AuthResult | null>
   }
   
   // Try JWT authentication (local auth or fallback)
-  if (AuthConfig.isMethodEnabled("local")) {
+  if (await isAuthMethodEnabled("local")) {
     const jwtResult = await authenticateJWT(request);
     if (jwtResult) {
       return { ...jwtResult, method: "local" };
@@ -111,7 +131,7 @@ export async function authenticate(request: Request): Promise<AuthResult | null>
   }
   
   // If forward auth is enabled but not primary, try it as fallback
-  if (primaryMethod !== "forward" && AuthConfig.isMethodEnabled("forward")) {
+  if (config.method !== "forward" && await isAuthMethodEnabled("forward")) {
     const forwardResult = await authenticateForwardAuth(request);
     if (forwardResult) {
       return { ...forwardResult, method: "forward" };
@@ -123,19 +143,9 @@ export async function authenticate(request: Request): Promise<AuthResult | null>
 
 /**
  * Check if user count is zero (for initial setup)
+ * Re-export from queries module for backward compatibility
  */
-export async function hasUsers(): Promise<boolean> {
-  try {
-    const userCount = await db
-      .select({ count: users.id })
-      .from(users);
-    
-    return userCount.length > 0;
-  } catch (error) {
-    console.error("Error checking user count:", error);
-    return false;
-  }
-}
+export const hasUsers = checkHasUsers;
 
 /**
  * Get authentication status for API responses
@@ -200,9 +210,12 @@ export function isAuthRequired(pathname: string): boolean {
   const publicPaths = [
     "/login",
     "/signup",
+    "/setup",
     "/api/auth/login",
     "/api/auth/register",
     "/api/auth/oidc",
+    "/api/auth/setup",
+    "/api/auth/config",
     "/api/health",
     "/_astro",
     "/favicon.ico",
@@ -215,17 +228,17 @@ export function isAuthRequired(pathname: string): boolean {
 /**
  * Get redirect URL for authentication
  */
-export function getAuthRedirectUrl(request: Request): string {
+export async function getAuthRedirectUrl(request: Request): Promise<string> {
   const url = new URL(request.url);
-  const primaryMethod = AuthConfig.getPrimaryMethod();
+  const config = await getActiveAuthConfig();
   
   // For forward auth, redirect to login page (which will auto-redirect)
-  if (primaryMethod === "forward") {
+  if (config.method === "forward") {
     return "/login";
   }
   
   // For OIDC, redirect to OIDC login
-  if (primaryMethod === "oidc" && AuthConfig.isMethodEnabled("oidc")) {
+  if (config.method === "oidc" && await isAuthMethodEnabled("oidc")) {
     return "/api/auth/oidc/login";
   }
   

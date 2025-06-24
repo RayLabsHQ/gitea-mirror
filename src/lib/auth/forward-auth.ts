@@ -4,10 +4,12 @@
  */
 
 import { ENV } from "@/lib/config";
-import { db, users } from "@/lib/db";
-import { eq, and } from "drizzle-orm";
+import { getActiveAuthConfig } from "@/lib/config/db-config";
+import { db, users, sqlite } from "@/lib/db";
 import jwt from "jsonwebtoken";
+import { v4 as uuidv4 } from "uuid";
 import type { User } from "@/lib/db/schema";
+import { eq, and } from "drizzle-orm";
 
 const JWT_SECRET = ENV.JWT_SECRET;
 
@@ -21,16 +23,26 @@ export interface ForwardAuthUser {
 /**
  * Extract user information from forward auth headers
  */
-export function extractForwardAuthUser(request: Request): ForwardAuthUser | null {
-  const userHeader = request.headers.get(ENV.AUTH.FORWARD.USER_HEADER);
-  const emailHeader = request.headers.get(ENV.AUTH.FORWARD.EMAIL_HEADER);
+export async function extractForwardAuthUser(request: Request): Promise<ForwardAuthUser | null> {
+  const config = await getActiveAuthConfig();
+  
+  if (!config.forwardAuth) {
+    return null;
+  }
+  
+  const userHeader = request.headers.get(config.forwardAuth.userHeader);
+  const emailHeader = request.headers.get(config.forwardAuth.emailHeader);
   
   if (!userHeader || !emailHeader) {
     return null;
   }
   
-  const displayName = request.headers.get(ENV.AUTH.FORWARD.NAME_HEADER) || undefined;
-  const groupsHeader = request.headers.get(ENV.AUTH.FORWARD.GROUPS_HEADER);
+  const displayName = config.forwardAuth.nameHeader 
+    ? request.headers.get(config.forwardAuth.nameHeader) || undefined 
+    : undefined;
+  const groupsHeader = config.forwardAuth.groupsHeader 
+    ? request.headers.get(config.forwardAuth.groupsHeader) 
+    : null;
   const groups = groupsHeader ? groupsHeader.split(",").map(g => g.trim()) : undefined;
   
   return {
@@ -44,10 +56,17 @@ export function extractForwardAuthUser(request: Request): ForwardAuthUser | null
 /**
  * Validate that the request comes from a trusted proxy
  */
-export function validateTrustedProxy(request: Request): boolean {
-  // If no trusted proxies are configured, allow all (for backward compatibility)
-  if (ENV.AUTH.FORWARD.TRUSTED_PROXIES.length === 0) {
-    return true;
+export async function validateTrustedProxy(request: Request): Promise<boolean> {
+  const config = await getActiveAuthConfig();
+  
+  if (!config.forwardAuth) {
+    return false;
+  }
+  
+  // If no trusted proxies are configured, deny (security by default)
+  if (config.forwardAuth.trustedProxies.length === 0) {
+    console.warn("Forward Auth: No trusted proxies configured");
+    return false;
   }
   
   // Get the immediate proxy IP (the last proxy in the chain)
@@ -75,7 +94,7 @@ export function validateTrustedProxy(request: Request): boolean {
   }
   
   // Check if the proxy IP is in the trusted list
-  const isTrusted = ENV.AUTH.FORWARD.TRUSTED_PROXIES.includes(proxyIP);
+  const isTrusted = config.forwardAuth.trustedProxies.includes(proxyIP);
   
   if (!isTrusted) {
     console.warn(`Forward Auth: Untrusted proxy IP: ${proxyIP}`);
@@ -90,45 +109,62 @@ export function validateTrustedProxy(request: Request): boolean {
 export async function findOrCreateForwardAuthUser(forwardAuthUser: ForwardAuthUser): Promise<User | null> {
   try {
     // First, try to find existing user by external username or email
-    let existingUser = await db
-      .select()
-      .from(users)
-      .where(
-        and(
-          eq(users.authProvider, "forward"),
-          eq(users.externalUsername, forwardAuthUser.username)
-        )
-      )
-      .limit(1);
+    let existingUser: User | undefined;
     
-    if (!existingUser.length) {
+    // Try to find by external username
+    const byExternalQuery = sqlite.query(`
+      SELECT id, username, email, displayName, authProvider, externalId, externalUsername, isActive, lastLoginAt
+      FROM users
+      WHERE authProvider = 'forward' AND externalUsername = ?
+      LIMIT 1
+    `);
+    existingUser = byExternalQuery.get(forwardAuthUser.username) as User | undefined;
+    
+    if (!existingUser) {
       // Try to find by email
-      existingUser = await db
-        .select()
-        .from(users)
-        .where(eq(users.email, forwardAuthUser.email))
-        .limit(1);
+      const byEmailQuery = sqlite.query(`
+        SELECT id, username, email, displayName, authProvider, externalId, externalUsername, isActive, lastLoginAt
+        FROM users
+        WHERE email = ?
+        LIMIT 1
+      `);
+      existingUser = byEmailQuery.get(forwardAuthUser.email) as User | undefined;
     }
     
-    if (existingUser.length > 0) {
+    if (existingUser) {
       // Update existing user with latest information
-      const updatedUser = await db
-        .update(users)
-        .set({
-          displayName: forwardAuthUser.displayName,
-          authProvider: "forward",
-          externalUsername: forwardAuthUser.username,
-          lastLoginAt: new Date(),
-          updatedAt: new Date(),
-        })
-        .where(eq(users.id, existingUser[0].id))
-        .returning();
+      const updateQuery = sqlite.prepare(`
+        UPDATE users
+        SET displayName = ?,
+            authProvider = 'forward',
+            externalUsername = ?,
+            lastLoginAt = ?,
+            updatedAt = ?
+        WHERE id = ?
+      `);
       
-      return updatedUser[0];
+      const now = new Date().toISOString();
+      updateQuery.run(
+        forwardAuthUser.displayName || existingUser.displayName,
+        forwardAuthUser.username,
+        now,
+        now,
+        existingUser.id
+      );
+      
+      // Return updated user
+      const getUpdatedQuery = sqlite.query(`
+        SELECT id, username, email, displayName, authProvider, externalId, externalUsername, isActive, lastLoginAt
+        FROM users
+        WHERE id = ?
+      `);
+      return getUpdatedQuery.get(existingUser.id) as User;
     }
+    
+    const config = await getActiveAuthConfig();
     
     // Create new user if auto-creation is enabled
-    if (!ENV.AUTH.FORWARD.AUTO_CREATE_USERS) {
+    if (!config.forwardAuth?.autoCreateUsers) {
       console.warn(`Forward Auth: User ${forwardAuthUser.username} not found and auto-creation is disabled`);
       return null;
     }
@@ -137,14 +173,14 @@ export async function findOrCreateForwardAuthUser(forwardAuthUser: ForwardAuthUs
     let username = forwardAuthUser.username;
     let counter = 1;
     
+    const checkUsernameQuery = sqlite.query(`
+      SELECT COUNT(*) as count FROM users WHERE username = ?
+    `);
+    
     while (true) {
-      const existingByUsername = await db
-        .select()
-        .from(users)
-        .where(eq(users.username, username))
-        .limit(1);
+      const result = checkUsernameQuery.get(username) as { count: number };
       
-      if (existingByUsername.length === 0) {
+      if (result.count === 0) {
         break;
       }
       
@@ -153,24 +189,40 @@ export async function findOrCreateForwardAuthUser(forwardAuthUser: ForwardAuthUs
     }
     
     // Create new user
-    const newUser = await db
-      .insert(users)
-      .values({
-        id: crypto.randomUUID(),
-        username,
-        email: forwardAuthUser.email,
-        displayName: forwardAuthUser.displayName,
-        authProvider: "forward",
-        externalUsername: forwardAuthUser.username,
-        isActive: true,
-        lastLoginAt: new Date(),
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      })
-      .returning();
+    const userId = uuidv4();
+    const now = new Date().toISOString();
+    
+    const insertQuery = sqlite.prepare(`
+      INSERT INTO users (
+        id, username, email, displayName, authProvider, 
+        externalUsername, isActive, lastLoginAt, createdAt, updatedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    
+    insertQuery.run(
+      userId,
+      username,
+      forwardAuthUser.email,
+      forwardAuthUser.displayName || forwardAuthUser.username,
+      "forward",
+      forwardAuthUser.username,
+      1, // isActive
+      now,
+      now,
+      now
+    );
+    
+    // Get the created user
+    const getNewUserQuery = sqlite.query(`
+      SELECT id, username, email, displayName, authProvider, externalId, externalUsername, isActive, lastLoginAt
+      FROM users
+      WHERE id = ?
+    `);
+    
+    const newUser = getNewUserQuery.get(userId) as User;
     
     console.log(`Forward Auth: Created new user ${username} for external user ${forwardAuthUser.username}`);
-    return newUser[0];
+    return newUser;
     
   } catch (error) {
     console.error("Forward Auth: Error finding/creating user:", error);
@@ -184,12 +236,12 @@ export async function findOrCreateForwardAuthUser(forwardAuthUser: ForwardAuthUs
 export async function authenticateForwardAuth(request: Request): Promise<{ user: User; token: string } | null> {
   try {
     // Validate trusted proxy if configured
-    if (!validateTrustedProxy(request)) {
+    if (!await validateTrustedProxy(request)) {
       return null;
     }
     
     // Extract user information from headers
-    const forwardAuthUser = extractForwardAuthUser(request);
+    const forwardAuthUser = await extractForwardAuthUser(request);
     if (!forwardAuthUser) {
       return null;
     }
@@ -220,6 +272,7 @@ export async function authenticateForwardAuth(request: Request): Promise<{ user:
 /**
  * Check if forward auth is properly configured
  */
-export function isForwardAuthConfigured(): boolean {
-  return !!(ENV.AUTH.FORWARD.USER_HEADER && ENV.AUTH.FORWARD.EMAIL_HEADER);
+export async function isForwardAuthConfigured(): Promise<boolean> {
+  const config = await getActiveAuthConfig();
+  return !!(config.forwardAuth?.userHeader && config.forwardAuth?.emailHeader);
 }

@@ -46,9 +46,10 @@ export function SignupForm() {
 
       if (response.ok) {
         toast.success('Account created successfully! Redirecting to dashboard...');
-        // Small delay before redirecting to see the success message
+        // The cookie should be set by the response, so we can redirect immediately
+        // Use replace to avoid redirect loop issues
         setTimeout(() => {
-          window.location.href = '/';
+          window.location.replace('/');
         }, 1500);
       } else {
         showErrorToast(data.error || 'Failed to create account. Please try again.', toast);

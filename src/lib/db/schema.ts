@@ -194,3 +194,40 @@ export const eventSchema = z.object({
 });
 
 export type Event = z.infer<typeof eventSchema>;
+
+// Auth configuration schema
+export const authConfigSchema = z.object({
+  id: z.string().uuid().optional(),
+  
+  // Auth method configuration
+  method: z.enum(["local", "forward", "oidc"]).default("local"),
+  allowLocalFallback: z.boolean().default(false),
+  
+  // Forward auth configuration
+  forwardAuth: z.object({
+    userHeader: z.string().default("X-Remote-User"),
+    emailHeader: z.string().default("X-Remote-Email"),
+    nameHeader: z.string().default("X-Remote-Name"),
+    groupsHeader: z.string().default("X-Remote-Groups"),
+    trustedProxies: z.array(z.string()).default([]),
+    autoCreateUsers: z.boolean().default(true),
+  }).optional(),
+  
+  // OIDC configuration
+  oidc: z.object({
+    issuerUrl: z.string().url(),
+    clientId: z.string(),
+    clientSecret: z.string(),
+    redirectUri: z.string().url().optional(),
+    scopes: z.array(z.string()).default(["openid", "profile", "email"]),
+    autoCreateUsers: z.boolean().default(true),
+    usernameClaim: z.string().default("preferred_username"),
+    emailClaim: z.string().default("email"),
+    nameClaim: z.string().default("name"),
+  }).optional(),
+  
+  createdAt: z.date().default(() => new Date()),
+  updatedAt: z.date().default(() => new Date()),
+});
+
+export type AuthConfig = z.infer<typeof authConfigSchema>;

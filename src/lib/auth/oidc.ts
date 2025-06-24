@@ -3,12 +3,14 @@
  * Supports standard OIDC providers like Authentik, Keycloak, Auth0, etc.
  */
 
-import { ENV, AuthConfig } from "@/lib/config";
+import { ENV } from "@/lib/config";
+import { getActiveAuthConfig } from "@/lib/config/db-config";
 import { db, users } from "@/lib/db";
-import { eq, and } from "drizzle-orm";
 import jwt from "jsonwebtoken";
+import { v4 as uuidv4 } from "uuid";
 import type { User } from "@/lib/db/schema";
 import { validateIDToken } from "./jwks";
+import { eq, and } from "drizzle-orm";
 
 const JWT_SECRET = ENV.JWT_SECRET;
 
@@ -41,13 +43,19 @@ export interface OIDCTokenResponse {
 /**
  * Get OIDC configuration
  */
-export function getOIDCConfig(): OIDCConfig {
+export async function getOIDCConfig(): Promise<OIDCConfig | null> {
+  const config = await getActiveAuthConfig();
+  
+  if (!config.oidc) {
+    return null;
+  }
+  
   return {
-    issuerUrl: ENV.AUTH.OIDC.ISSUER_URL,
-    clientId: ENV.AUTH.OIDC.CLIENT_ID,
-    clientSecret: ENV.AUTH.OIDC.CLIENT_SECRET,
-    redirectUri: AuthConfig.getOIDCRedirectURI(),
-    scopes: ENV.AUTH.OIDC.SCOPES,
+    issuerUrl: config.oidc.issuerUrl,
+    clientId: config.oidc.clientId,
+    clientSecret: config.oidc.clientSecret,
+    redirectUri: config.oidc.redirectUri || "",
+    scopes: config.oidc.scopes,
   };
 }
 
@@ -82,7 +90,7 @@ export async function discoverOIDCEndpoints(issuerUrl: string) {
  * Generate OIDC authorization URL with state and nonce
  */
 export async function generateAuthorizationUrl(state?: string, nonce?: string): Promise<string> {
-  const config = getOIDCConfig();
+  const config = await getOIDCConfig();
   const endpoints = await discoverOIDCEndpoints(config.issuerUrl);
   
   const params = new URLSearchParams({
@@ -105,7 +113,7 @@ export async function generateAuthorizationUrl(state?: string, nonce?: string): 
  * Exchange authorization code for tokens
  */
 export async function exchangeCodeForTokens(code: string): Promise<OIDCTokenResponse> {
-  const config = getOIDCConfig();
+  const config = await getOIDCConfig();
   const endpoints = await discoverOIDCEndpoints(config.issuerUrl);
   
   const body = new URLSearchParams({
@@ -136,7 +144,7 @@ export async function exchangeCodeForTokens(code: string): Promise<OIDCTokenResp
  * Get user information from OIDC provider
  */
 export async function getUserInfo(accessToken: string): Promise<OIDCUserInfo> {
-  const config = getOIDCConfig();
+  const config = await getOIDCConfig();
   const endpoints = await discoverOIDCEndpoints(config.issuerUrl);
   
   const response = await fetch(endpoints.userinfoEndpoint, {
@@ -197,10 +205,19 @@ export function decodeIdToken(idToken: string, issuer: string): any {
  */
 export async function findOrCreateOIDCUser(userInfo: OIDCUserInfo): Promise<User | null> {
   try {
+    const authConfig = await getActiveAuthConfig();
+    
+    if (!authConfig.oidc) {
+      console.error("OIDC: Configuration not found");
+      return null;
+    }
+    
+    const config = authConfig.oidc;
+    
     // Extract user data using configured claims
-    const username = userInfo[ENV.AUTH.OIDC.USERNAME_CLAIM as keyof OIDCUserInfo] as string || userInfo.preferred_username || userInfo.sub;
-    const email = userInfo[ENV.AUTH.OIDC.EMAIL_CLAIM as keyof OIDCUserInfo] as string || userInfo.email;
-    const displayName = userInfo[ENV.AUTH.OIDC.NAME_CLAIM as keyof OIDCUserInfo] as string || userInfo.name;
+    const username = userInfo[config.usernameClaim as keyof OIDCUserInfo] as string || userInfo.preferred_username || userInfo.sub;
+    const email = userInfo[config.emailClaim as keyof OIDCUserInfo] as string || userInfo.email;
+    const displayName = userInfo[config.nameClaim as keyof OIDCUserInfo] as string || userInfo.name;
     
     if (!username || !email) {
       console.error("OIDC: Missing required user information (username or email)");
@@ -247,7 +264,7 @@ export async function findOrCreateOIDCUser(userInfo: OIDCUserInfo): Promise<User
     }
     
     // Create new user if auto-creation is enabled
-    if (!ENV.AUTH.OIDC.AUTO_CREATE_USERS) {
+    if (!config.autoCreateUsers) {
       console.warn(`OIDC: User ${username} not found and auto-creation is disabled`);
       return null;
     }
@@ -275,7 +292,7 @@ export async function findOrCreateOIDCUser(userInfo: OIDCUserInfo): Promise<User
     const newUser = await db
       .insert(users)
       .values({
-        id: crypto.randomUUID(),
+        id: uuidv4(),
         username: finalUsername,
         email,
         displayName,
@@ -308,7 +325,7 @@ export async function completeOIDCAuth(code: string): Promise<{ user: User; toke
     
     // Validate ID token if present
     if (tokens.id_token) {
-      const config = getOIDCConfig();
+      const config = await getOIDCConfig();
       const endpoints = await discoverOIDCEndpoints(config.issuerUrl);
       
       // Use proper JWT signature validation

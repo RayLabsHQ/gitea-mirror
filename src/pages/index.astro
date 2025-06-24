@@ -1,16 +1,18 @@
 ---
 import '../styles/global.css';
 import App from '@/components/layout/MainLayout';
-import { db, repositories, mirrorJobs, client } from '@/lib/db';
+import { db, repositories, mirrorJobs } from '@/lib/db';
 import ThemeScript from '@/components/theme/ThemeScript.astro';
+import { hasUsers } from '@/lib/db/queries/users';
+import { hasAuthConfig } from '@/lib/db/queries/auth-config';
 
-// Check if any users exist in the database
-const userCountResult = await client.execute(`SELECT COUNT(*) as count FROM users`);
-const userCount = userCountResult.rows[0].count;
+// Check if setup is needed
+const userCount = await hasUsers();
+const authConfigExists = await hasAuthConfig();
 
-// Redirect to signup if no users exist
-if (userCount === 0) {
-  return Astro.redirect('/signup');
+// Redirect to setup if no auth config exists or no users
+if (!authConfigExists || !userCount) {
+  return Astro.redirect('/setup');
 }
 
 // Fetch data from the database

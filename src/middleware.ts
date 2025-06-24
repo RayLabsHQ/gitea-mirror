@@ -123,7 +123,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
     
     if (!auth) {
       // No valid authentication found, redirect to appropriate login
-      const redirectUrl = getAuthRedirectUrl(context.request);
+      const redirectUrl = await getAuthRedirectUrl(context.request);
       
       // For API endpoints, return 401 instead of redirecting
       if (pathname.startsWith('/api/')) {
