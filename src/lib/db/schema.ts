@@ -1,233 +1,313 @@
-import { z } from "zod";
-import { repositoryVisibilityEnum, repoStatusEnum } from "@/types/Repository";
-import { membershipRoleEnum } from "@/types/organizations";
+// Complete Drizzle schema definition for Gitea Mirror v3.0.0
+import { sqliteTable, text, integer, index, primaryKey } from "drizzle-orm/sqlite-core";
+import { sql } from "drizzle-orm";
 
-// Authentication provider enum
-export const authProviderEnum = z.enum(["local", "forward", "oidc"]);
-
-// User schema
-export const userSchema = z.object({
-  id: z.string().uuid().optional(),
-  username: z.string().min(3),
-  password: z.string().min(8).optional(), // Hashed password - optional for external auth
-  email: z.string().email(),
-  displayName: z.string().optional(), // Full name from external providers
-
-  // External authentication fields
-  authProvider: authProviderEnum.default("local"),
-  externalId: z.string().optional(), // ID from external provider
-  externalUsername: z.string().optional(), // Username from external provider
-
-  // Metadata
-  isActive: z.boolean().default(true),
-  lastLoginAt: z.date().optional(),
-
-  createdAt: z.date().default(() => new Date()),
-  updatedAt: z.date().default(() => new Date()),
+// ============================================
+// USERS TABLE
+// ============================================
+export const users = sqliteTable("users", {
+  id: text("id").primaryKey(),
+  username: text("username").notNull().unique(),
+  password: text("password"), // Optional for external auth
+  email: text("email").notNull(),
+  displayName: text("display_name"),
+  
+  // Authentication fields
+  authProvider: text("auth_provider").notNull().default("local"),
+  externalId: text("external_id"),
+  externalUsername: text("external_username"),
+  
+  // Status fields
+  isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+  lastLoginAt: integer("last_login_at", { mode: "timestamp" }),
+  
+  // Timestamps
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().default(sql`(unixepoch())`),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().default(sql`(unixepoch())`),
+}, (table) => {
+  return {
+    emailIdx: index("idx_users_email").on(table.email),
+    authProviderIdx: index("idx_users_auth_provider").on(table.authProvider),
+    externalIdIdx: index("idx_users_external_id").on(table.externalId),
+  };
 });
 
-export type User = z.infer<typeof userSchema>;
-
-// Configuration schema
-export const configSchema = z.object({
-  id: z.string().uuid().optional(),
-  userId: z.string().uuid(),
-  name: z.string().min(1),
-  isActive: z.boolean().default(true),
-  githubConfig: z.object({
-    username: z.string().min(1),
-    token: z.string().optional(),
-    skipForks: z.boolean().default(false),
-    privateRepositories: z.boolean().default(false),
-    mirrorIssues: z.boolean().default(false),
-    mirrorWiki: z.boolean().default(false),
-    mirrorStarred: z.boolean().default(false),
-    useSpecificUser: z.boolean().default(false),
-    singleRepo: z.string().optional(),
-    includeOrgs: z.array(z.string()).default([]),
-    excludeOrgs: z.array(z.string()).default([]),
-    mirrorPublicOrgs: z.boolean().default(false),
-    publicOrgs: z.array(z.string()).default([]),
-    skipStarredIssues: z.boolean().default(false),
-  }),
-  giteaConfig: z.object({
-    username: z.string().min(1),
-    url: z.string().url(),
-    token: z.string().min(1),
-    organization: z.string().optional(),
-    visibility: z.enum(["public", "private", "limited"]).default("public"),
-    starredReposOrg: z.string().default("github"),
-    preserveOrgStructure: z.boolean().default(false),
-    mirrorStrategy: z.enum(["preserve", "single-org", "flat-user", "mixed"]).optional(),
-    personalReposOrg: z.string().optional(), // Override destination for personal repos
-  }),
-  include: z.array(z.string()).default(["*"]),
-  exclude: z.array(z.string()).default([]),
-  scheduleConfig: z.object({
-    enabled: z.boolean().default(false),
-    interval: z.number().min(1).default(3600), // in seconds
-    lastRun: z.date().optional(),
-    nextRun: z.date().optional(),
-  }),
-  cleanupConfig: z.object({
-    enabled: z.boolean().default(false),
-    retentionDays: z.number().min(1).default(604800), // in seconds (default: 7 days)
-    lastRun: z.date().optional(),
-    nextRun: z.date().optional(),
-  }),
-  createdAt: z.date().default(() => new Date()),
-  updatedAt: z.date().default(() => new Date()),
-});
-
-export type Config = z.infer<typeof configSchema>;
-
-// Repository schema
-export const repositorySchema = z.object({
-  id: z.string().uuid().optional(),
-  userId: z.string().uuid().optional(),
-  configId: z.string().uuid(),
-
-  name: z.string().min(1),
-  fullName: z.string().min(1),
-  url: z.string().url(),
-  cloneUrl: z.string().url(),
-
-  owner: z.string().min(1),
-  organization: z.string().optional(),
-
-  isPrivate: z.boolean().default(false),
-  isForked: z.boolean().default(false),
-  forkedFrom: z.string().optional(),
-
-  hasIssues: z.boolean().default(false),
-  isStarred: z.boolean().default(false),
-  isArchived: z.boolean().default(false),
-
-  size: z.number(),
-  hasLFS: z.boolean().default(false),
-  hasSubmodules: z.boolean().default(false),
-
-  defaultBranch: z.string(),
-  visibility: repositoryVisibilityEnum.default("public"),
-
-  status: repoStatusEnum.default("imported"),
-  lastMirrored: z.date().optional(),
-  errorMessage: z.string().optional(),
-
-  mirroredLocation: z.string().default(""), // Store the full Gitea path where repo was mirrored
-  destinationOrg: z.string().optional(), // Custom destination organization override
-
-  createdAt: z.date().default(() => new Date()),
-  updatedAt: z.date().default(() => new Date()),
-});
-
-export type Repository = z.infer<typeof repositorySchema>;
-
-// Mirror job schema
-export const mirrorJobSchema = z.object({
-  id: z.string().uuid().optional(),
-  userId: z.string().uuid().optional(),
-  repositoryId: z.string().uuid().optional(),
-  repositoryName: z.string().optional(),
-  organizationId: z.string().uuid().optional(),
-  organizationName: z.string().optional(),
-  details: z.string().optional(),
-  status: repoStatusEnum.default("imported"),
-  message: z.string(),
-  timestamp: z.date().default(() => new Date()),
-
-  // New fields for job resilience
-  jobType: z.enum(["mirror", "sync", "retry"]).default("mirror"),
-  batchId: z.string().uuid().optional(), // Group related jobs together
-  totalItems: z.number().optional(), // Total number of items to process
-  completedItems: z.number().optional(), // Number of items completed
-  itemIds: z.array(z.string()).optional(), // IDs of items to process
-  completedItemIds: z.array(z.string()).optional(), // IDs of completed items
-  inProgress: z.boolean().default(false), // Whether the job is currently running
-  startedAt: z.date().optional(), // When the job started
-  completedAt: z.date().optional(), // When the job completed
-  lastCheckpoint: z.date().optional(), // Last time progress was saved
-});
-
-export type MirrorJob = z.infer<typeof mirrorJobSchema>;
-
-// Organization schema
-export const organizationSchema = z.object({
-  id: z.string().uuid().optional(),
-  userId: z.string().uuid().optional(),
-  configId: z.string().uuid(),
-
-  avatarUrl: z.string().url(),
-
-  name: z.string().min(1),
-
-  membershipRole: membershipRoleEnum.default("member"),
-
-  isIncluded: z.boolean().default(false),
-
-  status: repoStatusEnum.default("imported"),
-  lastMirrored: z.date().optional(),
-  errorMessage: z.string().optional(),
-
-  repositoryCount: z.number().default(0),
-  publicRepositoryCount: z.number().optional(),
-  privateRepositoryCount: z.number().optional(),
-  forkRepositoryCount: z.number().optional(),
-
-  // Override destination organization for this GitHub org's repos
-  destinationOrg: z.string().optional(),
-
-  createdAt: z.date().default(() => new Date()),
-  updatedAt: z.date().default(() => new Date()),
-});
-
-export type Organization = z.infer<typeof organizationSchema>;
-
-// Event schema (for SQLite-based pub/sub)
-export const eventSchema = z.object({
-  id: z.string().uuid().optional(),
-  userId: z.string().uuid(),
-  channel: z.string().min(1),
-  payload: z.any(),
-  read: z.boolean().default(false),
-  createdAt: z.date().default(() => new Date()),
-});
-
-export type Event = z.infer<typeof eventSchema>;
-
-// Auth configuration schema
-export const authConfigSchema = z.object({
-  id: z.string().uuid().optional(),
+// ============================================
+// AUTH CONFIG TABLE
+// ============================================
+export const authConfig = sqliteTable("auth_config", {
+  id: text("id").primaryKey(),
   
   // Auth method configuration
-  method: z.enum(["local", "forward", "oidc"]).default("local"),
-  allowLocalFallback: z.boolean().default(false),
+  method: text("method").notNull().default("local"), // local, oidc, forward
+  isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+  allowLocalFallback: integer("allow_local_fallback", { mode: "boolean" }).notNull().default(false),
   
-  // Forward auth configuration
-  forwardAuth: z.object({
-    userHeader: z.string().default("X-Remote-User"),
-    emailHeader: z.string().default("X-Remote-Email"),
-    nameHeader: z.string().default("X-Remote-Name"),
-    groupsHeader: z.string().default("X-Remote-Groups"),
-    trustedProxies: z.array(z.string()).default([]),
-    autoCreateUsers: z.boolean().default(true),
-  }).optional(),
+  // Configuration as JSON
+  forwardAuth: text("forward_auth", { mode: "json" }).$type<{
+    userHeader: string;
+    emailHeader: string;
+    nameHeader?: string;
+    trustedProxies: string[];
+    autoCreateUsers: boolean;
+  }>(),
   
-  // OIDC configuration
-  oidc: z.object({
-    issuerUrl: z.string().url(),
-    clientId: z.string(),
-    clientSecret: z.string(),
-    redirectUri: z.string().url().optional(),
-    scopes: z.array(z.string()).default(["openid", "profile", "email"]),
-    autoCreateUsers: z.boolean().default(true),
-    usernameClaim: z.string().default("preferred_username"),
-    emailClaim: z.string().default("email"),
-    nameClaim: z.string().default("name"),
-  }).optional(),
+  oidc: text("oidc", { mode: "json" }).$type<{
+    issuerUrl: string;
+    clientId: string;
+    clientSecret: string;
+    redirectUrl: string;
+    scopes: string[];
+    autoCreateUsers: boolean;
+    allowedDomains?: string[];
+  }>(),
   
-  createdAt: z.date().default(() => new Date()),
-  updatedAt: z.date().default(() => new Date()),
+  // Timestamps
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().default(sql`(unixepoch())`),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().default(sql`(unixepoch())`),
 });
 
-export type AuthConfig = z.infer<typeof authConfigSchema>;
+// ============================================
+// CONFIGS TABLE
+// ============================================
+export const configs = sqliteTable("configs", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+  
+  // Configuration as JSON
+  githubConfig: text("github_config", { mode: "json" }).notNull().$type<{
+    token: string;
+    baseUrl?: string;
+    includeStarred: boolean;
+    includeWatched: boolean;
+    includeForks: boolean;
+    includeArchived: boolean;
+    includePrivate: boolean;
+    includePublic: boolean;
+    selectedOrgs: string[];
+  }>(),
+  
+  giteaConfig: text("gitea_config", { mode: "json" }).notNull().$type<{
+    url: string;
+    token: string;
+    mirrorInterval: string;
+    defaultBranch: string;
+    organizationStrategy: string;
+    singleOrgName?: string;
+    personalReposOrg?: string;
+    starredReposOrg?: string;
+    includeWiki: boolean;
+    includeIssues: boolean;
+    includePullRequests: boolean;
+    includeReleases: boolean;
+    includeMilestones: boolean;
+    includeLabels: boolean;
+  }>(),
+  
+  include: text("include", { mode: "json" }).notNull().default(sql`'["*"]'`).$type<string[]>(),
+  exclude: text("exclude", { mode: "json" }).notNull().default(sql`'[]'`).$type<string[]>(),
+  
+  scheduleConfig: text("schedule_config", { mode: "json" }).notNull().$type<{
+    enabled: boolean;
+    interval: string;
+    time?: string;
+  }>(),
+  
+  cleanupConfig: text("cleanup_config", { mode: "json" }).notNull().$type<{
+    enabled: boolean;
+    keepDays: number;
+    keepCount: number;
+  }>(),
+  
+  // Timestamps
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().default(sql`(unixepoch())`),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().default(sql`(unixepoch())`),
+}, (table) => {
+  return {
+    userIdIdx: index("idx_configs_user_id").on(table.userId),
+    isActiveIdx: index("idx_configs_is_active").on(table.isActive),
+  };
+});
+
+// ============================================
+// REPOSITORIES TABLE
+// ============================================
+export const repositories = sqliteTable("repositories", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  configId: text("config_id").notNull().references(() => configs.id, { onDelete: "cascade" }),
+  
+  // Repository info
+  name: text("name").notNull(),
+  fullName: text("full_name").notNull(),
+  url: text("url").notNull(),
+  cloneUrl: text("clone_url").notNull(),
+  owner: text("owner").notNull(),
+  organization: text("organization"),
+  mirroredLocation: text("mirrored_location").default(""),
+  destinationOrg: text("destination_org"), // Custom destination override
+  
+  // Repository metadata
+  isPrivate: integer("is_private", { mode: "boolean" }).notNull().default(false),
+  isFork: integer("is_fork", { mode: "boolean" }).notNull().default(false),
+  forkedFrom: text("forked_from"),
+  hasIssues: integer("has_issues", { mode: "boolean" }).notNull().default(false),
+  isStarred: integer("is_starred", { mode: "boolean" }).notNull().default(false),
+  isArchived: integer("is_archived", { mode: "boolean" }).notNull().default(false),
+  
+  // Additional metadata
+  size: integer("size").notNull().default(0),
+  hasLFS: integer("has_lfs", { mode: "boolean" }).notNull().default(false),
+  hasSubmodules: integer("has_submodules", { mode: "boolean" }).notNull().default(false),
+  language: text("language"),
+  description: text("description"),
+  defaultBranch: text("default_branch").notNull(),
+  visibility: text("visibility").notNull().default("public"),
+  
+  // Status
+  status: text("status").notNull().default("imported"),
+  lastMirrored: integer("last_mirrored", { mode: "timestamp" }),
+  errorMessage: text("error_message"),
+  
+  // Timestamps
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().default(sql`(unixepoch())`),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().default(sql`(unixepoch())`),
+}, (table) => {
+  return {
+    userIdIdx: index("idx_repositories_user_id").on(table.userId),
+    configIdIdx: index("idx_repositories_config_id").on(table.configId),
+    statusIdx: index("idx_repositories_status").on(table.status),
+    ownerIdx: index("idx_repositories_owner").on(table.owner),
+    organizationIdx: index("idx_repositories_organization").on(table.organization),
+    isForkIdx: index("idx_repositories_is_fork").on(table.isFork),
+    isStarredIdx: index("idx_repositories_is_starred").on(table.isStarred),
+  };
+});
+
+// ============================================
+// ORGANIZATIONS TABLE
+// ============================================
+export const organizations = sqliteTable("organizations", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  configId: text("config_id").notNull().references(() => configs.id, { onDelete: "cascade" }),
+  
+  // Organization info
+  name: text("name").notNull(),
+  avatarUrl: text("avatar_url").notNull(),
+  membershipRole: text("membership_role").notNull().default("member"),
+  isIncluded: integer("is_included", { mode: "boolean" }).notNull().default(true),
+  destinationOrg: text("destination_org"), // Custom destination override
+  
+  // Status
+  status: text("status").notNull().default("imported"),
+  lastMirrored: integer("last_mirrored", { mode: "timestamp" }),
+  errorMessage: text("error_message"),
+  repositoryCount: integer("repository_count").notNull().default(0),
+  
+  // Timestamps
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().default(sql`(unixepoch())`),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().default(sql`(unixepoch())`),
+}, (table) => {
+  return {
+    userIdIdx: index("idx_organizations_user_id").on(table.userId),
+    configIdIdx: index("idx_organizations_config_id").on(table.configId),
+    statusIdx: index("idx_organizations_status").on(table.status),
+    isIncludedIdx: index("idx_organizations_is_included").on(table.isIncluded),
+  };
+});
+
+// ============================================
+// MIRROR JOBS TABLE
+// ============================================
+export const mirrorJobs = sqliteTable("mirror_jobs", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  
+  // Job details
+  repositoryId: text("repository_id"),
+  repositoryName: text("repository_name"),
+  organizationId: text("organization_id"),
+  organizationName: text("organization_name"),
+  details: text("details"),
+  
+  // Job status
+  status: text("status").notNull().default("pending"),
+  message: text("message").notNull(),
+  
+  // Job resilience fields
+  jobType: text("job_type").notNull().default("mirror"),
+  batchId: text("batch_id"),
+  totalItems: integer("total_items"),
+  completedItems: integer("completed_items").default(0),
+  itemIds: text("item_ids", { mode: "json" }).$type<string[]>(),
+  completedItemIds: text("completed_item_ids", { mode: "json" }).default(sql`'[]'`).$type<string[]>(),
+  inProgress: integer("in_progress", { mode: "boolean" }).notNull().default(false),
+  
+  // Timestamps
+  timestamp: integer("timestamp", { mode: "timestamp" }).notNull().default(sql`(unixepoch())`),
+  startedAt: integer("started_at", { mode: "timestamp" }),
+  completedAt: integer("completed_at", { mode: "timestamp" }),
+  lastCheckpoint: integer("last_checkpoint", { mode: "timestamp" }),
+}, (table) => {
+  return {
+    userIdIdx: index("idx_mirror_jobs_user_id").on(table.userId),
+    batchIdIdx: index("idx_mirror_jobs_batch_id").on(table.batchId),
+    inProgressIdx: index("idx_mirror_jobs_in_progress").on(table.inProgress),
+    jobTypeIdx: index("idx_mirror_jobs_job_type").on(table.jobType),
+    timestampIdx: index("idx_mirror_jobs_timestamp").on(table.timestamp),
+  };
+});
+
+// ============================================
+// EVENTS TABLE
+// ============================================
+export const events = sqliteTable("events", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  
+  // Event details
+  channel: text("channel").notNull(),
+  payload: text("payload", { mode: "json" }).notNull().$type<any>(),
+  read: integer("read", { mode: "boolean" }).notNull().default(false),
+  
+  // Timestamp
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().default(sql`(unixepoch())`),
+}, (table) => {
+  return {
+    userChannelIdx: index("idx_events_user_channel").on(table.userId, table.channel),
+    createdAtIdx: index("idx_events_created_at").on(table.createdAt),
+    readIdx: index("idx_events_read").on(table.read),
+  };
+});
+
+// ============================================
+// EXPORT ALL TABLES
+// ============================================
+export const schema = {
+  users,
+  authConfig,
+  configs,
+  repositories,
+  organizations,
+  mirrorJobs,
+  events,
+};
+
+// Type exports
+export type User = typeof users.$inferSelect;
+export type NewUser = typeof users.$inferInsert;
+export type AuthConfig = typeof authConfig.$inferSelect;
+export type NewAuthConfig = typeof authConfig.$inferInsert;
+export type Config = typeof configs.$inferSelect;
+export type NewConfig = typeof configs.$inferInsert;
+export type Repository = typeof repositories.$inferSelect;
+export type NewRepository = typeof repositories.$inferInsert;
+export type Organization = typeof organizations.$inferSelect;
+export type NewOrganization = typeof organizations.$inferInsert;
+export type MirrorJob = typeof mirrorJobs.$inferSelect;
+export type NewMirrorJob = typeof mirrorJobs.$inferInsert;
+export type Event = typeof events.$inferSelect;
+export type NewEvent = typeof events.$inferInsert;
