@@ -3,6 +3,20 @@ import { validateTrustedProxy } from "./forward-auth";
 import { decodeIdToken } from "./oidc";
 import { ENV } from "@/lib/config";
 
+// Mock the db-config module
+mock.module("@/lib/config/db-config", () => ({
+  getActiveAuthConfig: async () => ({
+    method: "forward",
+    allowLocalFallback: false,
+    forwardAuth: {
+      userHeader: "X-Auth-User",
+      emailHeader: "X-Auth-Email",
+      trustedProxies: ENV.AUTH.FORWARD.TRUSTED_PROXIES || [],
+      autoCreateUsers: true,
+    },
+  }),
+}));
+
 describe("Forward Auth Security", () => {
   const originalTrustedProxies = ENV.AUTH.FORWARD.TRUSTED_PROXIES;
 
@@ -16,12 +30,12 @@ describe("Forward Auth Security", () => {
     ENV.AUTH.FORWARD.TRUSTED_PROXIES = originalTrustedProxies;
   });
 
-  test("validateTrustedProxy allows all when no proxies configured", () => {
+  test("validateTrustedProxy denies when no proxies configured", async () => {
     const request = new Request("http://localhost/test");
-    expect(validateTrustedProxy(request)).toBe(true);
+    expect(await validateTrustedProxy(request)).toBe(false);
   });
 
-  test("validateTrustedProxy checks the last proxy in X-Forwarded-For", () => {
+  test("validateTrustedProxy checks the last proxy in X-Forwarded-For", async () => {
     ENV.AUTH.FORWARD.TRUSTED_PROXIES = ["10.0.0.5"];
     
     const request = new Request("http://localhost/test", {
@@ -31,10 +45,10 @@ describe("Forward Auth Security", () => {
     });
     
     // Should return true because 10.0.0.5 is the last proxy and is trusted
-    expect(validateTrustedProxy(request)).toBe(true);
+    expect(await validateTrustedProxy(request)).toBe(true);
   });
 
-  test("validateTrustedProxy rejects untrusted proxy", () => {
+  test("validateTrustedProxy rejects untrusted proxy", async () => {
     ENV.AUTH.FORWARD.TRUSTED_PROXIES = ["10.0.0.5"];
     
     const request = new Request("http://localhost/test", {
@@ -44,7 +58,7 @@ describe("Forward Auth Security", () => {
     });
     
     // Should return false because 10.0.0.6 is not in trusted list
-    expect(validateTrustedProxy(request)).toBe(false);
+    expect(await validateTrustedProxy(request)).toBe(false);
   });
 });
 
