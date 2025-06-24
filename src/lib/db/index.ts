@@ -81,5 +81,12 @@ export function closeDatabase() {
 // Export schema for use in queries
 export * from "./schema";
 
+// Export db instance for backward compatibility
+export let db: ReturnType<typeof drizzle>;
+export let sqlite: Database;
+
 // Initialize database on module load
-initializeDatabase().catch(console.error);
+initializeDatabase().then(({ db: database, sqlite: sqliteDb }) => {
+  db = database;
+  sqlite = sqliteDb;
+}).catch(console.error);

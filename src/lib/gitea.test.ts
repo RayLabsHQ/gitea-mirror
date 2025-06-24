@@ -10,15 +10,27 @@ const mockIsRepoPresentInGitea = mock(() => Promise.resolve(false));
 // Mock the database module
 mock.module("@/lib/db", () => {
   return {
-    db: {
+    getDb: async () => ({
       update: () => ({
         set: () => ({
           where: () => Promise.resolve()
         })
+      }),
+      select: () => ({
+        from: () => ({
+          where: () => ({
+            limit: () => Promise.resolve([])
+          })
+        })
       })
-    },
+    }),
     repositories: {},
-    organizations: {}
+    organizations: {},
+    users: {},
+    configs: {},
+    mirrorJobs: {},
+    events: {},
+    authConfig: {}
   };
 });
 
