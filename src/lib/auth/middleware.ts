@@ -4,11 +4,10 @@
 
 import { ENV } from "@/lib/config";
 import { getActiveAuthConfig, isAuthMethodEnabled } from "@/lib/config/db-config";
-import { db, users, sqlite } from "@/lib/db";
+import { getDb, users, type User } from "@/lib/db";
 import jwt from "jsonwebtoken";
 import { authenticateForwardAuth } from "./forward-auth";
 import { hasUsers as checkHasUsers } from "@/lib/db/queries/users";
-import type { User } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 
 const JWT_SECRET = ENV.JWT_SECRET;
@@ -53,40 +52,23 @@ async function authenticateJWT(request: Request): Promise<{ user: User; token: s
     // Verify JWT token
     const decoded = jwt.verify(token, JWT_SECRET) as { id: string };
     
-    // Get user from database - using simpler query for now
-    const query = sqlite.query(`
-      SELECT id, username, email
-      FROM users
-      WHERE id = ?
-      LIMIT 1
-    `);
-    
-    const user = query.get(decoded.id) as any;
+    // Get user from database using Drizzle
+    const db = await getDb();
+    const result = await db.select().from(users).where(eq(users.id, decoded.id)).limit(1);
+    const user = result[0];
     
     if (!user) {
       return null;
     }
     
-    // Add default values for missing fields
-    const fullUser: User = {
-      ...user,
-      password: undefined,
-      displayName: user.display_name || user.username,
-      authProvider: user.auth_provider || "local",
-      externalId: user.external_id || null,
-      externalUsername: user.external_username || null,
-      isActive: user.is_active !== undefined ? Boolean(user.is_active) : true,
-      lastLoginAt: user.last_login_at ? new Date(user.last_login_at) : null,
-      createdAt: user.created_at ? new Date(user.created_at) : new Date(),
-      updatedAt: user.updated_at ? new Date(user.updated_at) : new Date(),
-    };
-    
-    // Check if user is active (default to true for backward compatibility)
-    if (!fullUser.isActive) {
+    // Check if user is active
+    if (!user.isActive) {
       return null;
     }
     
-    return { user: fullUser, token };
+    // Return user without password
+    const { password, ...safeUser } = user;
+    return { user: safeUser as User, token };
     
   } catch (error) {
     // JWT verification failed or other error

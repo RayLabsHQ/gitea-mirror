@@ -5,11 +5,10 @@
 
 import { ENV } from "@/lib/config";
 import { getActiveAuthConfig } from "@/lib/config/db-config";
-import { db, users, sqlite } from "@/lib/db";
+import { getDb, users, type User } from "@/lib/db";
 import jwt from "jsonwebtoken";
 import { v4 as uuidv4 } from "uuid";
-import type { User } from "@/lib/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, or } from "drizzle-orm";
 
 const JWT_SECRET = ENV.JWT_SECRET;
 
@@ -48,55 +47,52 @@ export async function extractForwardAuthUser(request: Request): Promise<ForwardA
   return {
     username: userHeader.trim(),
     email: emailHeader.trim(),
-    displayName,
+    displayName: displayName?.trim(),
     groups,
   };
 }
 
 /**
- * Validate that the request comes from a trusted proxy
+ * Validate that the request is coming from a trusted proxy
  */
 export async function validateTrustedProxy(request: Request): Promise<boolean> {
   const config = await getActiveAuthConfig();
   
-  if (!config.forwardAuth) {
+  if (!config.forwardAuth || !config.forwardAuth.trustedProxies?.length) {
+    // No trusted proxies configured, deny by default for security
     return false;
   }
   
-  // If no trusted proxies are configured, deny (security by default)
-  if (config.forwardAuth.trustedProxies.length === 0) {
-    console.warn("Forward Auth: No trusted proxies configured");
+  // Get the real IP from X-Forwarded-For or X-Real-IP
+  let clientIP = request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip");
+  
+  if (clientIP) {
+    // X-Forwarded-For can contain multiple IPs, get the last one (closest proxy)
+    const ips = clientIP.split(",").map(ip => ip.trim());
+    clientIP = ips[ips.length - 1];
+  }
+  
+  // Fallback to connection remote address if available
+  if (!clientIP && (request as any).socket?.remoteAddress) {
+    clientIP = (request as any).socket.remoteAddress;
+  }
+  
+  if (!clientIP) {
+    console.warn("Forward Auth: Unable to determine client IP");
     return false;
   }
   
-  // Get the immediate proxy IP (the last proxy in the chain)
-  const forwardedFor = request.headers.get("X-Forwarded-For");
-  const realIP = request.headers.get("X-Real-IP");
-  
-  let proxyIP: string | undefined;
-  
-  if (forwardedFor) {
-    // X-Forwarded-For format: "client, proxy1, proxy2"
-    // We want the last proxy (the one directly connecting to us)
-    const ips = forwardedFor.split(",").map(ip => ip.trim());
-    proxyIP = ips[ips.length - 1];
-  } else if (realIP) {
-    // X-Real-IP typically contains the immediate proxy
-    proxyIP = realIP;
-  }
-  
-  // Note: In a production environment, you should also check request.socket.remoteAddress
-  // However, this may not be available in all environments (e.g., serverless)
-  
-  if (!proxyIP) {
-    console.warn("Forward Auth: No proxy IP found in headers");
-    return false;
-  }
-  
-  // Check if the proxy IP is in the trusted list
-  const isTrusted = config.forwardAuth.trustedProxies.includes(proxyIP);
+  // Check if the IP is in the trusted proxy list
+  const isTrusted = config.forwardAuth.trustedProxies.some(trustedIP => {
+    // Simple string comparison for now
+    // TODO: Add CIDR range support
+    return clientIP === trustedIP;
+  });
   
   if (!isTrusted) {
+    const proxyIP = clientIP.includes(":") && !clientIP.includes("[") 
+      ? `[${clientIP}]` 
+      : clientIP;
     console.warn(`Forward Auth: Untrusted proxy IP: ${proxyIP}`);
   }
   
@@ -108,57 +104,43 @@ export async function validateTrustedProxy(request: Request): Promise<boolean> {
  */
 export async function findOrCreateForwardAuthUser(forwardAuthUser: ForwardAuthUser): Promise<User | null> {
   try {
+    const db = await getDb();
+    
     // First, try to find existing user by external username or email
-    let existingUser: User | undefined;
+    const existingUsers = await db.select()
+      .from(users)
+      .where(
+        or(
+          and(
+            eq(users.authProvider, "forward"),
+            eq(users.externalUsername, forwardAuthUser.username)
+          ),
+          eq(users.email, forwardAuthUser.email)
+        )
+      )
+      .limit(1);
     
-    // Try to find by external username
-    const byExternalQuery = sqlite.query(`
-      SELECT id, username, email, displayName, authProvider, externalId, externalUsername, isActive, lastLoginAt
-      FROM users
-      WHERE authProvider = 'forward' AND externalUsername = ?
-      LIMIT 1
-    `);
-    existingUser = byExternalQuery.get(forwardAuthUser.username) as User | undefined;
-    
-    if (!existingUser) {
-      // Try to find by email
-      const byEmailQuery = sqlite.query(`
-        SELECT id, username, email, displayName, authProvider, externalId, externalUsername, isActive, lastLoginAt
-        FROM users
-        WHERE email = ?
-        LIMIT 1
-      `);
-      existingUser = byEmailQuery.get(forwardAuthUser.email) as User | undefined;
-    }
+    const existingUser = existingUsers[0];
     
     if (existingUser) {
       // Update existing user with latest information
-      const updateQuery = sqlite.prepare(`
-        UPDATE users
-        SET displayName = ?,
-            authProvider = 'forward',
-            externalUsername = ?,
-            lastLoginAt = ?,
-            updatedAt = ?
-        WHERE id = ?
-      `);
-      
-      const now = new Date().toISOString();
-      updateQuery.run(
-        forwardAuthUser.displayName || existingUser.displayName,
-        forwardAuthUser.username,
-        now,
-        now,
-        existingUser.id
-      );
+      await db.update(users)
+        .set({
+          displayName: forwardAuthUser.displayName || existingUser.displayName,
+          authProvider: "forward",
+          externalUsername: forwardAuthUser.username,
+          lastLoginAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, existingUser.id));
       
       // Return updated user
-      const getUpdatedQuery = sqlite.query(`
-        SELECT id, username, email, displayName, authProvider, externalId, externalUsername, isActive, lastLoginAt
-        FROM users
-        WHERE id = ?
-      `);
-      return getUpdatedQuery.get(existingUser.id) as User;
+      const updatedUsers = await db.select()
+        .from(users)
+        .where(eq(users.id, existingUser.id))
+        .limit(1);
+      
+      return updatedUsers[0];
     }
     
     const config = await getActiveAuthConfig();
@@ -173,14 +155,13 @@ export async function findOrCreateForwardAuthUser(forwardAuthUser: ForwardAuthUs
     let username = forwardAuthUser.username;
     let counter = 1;
     
-    const checkUsernameQuery = sqlite.query(`
-      SELECT COUNT(*) as count FROM users WHERE username = ?
-    `);
-    
     while (true) {
-      const result = checkUsernameQuery.get(username) as { count: number };
+      const existing = await db.select({ id: users.id })
+        .from(users)
+        .where(eq(users.username, username))
+        .limit(1);
       
-      if (result.count === 0) {
+      if (existing.length === 0) {
         break;
       }
       
@@ -190,40 +171,31 @@ export async function findOrCreateForwardAuthUser(forwardAuthUser: ForwardAuthUs
     
     // Create new user
     const userId = uuidv4();
-    const now = new Date().toISOString();
+    const now = new Date();
     
-    const insertQuery = sqlite.prepare(`
-      INSERT INTO users (
-        id, username, email, displayName, authProvider, 
-        externalUsername, isActive, lastLoginAt, createdAt, updatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    
-    insertQuery.run(
-      userId,
+    await db.insert(users).values({
+      id: userId,
       username,
-      forwardAuthUser.email,
-      forwardAuthUser.displayName || forwardAuthUser.username,
-      "forward",
-      forwardAuthUser.username,
-      1, // isActive
-      now,
-      now,
-      now
-    );
+      email: forwardAuthUser.email,
+      password: null, // No password for forward auth users
+      displayName: forwardAuthUser.displayName || forwardAuthUser.username,
+      authProvider: "forward",
+      externalUsername: forwardAuthUser.username,
+      isActive: true,
+      lastLoginAt: now,
+      createdAt: now,
+      updatedAt: now,
+    });
     
-    // Get the created user
-    const getNewUserQuery = sqlite.query(`
-      SELECT id, username, email, displayName, authProvider, externalId, externalUsername, isActive, lastLoginAt
-      FROM users
-      WHERE id = ?
-    `);
+    console.log(`Forward Auth: Created new user ${username} (${forwardAuthUser.email})`);
     
-    const newUser = getNewUserQuery.get(userId) as User;
+    // Return the newly created user
+    const newUsers = await db.select()
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
     
-    console.log(`Forward Auth: Created new user ${username} for external user ${forwardAuthUser.username}`);
-    return newUser;
-    
+    return newUsers[0];
   } catch (error) {
     console.error("Forward Auth: Error finding/creating user:", error);
     return null;
@@ -231,48 +203,39 @@ export async function findOrCreateForwardAuthUser(forwardAuthUser: ForwardAuthUs
 }
 
 /**
- * Authenticate a request using forward auth headers
+ * Authenticate a user using forward auth headers
  */
 export async function authenticateForwardAuth(request: Request): Promise<{ user: User; token: string } | null> {
-  try {
-    // Validate trusted proxy if configured
-    if (!await validateTrustedProxy(request)) {
-      return null;
-    }
-    
-    // Extract user information from headers
-    const forwardAuthUser = await extractForwardAuthUser(request);
-    if (!forwardAuthUser) {
-      return null;
-    }
-    
-    // Find or create user
-    const user = await findOrCreateForwardAuthUser(forwardAuthUser);
-    if (!user) {
-      return null;
-    }
-    
-    // Check if user is active
-    if (!user.isActive) {
-      console.warn(`Forward Auth: User ${user.username} is inactive`);
-      return null;
-    }
-    
-    // Generate JWT token
-    const token = jwt.sign({ id: user.id }, JWT_SECRET, { expiresIn: "7d" });
-    
-    return { user, token };
-    
-  } catch (error) {
-    console.error("Forward Auth: Authentication error:", error);
+  // Validate trusted proxy
+  if (!await validateTrustedProxy(request)) {
     return null;
   }
-}
-
-/**
- * Check if forward auth is properly configured
- */
-export async function isForwardAuthConfigured(): Promise<boolean> {
-  const config = await getActiveAuthConfig();
-  return !!(config.forwardAuth?.userHeader && config.forwardAuth?.emailHeader);
+  
+  // Extract user information from headers
+  const forwardAuthUser = await extractForwardAuthUser(request);
+  if (!forwardAuthUser) {
+    return null;
+  }
+  
+  // Find or create user
+  const user = await findOrCreateForwardAuthUser(forwardAuthUser);
+  if (!user || !user.isActive) {
+    return null;
+  }
+  
+  // Generate JWT token
+  const token = jwt.sign(
+    { 
+      id: user.id,
+      username: user.username,
+      email: user.email,
+      method: "forward"
+    },
+    JWT_SECRET,
+    { expiresIn: "7d" }
+  );
+  
+  // Return user without password
+  const { password, ...safeUser } = user;
+  return { user: safeUser as User, token };
 }

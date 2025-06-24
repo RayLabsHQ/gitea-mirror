@@ -1,5 +1,5 @@
 // Complete Drizzle schema definition for Gitea Mirror v3.0.0
-import { sqliteTable, text, integer, index, primaryKey } from "drizzle-orm/sqlite-core";
+import { sqliteTable, text, integer, index, uniqueIndex, primaryKey } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
 // ============================================
@@ -7,7 +7,7 @@ import { sql } from "drizzle-orm";
 // ============================================
 export const users = sqliteTable("users", {
   id: text("id").primaryKey(),
-  username: text("username").notNull().unique(),
+  username: text("username").notNull(),
   password: text("password"), // Optional for external auth
   email: text("email").notNull(),
   displayName: text("display_name"),
@@ -26,6 +26,7 @@ export const users = sqliteTable("users", {
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().default(sql`(unixepoch())`),
 }, (table) => {
   return {
+    usernameIdx: uniqueIndex("idx_users_username").on(table.username),
     emailIdx: index("idx_users_email").on(table.email),
     authProviderIdx: index("idx_users_auth_provider").on(table.authProvider),
     externalIdIdx: index("idx_users_external_id").on(table.externalId),

@@ -3,7 +3,6 @@ import { initializeRecovery, hasJobsNeedingRecovery, getRecoveryStatus } from '.
 import { startCleanupService, stopCleanupService } from './lib/cleanup-service';
 import { initializeShutdownManager, registerShutdownCallback } from './lib/shutdown-manager';
 import { setupSignalHandlers } from './lib/signal-handlers';
-import { runMigrations, checkMigrationsNeeded } from './lib/db/migrations';
 import { authenticate, isAuthRequired, getAuthRedirectUrl } from './lib/auth/middleware';
 
 // Flag to track if recovery has been initialized
@@ -11,28 +10,9 @@ let recoveryInitialized = false;
 let recoveryAttempted = false;
 let cleanupServiceStarted = false;
 let shutdownManagerInitialized = false;
-let migrationsRun = false;
 
 export const onRequest = defineMiddleware(async (context, next) => {
-  // Run database migrations first (only once)
-  if (!migrationsRun) {
-    try {
-      if (checkMigrationsNeeded()) {
-        console.log('🔄 Database migrations needed, running...');
-        const migrationResult = await runMigrations();
-        if (migrationResult) {
-          console.log('✅ Database migrations completed successfully');
-        } else {
-          console.log('⚠️  Database migrations completed with issues');
-        }
-      }
-      migrationsRun = true;
-    } catch (error) {
-      console.error('❌ Failed to run database migrations:', error);
-      // Continue anyway - this shouldn't block the application
-      migrationsRun = true;
-    }
-  }
+  // Database migrations are now handled automatically in db/index.ts
 
   // Initialize shutdown manager and signal handlers
   if (!shutdownManagerInitialized) {
