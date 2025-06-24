@@ -1,0 +1,30 @@
+---
+import '../styles/global.css';
+import ThemeScript from '@/components/theme/ThemeScript.astro';
+import { SetupWizard } from "@/components/auth/SetupWizard";
+
+// Check if setup is needed
+const response = await fetch(new URL("/api/auth/setup/check", Astro.url.origin));
+const { needsSetup } = await response.json();
+
+// If setup is not needed, redirect to home
+if (!needsSetup) {
+  return Astro.redirect("/");
+}
+
+const generator = Astro.generator;
+---
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width" />
+    <meta name="generator" content={generator} />
+    <title>Setup - Gitea Mirror</title>
+    <ThemeScript />
+  </head>
+  <body>
+    <SetupWizard client:load />
+  </body>
+</html>

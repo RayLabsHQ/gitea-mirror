@@ -3,8 +3,9 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { db, users } from "@/lib/db";
 import { eq } from "drizzle-orm";
+import { ENV } from "@/lib/config";
 
-const JWT_SECRET = process.env.JWT_SECRET || "your-secret-key";
+const JWT_SECRET = ENV.JWT_SECRET;
 
 export const POST: APIRoute = async ({ request }) => {
   const { username, password } = await request.json();
@@ -35,6 +36,30 @@ export const POST: APIRoute = async ({ request }) => {
     );
   }
 
+  // Check if user is using external authentication
+  if (user[0].authProvider !== "local") {
+    return new Response(
+      JSON.stringify({ 
+        error: `This account uses ${user[0].authProvider.toUpperCase()} authentication. Please use the appropriate login method.` 
+      }),
+      {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      }
+    );
+  }
+
+  // Check if user has a password (required for local auth)
+  if (!user[0].password) {
+    return new Response(
+      JSON.stringify({ error: "Invalid account configuration. Please contact your administrator." }),
+      {
+        status: 401,
+        headers: { "Content-Type": "application/json" },
+      }
+    );
+  }
+
   const isPasswordValid = await bcrypt.compare(password, user[0].password);
 
   if (!isPasswordValid) {
@@ -47,14 +72,28 @@ export const POST: APIRoute = async ({ request }) => {
     );
   }
 
+  // Update last login timestamp
+  await db
+    .update(users)
+    .set({ 
+      lastLoginAt: new Date(),
+      updatedAt: new Date() 
+    })
+    .where(eq(users.id, user[0].id));
+
   const { password: _, ...userWithoutPassword } = user[0];
   const token = jwt.sign({ id: user[0].id }, JWT_SECRET, { expiresIn: "7d" });
+
+  const isProduction = ENV.NODE_ENV === "production";
+  const cookieFlags = isProduction 
+    ? "HttpOnly; SameSite=Strict; Secure" 
+    : "HttpOnly; SameSite=Strict";
 
   return new Response(JSON.stringify({ token, user: userWithoutPassword }), {
     status: 200,
     headers: {
       "Content-Type": "application/json",
-      "Set-Cookie": `token=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${
+      "Set-Cookie": `token=${token}; Path=/; ${cookieFlags}; Max-Age=${
         60 * 60 * 24 * 7
       }`,
     },

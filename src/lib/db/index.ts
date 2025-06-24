@@ -4,7 +4,7 @@ import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import fs from "fs";
 import path from "path";
-import { configSchema } from "./schema";
+import { configSchema, authConfigSchema } from "./schema";
 
 // Define the database URL - for development we'll use a local SQLite file
 const dataDir = path.join(process.cwd(), "data");
@@ -77,6 +77,7 @@ function ensureTablesExist(db: Database) {
     "organizations",
     "mirror_jobs",
     "events",
+    "auth_config",
   ];
 
   for (const table of requiredTables) {
@@ -270,6 +271,20 @@ function createTable(db: Database, tableName: string) {
       `);
       break;
 
+    case "auth_config":
+      db.exec(`
+        CREATE TABLE auth_config (
+          id TEXT PRIMARY KEY,
+          method TEXT NOT NULL DEFAULT 'local',
+          allow_local_fallback INTEGER NOT NULL DEFAULT 0,
+          forward_auth TEXT,
+          oidc TEXT,
+          created_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+          updated_at INTEGER NOT NULL DEFAULT (strftime('%s','now'))
+        )
+      `);
+      break;
+
     default:
       throw new Error(`Unknown table: ${tableName}`);
   }
@@ -277,6 +292,9 @@ function createTable(db: Database, tableName: string) {
 
 // Create drizzle instance with the SQLite client
 export const db = drizzle({ client: sqlite });
+
+// Export the SQLite instance for raw queries
+export { sqlite };
 
 // Simple async wrapper around SQLite API for compatibility
 // This maintains backward compatibility with existing code
@@ -301,8 +319,19 @@ export const client = {
 export const users = sqliteTable("users", {
   id: text("id").primaryKey(),
   username: text("username").notNull(),
-  password: text("password").notNull(),
+  password: text("password"), // Made optional for external auth
   email: text("email").notNull(),
+  displayName: text("display_name"), // Full name from external providers
+
+  // External authentication fields
+  authProvider: text("auth_provider").notNull().default("local"), // local, forward, oidc
+  externalId: text("external_id"), // ID from external provider
+  externalUsername: text("external_username"), // Username from external provider
+
+  // Metadata
+  isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+  lastLoginAt: integer("last_login_at", { mode: "timestamp" }),
+
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
     .default(new Date()),
@@ -480,6 +509,30 @@ export const organizations = sqliteTable("organizations", {
 
   repositoryCount: integer("repository_count").notNull().default(0),
 
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .default(new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
+    .notNull()
+    .default(new Date()),
+});
+
+// Auth configuration table
+export const authConfig = sqliteTable("auth_config", {
+  id: text("id").primaryKey(),
+  
+  // Auth method configuration
+  method: text("method").notNull().default("local"),
+  allowLocalFallback: integer("allow_local_fallback", { mode: "boolean" }).notNull().default(false),
+  
+  // Forward auth configuration (JSON)
+  forwardAuth: text("forward_auth", { mode: "json" })
+    .$type<z.infer<typeof authConfigSchema.shape.forwardAuth>>(),
+  
+  // OIDC configuration (JSON)
+  oidc: text("oidc", { mode: "json" })
+    .$type<z.infer<typeof authConfigSchema.shape.oidc>>(),
+  
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
     .default(new Date()),

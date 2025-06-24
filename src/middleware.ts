@@ -3,15 +3,38 @@ import { initializeRecovery, hasJobsNeedingRecovery, getRecoveryStatus } from '.
 import { startCleanupService, stopCleanupService } from './lib/cleanup-service';
 import { initializeShutdownManager, registerShutdownCallback } from './lib/shutdown-manager';
 import { setupSignalHandlers } from './lib/signal-handlers';
+import { runMigrations, checkMigrationsNeeded } from './lib/db/migrations';
+import { authenticate, isAuthRequired, getAuthRedirectUrl } from './lib/auth/middleware';
 
 // Flag to track if recovery has been initialized
 let recoveryInitialized = false;
 let recoveryAttempted = false;
 let cleanupServiceStarted = false;
 let shutdownManagerInitialized = false;
+let migrationsRun = false;
 
 export const onRequest = defineMiddleware(async (context, next) => {
-  // Initialize shutdown manager and signal handlers first
+  // Run database migrations first (only once)
+  if (!migrationsRun) {
+    try {
+      if (checkMigrationsNeeded()) {
+        console.log('🔄 Database migrations needed, running...');
+        const migrationResult = runMigrations();
+        if (migrationResult) {
+          console.log('✅ Database migrations completed successfully');
+        } else {
+          console.log('⚠️  Database migrations completed with issues');
+        }
+      }
+      migrationsRun = true;
+    } catch (error) {
+      console.error('❌ Failed to run database migrations:', error);
+      // Continue anyway - this shouldn't block the application
+      migrationsRun = true;
+    }
+  }
+
+  // Initialize shutdown manager and signal handlers
   if (!shutdownManagerInitialized) {
     try {
       console.log('🔧 Initializing shutdown manager and signal handlers...');
@@ -89,6 +112,33 @@ export const onRequest = defineMiddleware(async (context, next) => {
       console.error('Failed to start cleanup service:', error);
       // Don't fail the request if cleanup service fails to start
     }
+  }
+
+  // Authentication check
+  const pathname = context.url.pathname;
+  
+  // Check if authentication is required for this path
+  if (isAuthRequired(pathname)) {
+    const auth = await authenticate(context.request);
+    
+    if (!auth) {
+      // No valid authentication found, redirect to appropriate login
+      const redirectUrl = await getAuthRedirectUrl(context.request);
+      
+      // For API endpoints, return 401 instead of redirecting
+      if (pathname.startsWith('/api/')) {
+        return new Response(JSON.stringify({ error: 'Authentication required' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' }
+        });
+      }
+      
+      return context.redirect(redirectUrl);
+    }
+    
+    // Store authenticated user in locals for use in pages/endpoints
+    context.locals.user = auth.user;
+    context.locals.authMethod = auth.method;
   }
 
   // Continue with the request

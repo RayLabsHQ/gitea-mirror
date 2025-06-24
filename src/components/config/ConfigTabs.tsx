@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { GitHubConfigForm } from './GitHubConfigForm';
 import { GiteaConfigForm } from './GiteaConfigForm';
 import { AutomationSettings } from './AutomationSettings';
+import { AuthSettings } from './AuthSettings';
 import type {
   ConfigApiResponse,
   GiteaConfig,
@@ -673,6 +674,11 @@ export function ConfigTabs() {
             isAutoSavingSchedule={isAutoSavingSchedule}
             isAutoSavingCleanup={isAutoSavingCleanup}
           />
+        </div>
+
+        {/* Authentication Settings - Full width */}
+        <div>
+          <AuthSettings />
         </div>
       </div>
     </div>

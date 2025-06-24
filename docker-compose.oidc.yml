@@ -1,0 +1,60 @@
+# Gitea Mirror deployment with OIDC authentication
+# Example configuration for OIDC/SSO setup
+
+services:
+  gitea-mirror:
+    image: ${DOCKER_REGISTRY:-ghcr.io}/${DOCKER_IMAGE:-arunavo4/gitea-mirror}:${DOCKER_TAG:-latest}
+    container_name: gitea-mirror
+    restart: unless-stopped
+    ports:
+      - "4321:4321"
+    volumes:
+      - gitea-mirror-data:/app/data
+    environment:
+      # Core Configuration
+      - NODE_ENV=production
+      - DATABASE_URL=file:data/gitea-mirror.db
+      - HOST=0.0.0.0
+      - PORT=4321
+      - JWT_SECRET=${JWT_SECRET:-}  # Auto-generated if empty
+      
+      # Authentication Configuration
+      # NOTE: OIDC can be configured via UI during initial setup!
+      # These env vars are optional and will pre-configure OIDC if set
+      - AUTH_METHOD=${AUTH_METHOD:-oidc}
+      - AUTH_ALLOW_LOCAL_FALLBACK=${AUTH_ALLOW_LOCAL_FALLBACK:-false}
+      
+      # OIDC Configuration (can be configured via UI)
+      - AUTH_OIDC_ISSUER_URL=${AUTH_OIDC_ISSUER_URL:-}
+      - AUTH_OIDC_CLIENT_ID=${AUTH_OIDC_CLIENT_ID:-}
+      - AUTH_OIDC_CLIENT_SECRET=${AUTH_OIDC_CLIENT_SECRET:-}
+      - AUTH_OIDC_REDIRECT_URI=${AUTH_OIDC_REDIRECT_URI:-}
+      - AUTH_OIDC_SCOPES=${AUTH_OIDC_SCOPES:-openid,profile,email}
+      - AUTH_OIDC_AUTO_CREATE=${AUTH_OIDC_AUTO_CREATE:-true}
+      - AUTH_OIDC_USERNAME_CLAIM=${AUTH_OIDC_USERNAME_CLAIM:-preferred_username}
+      - AUTH_OIDC_EMAIL_CLAIM=${AUTH_OIDC_EMAIL_CLAIM:-email}
+      - AUTH_OIDC_NAME_CLAIM=${AUTH_OIDC_NAME_CLAIM:-name}
+      
+      # Optional: GitHub/Gitea Mirror Config
+      - GITHUB_USERNAME=${GITHUB_USERNAME:-}
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      - GITEA_URL=${GITEA_URL:-}
+      - GITEA_TOKEN=${GITEA_TOKEN:-}
+      - GITEA_USERNAME=${GITEA_USERNAME:-}
+      - GITEA_ORGANIZATION=${GITEA_ORGANIZATION:-github-mirrors}
+      
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=3", "--spider", "http://localhost:4321/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+    networks:
+      - gitea-mirror
+
+volumes:
+  gitea-mirror-data:
+
+networks:
+  gitea-mirror:
+    driver: bridge

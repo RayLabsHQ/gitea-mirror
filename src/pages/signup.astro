@@ -2,14 +2,22 @@
 import '../styles/global.css';
 import ThemeScript from '@/components/theme/ThemeScript.astro';
 import { SignupForm } from '@/components/auth/SignupForm';
-import { client } from '../lib/db';
+import { hasUsers } from '@/lib/db/queries/users';
+import { hasAuthConfig } from '@/lib/db/queries/auth-config';
+
+// Check if auth configuration exists
+const authConfigExists = await hasAuthConfig();
+
+// Redirect to setup if no auth config exists
+if (!authConfigExists) {
+  return Astro.redirect('/setup');
+}
 
 // Check if any users exist in the database
-const userCountResult = await client.execute(`SELECT COUNT(*) as count FROM users`);
-const userCount = userCountResult.rows[0]?.count;
+const userCount = await hasUsers();
 
 // Redirect to login if users already exist
-if (userCount !== null && Number(userCount) > 0) {
+if (userCount) {
   return Astro.redirect('/login');
 }
 

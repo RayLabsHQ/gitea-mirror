@@ -24,6 +24,28 @@ services:
       - HOST=0.0.0.0
       - PORT=4321
       - JWT_SECRET=${JWT_SECRET:-your-secret-key-change-this-in-production}
+      # Authentication Configuration
+      # NOTE: Can be configured via UI during initial setup!
+      # These env vars are optional - UI configuration takes precedence
+      - AUTH_METHOD=${AUTH_METHOD:-}
+      - AUTH_ALLOW_LOCAL_FALLBACK=${AUTH_ALLOW_LOCAL_FALLBACK:-}
+      # OIDC Configuration (can be configured via UI)
+      - AUTH_OIDC_ISSUER_URL=${AUTH_OIDC_ISSUER_URL:-}
+      - AUTH_OIDC_CLIENT_ID=${AUTH_OIDC_CLIENT_ID:-}
+      - AUTH_OIDC_CLIENT_SECRET=${AUTH_OIDC_CLIENT_SECRET:-}
+      - AUTH_OIDC_REDIRECT_URI=${AUTH_OIDC_REDIRECT_URI:-}
+      - AUTH_OIDC_SCOPES=${AUTH_OIDC_SCOPES:-}
+      - AUTH_OIDC_AUTO_CREATE=${AUTH_OIDC_AUTO_CREATE:-}
+      - AUTH_OIDC_USERNAME_CLAIM=${AUTH_OIDC_USERNAME_CLAIM:-}
+      - AUTH_OIDC_EMAIL_CLAIM=${AUTH_OIDC_EMAIL_CLAIM:-}
+      - AUTH_OIDC_NAME_CLAIM=${AUTH_OIDC_NAME_CLAIM:-}
+      # Forward Auth Configuration (can be configured via UI)
+      - AUTH_FORWARD_USER_HEADER=${AUTH_FORWARD_USER_HEADER:-}
+      - AUTH_FORWARD_EMAIL_HEADER=${AUTH_FORWARD_EMAIL_HEADER:-}
+      - AUTH_FORWARD_NAME_HEADER=${AUTH_FORWARD_NAME_HEADER:-}
+      - AUTH_FORWARD_GROUPS_HEADER=${AUTH_FORWARD_GROUPS_HEADER:-}
+      - AUTH_FORWARD_TRUSTED_PROXIES=${AUTH_FORWARD_TRUSTED_PROXIES:-}
+      - AUTH_FORWARD_AUTO_CREATE=${AUTH_FORWARD_AUTO_CREATE:-}
       # GitHub/Gitea Mirror Config
       - GITHUB_USERNAME=${GITHUB_USERNAME:-}
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
