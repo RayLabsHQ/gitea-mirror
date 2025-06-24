@@ -142,7 +142,7 @@ bun run build
 
 ## Contributing
 
-Contributions welcome! Please submit a Pull Request.
+Contributions are welcome! Please read our [Contributing Guidelines](CONTRIBUTING.md) for details on our code of conduct and the process for submitting pull requests.
 
 ## License
 
