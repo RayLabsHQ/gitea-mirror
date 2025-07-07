@@ -18,6 +18,11 @@ services:
       - "4321:4321"
     volumes:
       - gitea-mirror-data:/app/data
+      # Mount CA certificates for self-signed Gitea instances
+      # Option 1: Mount specific CA certificate
+      #- ./ca-certificates/your-ca.crt:/usr/local/share/ca-certificates/your-ca.crt:ro
+      # Option 2: Mount system CA bundle (if your CA is already in system store)
+      #- /etc/ssl/certs/ca-certificates.crt:/etc/ssl/certs/ca-certificates.crt:ro
     environment:
       - NODE_ENV=production
       - DATABASE_URL=file:data/gitea-mirror.db
@@ -42,6 +47,10 @@ services:
       - GITEA_ORGANIZATION=${GITEA_ORGANIZATION:-github-mirrors}
       - GITEA_ORG_VISIBILITY=${GITEA_ORG_VISIBILITY:-public}
       - DELAY=${DELAY:-3600}
+      # SSL/TLS Configuration for self-signed certificates
+      # WARNING: Only use NODE_TLS_REJECT_UNAUTHORIZED=0 for development/testing
+      # For production, mount your CA certificate using the volumes section above
+      #- NODE_TLS_REJECT_UNAUTHORIZED=0
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=3", "--spider", "http://localhost:4321/api/health"]
       interval: 30s

@@ -1,6 +1,26 @@
 #!/bin/sh
 set -e
 
+# Handle custom CA certificates
+if [ -d "/usr/local/share/ca-certificates" ]; then
+  # Check if there are any .crt files in the directory
+  if ls /usr/local/share/ca-certificates/*.crt 1> /dev/null 2>&1; then
+    echo "Installing custom CA certificates..."
+    # Update CA certificates
+    if command -v update-ca-certificates >/dev/null 2>&1; then
+      update-ca-certificates
+      echo "CA certificates updated successfully"
+    else
+      echo "Warning: update-ca-certificates command not found"
+    fi
+    
+    # For Node.js/Bun, we need to combine all certificates into a single bundle
+    if [ -f "/etc/ssl/certs/ca-certificates.crt" ]; then
+      echo "Setting NODE_EXTRA_CA_CERTS to system CA bundle..."
+      export NODE_EXTRA_CA_CERTS="/etc/ssl/certs/ca-certificates.crt"
+    fi
+  fi
+fi
 
 # Ensure data directory exists
 mkdir -p /app/data

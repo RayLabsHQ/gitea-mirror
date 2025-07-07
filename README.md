@@ -131,6 +131,45 @@ docker compose -f docker-compose.dev.yml up -d
 > [!NOTE]
 > The examples above use the modern `docker compose` syntax (without hyphen) which is the recommended approach for Docker Compose V2. If you're using an older version of Docker Compose (V1), you may need to use `docker-compose` (with hyphen) instead.
 
+##### Self-Signed Certificates and Custom CAs
+
+If your Gitea instance uses a self-signed certificate or a certificate from a custom CA, you'll need to configure the container to trust it. Due to a [known issue with Node.js fetch](https://github.com/nodejs/node/issues/51426), the `NODE_EXTRA_CA_CERTS` environment variable doesn't work properly.
+
+**Recommended Solution: Mount your CA certificate**
+
+1. Create a directory for your CA certificates:
+   ```bash
+   mkdir ca-certificates
+   ```
+
+2. Copy your CA certificate to this directory:
+   ```bash
+   cp /path/to/your-ca.crt ca-certificates/
+   ```
+
+3. Update your `docker-compose.yml` to mount the certificate:
+   ```yaml
+   volumes:
+     - gitea-mirror-data:/app/data
+     - ./ca-certificates/your-ca.crt:/usr/local/share/ca-certificates/your-ca.crt:ro
+   ```
+
+4. Restart the container:
+   ```bash
+   docker compose restart
+   ```
+
+**Development/Testing Workaround**
+
+For development environments only, you can disable certificate validation:
+```yaml
+environment:
+  - NODE_TLS_REJECT_UNAUTHORIZED=0
+```
+
+> [!WARNING]
+> Never use `NODE_TLS_REJECT_UNAUTHORIZED=0` in production as it disables all SSL/TLS certificate validation, making your connection vulnerable to man-in-the-middle attacks.
+
 ##### Using Pre-built Images from GitHub Container Registry
 
 If you want to run the container directly without Docker Compose:
