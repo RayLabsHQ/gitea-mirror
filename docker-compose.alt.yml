@@ -15,6 +15,7 @@ services:
       - DATABASE_URL=file:data/gitea-mirror.db
       - HOST=0.0.0.0
       - PORT=4321
+      - BETTER_AUTH_URL=http://localhost:4321
       - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:-your-secret-key-change-this-in-production}
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=3", "--spider", "http://localhost:4321/api/health"]

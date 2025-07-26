@@ -518,6 +518,24 @@ export const verificationTokens = sqliteTable("verification_tokens", {
   };
 });
 
+// Verifications table (for Better Auth)
+export const verifications = sqliteTable("verifications", {
+  id: text("id").primaryKey(),
+  identifier: text("identifier").notNull(),
+  value: text("value").notNull(),
+  expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .default(sql`(unixepoch())`),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
+    .notNull()
+    .default(sql`(unixepoch())`),
+}, (table) => {
+  return {
+    identifierIdx: index("idx_verifications_identifier").on(table.identifier),
+  };
+});
+
 // ===== OIDC Provider Tables =====
 
 // OAuth Applications table

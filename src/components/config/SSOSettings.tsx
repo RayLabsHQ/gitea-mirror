@@ -6,15 +6,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Switch } from '@/components/ui/switch';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { apiRequest, showErrorToast } from '@/lib/utils';
 import { toast } from 'sonner';
-import { Plus, Trash2, ExternalLink, Loader2, AlertCircle, Shield, Info } from 'lucide-react';
-import { Separator } from '@/components/ui/separator';
+import { Plus, Trash2, Loader2, AlertCircle, Shield, Edit2 } from 'lucide-react';
 import { Skeleton } from '../ui/skeleton';
 import { Badge } from '../ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
+import { MultiSelect } from '@/components/ui/multi-select';
 
 interface SSOProvider {
   id: string;
@@ -60,8 +59,10 @@ export function SSOSettings() {
   const [providers, setProviders] = useState<SSOProvider[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showProviderDialog, setShowProviderDialog] = useState(false);
+  const [addingProvider, setAddingProvider] = useState(false);
   const [isDiscovering, setIsDiscovering] = useState(false);
   const [headerAuthEnabled, setHeaderAuthEnabled] = useState(false);
+  const [editingProvider, setEditingProvider] = useState<SSOProvider | null>(null);
 
   // Form states for new provider
   const [providerType, setProviderType] = useState<'oidc' | 'saml'>('oidc');
@@ -79,7 +80,7 @@ export function SSOSettings() {
     jwksEndpoint: '',
     userInfoEndpoint: '',
     discoveryEndpoint: '',
-    scopes: ['openid', 'email', 'profile'],
+    scopes: ['openid', 'email', 'profile'] as string[],
     pkce: true,
     // SAML fields
     entryPoint: '',
@@ -102,11 +103,11 @@ export function SSOSettings() {
     setIsLoading(true);
     try {
       const [providersRes, headerAuthStatus] = await Promise.all([
-        apiRequest<SSOProvider[]>('/auth/sso/register'),
+        apiRequest<SSOProvider[] | { providers: SSOProvider[] }>('/sso/providers'),
         apiRequest<{ enabled: boolean }>('/auth/header-status').catch(() => ({ enabled: false }))
       ]);
       
-      setProviders(providersRes);
+      setProviders(Array.isArray(providersRes) ? providersRes : providersRes?.providers || []);
       setHeaderAuthEnabled(headerAuthStatus.enabled);
     } catch (error) {
       showErrorToast(error, toast);
@@ -147,6 +148,7 @@ export function SSOSettings() {
   };
 
   const createProvider = async () => {
+    setAddingProvider(true);
     try {
       const requestData: any = {
         providerId: providerForm.providerId,
@@ -177,13 +179,26 @@ export function SSOSettings() {
         requestData.identifierFormat = providerForm.identifierFormat;
       }
 
-      const newProvider = await apiRequest<SSOProvider>('/auth/sso/register', {
-        method: 'POST',
-        data: requestData,
-      });
+      if (editingProvider) {
+        // Update existing provider
+        const updatedProvider = await apiRequest<SSOProvider>(`/sso/providers?id=${editingProvider.id}`, {
+          method: 'PUT',
+          data: requestData,
+        });
+        setProviders(providers.map(p => p.id === editingProvider.id ? updatedProvider : p));
+        toast.success('SSO provider updated successfully');
+      } else {
+        // Create new provider
+        const newProvider = await apiRequest<SSOProvider>('/sso/providers', {
+          method: 'POST',
+          data: requestData,
+        });
+        setProviders([...providers, newProvider]);
+        toast.success('SSO provider created successfully');
+      }
 
-      setProviders([...providers, newProvider]);
       setShowProviderDialog(false);
+      setEditingProvider(null);
       setProviderForm({
         issuer: '',
         domain: '',
@@ -196,7 +211,7 @@ export function SSOSettings() {
         jwksEndpoint: '',
         userInfoEndpoint: '',
         discoveryEndpoint: '',
-        scopes: ['openid', 'email', 'profile'],
+        scopes: ['openid', 'email', 'profile'] as string[],
         pkce: true,
         entryPoint: '',
         cert: '',
@@ -207,10 +222,37 @@ export function SSOSettings() {
         digestAlgorithm: 'sha256',
         identifierFormat: 'urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress',
       });
-      toast.success('SSO provider created successfully');
     } catch (error) {
       showErrorToast(error, toast);
+    } finally {
+      setAddingProvider(false);
     }
+  };
+
+  const startEditProvider = (provider: SSOProvider) => {
+    setEditingProvider(provider);
+    setProviderType(provider.samlConfig ? 'saml' : 'oidc');
+    
+    if (provider.oidcConfig) {
+      setProviderForm({
+        ...providerForm,
+        providerId: provider.providerId,
+        issuer: provider.issuer,
+        domain: provider.domain,
+        organizationId: provider.organizationId || '',
+        clientId: provider.oidcConfig.clientId || '',
+        clientSecret: provider.oidcConfig.clientSecret || '',
+        authorizationEndpoint: provider.oidcConfig.authorizationEndpoint || '',
+        tokenEndpoint: provider.oidcConfig.tokenEndpoint || '',
+        jwksEndpoint: provider.oidcConfig.jwksEndpoint || '',
+        userInfoEndpoint: provider.oidcConfig.userInfoEndpoint || '',
+        discoveryEndpoint: provider.oidcConfig.discoveryEndpoint || '',
+        scopes: provider.oidcConfig.scopes || ['openid', 'email', 'profile'],
+        pkce: provider.oidcConfig.pkce !== false,
+      });
+    }
+    
+    setShowProviderDialog(true);
   };
 
   const deleteProvider = async (id: string) => {
@@ -224,10 +266,6 @@ export function SSOSettings() {
   };
 
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    toast.success('Copied to clipboard');
-  };
 
   if (isLoading) {
     return (
@@ -243,8 +281,8 @@ export function SSOSettings() {
       {/* Header with status indicators */}
       <div className="flex items-center justify-between">
         <div>
-          <h3 className="text-lg font-semibold">Authentication & SSO</h3>
-          <p className="text-sm text-muted-foreground">
+          <h2 className="text-2xl font-semibold">Authentication & SSO</h2>
+          <p className="text-sm text-muted-foreground mt-1">
             Configure how users authenticate with your application
           </p>
         </div>
@@ -257,9 +295,9 @@ export function SSOSettings() {
       </div>
 
       {/* Authentication Methods Overview */}
-      <Card className="mb-6">
+      <Card>
         <CardHeader>
-          <CardTitle className="text-base">Active Authentication Methods</CardTitle>
+          <CardTitle className="text-lg font-semibold">Active Authentication Methods</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="space-y-3">
@@ -314,8 +352,8 @@ export function SSOSettings() {
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div>
-                  <CardTitle>External Identity Providers</CardTitle>
-                  <CardDescription>
+                  <CardTitle className="text-lg font-semibold">External Identity Providers</CardTitle>
+                  <CardDescription className="text-sm">
                     Connect external OIDC/OAuth providers (Google, Azure AD, etc.) to allow users to sign in with their existing accounts
                   </CardDescription>
                 </div>
@@ -328,9 +366,11 @@ export function SSOSettings() {
                   </DialogTrigger>
                   <DialogContent className="max-w-2xl">
                     <DialogHeader>
-                      <DialogTitle>Add SSO Provider</DialogTitle>
+                      <DialogTitle>{editingProvider ? 'Edit SSO Provider' : 'Add SSO Provider'}</DialogTitle>
                       <DialogDescription>
-                        Configure an external identity provider for user authentication
+                        {editingProvider 
+                          ? 'Update the configuration for this identity provider'
+                          : 'Configure an external identity provider for user authentication'}
                       </DialogDescription>
                     </DialogHeader>
                     <Tabs value={providerType} onValueChange={(value) => setProviderType(value as 'oidc' | 'saml')}>
@@ -349,6 +389,7 @@ export function SSOSettings() {
                               value={providerForm.providerId}
                               onChange={e => setProviderForm(prev => ({ ...prev, providerId: e.target.value }))}
                               placeholder="google-sso"
+                              disabled={!!editingProvider}
                             />
                           </div>
                           <div className="space-y-2">
@@ -436,6 +477,24 @@ export function SSOSettings() {
                           />
                         </div>
 
+                        <div className="space-y-2">
+                          <Label htmlFor="scopes">OAuth Scopes</Label>
+                          <MultiSelect
+                            options={[
+                              { label: "OpenID", value: "openid" },
+                              { label: "Email", value: "email" },
+                              { label: "Profile", value: "profile" },
+                              { label: "Offline Access", value: "offline_access" },
+                            ]}
+                            selected={providerForm.scopes}
+                            onChange={(scopes) => setProviderForm(prev => ({ ...prev, scopes }))}
+                            placeholder="Select scopes..."
+                          />
+                          <p className="text-xs text-muted-foreground">
+                            Select the OAuth scopes to request from the provider
+                          </p>
+                        </div>
+
                         <div className="flex items-center space-x-2">
                           <Switch
                             id="pkce"
@@ -448,7 +507,14 @@ export function SSOSettings() {
                         <Alert>
                           <AlertCircle className="h-4 w-4" />
                           <AlertDescription>
-                            Redirect URL: {window.location.origin}/api/auth/sso/callback/{providerForm.providerId || '{provider-id}'}
+                            <div className="space-y-2">
+                              <p>Redirect URL: {window.location.origin}/api/auth/sso/callback/{providerForm.providerId || '{provider-id}'}</p>
+                              {providerForm.issuer.includes('google.com') && (
+                                <p className="text-xs text-muted-foreground">
+                                  Note: Google doesn't support the "offline_access" scope. Make sure to exclude it from the selected scopes.
+                                </p>
+                              )}
+                            </div>
                           </AlertDescription>
                         </Alert>
                       </TabsContent>
@@ -496,10 +562,49 @@ export function SSOSettings() {
                       </TabsContent>
                     </Tabs>
                     <DialogFooter>
-                      <Button variant="outline" onClick={() => setShowProviderDialog(false)}>
+                      <Button 
+                        variant="outline" 
+                        onClick={() => {
+                          setShowProviderDialog(false);
+                          setEditingProvider(null);
+                          // Reset form
+                          setProviderForm({
+                            issuer: '',
+                            domain: '',
+                            providerId: '',
+                            organizationId: '',
+                            clientId: '',
+                            clientSecret: '',
+                            authorizationEndpoint: '',
+                            tokenEndpoint: '',
+                            jwksEndpoint: '',
+                            userInfoEndpoint: '',
+                            discoveryEndpoint: '',
+                            scopes: ['openid', 'email', 'profile'] as string[],
+                            pkce: true,
+                            entryPoint: '',
+                            cert: '',
+                            callbackUrl: '',
+                            audience: '',
+                            wantAssertionsSigned: true,
+                            signatureAlgorithm: 'sha256',
+                            digestAlgorithm: 'sha256',
+                            identifierFormat: 'urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress',
+                          });
+                        }}
+                      >
                         Cancel
                       </Button>
-                      <Button onClick={createProvider}>Create Provider</Button>
+                      <Button onClick={createProvider} disabled={addingProvider}>
+                        {addingProvider ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            {editingProvider ? 'Updating...' : 'Creating...'}
+                          </>
+                        ) : (
+                          editingProvider ? 'Update Provider' : 'Create Provider'
+                        )}
+                      </Button>
                     </DialogFooter>
                   </DialogContent>
                 </Dialog>
@@ -525,56 +630,83 @@ export function SSOSettings() {
                   </div>
                 </div>
               ) : (
-                <div className="space-y-4">
+                <div className="space-y-3">
                   {providers.map(provider => (
-                    <Card key={provider.id}>
-                      <CardHeader>
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <h4 className="font-semibold">{provider.providerId}</h4>
-                              <Badge variant="outline" className="text-xs">
-                                {provider.samlConfig ? 'SAML' : 'OIDC'}
-                              </Badge>
-                            </div>
-                            <p className="text-sm text-muted-foreground">{provider.domain}</p>
+                    <div key={provider.id} className="border rounded-lg p-4 hover:bg-muted/50 transition-colors">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-2">
+                            <h4 className="font-semibold text-sm">{provider.providerId}</h4>
+                            <Badge variant="outline" className="text-xs">
+                              {provider.samlConfig ? 'SAML' : 'OIDC'}
+                            </Badge>
                           </div>
+                          <p className="text-sm text-muted-foreground mb-3">{provider.domain}</p>
+                          
+                          <div className="space-y-2">
+                            <div className="flex items-start gap-2 text-sm">
+                              <span className="text-muted-foreground min-w-[80px]">Issuer:</span>
+                              <span className="text-muted-foreground break-all">{provider.issuer}</span>
+                            </div>
+                            
+                            {provider.oidcConfig && (
+                              <>
+                                <div className="flex items-start gap-2 text-sm">
+                                  <span className="text-muted-foreground min-w-[80px]">Client ID:</span>
+                                  <span className="font-mono text-xs text-muted-foreground break-all">{provider.oidcConfig.clientId}</span>
+                                </div>
+                                
+                                {provider.oidcConfig.scopes && provider.oidcConfig.scopes.length > 0 && (
+                                  <div className="flex items-start gap-2 text-sm">
+                                    <span className="text-muted-foreground min-w-[80px]">Scopes:</span>
+                                    <div className="flex flex-wrap gap-1">
+                                      {provider.oidcConfig.scopes.map(scope => (
+                                        <Badge key={scope} variant="secondary" className="text-xs">
+                                          {scope}
+                                        </Badge>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </>
+                            )}
+                            
+                            {provider.samlConfig && (
+                              <div className="flex items-start gap-2 text-sm">
+                                <span className="text-muted-foreground min-w-[80px]">Entry Point:</span>
+                                <span className="text-muted-foreground break-all">{provider.samlConfig.entryPoint}</span>
+                              </div>
+                            )}
+                            
+                            {provider.organizationId && (
+                              <div className="flex items-start gap-2 text-sm">
+                                <span className="text-muted-foreground min-w-[80px]">Organization:</span>
+                                <span className="text-muted-foreground">{provider.organizationId}</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        
+                        <div className="flex items-center gap-2">
                           <Button
-                            variant="destructive"
-                            size="sm"
+                            variant="ghost"
+                            size="icon"
+                            className="text-muted-foreground hover:text-foreground"
+                            onClick={() => startEditProvider(provider)}
+                          >
+                            <Edit2 className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="text-muted-foreground hover:text-destructive"
                             onClick={() => deleteProvider(provider.id)}
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>
                         </div>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="grid grid-cols-2 gap-4 text-sm">
-                          <div>
-                            <p className="font-medium">Issuer</p>
-                            <p className="text-muted-foreground break-all">{provider.issuer}</p>
-                          </div>
-                          {provider.oidcConfig && (
-                            <div>
-                              <p className="font-medium">Client ID</p>
-                              <p className="text-muted-foreground font-mono break-all">{provider.oidcConfig.clientId}</p>
-                            </div>
-                          )}
-                          {provider.samlConfig && (
-                            <div>
-                              <p className="font-medium">Entry Point</p>
-                              <p className="text-muted-foreground break-all">{provider.samlConfig.entryPoint}</p>
-                            </div>
-                          )}
-                          {provider.organizationId && (
-                            <div className="col-span-2">
-                              <p className="font-medium">Organization</p>
-                              <p className="text-muted-foreground">{provider.organizationId}</p>
-                            </div>
-                          )}
-                        </div>
-                      </CardContent>
-                    </Card>
+                      </div>
+                    </div>
                   ))}
                 </div>
               )}

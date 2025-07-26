@@ -78,6 +78,7 @@ export {
   sessions,
   accounts,
   verificationTokens,
+  verifications,
   oauthApplications,
   oauthAccessTokens,
   oauthConsent,

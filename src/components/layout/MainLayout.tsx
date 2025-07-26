@@ -48,10 +48,10 @@ function AppWithProviders({ page: initialPage }: AppProps) {
 
   useRepoSync({
     userId: user?.id,
-    enabled: user?.syncEnabled,
-    interval: user?.syncInterval,
-    lastSync: user?.lastSync,
-    nextSync: user?.nextSync,
+    enabled: false, // TODO: Get from config
+    interval: 3600, // TODO: Get from config
+    lastSync: null,
+    nextSync: null,
   });
 
   // Handle navigation from sidebar

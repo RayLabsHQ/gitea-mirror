@@ -215,7 +215,7 @@ export function OrganizationList({
                 <MirrorDestinationEditor
                   organizationId={org.id!}
                   organizationName={org.name!}
-                  currentDestination={org.destinationOrg}
+                  currentDestination={org.destinationOrg ?? undefined}
                   onUpdate={(newDestination) => handleUpdateDestination(org.id!, newDestination)}
                   isUpdating={isLoading}
                 />
@@ -260,7 +260,7 @@ export function OrganizationList({
                 <MirrorDestinationEditor
                   organizationId={org.id!}
                   organizationName={org.name!}
-                  currentDestination={org.destinationOrg}
+                  currentDestination={org.destinationOrg ?? undefined}
                   onUpdate={(newDestination) => handleUpdateDestination(org.id!, newDestination)}
                   isUpdating={isLoading}
                 />
@@ -276,8 +276,9 @@ export function OrganizationList({
                     </span>
                   </div>
                   
-                  {/* Repository breakdown */}
-                  {isLoading || (org.status === "mirroring" && org.publicRepositoryCount === undefined) ? (
+                  {/* Repository breakdown - TODO: Add these properties to Organization type */}
+                  {/* Commented out until repository count breakdown is available
+                  {isLoading || (org.status === "mirroring") ? (
                     <div className="flex items-center gap-3">
                       <Skeleton className="h-4 w-20" />
                       <Skeleton className="h-4 w-20" />
@@ -285,32 +286,9 @@ export function OrganizationList({
                     </div>
                   ) : (
                     <div className="flex items-center gap-3">
-                      {org.publicRepositoryCount !== undefined && (
-                        <div className="flex items-center gap-1.5">
-                          <div className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
-                          <span className="text-muted-foreground">
-                            {org.publicRepositoryCount} public
-                          </span>
-                        </div>
-                      )}
-                      {org.privateRepositoryCount !== undefined && org.privateRepositoryCount > 0 && (
-                        <div className="flex items-center gap-1.5">
-                          <div className="h-2.5 w-2.5 rounded-full bg-orange-500" />
-                          <span className="text-muted-foreground">
-                            {org.privateRepositoryCount} private
-                          </span>
-                        </div>
-                      )}
-                      {org.forkRepositoryCount !== undefined && org.forkRepositoryCount > 0 && (
-                        <div className="flex items-center gap-1.5">
-                          <div className="h-2.5 w-2.5 rounded-full bg-blue-500" />
-                          <span className="text-muted-foreground">
-                            {org.forkRepositoryCount} {org.forkRepositoryCount === 1 ? "fork" : "forks"}
-                          </span>
-                        </div>
-                      )}
                     </div>
                   )}
+                  */}
                 </div>
               </div>
             </div>

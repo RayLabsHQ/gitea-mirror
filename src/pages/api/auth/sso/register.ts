@@ -77,7 +77,7 @@ export async function POST(context: APIContext) {
         jwksEndpoint,
         discoveryEndpoint,
         userInfoEndpoint,
-        scopes = ["openid", "email", "profile"],
+        scopes,
         pkce = true,
         mapping = {
           id: "sub",
@@ -88,6 +88,9 @@ export async function POST(context: APIContext) {
         }
       } = body;
 
+      // Use provided scopes or default if not specified
+      const finalScopes = scopes || ["openid", "email", "profile"];
+
       registrationBody.oidcConfig = {
         clientId,
         clientSecret,
@@ -96,7 +99,7 @@ export async function POST(context: APIContext) {
         jwksEndpoint,
         discoveryEndpoint,
         userInfoEndpoint,
-        scopes,
+        scopes: finalScopes,
         pkce,
       };
       registrationBody.mapping = mapping;
@@ -147,11 +150,9 @@ export async function GET(context: APIContext) {
     // doesn't provide a built-in API to list SSO providers
     // This will be implemented once we update the database schema
     
+    // Return empty array for now - frontend expects array not object
     return new Response(
-      JSON.stringify({ 
-        message: "SSO provider listing not yet implemented",
-        providers: [] 
-      }),
+      JSON.stringify([]),
       {
         status: 200,
         headers: { "Content-Type": "application/json" },

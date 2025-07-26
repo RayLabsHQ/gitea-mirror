@@ -1,7 +1,7 @@
 import type { APIContext } from "astro";
 import { createSecureErrorResponse } from "@/lib/utils";
 import { requireAuth } from "@/lib/utils/auth-helpers";
-import { authClient } from "@/lib/auth-client";
+import { auth } from "@/lib/auth";
 
 // POST /api/auth/oauth2/register - Register a new OAuth2 application
 export async function POST(context: APIContext) {
@@ -47,36 +47,38 @@ export async function POST(context: APIContext) {
     }
 
     try {
-      // Use Better Auth client to register OAuth2 application
-      const response = await authClient.oauth2.register({
-        client_name,
-        redirect_uris,
-        token_endpoint_auth_method,
-        grant_types,
-        response_types,
-        client_uri,
-        logo_uri,
-        scope,
-        contacts,
-        tos_uri,
-        policy_uri,
-        jwks_uri,
-        jwks,
-        metadata,
-        software_id,
-        software_version,
-        software_statement,
+      // Use Better Auth server API to register OAuth2 application
+      const response = await auth.api.registerOAuthApplication({
+        body: {
+          client_name,
+          redirect_uris,
+          token_endpoint_auth_method,
+          grant_types,
+          response_types,
+          client_uri,
+          logo_uri,
+          scope,
+          contacts,
+          tos_uri,
+          policy_uri,
+          jwks_uri,
+          jwks,
+          metadata,
+          software_id,
+          software_version,
+          software_statement,
+        },
       });
 
       // Check if response is an error
-      if ('error' in response && response.error) {
+      if (!response || typeof response !== 'object') {
         return new Response(
           JSON.stringify({ 
-            error: response.error.code || "registration_error",
-            error_description: response.error.message || "Failed to register application" 
+            error: "registration_error",
+            error_description: "Invalid response from server" 
           }),
           {
-            status: 400,
+            status: 500,
             headers: { "Content-Type": "application/json" },
           }
         );

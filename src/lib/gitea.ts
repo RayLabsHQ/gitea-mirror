@@ -361,6 +361,29 @@ export const mirrorGithubRepoToGitea = async ({
       });
     }
 
+    // Check if repository already exists as a non-mirror
+    const { getGiteaRepoInfo, handleExistingNonMirrorRepo } = await import("./gitea-enhanced");
+    const existingRepo = await getGiteaRepoInfo({
+      config,
+      owner: repoOwner,
+      repoName: repository.name,
+    });
+
+    if (existingRepo && !existingRepo.mirror) {
+      console.log(`Repository ${repository.name} exists but is not a mirror. Handling...`);
+      
+      // Handle the existing non-mirror repository
+      await handleExistingNonMirrorRepo({
+        config,
+        repository,
+        repoInfo: existingRepo,
+        strategy: "delete", // Can be configured: "skip", "delete", or "rename"
+      });
+      
+      // After handling, proceed with mirror creation
+      console.log(`Proceeding with mirror creation for ${repository.name}`);
+    }
+
     const response = await httpPost(
       apiUrl,
       {
@@ -470,156 +493,23 @@ export async function getOrCreateGiteaOrg({
   orgName: string;
   config: Partial<Config>;
 }): Promise<number> {
-  if (
-    !config.giteaConfig?.url ||
-    !config.giteaConfig?.token ||
-    !config.userId
-  ) {
-    throw new Error("Gitea config is required.");
-  }
-
+  // Import the enhanced version with retry logic
+  const { getOrCreateGiteaOrgEnhanced } = await import("./gitea-enhanced");
+  
   try {
-    console.log(`Attempting to get or create Gitea organization: ${orgName}`);
-
-    // Decrypt config tokens for API usage
-    const decryptedConfig = decryptConfigTokens(config as Config);
-
-    const orgRes = await fetch(
-      `${config.giteaConfig.url}/api/v1/orgs/${orgName}`,
-      {
-        headers: {
-          Authorization: `token ${decryptedConfig.giteaConfig.token}`,
-          "Content-Type": "application/json",
-        },
-      }
-    );
-
-    console.log(
-      `Get org response status: ${orgRes.status} for org: ${orgName}`
-    );
-
-    if (orgRes.ok) {
-      // Check if response is actually JSON
-      const contentType = orgRes.headers.get("content-type");
-      if (!contentType || !contentType.includes("application/json")) {
-        console.warn(
-          `Expected JSON response but got content-type: ${contentType}`
-        );
-        const responseText = await orgRes.text();
-        console.warn(`Response body: ${responseText}`);
-        throw new Error(
-          `Invalid response format from Gitea API. Expected JSON but got: ${contentType}`
-        );
-      }
-
-      // Clone the response to handle potential JSON parsing errors
-      const orgResClone = orgRes.clone();
-
-      try {
-        const org = await orgRes.json();
-        console.log(
-          `Successfully retrieved existing org: ${orgName} with ID: ${org.id}`
-        );
-        // Note: Organization events are handled by the main mirroring process
-        // to avoid duplicate events
-        return org.id;
-      } catch (jsonError) {
-        const responseText = await orgResClone.text();
-        console.error(
-          `Failed to parse JSON response for existing org: ${responseText}`
-        );
-        throw new Error(
-          `Failed to parse JSON response from Gitea API: ${
-            jsonError instanceof Error ? jsonError.message : String(jsonError)
-          }`
-        );
-      }
-    }
-
-    console.log(`Organization ${orgName} not found, attempting to create it`);
-
-    const createRes = await fetch(`${config.giteaConfig.url}/api/v1/orgs`, {
-      method: "POST",
-      headers: {
-        Authorization: `token ${decryptedConfig.giteaConfig.token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        username: orgName,
-        full_name: `${orgName} Org`,
-        description: `Mirrored organization from GitHub ${orgName}`,
-        visibility: config.giteaConfig?.visibility || "public",
-      }),
+    return await getOrCreateGiteaOrgEnhanced({
+      orgName,
+      orgId,
+      config,
+      maxRetries: 3,
+      retryDelay: 100,
     });
-
-    console.log(
-      `Create org response status: ${createRes.status} for org: ${orgName}`
-    );
-
-    if (!createRes.ok) {
-      const errorText = await createRes.text();
-      console.error(
-        `Failed to create org ${orgName}. Status: ${createRes.status}, Response: ${errorText}`
-      );
-      throw new Error(`Failed to create Gitea org: ${errorText}`);
-    }
-
-    // Check if response is actually JSON
-    const createContentType = createRes.headers.get("content-type");
-    if (!createContentType || !createContentType.includes("application/json")) {
-      console.warn(
-        `Expected JSON response but got content-type: ${createContentType}`
-      );
-      const responseText = await createRes.text();
-      console.warn(`Response body: ${responseText}`);
-      throw new Error(
-        `Invalid response format from Gitea API. Expected JSON but got: ${createContentType}`
-      );
-    }
-
-    // Note: Organization creation events are handled by the main mirroring process
-    // to avoid duplicate events
-
-    // Clone the response to handle potential JSON parsing errors
-    const createResClone = createRes.clone();
-
-    try {
-      const newOrg = await createRes.json();
-      console.log(
-        `Successfully created new org: ${orgName} with ID: ${newOrg.id}`
-      );
-      return newOrg.id;
-    } catch (jsonError) {
-      const responseText = await createResClone.text();
-      console.error(
-        `Failed to parse JSON response for new org: ${responseText}`
-      );
-      throw new Error(
-        `Failed to parse JSON response from Gitea API: ${
-          jsonError instanceof Error ? jsonError.message : String(jsonError)
-        }`
-      );
-    }
   } catch (error) {
-    const errorMessage =
-      error instanceof Error
-        ? error.message
-        : "Unknown error occurred in getOrCreateGiteaOrg.";
-
-    console.error(
-      `Error in getOrCreateGiteaOrg for ${orgName}: ${errorMessage}`
-    );
-
-    await createMirrorJob({
-      userId: config.userId,
-      organizationId: orgId,
-      organizationName: orgName,
-      message: `Failed to create or fetch Gitea organization: ${orgName}`,
-      status: "failed",
-      details: `Error: ${errorMessage}`,
-    });
-
-    throw new Error(`Error in getOrCreateGiteaOrg: ${errorMessage}`);
+    // Re-throw with original function name for backward compatibility
+    if (error instanceof Error) {
+      throw new Error(`Error in getOrCreateGiteaOrg: ${error.message}`);
+    }
+    throw error;
   }
 }
 
@@ -1077,117 +967,13 @@ export const syncGiteaRepo = async ({
   config: Partial<Config>;
   repository: Repository;
 }) => {
+  // Use the enhanced sync function that handles non-mirror repos
+  const { syncGiteaRepoEnhanced } = await import("./gitea-enhanced");
+  
   try {
-    if (
-      !config.userId ||
-      !config.giteaConfig?.url ||
-      !config.giteaConfig?.token ||
-      !config.giteaConfig?.defaultOwner
-    ) {
-      throw new Error("Gitea config is required.");
-    }
-
-    // Decrypt config tokens for API usage
-    const decryptedConfig = decryptConfigTokens(config as Config);
-
-    console.log(`Syncing repository ${repository.name}`);
-
-    // Mark repo as "syncing" in DB
-    await db
-      .update(repositories)
-      .set({
-        status: repoStatusEnum.parse("syncing"),
-        updatedAt: new Date(),
-      })
-      .where(eq(repositories.id, repository.id!));
-
-    // Append log for "syncing" status
-    await createMirrorJob({
-      userId: config.userId,
-      repositoryId: repository.id,
-      repositoryName: repository.name,
-      message: `Started syncing repository: ${repository.name}`,
-      details: `Repository ${repository.name} is now in the syncing state.`,
-      status: repoStatusEnum.parse("syncing"),
-    });
-
-    // Get the expected owner based on current config (with organization overrides)
-    const repoOwner = await getGiteaRepoOwnerAsync({ config, repository });
-
-    // Check if repo exists at the expected location or alternate location
-    const { present, actualOwner } = await checkRepoLocation({
-      config,
-      repository,
-      expectedOwner: repoOwner,
-    });
-
-    if (!present) {
-      throw new Error(
-        `Repository ${repository.name} not found in Gitea at any expected location`
-      );
-    }
-
-    // Use the actual owner where the repo was found
-    const apiUrl = `${config.giteaConfig.url}/api/v1/repos/${actualOwner}/${repository.name}/mirror-sync`;
-
-    const response = await httpPost(apiUrl, undefined, {
-      Authorization: `token ${decryptedConfig.giteaConfig.token}`,
-    });
-
-    // Mark repo as "synced" in DB
-    await db
-      .update(repositories)
-      .set({
-        status: repoStatusEnum.parse("synced"),
-        updatedAt: new Date(),
-        lastMirrored: new Date(),
-        errorMessage: null,
-        mirroredLocation: `${actualOwner}/${repository.name}`,
-      })
-      .where(eq(repositories.id, repository.id!));
-
-    // Append log for "synced" status
-    await createMirrorJob({
-      userId: config.userId,
-      repositoryId: repository.id,
-      repositoryName: repository.name,
-      message: `Successfully synced repository: ${repository.name}`,
-      details: `Repository ${repository.name} was synced with Gitea.`,
-      status: repoStatusEnum.parse("synced"),
-    });
-
-    console.log(`Repository ${repository.name} synced successfully`);
-
-    return response.data;
+    return await syncGiteaRepoEnhanced({ config, repository });
   } catch (error) {
-    console.error(
-      `Error while syncing repository ${repository.name}: ${
-        error instanceof Error ? error.message : String(error)
-      }`
-    );
-
-    // Optional: update repo with error status
-    await db
-      .update(repositories)
-      .set({
-        status: repoStatusEnum.parse("failed"),
-        updatedAt: new Date(),
-        errorMessage: (error as Error).message,
-      })
-      .where(eq(repositories.id, repository.id!));
-
-    // Append log for "error" status
-    if (config.userId && repository.id && repository.name) {
-      await createMirrorJob({
-        userId: config.userId,
-        repositoryId: repository.id,
-        repositoryName: repository.name,
-        message: `Failed to sync repository: ${repository.name}`,
-        details: (error as Error).message,
-        status: repoStatusEnum.parse("failed"),
-      });
-    }
-
+    // Re-throw with original function name for backward compatibility
     if (error instanceof Error) {
       throw new Error(`Failed to sync repository: ${error.message}`);
     }
