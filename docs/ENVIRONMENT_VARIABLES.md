@@ -83,7 +83,7 @@ Settings for the destination Gitea instance.
 | Variable | Description | Default | Options |
 |----------|-------------|---------|---------|
 | `GITEA_ORG_VISIBILITY` | Default organization visibility | `public` | `public`, `private`, `limited`, `default` |
-| `GITEA_MIRROR_INTERVAL` | Mirror sync interval | `8h` | Duration string (e.g., `30m`, `1h`, `8h`, `24h`) |
+| `GITEA_MIRROR_INTERVAL` | Mirror sync interval (automatically enables scheduler) | `8h` | Duration string (e.g., `30m`, `1h`, `8h`, `24h`) |
 | `GITEA_LFS` | Enable LFS support | `false` | `true`, `false` |
 | `GITEA_CREATE_ORG` | Auto-create organizations | `true` | `true`, `false` |
 | `GITEA_PRESERVE_VISIBILITY` | Preserve GitHub repo visibility in Gitea | `false` | `true`, `false` |
@@ -192,7 +192,7 @@ Configure automatic cleanup of old events and data.
 | Variable | Description | Default | Options |
 |----------|-------------|---------|---------|
 | `CLEANUP_DELETE_FROM_GITEA` | Delete repositories from Gitea | `false` | `true`, `false` |
-| `CLEANUP_DELETE_IF_NOT_IN_GITHUB` | Delete repos not found in GitHub | `true` | `true`, `false` |
+| `CLEANUP_DELETE_IF_NOT_IN_GITHUB` | Delete repos not found in GitHub (automatically enables cleanup) | `true` | `true`, `false` |
 | `CLEANUP_ORPHANED_REPO_ACTION` | Action for orphaned repositories | `archive` | `skip`, `archive`, `delete` |
 | `CLEANUP_DRY_RUN` | Test mode without actual deletion | `true` | `true`, `false` |
 | `CLEANUP_PROTECTED_REPOS` | Comma-separated list of protected repository names | - | Comma-separated strings |

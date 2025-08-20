@@ -7,7 +7,7 @@ import { membershipRoleEnum } from "@/types/organizations";
 import { Octokit } from "@octokit/rest";
 import type { Config } from "@/types/config";
 import type { Organization, Repository } from "./db/schema";
-import { httpPost, httpGet } from "./http-client";
+import { httpPost, httpGet, httpDelete, httpPut } from "./http-client";
 import { createMirrorJob } from "./helpers";
 import { db, organizations, repositories } from "./db";
 import { eq, and } from "drizzle-orm";
@@ -1739,4 +1739,69 @@ export async function mirrorGitRepoMilestonesToGitea({
   }
 
   console.log(`✅ Mirrored ${mirroredCount} new milestones to Gitea`);
+}
+
+/**
+ * Create a simple Gitea client object with base URL and token
+ */
+export function createGiteaClient(url: string, token: string) {
+  return { url, token };
+}
+
+/**
+ * Delete a repository from Gitea
+ */
+export async function deleteGiteaRepo(
+  client: { url: string; token: string },
+  owner: string,
+  repo: string
+): Promise<void> {
+  try {
+    const response = await httpDelete(
+      `${client.url}/api/v1/repos/${owner}/${repo}`,
+      {
+        Authorization: `token ${client.token}`,
+      }
+    );
+    
+    if (!response.success) {
+      throw new Error(`Failed to delete repository ${owner}/${repo}: ${response.statusCode}`);
+    }
+    
+    console.log(`Successfully deleted repository ${owner}/${repo} from Gitea`);
+  } catch (error) {
+    console.error(`Error deleting repository ${owner}/${repo}:`, error);
+    throw error;
+  }
+}
+
+/**
+ * Archive a repository in Gitea
+ */
+export async function archiveGiteaRepo(
+  client: { url: string; token: string },
+  owner: string,
+  repo: string
+): Promise<void> {
+  try {
+    const response = await httpPut(
+      `${client.url}/api/v1/repos/${owner}/${repo}`,
+      {
+        archived: true,
+      },
+      {
+        Authorization: `token ${client.token}`,
+        'Content-Type': 'application/json',
+      }
+    );
+    
+    if (!response.success) {
+      throw new Error(`Failed to archive repository ${owner}/${repo}: ${response.statusCode}`);
+    }
+    
+    console.log(`Successfully archived repository ${owner}/${repo} in Gitea`);
+  } catch (error) {
+    console.error(`Error archiving repository ${owner}/${repo}:`, error);
+    throw error;
+  }
 }

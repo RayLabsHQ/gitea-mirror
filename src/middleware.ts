@@ -1,6 +1,8 @@
 import { defineMiddleware } from 'astro:middleware';
 import { initializeRecovery, hasJobsNeedingRecovery, getRecoveryStatus } from './lib/recovery';
 import { startCleanupService, stopCleanupService } from './lib/cleanup-service';
+import { startSchedulerService, stopSchedulerService } from './lib/scheduler-service';
+import { startRepositoryCleanupService, stopRepositoryCleanupService } from './lib/repository-cleanup-service';
 import { initializeShutdownManager, registerShutdownCallback } from './lib/shutdown-manager';
 import { setupSignalHandlers } from './lib/signal-handlers';
 import { auth } from './lib/auth';
@@ -11,6 +13,8 @@ import { initializeConfigFromEnv } from './lib/env-config-loader';
 let recoveryInitialized = false;
 let recoveryAttempted = false;
 let cleanupServiceStarted = false;
+let schedulerServiceStarted = false;
+let repositoryCleanupServiceStarted = false;
 let shutdownManagerInitialized = false;
 let envConfigInitialized = false;
 
@@ -149,6 +153,44 @@ export const onRequest = defineMiddleware(async (context, next) => {
     } catch (error) {
       console.error('Failed to start cleanup service:', error);
       // Don't fail the request if cleanup service fails to start
+    }
+  }
+
+  // Start scheduler service only once after recovery is complete
+  if (recoveryInitialized && !schedulerServiceStarted) {
+    try {
+      console.log('Starting automatic mirror scheduler service...');
+      startSchedulerService();
+
+      // Register scheduler service shutdown callback
+      registerShutdownCallback(async () => {
+        console.log('🛑 Shutting down scheduler service...');
+        stopSchedulerService();
+      });
+
+      schedulerServiceStarted = true;
+    } catch (error) {
+      console.error('Failed to start scheduler service:', error);
+      // Don't fail the request if scheduler service fails to start
+    }
+  }
+
+  // Start repository cleanup service only once after recovery is complete
+  if (recoveryInitialized && !repositoryCleanupServiceStarted) {
+    try {
+      console.log('Starting repository cleanup service...');
+      startRepositoryCleanupService();
+
+      // Register repository cleanup service shutdown callback
+      registerShutdownCallback(async () => {
+        console.log('🛑 Shutting down repository cleanup service...');
+        stopRepositoryCleanupService();
+      });
+
+      repositoryCleanupServiceStarted = true;
+    } catch (error) {
+      console.error('Failed to start repository cleanup service:', error);
+      // Don't fail the request if repository cleanup service fails to start
     }
   }
 

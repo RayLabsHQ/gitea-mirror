@@ -135,8 +135,11 @@ function parseEnvConfig(): EnvConfig {
       mirrorMetadata: process.env.MIRROR_METADATA === 'true',
     },
     schedule: {
-      enabled: process.env.SCHEDULE_ENABLED === 'true',
-      interval: process.env.SCHEDULE_INTERVAL || process.env.DELAY, // Support both old DELAY and new SCHEDULE_INTERVAL
+      enabled: process.env.SCHEDULE_ENABLED === 'true' || 
+               !!process.env.GITEA_MIRROR_INTERVAL || 
+               !!process.env.SCHEDULE_INTERVAL || 
+               !!process.env.DELAY, // Auto-enable if any interval is specified
+      interval: process.env.SCHEDULE_INTERVAL || process.env.GITEA_MIRROR_INTERVAL || process.env.DELAY, // Support GITEA_MIRROR_INTERVAL, SCHEDULE_INTERVAL, and old DELAY
       concurrent: process.env.SCHEDULE_CONCURRENT === 'true',
       batchSize: process.env.SCHEDULE_BATCH_SIZE ? parseInt(process.env.SCHEDULE_BATCH_SIZE, 10) : undefined,
       pauseBetweenBatches: process.env.SCHEDULE_PAUSE_BETWEEN_BATCHES ? parseInt(process.env.SCHEDULE_PAUSE_BETWEEN_BATCHES, 10) : undefined,
@@ -155,7 +158,8 @@ function parseEnvConfig(): EnvConfig {
       recentThreshold: process.env.SCHEDULE_RECENT_THRESHOLD ? parseInt(process.env.SCHEDULE_RECENT_THRESHOLD, 10) : undefined,
     },
     cleanup: {
-      enabled: process.env.CLEANUP_ENABLED === 'true',
+      enabled: process.env.CLEANUP_ENABLED === 'true' || 
+               process.env.CLEANUP_DELETE_IF_NOT_IN_GITHUB === 'true', // Auto-enable if deleteIfNotInGitHub is enabled
       retentionDays: process.env.CLEANUP_RETENTION_DAYS ? parseInt(process.env.CLEANUP_RETENTION_DAYS, 10) : undefined,
       deleteFromGitea: process.env.CLEANUP_DELETE_FROM_GITEA === 'true',
       deleteIfNotInGitHub: process.env.CLEANUP_DELETE_IF_NOT_IN_GITHUB === 'true',
