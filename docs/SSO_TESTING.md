@@ -29,6 +29,8 @@ This guide explains how to test SSO authentication locally with Gitea Mirror.
      - Client Secret: (from Google Console)
    - Save the provider
 
+   Note: Provider creation uses Better Auth's SSO registration under the hood. Do not call the legacy `POST /api/sso/providers` endpoint directly; it is deprecated and reserved for internal mirroring. Use the UI or Better Auth client/server registration APIs instead.
+
 ## Option 2: Using Keycloak (Local Identity Provider)
 
 ### Setup with Docker:
@@ -113,8 +115,8 @@ npm start
 
 2. **Provider not showing in login**
    - Check browser console for errors
-   - Verify provider was saved successfully
-   - Check `/api/sso/providers` returns your providers
+   - Verify provider was saved successfully (via UI)
+   - Check `/api/sso/providers` (or `/api/sso/providers/public`) returns your providers. This list mirrors what was registered with Better Auth.
 
 3. **Redirect URI mismatch**
    - Ensure the redirect URI in your OAuth app matches exactly:

@@ -4,7 +4,10 @@ import MainLayout from '../../layouts/main.astro';
 const envVars = [
   { name: 'NODE_ENV', desc: 'Runtime environment', default: 'development', example: 'production' },
   { name: 'DATABASE_URL', desc: 'SQLite database URL', default: 'file:data/gitea-mirror.db', example: 'file:path/to/database.db' },
-  { name: 'JWT_SECRET', desc: 'Secret key for JWT auth', default: 'Auto-generated', example: 'your-secure-string' },
+  { name: 'BETTER_AUTH_SECRET', desc: 'Authentication secret key', default: 'Auto-generated', example: 'generate a strong random string' },
+  { name: 'BETTER_AUTH_URL', desc: 'Authentication base URL (public origin)', default: 'http://localhost:4321', example: 'https://gitea-mirror.example.com' },
+  { name: 'PUBLIC_BETTER_AUTH_URL', desc: 'Optional: public URL used by the client', default: 'Unset', example: 'https://gitea-mirror.example.com' },
+  { name: 'BETTER_AUTH_TRUSTED_ORIGINS', desc: 'Comma-separated list of additional trusted origins', default: 'Unset', example: 'https://gitea-mirror.example.com,https://alt.example.com' },
   { name: 'HOST', desc: 'Server host', default: 'localhost', example: '0.0.0.0' },
   { name: 'PORT', desc: 'Server port', default: '4321', example: '8080' }
 ];

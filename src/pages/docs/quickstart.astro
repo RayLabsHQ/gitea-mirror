@@ -260,6 +260,16 @@ bun run start</code></pre>
             },
             {
               num: '3',
+              title: 'Optional: Configure SSO',
+              items: [
+                'Open Configuration → Authentication',
+                'Click “Add Provider” and enter your OIDC details',
+                'Use redirect URL: https://<your-domain>/api/auth/sso/callback/{provider-id}',
+                'Edits are handled as delete & recreate (Better Auth registration)'
+              ]
+            },
+            {
+              num: '4',
               title: 'Configure Gitea Connection',
               items: [
                 'Enter your Gitea server URL',
@@ -269,7 +279,7 @@ bun run start</code></pre>
               ]
             },
             {
-              num: '4',
+              num: '5',
               title: 'Set Up Scheduling',
               items: [
                 'Enable automatic mirroring',

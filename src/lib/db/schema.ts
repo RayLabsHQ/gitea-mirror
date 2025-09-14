@@ -617,6 +617,7 @@ export const ssoProviders = sqliteTable("sso_providers", {
   issuer: text("issuer").notNull(),
   domain: text("domain").notNull(),
   oidcConfig: text("oidc_config").notNull(), // JSON string with OIDC configuration
+  samlConfig: text("saml_config"), // JSON string with SAML configuration (optional)
   userId: text("user_id").notNull(), // Admin who created this provider
   providerId: text("provider_id").notNull().unique(), // Unique identifier for the provider
   organizationId: text("organization_id"), // Optional - if provider is linked to an organization
