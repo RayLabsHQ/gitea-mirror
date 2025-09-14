@@ -107,6 +107,23 @@ import MainLayout from '../../layouts/main.astro';
         </p>
 
         <h3 class="text-xl font-semibold mb-4">Adding an SSO Provider</h3>
+        <div class="bg-blue-500/10 border border-blue-500/20 rounded-lg p-4 mb-6">
+          <div class="flex gap-3">
+            <div class="text-blue-600 dark:text-blue-500">
+              <svg class="w-5 h-5 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+              </svg>
+            </div>
+            <div>
+              <p class="font-semibold text-blue-600 dark:text-blue-500 mb-1">Better Auth Registration</p>
+              <p class="text-sm">
+                Provider creation uses Better Auth's SSO registration under the hood. The legacy API route
+                <code class="bg-muted px-1 rounded">POST /api/sso/providers</code> is deprecated and not required for setup.
+                To change Provider ID or endpoints, delete and recreate the provider from the UI.
+              </p>
+            </div>
+          </div>
+        </div>
         
         <div class="bg-card rounded-lg border border-border p-6 mb-6">
           <h4 class="font-semibold mb-4">Required Information</h4>
@@ -147,11 +164,11 @@ import MainLayout from '../../layouts/main.astro';
 
         <h3 class="text-xl font-semibold mb-4">Redirect URL Configuration</h3>
         
-        <div class="bg-muted/30 rounded-lg p-4">
-          <p class="text-sm mb-2">When configuring your SSO provider, use this redirect URL:</p>
-          <code class="bg-muted rounded px-3 py-2 block">https://your-domain.com/api/auth/sso/callback/{`{provider-id}`}</code>
-          <p class="text-xs text-muted-foreground mt-2">Replace <code>{`{provider-id}`}</code> with your chosen Provider ID (e.g., google-sso)</p>
-        </div>
+          <div class="bg-muted/30 rounded-lg p-4">
+            <p class="text-sm mb-2">When configuring your SSO provider, use this redirect URL:</p>
+            <code class="bg-muted rounded px-3 py-2 block">https://your-domain.com/api/auth/sso/callback/{`{provider-id}`}</code>
+            <p class="text-xs text-muted-foreground mt-2">Replace <code>{`{provider-id}`}</code> with your chosen Provider ID (e.g., google-sso)</p>
+          </div>
       </section>
 
       <div class="my-12 h-px bg-border/50"></div>

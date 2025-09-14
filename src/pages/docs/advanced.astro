@@ -52,7 +52,9 @@ import MainLayout from '../../layouts/main.astro';
                 { var: 'PORT', desc: 'Server port', default: '4321' },
                 { var: 'HOST', desc: 'Server host', default: '0.0.0.0' },
                 { var: 'BETTER_AUTH_SECRET', desc: 'Authentication secret key', default: 'Auto-generated' },
-                { var: 'BETTER_AUTH_URL', desc: 'Authentication base URL', default: 'http://localhost:4321' },
+                { var: 'BETTER_AUTH_URL', desc: 'Authentication base URL (public origin)', default: 'http://localhost:4321' },
+                { var: 'PUBLIC_BETTER_AUTH_URL', desc: 'Optional: public URL used by the client', default: 'Unset' },
+                { var: 'BETTER_AUTH_TRUSTED_ORIGINS', desc: 'Comma-separated list of additional trusted origins', default: 'Unset' },
                 { var: 'NODE_EXTRA_CA_CERTS', desc: 'Path to CA certificate file', default: 'None' },
                 { var: 'DATABASE_URL', desc: 'SQLite database path', default: './data/gitea-mirror.db' },
               ].map((item, i) => (

@@ -70,6 +70,8 @@ export function LoginForm() {
         domain: domain,
         providerId: providerId,
         callbackURL: `${baseURL}/`,
+        errorCallbackURL: `${baseURL}/auth-error`,
+        newUserCallbackURL: `${baseURL}/`,
         scopes: ['openid', 'email', 'profile'], // TODO: This is not being respected by the SSO plugin.
       });
     } catch (error) {
