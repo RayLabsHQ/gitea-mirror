@@ -1,0 +1,58 @@
+name: Helm Chart CI
+
+on:
+  pull_request:
+    paths:
+      - 'helm-charts/gitea-mirror/**'
+      - '.github/workflows/helm-test.yml'
+      - '.github/ci/values-ci.yaml'
+  push:
+    branches: [ main ]
+    paths:
+      - 'helm-charts/gitea-mirror/**'
+      - '.github/workflows/helm-test.yml'
+      - '.github/ci/values-ci.yaml'
+  workflow_dispatch:
+
+jobs:
+  yamllint:
+    name: Lint YAML
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - name: Install yamllint
+        run: pip install --disable-pip-version-check yamllint
+      - name: Run yamllint
+        run: |
+          yamllint -c helm/gitea-mirror/.yamllint helm/gitea-mirror
+
+  helm-template:
+    name: Helm lint & template
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.19.0
+      - name: Helm lint
+        run: |
+          helm lint ./helm/gitea-mirror
+      - name: Template with defaults
+        run: |
+          helm template test ./helm/gitea-mirror > /tmp/render-defaults.yaml
+          test -s /tmp/render-defaults.yaml
+      - name: Template with CI values
+        run: |
+          helm template test ./helm/gitea-mirror -f .github/ci/values-ci.yaml > /tmp/render-ci.yaml
+          test -s /tmp/render-ci.yaml
+      - name: Show a summary
+        run: |
+          echo "Rendered with defaults:"
+          awk 'NR<=50{print} NR==51{print "..."; exit}' /tmp/render-defaults.yaml
+          echo ""
+          echo "Rendered with CI values:"
+          awk 'NR<=50{print} NR==51{print "..."; exit}' /tmp/render-ci.yaml

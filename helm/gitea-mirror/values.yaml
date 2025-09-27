@@ -1,0 +1,151 @@
+image:
+  registry: ghcr.io
+  repository: raylabshq/gitea-mirror
+  # Leave blank to use the Appversion tag
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+podSecurityContext:
+  runAsUser: 1001
+  runAsGroup: 1001
+  fsGroup: 1001
+  fsGroupChangePolicy: OnRootMismatch
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: mirror.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  #  - secretName: chart-example-tls
+  #    hosts:
+  #      - mirror.example.com
+
+route:
+  enabled: false
+  forceHTTPS: true
+  domain: ["mirror.example.com"]
+  gateway: ""
+  gatewayNamespace: ""
+  http:
+    gatewaySection: ""
+    filters: []
+  https:
+    gatewaySection: ""
+    filters:
+      - type: ResponseHeaderModifier
+        responseHeaderModifier:
+          add:
+            - name: Strict-Transport-Security
+              value: "max-age=31536000; includeSubDomains; preload"
+
+service:
+  type: ClusterIP
+  port: 8080
+  clusterIP: None
+  annotations: {}
+  externalTrafficPolicy:
+  labels: {}
+  loadBalancerIP:
+  loadBalancerClass:
+
+deployment:
+  port: 8080
+  strategy:
+    type: Recreate
+  env: []
+  terminationGracePeriodSeconds: 60
+  labels: {}
+  annotations: {}
+  resources: {}
+
+livenessProbe:
+  enabled: true
+  initialDelaySeconds: 60
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 6
+  successThreshold: 1
+readinessProbe:
+  enabled: true
+  initialDelaySeconds: 60
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 6
+  successThreshold: 1
+startupProbe:
+  enabled: true
+  initialDelaySeconds: 60
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 6
+  successThreshold: 1
+
+persistence:
+  enabled: true
+  create: true
+  claimName: gitea-mirror-storage
+  storageClass: ""
+  accessModes:
+    - ReadWriteOnce
+  size: 1Gi
+
+affinity: {}
+nodeSelector: {}
+tolerations: []
+topologySpreadConstraints: []
+extraVolumes: []
+extraVolumeMounts: []
+
+serviceAccount:
+  create: false
+  name: ""
+  annotations: {}
+  labels: {}
+  automountServiceAccountToken: false
+
+gitea-mirror:
+  existingSecret: ""
+  nodeEnv: production
+  core:
+    databaseUrl: file:data/gitea-mirror.db
+    encryptionSecret: ""
+    betterAuthSecret: ""
+    betterAuthUrl: "http://localhost:4321"
+    betterAuthTrustedOrigins: "http://localhost:4321"
+
+  github:
+    username: ""
+    token: ""
+    type: personal
+    privateRepositories: true
+    mirrorStarred: false
+    skipForks: false
+    skipStarredIssues: false
+
+  gitea:
+    url: ""
+    token: ""
+    username: ""
+    organization: "github-mirrors"
+    visibility: "public"
+
+  mirror:
+    releases: true
+    wiki: true
+    metadata: true
+    issues: true
+    pullRequests: true
+
+  automation:
+    schedule_enabled: true
+    schedule_interval: 3600
+
+  cleanup:
+    enabled: true
+    retentionDays: 30

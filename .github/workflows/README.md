@@ -85,3 +85,10 @@ If a workflow fails:
    - Security vulnerabilities
 
 For persistent issues, consider opening an issue in the repository.
+
+
+### Helm Test (`helm-test.yml`)
+
+This workflow run on the main branch and pull requests. it:
+- Run yamllint to keep the formating unified
+- Run helm template with different value files

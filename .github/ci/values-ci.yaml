@@ -1,0 +1,59 @@
+image:
+  registry: ghcr.io
+  repository: raylabshq/gitea-mirror
+  tag: ""
+
+service:
+  type: ClusterIP
+  port: 8080
+
+ingress:
+  enabled: true
+  className: "nginx"
+  hosts:
+    - host: ci.example.com
+
+route:
+  enabled: true
+  forceHTTPS: true
+  domain: ["ci.example.com"]
+  gateway: "dummy-gw"
+  gatewayNamespace: "default"
+  http:
+    gatewaySection: "http"
+  https:
+    gatewaySection: "https"
+
+gitea-mirror:
+  nodeEnv: production
+  core:
+    databaseUrl: "file:data/gitea-mirror.db"
+    betterAuthSecret: "dummy"
+    betterAuthUrl: "http://localhost:4321"
+    betterAuthTrustedOrigins: "http://localhost:4321"
+  github:
+    username: "ci-user"
+    token: "not-used-in-template"
+    type: "personal"
+    privateRepositories: true
+    skipForks: false
+    skipStarredIssues: false
+  gitea:
+    url: "https://gitea.example.com"
+    token: "not-used-in-template"
+    username: "ci-user"
+    organization: "github-mirrors"
+    visibility: "public"
+  mirror:
+    releases: true
+    wiki: true
+    metadata: true
+    issues: true
+    pullRequests: true
+    starred: false
+  automation:
+    schedule_enabled: true
+    schedule_interval: "3600"
+  cleanup:
+    enabled: true
+    interval: "2592000"

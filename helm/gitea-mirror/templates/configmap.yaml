@@ -1,0 +1,38 @@
+{{- $gm := index .Values "gitea-mirror" -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "gitea-mirror.fullname" . }}
+  labels:
+    {{- include "gitea-mirror.labels" . | nindent 4 }}
+data:
+  NODE_ENV: {{ $gm.nodeEnv | quote }}
+  # Core configuration
+  DATABASE_URL: {{ $gm.core.databaseUrl | quote }}
+  BETTER_AUTH_SECRET: {{ $gm.core.betterAuthSecret | quote }}
+  BETTER_AUTH_URL: {{ $gm.core.betterAuthUrl | quote }}
+  BETTER_AUTH_TRUSTED_ORIGINS: {{ $gm.core.betterAuthTrustedOrigins | quote }}
+  # GitHub Config
+  GITHUB_USERNAME: {{ $gm.github.username | quote }}
+  GITHUB_TYPE: {{ $gm.github.type | quote }}
+  PRIVATE_REPOSITORIES: {{ $gm.github.privateRepositories | quote }}
+  MIRROR_STARRED: {{ $gm.github.mirrorStarred | quote }}
+  SKIP_FORKS: {{ $gm.github.skipForks | quote }}
+  SKIP_STARRED_ISSUES: {{ $gm.github.skipStarredIssues | quote }}
+  # Gitea Config
+  GITEA_URL: {{ $gm.gitea.url | quote }}
+  GITEA_USERNAME: {{ $gm.gitea.username | quote }}
+  GITEA_ORGANIZATION: {{ $gm.gitea.organization | quote }}
+  GITEA_ORG_VISIBILITY: {{ $gm.gitea.visibility | quote }}
+  # Mirror Options
+  MIRROR_RELEASES: {{ $gm.mirror.releases | quote }}
+  MIRROR_WIKI: {{ $gm.mirror.wiki | quote }}
+  MIRROR_METADATA: {{ $gm.mirror.metadata | quote }}
+  MIRROR_ISSUES: {{ $gm.mirror.issues | quote }}
+  MIRROR_PULL_REQUESTS: {{ $gm.mirror.pullRequests | quote }}
+  # Automation
+  SCHEDULE_ENABLED: {{ $gm.automation.schedule_enabled| quote  }}
+  SCHEDULE_INTERVAL: {{ $gm.automation.schedule_interval | quote }}
+  # Cleanup
+  CLEANUP_ENABLED: {{ $gm.cleanup.enabled | quote }}
+  CLEANUP_RETENTION_DAYS: {{ $gm.cleanup.retentionDays | quote }}

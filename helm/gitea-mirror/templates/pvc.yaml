@@ -1,0 +1,26 @@
+{{- if and .Values.persistence.enabled .Values.persistence.create }}
+{{- $gm := index .Values "gitea-mirror" -}}
+kind: PersistentVolumeClaim
+apiVersion: v1
+metadata:
+  name: {{ .Values.persistence.claimName }}
+  labels:
+    {{- include "gitea-mirror.labels" . | nindent 4 }}
+  {{- with .Values.persistence.annotations }}
+  annotations:
+    {{ . | toYaml | indent 4}}
+  {{- end }}
+spec:
+  accessModes:
+    {{- toYaml .Values.persistence.accessModes | nindent 4 }}
+  {{- with .Values.persistence.storageClass }}
+  storageClassName: {{ . }}
+  {{- end }}
+  volumeMode: Filesystem
+  {{- with .Values.persistence.volumeName }}
+  volumeName: {{ . }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.size }}
+{{- end }}

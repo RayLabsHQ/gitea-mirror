@@ -1,0 +1,77 @@
+{{- if .Values.route.enabled }}
+{{- if .Values.route.forceHTTPS }}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "gitea-mirror.fullname" . }}-http
+  labels:
+    {{- include "gitea-mirror.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    - name: {{ .Values.route.gateway }}
+      sectionName: {{ .Values.route.http.gatewaySection }}
+      namespace: {{ .Values.route.gatewayNamespace }}
+  hostnames: {{ .Values.route.domain }}
+  rules:
+    - filters:
+        - type: RequestRedirect
+          requestRedirect:
+            scheme: https
+            statusCode: 301
+        {{- with .Values.route.http.filters }}
+          {{ toYaml . | nindent 4 }}
+        {{- end }}
+{{- else }}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "gitea-mirror.fullname" . }}-http
+  labels:
+    {{- include "gitea-mirror.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    - name: {{ .Values.route.gateway }}
+      sectionName: {{ .Values.route.http.gatewaySection }}
+      namespace: {{ .Values.route.gatewayNamespace }}
+  hostnames: {{ .Values.route.domain }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: {{ include "gitea-mirror.fullname" . }}
+          port: {{ .Values.service.port }}
+      {{- with .Values.route.http.filters }}
+      filters:
+         {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "gitea-mirror.fullname" . }}-https
+  labels:
+    {{- include "gitea-mirror.labels" . | nindent 4 }}
+spec:
+  parentRefs:
+    - name: {{ .Values.route.gateway }}
+      sectionName: {{ .Values.route.https.gatewaySection }}
+      namespace: {{ .Values.route.gatewayNamespace }}
+  hostnames: {{ .Values.route.domain }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: {{ include "gitea-mirror.fullname" . }}
+          port: {{ .Values.service.port }}
+      {{- with .Values.route.https.filters }}
+      filters:
+          {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
