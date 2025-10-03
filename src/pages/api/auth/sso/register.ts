@@ -2,6 +2,9 @@ import type { APIContext } from "astro";
 import { createSecureErrorResponse } from "@/lib/utils";
 import { requireAuth } from "@/lib/utils/auth-helpers";
 import { auth } from "@/lib/auth";
+import { db, ssoProviders } from "@/lib/db";
+import { eq } from "drizzle-orm";
+import { nanoid } from "nanoid";
 
 // POST /api/auth/sso/register - Register a new SSO provider using Better Auth
 export async function POST(context: APIContext) {
@@ -168,7 +171,47 @@ export async function POST(context: APIContext) {
     }
 
     const result = await response.json();
-    
+
+    // Mirror provider into our local sso_providers table for UI listing
+    try {
+      const existing = await db
+        .select()
+        .from(ssoProviders)
+        .where(eq(ssoProviders.providerId, providerId))
+        .limit(1);
+
+      const values: any = {
+        issuer: registrationBody.issuer,
+        domain: registrationBody.domain,
+        organizationId: registrationBody.organizationId,
+        updatedAt: new Date(),
+      };
+      if (registrationBody.oidcConfig) {
+        values.oidcConfig = JSON.stringify(registrationBody.oidcConfig);
+      }
+      if (registrationBody.samlConfig) {
+        values.samlConfig = JSON.stringify(registrationBody.samlConfig);
+      }
+
+      if (existing.length > 0) {
+        await db.update(ssoProviders).set(values).where(eq(ssoProviders.id, existing[0].id));
+      } else {
+        await db.insert(ssoProviders).values({
+          id: nanoid(),
+          issuer: registrationBody.issuer,
+          domain: registrationBody.domain,
+          oidcConfig: JSON.stringify(registrationBody.oidcConfig || {}),
+          samlConfig: registrationBody.samlConfig ? JSON.stringify(registrationBody.samlConfig) : undefined,
+          userId: user.id,
+          providerId: registrationBody.providerId,
+          organizationId: registrationBody.organizationId,
+        });
+      }
+    } catch (e) {
+      // Do not fail the main request if mirroring to local table fails
+      console.warn("Failed to mirror SSO provider to local DB:", e);
+    }
+
     return new Response(JSON.stringify(result), {
       status: 201,
       headers: { "Content-Type": "application/json" },

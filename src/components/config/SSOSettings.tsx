@@ -14,6 +14,7 @@ import { Badge } from '../ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { MultiSelect } from '@/components/ui/multi-select';
+import { authClient } from '@/lib/auth-client';
 
 function isTrustedIssuer(issuer: string, allowedHosts: string[]): boolean {
   try {
@@ -158,50 +159,146 @@ export function SSOSettings() {
   const createProvider = async () => {
     setAddingProvider(true);
     try {
-      const requestData: any = {
-        providerId: providerForm.providerId,
-        issuer: providerForm.issuer,
-        domain: providerForm.domain,
-        organizationId: providerForm.organizationId || undefined,
-        providerType,
-      };
-
-      if (providerType === 'oidc') {
-        requestData.clientId = providerForm.clientId;
-        requestData.clientSecret = providerForm.clientSecret;
-        requestData.authorizationEndpoint = providerForm.authorizationEndpoint;
-        requestData.tokenEndpoint = providerForm.tokenEndpoint;
-        requestData.jwksEndpoint = providerForm.jwksEndpoint;
-        requestData.userInfoEndpoint = providerForm.userInfoEndpoint;
-        requestData.discoveryEndpoint = providerForm.discoveryEndpoint;
-        requestData.scopes = providerForm.scopes;
-        requestData.pkce = providerForm.pkce;
-      } else {
-        requestData.entryPoint = providerForm.entryPoint;
-        requestData.cert = providerForm.cert;
-        requestData.callbackUrl = providerForm.callbackUrl || `${window.location.origin}/api/auth/sso/saml2/callback/${providerForm.providerId}`;
-        requestData.audience = providerForm.audience || window.location.origin;
-        requestData.wantAssertionsSigned = providerForm.wantAssertionsSigned;
-        requestData.signatureAlgorithm = providerForm.signatureAlgorithm;
-        requestData.digestAlgorithm = providerForm.digestAlgorithm;
-        requestData.identifierFormat = providerForm.identifierFormat;
-      }
-
       if (editingProvider) {
-        // Update existing provider
-        const updatedProvider = await apiRequest<SSOProvider>(`/sso/providers?id=${editingProvider.id}`, {
-          method: 'PUT',
-          data: requestData,
-        });
-        setProviders(providers.map(p => p.id === editingProvider.id ? updatedProvider : p));
-        toast.success('SSO provider updated successfully');
+        // Delete and recreate to align with Better Auth docs
+        try {
+          await apiRequest(`/sso/providers?id=${editingProvider.id}`, { method: 'DELETE' });
+        } catch (e) {
+          // Continue even if local delete fails; registration will mirror latest
+          console.warn('Failed to delete local provider before recreate', e);
+        }
+
+        // Recreate via Better Auth registration
+        try {
+          if (providerType === 'oidc') {
+            await authClient.sso.register({
+              providerId: providerForm.providerId,
+              issuer: providerForm.issuer,
+              domain: providerForm.domain,
+              organizationId: providerForm.organizationId || undefined,
+              oidcConfig: {
+                clientId: providerForm.clientId || undefined,
+                clientSecret: providerForm.clientSecret || undefined,
+                authorizationEndpoint: providerForm.authorizationEndpoint || undefined,
+                tokenEndpoint: providerForm.tokenEndpoint || undefined,
+                jwksEndpoint: providerForm.jwksEndpoint || undefined,
+                userInfoEndpoint: providerForm.userInfoEndpoint || undefined,
+                discoveryEndpoint: providerForm.discoveryEndpoint || undefined,
+                scopes: providerForm.scopes,
+                pkce: providerForm.pkce,
+              },
+              mapping: {
+                id: 'sub',
+                email: 'email',
+                emailVerified: 'email_verified',
+                name: 'name',
+                image: 'picture',
+              },
+            } as any);
+          } else {
+            await authClient.sso.register({
+              providerId: providerForm.providerId,
+              issuer: providerForm.issuer,
+              domain: providerForm.domain,
+              organizationId: providerForm.organizationId || undefined,
+              samlConfig: {
+                entryPoint: providerForm.entryPoint,
+                cert: providerForm.cert,
+                callbackUrl:
+                  providerForm.callbackUrl ||
+                  `${window.location.origin}/api/auth/sso/saml2/callback/${providerForm.providerId}`,
+                audience: providerForm.audience || window.location.origin,
+                wantAssertionsSigned: providerForm.wantAssertionsSigned,
+                signatureAlgorithm: providerForm.signatureAlgorithm,
+                digestAlgorithm: providerForm.digestAlgorithm,
+                identifierFormat: providerForm.identifierFormat,
+              },
+              mapping: {
+                id: 'nameID',
+                email: 'email',
+                name: 'displayName',
+                firstName: 'givenName',
+                lastName: 'surname',
+              },
+            } as any);
+          }
+          toast.success('SSO provider recreated');
+        } catch (e: any) {
+          console.error('Recreate failed', e);
+          const msg = typeof e?.message === 'string' ? e.message : String(e);
+          // Common case: providerId already exists in Better Auth
+          if (msg.toLowerCase().includes('already exists')) {
+            toast.error('Provider ID already exists in auth server. Choose a new Provider ID and try again.');
+          } else {
+            showErrorToast(e, toast);
+          }
+        }
+
+        // Refresh providers from our API after registration mirrors into DB
+        const refreshed = await apiRequest<SSOProvider[] | { providers: SSOProvider[] }>(
+          '/sso/providers'
+        );
+        setProviders(Array.isArray(refreshed) ? refreshed : refreshed?.providers || []);
       } else {
-        // Create new provider
-        const newProvider = await apiRequest<SSOProvider>('/sso/providers', {
-          method: 'POST',
-          data: requestData,
-        });
-        setProviders([...providers, newProvider]);
+        // Create new provider - follow Better Auth docs using the SSO client
+        if (providerType === 'oidc') {
+          await authClient.sso.register({
+            providerId: providerForm.providerId,
+            issuer: providerForm.issuer,
+            domain: providerForm.domain,
+            organizationId: providerForm.organizationId || undefined,
+            oidcConfig: {
+              clientId: providerForm.clientId || undefined,
+              clientSecret: providerForm.clientSecret || undefined,
+              authorizationEndpoint: providerForm.authorizationEndpoint || undefined,
+              tokenEndpoint: providerForm.tokenEndpoint || undefined,
+              jwksEndpoint: providerForm.jwksEndpoint || undefined,
+              userInfoEndpoint: providerForm.userInfoEndpoint || undefined,
+              discoveryEndpoint: providerForm.discoveryEndpoint || undefined,
+              scopes: providerForm.scopes,
+              pkce: providerForm.pkce,
+            },
+            mapping: {
+              id: 'sub',
+              email: 'email',
+              emailVerified: 'email_verified',
+              name: 'name',
+              image: 'picture',
+            },
+          } as any);
+        } else {
+          await authClient.sso.register({
+            providerId: providerForm.providerId,
+            issuer: providerForm.issuer,
+            domain: providerForm.domain,
+            organizationId: providerForm.organizationId || undefined,
+            samlConfig: {
+              entryPoint: providerForm.entryPoint,
+              cert: providerForm.cert,
+              callbackUrl:
+                providerForm.callbackUrl ||
+                `${window.location.origin}/api/auth/sso/saml2/callback/${providerForm.providerId}`,
+              audience: providerForm.audience || window.location.origin,
+              wantAssertionsSigned: providerForm.wantAssertionsSigned,
+              signatureAlgorithm: providerForm.signatureAlgorithm,
+              digestAlgorithm: providerForm.digestAlgorithm,
+              identifierFormat: providerForm.identifierFormat,
+            },
+            mapping: {
+              id: 'nameID',
+              email: 'email',
+              name: 'displayName',
+              firstName: 'givenName',
+              lastName: 'surname',
+            },
+          } as any);
+        }
+
+        // Refresh providers from our API after registration mirrors into DB
+        const refreshed = await apiRequest<SSOProvider[] | { providers: SSOProvider[] }>(
+          '/sso/providers'
+        );
+        setProviders(Array.isArray(refreshed) ? refreshed : refreshed?.providers || []);
         toast.success('SSO provider created successfully');
       }
 

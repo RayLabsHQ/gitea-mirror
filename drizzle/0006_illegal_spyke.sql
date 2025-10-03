@@ -1,0 +1,1 @@
+ALTER TABLE `sso_providers` ADD `saml_config` text;

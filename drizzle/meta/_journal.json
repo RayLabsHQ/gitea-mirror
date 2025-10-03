@@ -43,6 +43,13 @@
       "when": 1757786449446,
       "tag": "0005_polite_preak",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1757825311459,
+      "tag": "0006_illegal_spyke",
+      "breakpoints": true
     }
   ]
 }
