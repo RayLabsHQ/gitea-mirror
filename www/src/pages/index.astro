@@ -4,6 +4,7 @@ import { Header } from '../components/Header';
 import { Hero } from '../components/Hero';
 import ShaderBackground from '../components/ShaderBackground.astro';
 import Features from '../components/Features.astro';
+import UseCases from '../components/UseCases.astro';
 import Screenshots from '../components/Screenshots.astro';
 import { Installation } from '../components/Installation';
 import { CTA } from '../components/CTA';
@@ -123,6 +124,7 @@ const structuredData = {
         <Hero client:load />
       </div>
       <Features />
+      <UseCases />
       <Screenshots />
       <Installation client:load />
       <CTA client:load />

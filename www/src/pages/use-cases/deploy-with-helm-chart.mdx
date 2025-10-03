@@ -1,0 +1,106 @@
+---
+layout: ../../layouts/UseCaseLayout.astro
+title: "Deploy Gitea Mirror with the Helm Chart"
+description: "Install the Gitea Mirror backup service on Kubernetes with the official Helm chart, including secrets, persistence, and upgrade workflow."
+canonical: "https://gitea-mirror.com/use-cases/deploy-with-helm-chart/"
+---
+
+## Why ship it to Kubernetes
+
+If your homelab already runs a cluster (k3s, Talos, MicroK8s), Helm is the fastest way to keep Gitea Mirror close to the rest of your self-hosted stack. The chart in `helm/gitea-mirror` bundles the deployment, service, ingress, and persistence so you can version your backup mirror just like any other release.
+
+## Requirements
+
+- Kubernetes 1.23+ with storage (Rook, Longhorn, local-path, etc.)
+- Helm 3.8+
+- GitHub PAT and Gitea API token ready (same scopes as the Docker playbook)
+- Namespace with outbound access to GitHub and your Gitea host
+
+## Step-by-step
+
+### 1. Prepare a values file
+
+Create `values-gitea-mirror.yaml` with the credentials you want the chart to render. Only `github` and `gitea` fields are required for a basic backup deployment.
+
+```yaml
+gitea-mirror:
+  github:
+    username: "your-gh-user"
+    token: "ghp_..."
+  gitea:
+    url: "https://git.lab.local"
+    token: "gitea_..."
+  mirror:
+    interval: "30m"
+    owners:
+      - "your-gh-user"
+
+persistence:
+  enabled: true
+  size: 5Gi
+
+service:
+  type: ClusterIP
+
+ingress:
+  enabled: true
+  className: "traefik"
+  hosts:
+    - host: "mirror.lab.local"
+      paths:
+        - path: "/"
+          pathType: Prefix
+  tls:
+    - hosts: ["mirror.lab.local"]
+      secretName: "mirror-tls"
+```
+
+### 2. Install into a namespace
+
+```bash
+kubectl create namespace gitea-mirror
+helm upgrade --install gitea-mirror ./helm/gitea-mirror \
+  --namespace gitea-mirror \
+  --values values-gitea-mirror.yaml
+```
+
+Helm renders a `Deployment`, `Service`, optional `Ingress`, and PVC if persistence is enabled. The pod mounts storage at `/app/data` for the SQLite DB and cached repositories.
+
+### 3. Verify the release
+
+```bash
+kubectl -n gitea-mirror get pods,svc,pvc
+kubectl -n gitea-mirror logs deploy/gitea-mirror --tail=100
+```
+
+Watch for `Server started` in the logs. Once ready, browse to the ingress host (or userland port-forward with `kubectl port-forward svc/gitea-mirror 4321:8080`). Complete the first-run wizard just like the Docker playbook.
+
+### 4. Keep it updated
+
+- Pull chart updates when you bump the repo: `git pull` then re-run the `helm upgrade` command.
+- Override the container image tag with `--set image.tag=v3.7.2` if you need to pin.
+- Use Helm rollbacks if a release misbehaves: `helm rollback gitea-mirror <REVISION> -n gitea-mirror`.
+
+## Observability
+
+- Attach the `/api/health` endpoint to your cluster’s probing (Kubernetes probes are already configured by the chart).
+- Expose the metrics endpoint via a `ServiceMonitor` if you run Prometheus; add `extraAnnotations` to make it discoverable.
+- Watch PVC growth with `kubectl df-pv` or your storage dashboard to ensure LFS blobs do not exhaust the volume.
+
+## Disaster-recovery drill
+
+1. Scale the deployment down: `kubectl -n gitea-mirror scale deploy gitea-mirror --replicas=0`.
+2. Snapshot the PVC (CSI snapshots or Velero).
+3. Restore into a test namespace and scale the deployment back up.
+4. Confirm you can log in and the mirrored repositories are intact.
+
+## Cleanup
+
+```bash
+helm uninstall gitea-mirror -n gitea-mirror
+kubectl delete namespace gitea-mirror
+```
+
+Remove the PVC manually if you want a clean slate: `kubectl delete pvc gitea-mirror-storage -n gitea-mirror`.
+
+Ready to run on bare metal instead? Head over to the [Proxmox LXC playbook](../proxmox-lxc-homelab).

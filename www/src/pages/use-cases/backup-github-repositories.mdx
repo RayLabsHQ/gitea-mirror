@@ -1,0 +1,92 @@
+---
+layout: ../../layouts/UseCaseLayout.astro
+title: "Backup GitHub Repositories with Gitea Mirror"
+description: "Run a homelab-friendly playbook to mirror GitHub into self-hosted Gitea with automated schedules, health checks, and restore drills."
+canonical: "https://gitea-mirror.com/use-cases/backup-github-repositories/"
+---
+
+## Why homelabbers care
+
+GitHub is great—right up until an outage, SSO change, or account lockout strands your projects. Gitea Mirror keeps a self-hosted copy of everything (history, metadata, LFS) so you can keep working locally. This playbook walks through the minimal Docker setup the project ships with and shows how to prove your backups actually work.
+
+## Requirements
+
+- Docker Engine and Compose on the host that will run the mirror
+- A GitHub personal access token with `repo`, `read:org`, and `admin:org` if you mirror orgs
+- A self-hosted Gitea instance (can be on the same box) and admin or org owner credentials
+- Open ports 4321 (web UI) and 3000 (default Gitea) inside your network
+
+## Step-by-step
+
+### 1. Clone the repo and start the stack
+
+```bash
+git clone https://github.com/RayLabsHQ/gitea-mirror.git
+cd gitea-mirror
+docker compose -f docker-compose.alt.yml up -d
+```
+
+The `alt` compose file ships with sane defaults for a single-node backup mirror. It stores data in `./data`. If you need a different location, set `DATA_DIR=/path` in `.env` before boot.
+
+Verify the containers:
+
+```bash
+docker compose -f docker-compose.alt.yml ps
+docker compose -f docker-compose.alt.yml logs -f gitea-mirror
+```
+
+Wait for "Server started" before moving on.
+
+### 2. Generate tokens and connect GitHub
+
+1. Create a GitHub personal access token (classic) with at least `repo`, `read:org`, and `admin:org` if you want organization mirrors.
+2. Log in to Gitea and create an access token for an admin/owner account with `write:repository`.
+3. Visit `http://<host>:4321` and sign up—the first user becomes admin.
+4. Complete the setup wizard:
+   - Paste the GitHub PAT and Gitea URL/token.
+   - Choose which GitHub owners (user/org) to track.
+   - Leave sync interval at the default 1 hour to start.
+
+### 3. Stage your first backup job
+
+On the dashboard:
+
+1. Click **Sync Now** for a small test repository.
+2. Open Gitea and confirm the mirror appears with the right owner/org.
+3. Enable **Mirror metadata** and **Mirror LFS** if you rely on issues, wikis, or large assets.
+
+For broader coverage, switch the organization strategy to **Preserve structure** so Gitea mirrors your GitHub org layout automatically.
+
+### 4. Schedule a recurring sync window
+
+Under **Settings → Mirror Options**:
+
+- Set the global interval (for example 30 minutes) to keep backups fresh.
+- If you only need nightly backups, add a schedule window such as `02:00-02:30`.
+- Enable **Auto-discovery** so new repositories are picked up whenever they appear.
+
+### 5. Prove the backup works
+
+Treat the mirror like any other DR asset:
+
+1. Temporarily block outbound GitHub access on your machine.
+2. Clone from Gitea instead: `git clone http://<gitea-host>/<owner>/<repo>.git`.
+3. Confirm commit history, tags, releases, and issues exist.
+4. Remove the block and document the restore steps in your homelab wiki.
+
+## Health checks & monitoring
+
+- The container exposes `/api/health`; add it to Uptime Kuma, Healthchecks.io, or Prometheus.
+- Mirror failures surface in the activity log; consider exporting them through the `/api/events` endpoint.
+- Disk usage lives under `Settings → Storage`; make sure the host volume has headroom for LFS blobs.
+
+## Hardening tips
+
+- Put the stack behind a reverse proxy (Traefik, Caddy, Nginx) and enable TLS.
+- Rotate both GitHub and Gitea tokens quarterly; the UI will flag expired credentials.
+- Snapshot the `data/` volume (ZFS/BTRFS) or back it up with `restic` so the mirror survives host failure.
+
+## Next steps
+
+- Promote the mirror to read-only users who do not need GitHub access.
+- Layer on the [Helm](../deploy-with-helm-chart) or [Proxmox LXC](../proxmox-lxc-homelab) playbooks when you outgrow the single-node setup.

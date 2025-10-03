@@ -1,0 +1,115 @@
+---
+import '../styles/global.css';
+import { Header } from '../components/Header';
+import Footer from '../components/Footer.astro';
+
+const {
+  content: {
+    title = 'Use Case',
+    description = 'Explore how Gitea Mirror helps engineering teams stay resilient.',
+    canonical = 'https://gitea-mirror.com/use-cases',
+  }
+} = Astro.props;
+---
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width" />
+    <title>{title} · Gitea Mirror</title>
+    <meta name="description" content={description} />
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+    <link rel="canonical" href={canonical} />
+    <script is:inline>
+      const theme = localStorage.getItem('theme') ||
+        (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+      document.documentElement.classList.toggle('dark', theme === 'dark');
+    </script>
+  </head>
+  <body class="min-h-screen bg-background text-foreground antialiased">
+    <Header client:load />
+    <main class="pt-24 pb-20">
+      <article class="use-case-content mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        <slot />
+      </article>
+    </main>
+    <Footer />
+  </body>
+</html>
+
+<style is:global>
+  .use-case-content {
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+    padding-top: 3rem;
+    padding-bottom: 3rem;
+    font-size: 1rem;
+    line-height: 1.75;
+  }
+
+  .use-case-content > :is(h1, h2, h3) {
+    font-weight: 700;
+    color: var(--foreground);
+    letter-spacing: -0.01em;
+  }
+
+  .use-case-content h1 {
+    font-size: clamp(2rem, 3vw + 1rem, 2.75rem);
+  }
+
+  .use-case-content h2 {
+    font-size: clamp(1.5rem, 2.5vw + 0.75rem, 2.125rem);
+    margin-top: 1rem;
+  }
+
+  .use-case-content h3 {
+    font-size: clamp(1.25rem, 1.5vw + 0.75rem, 1.5rem);
+  }
+
+  .use-case-content p {
+    margin: 0;
+    color: var(--muted-foreground);
+  }
+
+  .use-case-content ul,
+  .use-case-content ol {
+    padding-left: 1.5rem;
+    display: grid;
+    gap: 0.5rem;
+    color: var(--muted-foreground);
+  }
+
+  .use-case-content li::marker {
+    color: var(--primary);
+  }
+
+  .use-case-content pre {
+    background-color: color-mix(in srgb, var(--muted) 70%, transparent);
+    border-radius: 1rem;
+    padding: 1rem 1.25rem;
+    font-family: 'Fira Code', 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+    font-size: 0.95rem;
+    overflow-x: auto;
+  }
+
+  .use-case-content code:not(pre code) {
+    background-color: color-mix(in srgb, var(--muted) 70%, transparent);
+    color: var(--foreground);
+    padding: 0.1rem 0.35rem;
+    border-radius: 0.4rem;
+    font-size: 0.92em;
+  }
+
+  .use-case-content a {
+    color: color-mix(in srgb, var(--primary) 85%, var(--accent));
+    font-weight: 600;
+    text-decoration: underline;
+    text-decoration-thickness: 2px;
+    text-decoration-color: color-mix(in srgb, var(--primary) 50%, transparent);
+  }
+
+  .use-case-content a:hover {
+    text-decoration-color: var(--primary);
+  }
+</style>

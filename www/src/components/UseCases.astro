@@ -1,0 +1,74 @@
+---
+import { ArrowRight } from 'lucide-react';
+import { useCases } from '@/lib/use-cases';
+---
+
+<section id="use-cases" class="py-16 sm:py-24 px-4 sm:px-6 lg:px-8 bg-muted/30 border-y">
+  <div class="max-w-7xl mx-auto">
+    <div class="text-center max-w-3xl mx-auto mb-12 sm:mb-16">
+      <span class="inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-4">
+        Use Cases
+      </span>
+      <h2 class="text-2xl sm:text-3xl md:text-4xl font-bold tracking-tight">
+        Proven Ways Teams Depend on
+        <span class="text-gradient from-primary to-accent block sm:inline"> Gitea Mirror</span>
+      </h2>
+      <p class="mt-4 text-base sm:text-lg text-muted-foreground">
+        Explore real-world workflows where automated mirroring removes risk, accelerates migrations, and keeps engineering teams shipping.
+      </p>
+    </div>
+
+    <div class="grid gap-4 sm:gap-6 lg:gap-8 lg:grid-cols-3">
+      {useCases.slice(0, 3).map((useCase) => (
+        <article class="group relative flex flex-col rounded-2xl border bg-background/80 p-6 sm:p-8 shadow-sm transition-all duration-300 hover:-translate-y-1 hover:shadow-lg">
+          <div class="absolute inset-0 rounded-2xl bg-gradient-to-br from-primary/5 via-accent/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+          <div class="relative flex flex-col h-full">
+            <h3 class="text-xl font-semibold mb-3">
+              {useCase.title}
+            </h3>
+            <p class="text-sm sm:text-base text-muted-foreground mb-4">
+              {useCase.summary}
+            </p>
+
+            <dl class="grid gap-3 text-sm sm:text-base text-muted-foreground">
+              <div>
+                <dt class="font-semibold text-foreground">Pain Point</dt>
+                <dd>{useCase.painPoint}</dd>
+              </div>
+              <div>
+                <dt class="font-semibold text-foreground">Outcome</dt>
+                <dd>{useCase.outcome}</dd>
+              </div>
+            </dl>
+
+            <div class="mt-6 flex flex-wrap gap-2">
+              {useCase.tags.map((tag) => (
+                <span class="inline-flex items-center rounded-full border border-muted px-3 py-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  {tag}
+                </span>
+              ))}
+            </div>
+
+            <a
+              href={`/use-cases/${useCase.slug}/`}
+              class="mt-auto inline-flex items-center gap-2 pt-6 text-sm font-medium text-primary transition-colors hover:text-primary/80"
+            >
+              Read the playbook
+              <ArrowRight class="h-4 w-4 transition-transform group-hover:translate-x-1" />
+            </a>
+          </div>
+        </article>
+      ))}
+    </div>
+
+    <div class="mt-10 text-center">
+      <a
+        href="/use-cases/"
+        class="inline-flex items-center gap-2 rounded-full border border-primary/40 bg-primary/10 px-6 py-2 text-sm font-semibold text-primary transition-colors hover:bg-primary/15"
+      >
+        View more use cases
+        <ArrowRight class="h-4 w-4" />
+      </a>
+    </div>
+  </div>
+</section>
