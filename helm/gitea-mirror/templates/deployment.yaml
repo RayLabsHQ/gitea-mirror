@@ -49,7 +49,7 @@ spec:
       terminationGracePeriodSeconds: {{ .Values.deployment.terminationGracePeriodSeconds }}
       containers:
         - name: gitea-mirror
-          image: {{ .Values.image.registry }}/{{ .Values.image.repository }}:v{{ .Values.image.tag | default .Chart.AppVersion | toString }}
+          image: {{ .Values.image.registry }}/{{ .Values.image.repository }}:{{ .Values.image.tag | default (printf "v%s" .Chart.AppVersion) }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           envFrom:
             - configMapRef:
