@@ -1,0 +1,80 @@
+---
+layout: ../../layouts/UseCaseLayout.astro
+title: "Run Gitea Mirror inside a Proxmox LXC"
+description: "Provision the community-maintained Proxmox VE LXC container for Gitea Mirror and wire it into your homelab backup workflow."
+canonical: "https://gitea-mirror.com/use-cases/proxmox-lxc-homelab/"
+---
+
+## Why run it on Proxmox
+
+When most of your homelab lives in Proxmox VE, the community LXC script is the fastest path from zero to a managed Gitea Mirror node. It handles Bun, systemd, persistent storage, and future upgrades so you can focus on keeping Git backups fresh.
+
+## Requirements
+
+- Proxmox VE host with the [community-scripts repository](https://community-scripts.github.io/ProxmoxVE/) enabled
+- Storage pool with ~6 GB free (default script allocation) and an available bridge (usually `vmbr0`)
+- GitHub PAT and Gitea token scoped for mirroring
+- DNS or IP address for the container on your LAN
+
+## Step-by-step
+
+### 1. Launch the installer
+
+SSH into the Proxmox host and run:
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/gitea-mirror.sh)"
+```
+
+The helper script prompts for:
+
+- **Node**: the Proxmox host that will own the container
+- **Storage**: local-lvm, ZFS dataset, etc.
+- **Network bridge**: e.g. `vmbr0`
+- **IP assignment**: DHCP or static (consider static for a backup appliance)
+- **Container size**: defaults to 2 vCPU, 2 GiB RAM, 6 GiB disk—bump RAM if you mirror large orgs
+
+Accept the defaults or adjust as needed. The script downloads the release, installs Bun, seeds systemd, and prints the access URL on completion.
+
+### 2. First login and setup
+
+1. Browse to `http://<container-ip>:4321`.
+2. Create the admin account (first user = admin).
+3. Enter your GitHub PAT and Gitea API token in the onboarding wizard.
+4. Select the GitHub owners you want mirrored and enable auto-discovery for new repos.
+
+### 3. Validate persistence and services
+
+Inside the container (`pct enter <CTID>`):
+
+```bash
+systemctl status gitea-mirror
+ls /opt/gitea-mirror/data
+```
+
+You should see `gitea-mirror.db` and a `repos/` directory. Data lives under `/opt/gitea-mirror/data`; back it up or snapshot the underlying storage pool regularly.
+
+### 4. Expose the service (optional)
+
+- Add a Proxmox firewall rule or reverse proxy entry (Traefik/Caddy/HAProxy) if you want TLS.
+- Create a DNS record (`mirror.lab.local`) pointed at the container for easier access.
+
+### 5. Upgrades & maintenance
+
+- Re-run the installer script; it detects existing installs, backs up `/opt/gitea-mirror/data`, downloads the latest release, and restarts the service.
+- Watch for warnings about upgrades from v2 → v3 wiping config—take a snapshot first if you still run v2 artifacts.
+- Check logs with `journalctl -u gitea-mirror -n 200` or `journalctl -u gitea-mirror -f` for live tailing.
+
+## Disaster-recovery drill
+
+1. In Proxmox, snapshot the container (or use ZFS/BTRFS snapshots on the storage pool).
+2. Stop GitHub access temporarily and clone from the Gitea mirror to confirm the backup works.
+3. Restore the snapshot on a different node to ensure the service boots cleanly with the preserved data volume.
+
+## Troubleshooting
+
+- **Port 4321 already used**: change `PORT` in `/opt/gitea-mirror.env` and restart with `systemctl restart gitea-mirror`.
+- **Disk full**: extend the container disk in Proxmox, then run `pct resize <CTID> rootfs +5G`.
+- **Token expired**: log in to the UI → Settings to update GitHub/Gitea credentials.
+
+Looking for a cluster-native deployment? Try the [Helm playbook](../deploy-with-helm-chart).

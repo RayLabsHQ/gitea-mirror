@@ -1,0 +1,61 @@
+---
+layout: ../../layouts/UseCaseLayout.astro
+title: "Build a Starred Repo Collection"
+description: "Mirror your starred GitHub projects into a dedicated Gitea library so favorites remain available offline."
+canonical: "https://gitea-mirror.com/use-cases/starred-repos-collection/"
+---
+
+## Curate without losing projects
+
+Stars are a personal library—but they vanish when creators delete repos or your account is rate limited. Gitea Mirror can automatically capture every starred repository into a dedicated Gitea organization, complete with issues and releases, so your inspiration lives on.
+
+## Requirements
+
+- Gitea Mirror up and running (Docker, LXC, or Helm)
+- GitHub PAT for the account whose stars you want mirrored
+- Destination Gitea with a personal organization ready (e.g. `stars`)
+- Optional: DNS entry for the mirror so friends can browse the collection
+
+## Step-by-step
+
+### 1. Enable starred owner tracking
+
+1. In the onboarding wizard (or later under **Settings → Owners**), add your GitHub username.
+2. Enable the **Include starred repositories** toggle.
+3. Set the destination in Gitea to a dedicated org, e.g. `stars-jamie`.
+
+### 2. Categorize the collection
+
+- Create sub-organizations in Gitea (e.g. `stars-iot`, `stars-ai`).
+- Use Destination Overrides inside the dashboard to route specific stars into themed orgs.
+- Tag repos in Gitea with labels like `language:rust`, `topic:homelab` for quick filtering.
+
+### 3. Schedule incremental updates
+
+- Set the star discovery interval to something light like `1h` so new stars import quickly.
+- Use the **Starred sync window** (e.g. `00:00-00:30`) to avoid interfering with org backups.
+- Turn on **Starred repo cleanup** if you want unstarred projects removed from the library.
+
+### 4. Showcase the library
+
+- Point a read-only Gitea user at the org so friends can browse without write access.
+- Host the Gitea instance behind a reverse proxy with HTTPS, then link it on your blog.
+- Export the repo list weekly and share it as a curated newsletter.
+
+## Verify the collection works
+
+1. Star a new repo on GitHub.
+2. Wait for the star interval or click **Sync now** in the dashboard.
+3. Confirm the repo appears in your `stars` org with issues/releases intact.
+4. Unstar it on GitHub; if cleanup is enabled, confirm it disappears on the next sync.
+
+## Nice-to-haves
+
+- Add a `README.md` in the Gitea org homepage explaining your tagging rules.
+- Pair with [Preserve GitHub History](../preserve-github-history/) so you keep metadata, not just code.
+- Use the [Helm deployment](../deploy-with-helm-chart/) if you want the collection available inside your cluster.
+
+## Related playbooks
+
+- [Backup GitHub Repositories](../backup-github-repositories/)
+- [Automate GitHub Backups](../github-backup-automation/)

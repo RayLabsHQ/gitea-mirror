@@ -1,0 +1,69 @@
+---
+layout: ../../layouts/UseCaseLayout.astro
+title: "Preserve GitHub History Forever"
+description: "Archive commits, issues, releases, and LFS assets into Gitea so hobby projects survive account removals or repo deletions."
+canonical: "https://gitea-mirror.com/use-cases/preserve-github-history/"
+---
+
+## Keep the entire story, not just the code
+
+GitHub accounts get banned, repos go private, and owners rage-delete history. If you care about the full timeline—issues, releases, wiki—Gitea Mirror snapshots everything on a schedule so the story survives in your homelab.
+
+## Requirements
+
+- Running Gitea Mirror (follow the [backup playbook](../backup-github-repositories/))
+- GitHub PAT with metadata scopes (`repo`, `read:org`)
+- Destination Gitea with enough disk for cloned repos + attachments
+- Optional: object storage or snapshots for long-term archiving of the mirror volume
+
+## Step-by-step
+
+### 1. Set archival-friendly defaults
+
+In the admin UI under **Settings → Mirror Options**:
+
+- Enable **Mirror metadata**.
+- Enable **Mirror releases** and **Mirror wiki**.
+- Turn on **Include attachments** so release assets and issue uploads copy across.
+
+### 2. Create an "Archive" organization in Gitea
+
+1. In Gitea, create an org like `github-archive` with read-only members.
+2. Back in Gitea Mirror, edit each owner and set the destination to the archive org.
+3. Enable **Lock mirrors** so accidental edits on the archive side are blocked.
+
+### 3. Choose retention & cadence
+
+- Set the global interval to `1h` for active projects or `12h` for dormant ones.
+- Configure **Snapshot retention** (for example `keep last 30`) so old mirror runs remain inspectable.
+- Schedule a weekly full sync window during off-hours to re-check metadata drift.
+
+### 4. Record provenance
+
+- Tag each archived repo in Gitea with the upstream URL and the first mirrored date.
+- Enable **Mirror webhooks** to push sync summaries into Matrix/Discord for auditing.
+- Export a CSV of repos quarterly as part of your homelab documentation.
+
+### 5. Back up the backup
+
+- Snapshots: Use ZFS/BTRFS or Proxmox backups on the mirror’s data volume.
+- Offsite: `restic`/`rclone` the `data/` directory to a NAS or object store.
+- Test: Restore to a test Gitea instance and spot-check history every few months.
+
+## Verify the archive
+
+1. Delete a draft issue on GitHub.
+2. Wait for the next sync; open the issue in Gitea—you should still see the original content.
+3. Compare `git tag -l` in both remotes to ensure releases match.
+4. Use `git lfs ls-files` to confirm large assets made it across.
+
+## Maintenance checklist
+
+- Rotate tokens annually and document the rotation date in the repo README.
+- Monitor disk growth; configure `persistence.size` if you run the Helm chart.
+- Log anomalies—failed runs, conflicts—in your homelab journal to track trends.
+
+## Related playbooks
+
+- [Automate GitHub Backups](../github-backup-automation/)
+- [Build a Starred Repo Collection](../starred-repos-collection/)

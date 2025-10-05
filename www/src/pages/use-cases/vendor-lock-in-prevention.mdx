@@ -1,0 +1,61 @@
+---
+layout: ../../layouts/UseCaseLayout.astro
+title: "Stay Ready to Leave GitHub"
+description: "Use Gitea Mirror to keep an always-current fallback so policy or pricing changes at GitHub never stall your projects."
+canonical: "https://gitea-mirror.com/use-cases/vendor-lock-in-prevention/"
+---
+
+## Keep your exit hatch open
+
+GitHub can change pricing, authentication rules, or terms without notice. With Gitea Mirror running, you always have a live copy of code and metadata inside infrastructure you control—so switching to self-hosted Gitea, Forgejo, or something else becomes a DNS change, not a fire drill.
+
+## Requirements
+
+- Production-ready Gitea instance (backed by your usual storage and TLS)
+- Gitea Mirror configured with owner discovery and metadata sync
+- Documentation of your current GitHub org structure (for validation)
+- Optional: reverse proxy + SSO for a smooth cutover experience
+
+## Step-by-step
+
+### 1. Mirror everything continuously
+
+- Add every GitHub organization you care about as an owner in Gitea Mirror.
+- Enable **Preserve structure** so Gitea’s org layout matches GitHub.
+- Turn on metadata + LFS mirroring to ensure issues, releases, and binaries are ready on day one.
+
+### 2. Simulate a cutover
+
+1. Pick a pilot team.
+2. Ask them to work exclusively out of the Gitea mirror for a sprint.
+3. Capture feedback about permissions, webhooks, CI integrations, and adjust.
+
+### 3. Keep integrations dual-homed
+
+- Point your CI (e.g. Woodpecker, Jenkins) at both GitHub and Gitea using mirrored tokens.
+- Maintain matching webhook payloads so automation keeps running post-swap.
+- Mirror secrets (deploy keys, bot accounts) into the Gitea org to remove blockers.
+
+### 4. Document the flip procedure
+
+- Write a runbook: DNS updates, webhook changes, `git remote set-url` commands.
+- Version-control the document inside the mirror so updates stay in sync.
+- Rehearse twice a year; include steps to roll back to GitHub if needed.
+
+### 5. Watch for drift
+
+- Review the Gitea mirror weekly for newly created repos, teams, or permissions.
+- Parse the `/api/owners` endpoint to ensure auto-discovery still works.
+- Set alerts on the mirror’s activity log so you catch sync failures quickly.
+
+## Success criteria
+
+- A developer can change their `origin` remote to Gitea and push without errors.
+- CI pipelines succeed when pointed exclusively at the mirror.
+- All active repos have synced within your SLA (for example, last run < 2 hours ago).
+- The runbook includes contact info, rollback steps, and verification checklists.
+
+## Related playbooks
+
+- [Sync GitHub to Your Self-Hosted Gitea](../sync-github-to-self-hosted-gitea/)
+- [Deploy Gitea Mirror with the Helm Chart](../deploy-with-helm-chart/)

@@ -15,9 +15,10 @@ export function Header() {
   }, []);
 
   const navLinks = [
-    { href: '#features', label: 'Features' },
-    { href: '#screenshots', label: 'Screenshots' },
-    { href: '#installation', label: 'Installation' }
+    { href: '/#features', label: 'Features' },
+    { href: '/#use-cases', label: 'Use Cases' },
+    { href: '/#screenshots', label: 'Screenshots' },
+    { href: '/#installation', label: 'Installation' }
   ];
 
   return (
@@ -27,7 +28,7 @@ export function Header() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           {/* Logo */}
-          <a href="#" className="flex items-center gap-2 group">
+          <a href="/" className="flex items-center gap-2 group">
             <img
               src="/assets/logo.png"
               alt="Gitea Mirror Logo"

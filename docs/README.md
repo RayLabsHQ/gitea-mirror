@@ -22,6 +22,11 @@ Welcome to the Gitea Mirror documentation. This guide covers everything you need
 - **[Sponsor Integration](./SPONSOR_INTEGRATION.md)** - GitHub Sponsors integration
 - **[Webhook Configuration](./WEBHOOKS.md)** - Set up GitHub webhooks
 
+### Marketing Site
+
+- **Use Case Library** (`www/src/pages/use-cases/`) - MDX guides surfaced on the landing page use case section
+- **Use Case Cards** (`www/src/lib/use-cases.ts`) - Central place to update titles, summaries, and CTA links shown across the site
+
 ### Architecture
 
 - **[Architecture Overview](./ARCHITECTURE.md)** - System design and components

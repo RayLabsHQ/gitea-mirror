@@ -93,32 +93,6 @@ export function Hero() {
             />
           </a>
         </div>
-
-        {/* Call to action buttons */}
-        {/* <div className="mt-8 sm:mt-10 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4 px-4 z-20">
-          <Button
-            size="lg"
-            className="relative group w-full sm:w-auto min-h-[48px] text-base bg-gradient-to-r from-primary to-accent hover:from-primary/90 hover:to-accent/90 shadow-lg shadow-primary/25 hover:shadow-xl hover:shadow-primary/30 transition-all duration-300"
-            asChild
-          >
-            <a
-              href="https://github.com/RayLabsHQ/gitea-mirror"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Get Started
-              <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
-            </a>
-          </Button>
-          <Button
-            size="lg"
-            variant="outline"
-            className="relative w-full sm:w-auto min-h-[48px] text-base border-primary/20 hover:bg-primary/10 hover:border-primary/30 hover:text-foreground transition-all duration-300"
-            asChild
-          >
-            <a href="#features">View Features</a>
-          </Button>
-        </div> */}
       </div>
     </section>
   );

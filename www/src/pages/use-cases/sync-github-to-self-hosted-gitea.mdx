@@ -1,0 +1,71 @@
+---
+layout: ../../layouts/UseCaseLayout.astro
+title: "Sync GitHub to Your Self-Hosted Gitea"
+description: "Keep a homelab Gitea instance continuously updated with GitHub by using Gitea Mirror's discovery, scheduling, and metadata sync."
+canonical: "https://gitea-mirror.com/use-cases/sync-github-to-self-hosted-gitea/"
+---
+
+## Keep SaaS and self-hosted in lockstep
+
+You may still collaborate on GitHub every day, yet want a LAN Gitea copy you control. Gitea Mirror bridges the two: it tracks owners, auto-discovers repos, mirrors metadata, and keeps a local instance only minutes behind upstream without hand-written cron jobs.
+
+## Requirements
+
+- Gitea Mirror deployed (Docker, Proxmox LXC, or Helm)
+- GitHub PAT with `repo`, `read:org`, and `admin:org` scopes
+- Gitea API token for the target account/org
+- Stable connectivity between the mirror host and both GitHub + Gitea
+
+## Step-by-step
+
+### 1. Connect accounts in the admin wizard
+
+1. Sign in at `http://<mirror-host>:4321`.
+2. Open **Settings → Connections**.
+3. Paste the GitHub PAT and choose the owners (user + orgs) you want mirrored.
+4. Add your self-hosted Gitea URL and token; pick the destination org structure (typically **Preserve structure**).
+
+### 2. Enable continuous discovery
+
+- Go to **Settings → Mirror Options** and toggle **Auto-discovery**.
+- Set the discovery interval (for example `15 minutes`) so new repositories, forks, and transfers sync automatically.
+- Optionally add a "Starred" owner to pull in personal favorites alongside org repos.
+
+### 3. Configure sync cadence
+
+Decide how far behind GitHub the mirror can lag:
+
+- Global interval: start with `15 minutes` for active projects.
+- Use **Custom intervals** on specific orgs/repositories if you need faster mirrors (as low as 5 minutes).
+- Set a quiet window (e.g. `01:00-05:00`) for heavy metadata pulls to avoid daytime throttling.
+
+### 4. Mirror metadata and LFS
+
+Under **Repository defaults**:
+
+- Enable **Mirror metadata** so issues, labels, and milestones stay in sync.
+- Enable **Mirror LFS** if your repos store binaries; confirm your Gitea instance has LFS enabled.
+- Turn on **Delete missing** only if you want Gitea to remove repos when they disappear upstream.
+
+### 5. Validate the local mirror
+
+- Select a repo in the dashboard and click **Sync now**.
+- In Gitea, verify commit history, tags, issues, and releases match GitHub.
+- Run a quick diff: `git remote add gitea http://<gitea>/<owner>/<repo>.git && git fetch gitea` then `git log origin/main..gitea/main` — it should be empty.
+
+## Monitoring & alerts
+
+- Check the **Activity** page for failed runs; set up Healthchecks.io/webhooks on the `/api/health` endpoint.
+- Enable email notifications so administrators learn about repeated failures or token expiry.
+- Export `/api/repos/:id/logs` periodically to archive sync history alongside the repos themselves.
+
+## Tips for smooth syncing
+
+- Avoid running more than one mirror against the same Gitea target; let Gitea Mirror manage the schedule centrally.
+- When restructuring orgs, pause auto-discovery, move repos in Gitea, then resume to prevent thrash.
+- Rate limits cropping up? Move the mirror onto a different IP or configure GitHub fine-grained PATs per org.
+
+## Related playbooks
+
+- [Backup GitHub Repositories](../backup-github-repositories/) for the base Docker deployment
+- [Run Gitea Mirror inside a Proxmox LXC](../proxmox-lxc-homelab/) if you want the mirror on a dedicated appliance
