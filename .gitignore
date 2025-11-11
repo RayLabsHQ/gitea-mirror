@@ -32,3 +32,8 @@ certs/*.pem
 certs/*.cer
 !certs/README.md
 
+# Nix build artifacts
+result
+result-*
+.direnv/
+
