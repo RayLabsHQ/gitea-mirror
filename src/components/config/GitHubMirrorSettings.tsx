@@ -125,10 +125,10 @@ export function GitHubMirrorSettings({
                 className="text-sm font-normal cursor-pointer flex items-center gap-2"
               >
                 <Lock className="h-3.5 w-3.5" />
-                Include private repositories
+                Include personal repositories
               </Label>
               <p className="text-xs text-muted-foreground">
-                Mirror your private repositories
+                Mirror your personal repositories
               </p>
             </div>
           </div>
