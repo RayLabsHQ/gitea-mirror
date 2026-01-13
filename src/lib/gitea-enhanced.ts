@@ -409,7 +409,15 @@ export async function syncGiteaRepoEnhanced({
         }
       }
 
-      if (shouldMirrorIssuesThisRun) {
+      // Check if we should do incremental sync for issues
+      const issuesSinceTimestamp = metadataState.componentLastSynced?.issues;
+      const shouldMirrorIssuesIncremental =
+        !!config.giteaConfig?.mirrorIssues &&
+        !skipMetadataForStarred &&
+        metadataState.components.issues &&
+        issuesSinceTimestamp;
+
+      if (shouldMirrorIssuesThisRun || shouldMirrorIssuesIncremental) {
         const octokit = ensureOctokit();
         if (!octokit) {
           console.warn(
@@ -423,12 +431,18 @@ export async function syncGiteaRepoEnhanced({
               repository,
               giteaOwner: repoOwner,
               giteaRepoName: repository.name,
+              sinceTimestamp: shouldMirrorIssuesIncremental ? issuesSinceTimestamp : undefined,
             });
             metadataState.components.issues = true;
             metadataState.components.labels = true;
+            // Update timestamp for incremental sync
+            if (!metadataState.componentLastSynced) {
+              metadataState.componentLastSynced = {};
+            }
+            metadataState.componentLastSynced.issues = new Date().toISOString();
             metadataUpdated = true;
             console.log(
-              `[Sync] Mirrored issues for ${repository.name} after sync`
+              `[Sync] Mirrored issues for ${repository.name} after sync${shouldMirrorIssuesIncremental ? ' (incremental)' : ''}`
             );
           } catch (issueError) {
             console.error(
@@ -445,11 +459,19 @@ export async function syncGiteaRepoEnhanced({
         metadataState.components.issues
       ) {
         console.log(
-          `[Sync] Issues already mirrored for ${repository.name}; skipping`
+          `[Sync] Issues already mirrored for ${repository.name}; skipping (enable incremental sync or re-mirror to update)`
         );
       }
 
-      if (shouldMirrorPullRequests) {
+      // Check if we should do incremental sync for PRs
+      const prsSinceTimestamp = metadataState.componentLastSynced?.pullRequests;
+      const shouldMirrorPullRequestsIncremental =
+        !!config.giteaConfig?.mirrorPullRequests &&
+        !skipMetadataForStarred &&
+        metadataState.components.pullRequests &&
+        prsSinceTimestamp;
+
+      if (shouldMirrorPullRequests || shouldMirrorPullRequestsIncremental) {
         const octokit = ensureOctokit();
         if (!octokit) {
           console.warn(
@@ -463,11 +485,17 @@ export async function syncGiteaRepoEnhanced({
               repository,
               giteaOwner: repoOwner,
               giteaRepoName: repository.name,
+              sinceTimestamp: shouldMirrorPullRequestsIncremental ? prsSinceTimestamp : undefined,
             });
             metadataState.components.pullRequests = true;
+            // Update timestamp for incremental sync
+            if (!metadataState.componentLastSynced) {
+              metadataState.componentLastSynced = {};
+            }
+            metadataState.componentLastSynced.pullRequests = new Date().toISOString();
             metadataUpdated = true;
             console.log(
-              `[Sync] Mirrored pull requests for ${repository.name} after sync`
+              `[Sync] Mirrored pull requests for ${repository.name} after sync${shouldMirrorPullRequestsIncremental ? ' (incremental)' : ''}`
             );
           } catch (prError) {
             console.error(
@@ -482,7 +510,7 @@ export async function syncGiteaRepoEnhanced({
         metadataState.components.pullRequests
       ) {
         console.log(
-          `[Sync] Pull requests already mirrored for ${repository.name}; skipping`
+          `[Sync] Pull requests already mirrored for ${repository.name}; skipping (enable incremental sync or re-mirror to update)`
         );
       }
 

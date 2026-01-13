@@ -6,9 +6,20 @@ interface MetadataComponentsState {
   milestones: boolean;
 }
 
+// Extended state that tracks last sync timestamps for incremental updates
+interface MetadataComponentTimestamps {
+  releases?: string;
+  issues?: string;
+  pullRequests?: string;
+  labels?: string;
+  milestones?: string;
+}
+
 export interface RepositoryMetadataState {
   components: MetadataComponentsState;
   lastSyncedAt?: string;
+  // Timestamps for each component to enable incremental sync
+  componentLastSynced?: MetadataComponentTimestamps;
 }
 
 const defaultComponents: MetadataComponentsState = {
@@ -63,6 +74,26 @@ export function parseRepositoryMetadataState(
     base.lastSyncedAt = parsed.lastSyncedAt;
   } else if (typeof parsed.lastMetadataSync === "string") {
     base.lastSyncedAt = parsed.lastMetadataSync;
+  }
+
+  // Parse component timestamps for incremental sync
+  if (parsed.componentLastSynced && typeof parsed.componentLastSynced === "object") {
+    base.componentLastSynced = {};
+    if (typeof parsed.componentLastSynced.releases === "string") {
+      base.componentLastSynced.releases = parsed.componentLastSynced.releases;
+    }
+    if (typeof parsed.componentLastSynced.issues === "string") {
+      base.componentLastSynced.issues = parsed.componentLastSynced.issues;
+    }
+    if (typeof parsed.componentLastSynced.pullRequests === "string") {
+      base.componentLastSynced.pullRequests = parsed.componentLastSynced.pullRequests;
+    }
+    if (typeof parsed.componentLastSynced.labels === "string") {
+      base.componentLastSynced.labels = parsed.componentLastSynced.labels;
+    }
+    if (typeof parsed.componentLastSynced.milestones === "string") {
+      base.componentLastSynced.milestones = parsed.componentLastSynced.milestones;
+    }
   }
 
   return base;

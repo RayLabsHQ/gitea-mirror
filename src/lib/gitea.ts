@@ -638,7 +638,15 @@ export const mirrorGithubRepoToGitea = async ({
       `[Metadata] Issue mirroring check: mirrorIssues=${config.giteaConfig?.mirrorIssues}, alreadyMirrored=${metadataState.components.issues}, isStarred=${repository.isStarred}, starredCodeOnly=${config.githubConfig?.starredCodeOnly}, shouldMirrorIssues=${shouldMirrorIssuesThisRun}`
     );
 
-    if (shouldMirrorIssuesThisRun) {
+    // Check for incremental sync for issues
+    const issuesSinceTimestamp = metadataState.componentLastSynced?.issues;
+    const shouldMirrorIssuesIncremental =
+      !!config.giteaConfig?.mirrorIssues &&
+      !skipMetadataForStarred &&
+      metadataState.components.issues &&
+      issuesSinceTimestamp;
+
+    if (shouldMirrorIssuesThisRun || shouldMirrorIssuesIncremental) {
       try {
         await mirrorGitRepoIssuesToGitea({
           config,
@@ -646,12 +654,18 @@ export const mirrorGithubRepoToGitea = async ({
           repository,
           giteaOwner: repoOwner,
           giteaRepoName: targetRepoName,
+          sinceTimestamp: shouldMirrorIssuesIncremental ? issuesSinceTimestamp : undefined,
         });
         metadataState.components.issues = true;
         metadataState.components.labels = true;
+        // Update timestamp for incremental sync
+        if (!metadataState.componentLastSynced) {
+          metadataState.componentLastSynced = {};
+        }
+        metadataState.componentLastSynced.issues = new Date().toISOString();
         metadataUpdated = true;
         console.log(
-          `[Metadata] Successfully mirrored issues for ${repository.name}`
+          `[Metadata] Successfully mirrored issues for ${repository.name}${shouldMirrorIssuesIncremental ? ' (incremental)' : ''}`
         );
       } catch (error) {
         console.error(
@@ -663,7 +677,7 @@ export const mirrorGithubRepoToGitea = async ({
       }
     } else if (config.giteaConfig?.mirrorIssues && metadataState.components.issues) {
       console.log(
-        `[Metadata] Issues already mirrored for ${repository.name}; skipping to avoid duplicates`
+        `[Metadata] Issues already mirrored for ${repository.name}; skipping (will use incremental sync on next sync)`
       );
     }
 
@@ -676,7 +690,15 @@ export const mirrorGithubRepoToGitea = async ({
       `[Metadata] Pull request mirroring check: mirrorPullRequests=${config.giteaConfig?.mirrorPullRequests}, alreadyMirrored=${metadataState.components.pullRequests}, isStarred=${repository.isStarred}, starredCodeOnly=${config.githubConfig?.starredCodeOnly}, shouldMirrorPullRequests=${shouldMirrorPullRequests}`
     );
 
-    if (shouldMirrorPullRequests) {
+    // Check for incremental sync for PRs
+    const prsSinceTimestamp = metadataState.componentLastSynced?.pullRequests;
+    const shouldMirrorPullRequestsIncremental =
+      !!config.giteaConfig?.mirrorPullRequests &&
+      !skipMetadataForStarred &&
+      metadataState.components.pullRequests &&
+      prsSinceTimestamp;
+
+    if (shouldMirrorPullRequests || shouldMirrorPullRequestsIncremental) {
       try {
         await mirrorGitRepoPullRequestsToGitea({
           config,
@@ -684,11 +706,17 @@ export const mirrorGithubRepoToGitea = async ({
           repository,
           giteaOwner: repoOwner,
           giteaRepoName: targetRepoName,
+          sinceTimestamp: shouldMirrorPullRequestsIncremental ? prsSinceTimestamp : undefined,
         });
         metadataState.components.pullRequests = true;
+        // Update timestamp for incremental sync
+        if (!metadataState.componentLastSynced) {
+          metadataState.componentLastSynced = {};
+        }
+        metadataState.componentLastSynced.pullRequests = new Date().toISOString();
         metadataUpdated = true;
         console.log(
-          `[Metadata] Successfully mirrored pull requests for ${repository.name}`
+          `[Metadata] Successfully mirrored pull requests for ${repository.name}${shouldMirrorPullRequestsIncremental ? ' (incremental)' : ''}`
         );
       } catch (error) {
         console.error(
@@ -703,7 +731,7 @@ export const mirrorGithubRepoToGitea = async ({
       metadataState.components.pullRequests
     ) {
       console.log(
-        `[Metadata] Pull requests already mirrored for ${repository.name}; skipping`
+        `[Metadata] Pull requests already mirrored for ${repository.name}; skipping (will use incremental sync on next sync)`
       );
     }
 
@@ -1188,7 +1216,15 @@ export async function mirrorGitHubRepoToGiteaOrg({
       `[Metadata] Issue mirroring check: mirrorIssues=${config.giteaConfig?.mirrorIssues}, alreadyMirrored=${metadataState.components.issues}, isStarred=${repository.isStarred}, starredCodeOnly=${config.githubConfig?.starredCodeOnly}, shouldMirrorIssues=${shouldMirrorIssuesThisRun}`
     );
 
-    if (shouldMirrorIssuesThisRun) {
+    // Check for incremental sync for issues
+    const issuesSinceTimestamp = metadataState.componentLastSynced?.issues;
+    const shouldMirrorIssuesIncremental =
+      !!config.giteaConfig?.mirrorIssues &&
+      !skipMetadataForStarred &&
+      metadataState.components.issues &&
+      issuesSinceTimestamp;
+
+    if (shouldMirrorIssuesThisRun || shouldMirrorIssuesIncremental) {
       try {
         await mirrorGitRepoIssuesToGitea({
           config,
@@ -1196,12 +1232,18 @@ export async function mirrorGitHubRepoToGiteaOrg({
           repository,
           giteaOwner: orgName,
           giteaRepoName: targetRepoName,
+          sinceTimestamp: shouldMirrorIssuesIncremental ? issuesSinceTimestamp : undefined,
         });
         metadataState.components.issues = true;
         metadataState.components.labels = true;
+        // Update timestamp for incremental sync
+        if (!metadataState.componentLastSynced) {
+          metadataState.componentLastSynced = {};
+        }
+        metadataState.componentLastSynced.issues = new Date().toISOString();
         metadataUpdated = true;
         console.log(
-          `[Metadata] Successfully mirrored issues for ${repository.name} to org ${orgName}/${targetRepoName}`
+          `[Metadata] Successfully mirrored issues for ${repository.name} to org ${orgName}/${targetRepoName}${shouldMirrorIssuesIncremental ? ' (incremental)' : ''}`
         );
       } catch (error) {
         console.error(
@@ -1216,7 +1258,7 @@ export async function mirrorGitHubRepoToGiteaOrg({
       metadataState.components.issues
     ) {
       console.log(
-        `[Metadata] Issues already mirrored for ${repository.name}; skipping`
+        `[Metadata] Issues already mirrored for ${repository.name}; skipping (will use incremental sync on next sync)`
       );
     }
 
@@ -1229,7 +1271,15 @@ export async function mirrorGitHubRepoToGiteaOrg({
       `[Metadata] Pull request mirroring check: mirrorPullRequests=${config.giteaConfig?.mirrorPullRequests}, alreadyMirrored=${metadataState.components.pullRequests}, isStarred=${repository.isStarred}, starredCodeOnly=${config.githubConfig?.starredCodeOnly}, shouldMirrorPullRequests=${shouldMirrorPullRequests}`
     );
 
-    if (shouldMirrorPullRequests) {
+    // Check for incremental sync for PRs
+    const prsSinceTimestamp = metadataState.componentLastSynced?.pullRequests;
+    const shouldMirrorPullRequestsIncremental =
+      !!config.giteaConfig?.mirrorPullRequests &&
+      !skipMetadataForStarred &&
+      metadataState.components.pullRequests &&
+      prsSinceTimestamp;
+
+    if (shouldMirrorPullRequests || shouldMirrorPullRequestsIncremental) {
       try {
         await mirrorGitRepoPullRequestsToGitea({
           config,
@@ -1237,11 +1287,17 @@ export async function mirrorGitHubRepoToGiteaOrg({
           repository,
           giteaOwner: orgName,
           giteaRepoName: targetRepoName,
+          sinceTimestamp: shouldMirrorPullRequestsIncremental ? prsSinceTimestamp : undefined,
         });
         metadataState.components.pullRequests = true;
+        // Update timestamp for incremental sync
+        if (!metadataState.componentLastSynced) {
+          metadataState.componentLastSynced = {};
+        }
+        metadataState.componentLastSynced.pullRequests = new Date().toISOString();
         metadataUpdated = true;
         console.log(
-          `[Metadata] Successfully mirrored pull requests for ${repository.name} to org ${orgName}/${targetRepoName}`
+          `[Metadata] Successfully mirrored pull requests for ${repository.name} to org ${orgName}/${targetRepoName}${shouldMirrorPullRequestsIncremental ? ' (incremental)' : ''}`
         );
       } catch (error) {
         console.error(
@@ -1256,7 +1312,7 @@ export async function mirrorGitHubRepoToGiteaOrg({
       metadataState.components.pullRequests
     ) {
       console.log(
-        `[Metadata] Pull requests already mirrored for ${repository.name}; skipping`
+        `[Metadata] Pull requests already mirrored for ${repository.name}; skipping (will use incremental sync on next sync)`
       );
     }
 
@@ -1687,12 +1743,14 @@ export const mirrorGitRepoIssuesToGitea = async ({
   repository,
   giteaOwner,
   giteaRepoName,
+  sinceTimestamp,
 }: {
   config: Partial<Config>;
   octokit: Octokit;
   repository: Repository;
   giteaOwner: string;
   giteaRepoName?: string;
+  sinceTimestamp?: string;
 }) => {
   //things covered here are- issue, title, body, labels, comments and assignees
   if (
@@ -1731,17 +1789,30 @@ export const mirrorGitRepoIssuesToGitea = async ({
 
   const [owner, repo] = repository.fullName.split("/");
 
-  // Fetch GitHub issues
+  // Fetch GitHub issues (with incremental sync support)
+  const isIncrementalSync = !!sinceTimestamp;
+  const fetchParams: any = {
+    owner,
+    repo,
+    state: "all",
+    per_page: 100,
+    sort: isIncrementalSync ? "updated" : "created",
+    direction: "asc",
+  };
+
+  // Add 'since' parameter for incremental sync
+  if (sinceTimestamp) {
+    fetchParams.since = sinceTimestamp;
+    console.log(
+      `[Issues] Incremental sync: fetching issues updated since ${sinceTimestamp}`
+    );
+  } else {
+    console.log(`[Issues] Full sync: fetching all issues`);
+  }
+
   const issues = await octokit.paginate(
     octokit.rest.issues.listForRepo,
-    {
-      owner,
-      repo,
-      state: "all",
-      per_page: 100,
-      sort: "created",
-      direction: "asc",
-    },
+    fetchParams,
     (res) => res.data
   );
 
@@ -1753,8 +1824,59 @@ export const mirrorGitRepoIssuesToGitea = async ({
   );
 
   if (filteredIssues.length === 0) {
-    console.log(`No issues to mirror for ${repository.fullName}`);
+    console.log(`No ${isIncrementalSync ? 'new or updated ' : ''}issues to mirror for ${repository.fullName}`);
     return;
+  }
+
+  // For incremental sync, fetch existing Gitea issues to avoid duplicates
+  const existingGiteaIssues = new Set<string>();
+  if (isIncrementalSync) {
+    try {
+      console.log(`[Issues] Fetching existing Gitea issues updated since ${sinceTimestamp} to check for duplicates`);
+      // Fetch with pagination to handle repos with >1000 issues
+      // Use 'since' parameter to only fetch recently updated issues for more efficient duplicate detection
+      let page = 1;
+      let hasMore = true;
+
+      while (hasMore) {
+        const giteaIssuesRes = await httpGet<any[]>(
+          `${config.giteaConfig.url}/api/v1/repos/${giteaOwner}/${repoName}/issues?state=all&since=${sinceTimestamp}&page=${page}&limit=100`,
+          {
+            Authorization: `token ${decryptedConfig.giteaConfig.token}`,
+          }
+        );
+
+        if (giteaIssuesRes.data.length === 0) {
+          hasMore = false;
+          break;
+        }
+
+        // Store issue titles to match against (excludes PR issues which have [PR #] prefix)
+        for (const giteaIssue of giteaIssuesRes.data) {
+          // Skip PR issues - they're handled separately
+          if (!giteaIssue.title.startsWith('[PR #')) {
+            existingGiteaIssues.add(giteaIssue.title);
+          }
+        }
+
+        // Stop after first page for performance (most recent issues)
+        if (giteaIssuesRes.data.length < 100) {
+          hasMore = false;
+        } else {
+          page++;
+          // Safety limit: don't fetch more than 10 pages (1000 issues)
+          if (page > 10) {
+            console.warn(`[Issues] Stopped duplicate check after 1000 issues for performance`);
+            hasMore = false;
+          }
+        }
+      }
+
+      console.log(`[Issues] Found ${existingGiteaIssues.size} existing issues in Gitea`);
+    } catch (error) {
+      console.warn(`[Issues] Failed to fetch existing Gitea issues: ${error instanceof Error ? error.message : String(error)}`);
+      // Continue anyway - worst case we might create duplicates
+    }
   }
 
   // Get existing labels from Gitea
@@ -1786,9 +1908,17 @@ export const mirrorGitRepoIssuesToGitea = async ({
   }
 
   // Process issues in parallel with concurrency control
+  let skippedCount = 0;
   await processWithRetry(
     filteredIssues,
     async (issue) => {
+      // Skip if issue already exists during incremental sync
+      if (isIncrementalSync && existingGiteaIssues.has(issue.title)) {
+        console.log(`[Issues] Skipping existing issue: "${issue.title}"`);
+        skippedCount++;
+        return issue;
+      }
+
       const githubLabelNames =
         issue.labels
           ?.map((l) => (typeof l === "string" ? l : l.name))
@@ -1927,8 +2057,9 @@ export const mirrorGitRepoIssuesToGitea = async ({
     }
   );
 
+  const newIssuesCount = filteredIssues.length - skippedCount;
   console.log(
-    `Completed mirroring ${filteredIssues.length} issues for ${repository.fullName}`
+    `Completed mirroring ${newIssuesCount} ${isIncrementalSync ? 'new ' : ''}issues for ${repository.fullName}${isIncrementalSync && skippedCount > 0 ? ` (${skippedCount} already existed)` : ''}`
   );
 };
 
@@ -2254,12 +2385,14 @@ export async function mirrorGitRepoPullRequestsToGitea({
   repository,
   giteaOwner,
   giteaRepoName,
+  sinceTimestamp,
 }: {
   config: Partial<Config>;
   octokit: Octokit;
   repository: Repository;
   giteaOwner: string;
   giteaRepoName?: string;
+  sinceTimestamp?: string;
 }) {
   if (
     !config.githubConfig?.token ||
@@ -2298,6 +2431,15 @@ export async function mirrorGitRepoPullRequestsToGitea({
   const [owner, repo] = repository.fullName.split("/");
 
   // Fetch GitHub pull requests
+  const isIncrementalSync = !!sinceTimestamp;
+  if (sinceTimestamp) {
+    console.log(
+      `[Pull Requests] Incremental sync: filtering PRs updated since ${sinceTimestamp}`
+    );
+  } else {
+    console.log(`[Pull Requests] Full sync: fetching all pull requests`);
+  }
+
   const pullRequests = await octokit.paginate(
     octokit.rest.pulls.list,
     {
@@ -2305,19 +2447,83 @@ export async function mirrorGitRepoPullRequestsToGitea({
       repo,
       state: "all",
       per_page: 100,
-      sort: "created",
-      direction: "asc",
+      sort: isIncrementalSync ? "updated" : "created",
+      direction: "desc", // Get newest first for incremental sync
     },
     (res) => res.data
   );
 
+  // Filter PRs by update time if doing incremental sync
+  let filteredPRs = pullRequests;
+  if (sinceTimestamp) {
+    const sinceDate = new Date(sinceTimestamp);
+    filteredPRs = pullRequests.filter(pr => {
+      const prUpdatedAt = new Date(pr.updated_at);
+      return prUpdatedAt > sinceDate;
+    });
+    console.log(
+      `[Pull Requests] Filtered to ${filteredPRs.length} PRs updated since ${sinceTimestamp} (from ${pullRequests.length} total)`
+    );
+  }
+
   console.log(
-    `Mirroring ${pullRequests.length} pull requests from ${repository.fullName}`
+    `Mirroring ${filteredPRs.length} pull requests from ${repository.fullName}`
   );
 
-  if (pullRequests.length === 0) {
-    console.log(`No pull requests to mirror for ${repository.fullName}`);
+  if (filteredPRs.length === 0) {
+    console.log(`No ${isIncrementalSync ? 'new or updated ' : ''}pull requests to mirror for ${repository.fullName}`);
     return;
+  }
+
+  // For incremental sync, fetch existing Gitea issues (PRs are stored as issues) to avoid duplicates
+  const existingGiteaPRNumbers = new Set<number>();
+  if (isIncrementalSync) {
+    try {
+      console.log(`[Pull Requests] Fetching existing Gitea PR issues updated since ${sinceTimestamp} to check for duplicates`);
+      // Fetch with pagination to handle repos with >1000 issues
+      // Use 'since' parameter to only fetch recently updated issues for more efficient duplicate detection
+      let page = 1;
+      let hasMore = true;
+
+      while (hasMore) {
+        const giteaIssuesRes = await httpGet<any[]>(
+          `${config.giteaConfig.url}/api/v1/repos/${giteaOwner}/${repoName}/issues?state=all&since=${sinceTimestamp}&page=${page}&limit=100`,
+          {
+            Authorization: `token ${decryptedConfig.giteaConfig.token}`,
+          }
+        );
+
+        if (giteaIssuesRes.data.length === 0) {
+          hasMore = false;
+          break;
+        }
+
+        // Extract PR numbers from titles (format: "[PR #123] ...")
+        for (const giteaIssue of giteaIssuesRes.data) {
+          const match = giteaIssue.title.match(/^\[PR #(\d+)\]/);
+          if (match) {
+            existingGiteaPRNumbers.add(parseInt(match[1], 10));
+          }
+        }
+
+        // Stop after first page for performance (most recent issues)
+        // Full scan only if we hit the limit
+        if (giteaIssuesRes.data.length < 100) {
+          hasMore = false;
+        } else {
+          page++;
+          // Safety limit: don't fetch more than 10 pages (1000 issues)
+          if (page > 10) {
+            console.warn(`[Pull Requests] Stopped duplicate check after 1000 issues for performance`);
+            hasMore = false;
+          }
+        }
+      }
+
+      console.log(`[Pull Requests] Found ${existingGiteaPRNumbers.size} existing PR issues in Gitea`);
+    } catch (error) {
+      console.warn(`[Pull Requests] Failed to fetch existing Gitea issues: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   // Note: Gitea doesn't have a direct API to create pull requests from external sources
@@ -2377,10 +2583,18 @@ export async function mirrorGitRepoPullRequestsToGitea({
 
   let successCount = 0;
   let failedCount = 0;
+  let skippedCount = 0;
 
   await processWithRetry(
-    pullRequests,
+    filteredPRs,
     async (pr) => {
+      // Skip if PR already exists during incremental sync (check by PR number)
+      if (isIncrementalSync && existingGiteaPRNumbers.has(pr.number)) {
+        console.log(`[Pull Requests] Skipping existing PR #${pr.number}: "${pr.title}"`);
+        skippedCount++;
+        return;
+      }
+
       try {
         // Fetch additional PR data for rich metadata
         const [prDetail, commits, files] = await Promise.all([
@@ -2503,7 +2717,7 @@ export async function mirrorGitRepoPullRequestsToGitea({
     }
   );
 
-  console.log(`✅ Mirrored ${successCount}/${pullRequests.length} pull requests to Gitea as enriched issues (${failedCount} failed)`);
+  console.log(`✅ Mirrored ${successCount}/${filteredPRs.length} pull requests to Gitea as enriched issues (${failedCount} failed${isIncrementalSync && skippedCount > 0 ? `, ${skippedCount} already existed` : ''})`);
 }
 
 export async function mirrorGitRepoLabelsToGitea({
