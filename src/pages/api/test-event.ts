@@ -2,16 +2,21 @@ import type { APIRoute } from "astro";
 import { publishEvent } from "@/lib/events";
 import { v4 as uuidv4 } from "uuid";
 import { createSecureErrorResponse } from "@/lib/utils";
+import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 
-export const POST: APIRoute = async ({ request }) => {
+export const POST: APIRoute = async ({ request, locals }) => {
   try {
-    const body = await request.json();
-    const { userId, message, status } = body;
+    const authResult = await requireAuthenticatedUserId({ request, locals });
+    if ("response" in authResult) return authResult.response;
+    const userId = authResult.userId;
 
-    if (!userId || !message || !status) {
+    const body = await request.json();
+    const { message, status } = body;
+
+    if (!message || !status) {
       return new Response(
         JSON.stringify({
-          error: "Missing required fields: userId, message, status",
+          error: "Missing required fields: message, status",
         }),
         { status: 400 }
       );

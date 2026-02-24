@@ -2,18 +2,23 @@ import type { APIContext } from "astro";
 import { db, organizations } from "@/lib/db";
 import { eq, and } from "drizzle-orm";
 import { createSecureErrorResponse } from "@/lib/utils";
+import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 
-export async function PATCH({ params, request }: APIContext) {
+export async function PATCH({ params, request, locals }: APIContext) {
   try {
+    const authResult = await requireAuthenticatedUserId({ request, locals });
+    if ("response" in authResult) return authResult.response;
+    const userId = authResult.userId;
+
     const { id } = params;
     const body = await request.json();
-    const { status, userId } = body;
+    const { status } = body;
 
-    if (!id || !userId) {
+    if (!id) {
       return new Response(
         JSON.stringify({
           success: false,
-          error: "Organization ID and User ID are required",
+          error: "Organization ID is required",
         }),
         {
           status: 400,

@@ -9,22 +9,14 @@ import {
 import type { Organization } from "@/lib/db/schema";
 import { repoStatusEnum } from "@/types/Repository";
 import { jsonResponse, createSecureErrorResponse } from "@/lib/utils";
+import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 
-export const GET: APIRoute = async ({ request }) => {
-  const url = new URL(request.url);
-  const userId = url.searchParams.get("userId");
-
-  if (!userId) {
-    return jsonResponse({
-      data: {
-        success: false,
-        error: "Missing userId",
-      },
-      status: 400,
-    });
-  }
-
+export const GET: APIRoute = async ({ request, locals }) => {
   try {
+    const authResult = await requireAuthenticatedUserId({ request, locals });
+    if ("response" in authResult) return authResult.response;
+    const userId = authResult.userId;
+
     // Fetch the user's active configuration to respect filtering settings
     const [config] = await db
       .select()

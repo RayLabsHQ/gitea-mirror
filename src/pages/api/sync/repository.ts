@@ -11,17 +11,22 @@ import type {
   RepositoryVisibility,
 } from "@/types/Repository";
 import { createMirrorJob } from "@/lib/helpers";
+import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 
-export const POST: APIRoute = async ({ request }) => {
+export const POST: APIRoute = async ({ request, locals }) => {
   try {
-    const body: AddRepositoriesApiRequest = await request.json();
-    const { owner, repo, userId, force = false } = body;
+    const authResult = await requireAuthenticatedUserId({ request, locals });
+    if ("response" in authResult) return authResult.response;
+    const userId = authResult.userId;
 
-    if (!owner || !repo || !userId) {
+    const body: AddRepositoriesApiRequest = await request.json();
+    const { owner, repo, force = false } = body;
+
+    if (!owner || !repo) {
       return new Response(
         JSON.stringify({
           success: false,
-          error: "Missing owner, repo, or userId",
+          error: "Missing owner or repo",
         }),
         { status: 400 }
       );
@@ -34,7 +39,7 @@ export const POST: APIRoute = async ({ request }) => {
       return jsonResponse({
         data: {
           success: false,
-          error: "Missing owner, repo, or userId",
+          error: "Missing owner or repo",
         },
         status: 400,
       });

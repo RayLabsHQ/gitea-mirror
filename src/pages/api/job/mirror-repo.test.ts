@@ -90,6 +90,7 @@ mock.module("@/lib/utils/concurrency", () => ({
 
 // Mock drizzle-orm
 mock.module("drizzle-orm", () => ({
+  and: mock(() => ({})),
   eq: mock(() => ({})),
   inArray: mock(() => ({}))
 }));
@@ -121,7 +122,7 @@ describe("Repository Mirroring API", () => {
     console.error = originalConsoleError;
   });
 
-  test("returns 400 if userId is missing", async () => {
+  test("returns 401 when request is unauthenticated", async () => {
     const request = new Request("http://localhost/api/job/mirror-repo", {
       method: "POST",
       headers: {
@@ -134,11 +135,11 @@ describe("Repository Mirroring API", () => {
 
     const response = await POST({ request } as any);
 
-    expect(response.status).toBe(400);
+    expect(response.status).toBe(401);
 
     const data = await response.json();
     expect(data.success).toBe(false);
-    expect(data.message).toBe("userId and repositoryIds are required.");
+    expect(data.error).toBe("Unauthorized");
   });
 
   test("returns 400 if repositoryIds is missing", async () => {
@@ -152,13 +153,18 @@ describe("Repository Mirroring API", () => {
       })
     });
 
-    const response = await POST({ request } as any);
+    const response = await POST({
+      request,
+      locals: {
+        session: { userId: "user-id" },
+      },
+    } as any);
 
     expect(response.status).toBe(400);
 
     const data = await response.json();
     expect(data.success).toBe(false);
-    expect(data.message).toBe("userId and repositoryIds are required.");
+    expect(data.message).toBe("repositoryIds are required.");
   });
 
   test("returns 200 and starts mirroring repositories", async () => {
@@ -173,7 +179,12 @@ describe("Repository Mirroring API", () => {
       })
     });
 
-    const response = await POST({ request } as any);
+    const response = await POST({
+      request,
+      locals: {
+        session: { userId: "user-id" },
+      },
+    } as any);
 
     expect(response.status).toBe(200);
 

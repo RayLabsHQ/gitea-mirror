@@ -1,7 +1,7 @@
 import type { APIRoute } from "astro";
 import type { MirrorOrgRequest, MirrorOrgResponse } from "@/types/mirror";
 import { db, configs, organizations } from "@/lib/db";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { createGitHubClient } from "@/lib/github";
 import { mirrorGitHubOrgToGitea } from "@/lib/gitea";
 import { repoStatusEnum } from "@/types/Repository";
@@ -10,17 +10,22 @@ import { createSecureErrorResponse } from "@/lib/utils";
 import { processWithResilience } from "@/lib/utils/concurrency";
 import { v4 as uuidv4 } from "uuid";
 import { getDecryptedGitHubToken } from "@/lib/utils/config-encryption";
+import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 
-export const POST: APIRoute = async ({ request }) => {
+export const POST: APIRoute = async ({ request, locals }) => {
   try {
-    const body: MirrorOrgRequest = await request.json();
-    const { userId, organizationIds } = body;
+    const authResult = await requireAuthenticatedUserId({ request, locals });
+    if ("response" in authResult) return authResult.response;
+    const userId = authResult.userId;
 
-    if (!userId || !organizationIds || !Array.isArray(organizationIds)) {
+    const body: MirrorOrgRequest = await request.json();
+    const { organizationIds } = body;
+
+    if (!organizationIds || !Array.isArray(organizationIds)) {
       return new Response(
         JSON.stringify({
           success: false,
-          message: "userId and organizationIds are required.",
+          message: "organizationIds are required.",
         }),
         { status: 400, headers: { "Content-Type": "application/json" } }
       );
@@ -56,7 +61,12 @@ export const POST: APIRoute = async ({ request }) => {
     const orgs = await db
       .select()
       .from(organizations)
-      .where(inArray(organizations.id, organizationIds));
+      .where(
+        and(
+          eq(organizations.userId, userId),
+          inArray(organizations.id, organizationIds)
+        )
+      );
 
     if (!orgs.length) {
       return new Response(

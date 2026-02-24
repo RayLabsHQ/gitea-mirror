@@ -1,7 +1,7 @@
 import type { APIRoute } from "astro";
 import type { MirrorRepoRequest, MirrorRepoResponse } from "@/types/mirror";
 import { db, configs, repositories } from "@/lib/db";
-import { eq, inArray } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import { repositoryVisibilityEnum, repoStatusEnum } from "@/types/Repository";
 import {
   mirrorGithubRepoToGitea,
@@ -12,17 +12,22 @@ import { createGitHubClient } from "@/lib/github";
 import { getDecryptedGitHubToken } from "@/lib/utils/config-encryption";
 import { processWithResilience } from "@/lib/utils/concurrency";
 import { createSecureErrorResponse } from "@/lib/utils";
+import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 
-export const POST: APIRoute = async ({ request }) => {
+export const POST: APIRoute = async ({ request, locals }) => {
   try {
-    const body: MirrorRepoRequest = await request.json();
-    const { userId, repositoryIds } = body;
+    const authResult = await requireAuthenticatedUserId({ request, locals });
+    if ("response" in authResult) return authResult.response;
+    const userId = authResult.userId;
 
-    if (!userId || !repositoryIds || !Array.isArray(repositoryIds)) {
+    const body: MirrorRepoRequest = await request.json();
+    const { repositoryIds } = body;
+
+    if (!repositoryIds || !Array.isArray(repositoryIds)) {
       return new Response(
         JSON.stringify({
           success: false,
-          message: "userId and repositoryIds are required.",
+          message: "repositoryIds are required.",
         }),
         { status: 400, headers: { "Content-Type": "application/json" } }
       );
@@ -58,7 +63,12 @@ export const POST: APIRoute = async ({ request }) => {
     const repos = await db
       .select()
       .from(repositories)
-      .where(inArray(repositories.id, repositoryIds));
+      .where(
+        and(
+          eq(repositories.userId, userId),
+          inArray(repositories.id, repositoryIds)
+        )
+      );
 
     if (!repos.length) {
       return new Response(

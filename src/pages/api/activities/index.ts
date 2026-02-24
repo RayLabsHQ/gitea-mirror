@@ -1,21 +1,16 @@
 import type { APIRoute } from "astro";
-import { db, mirrorJobs, configs } from "@/lib/db";
+import { db, mirrorJobs } from "@/lib/db";
 import { eq, sql } from "drizzle-orm";
 import { createSecureErrorResponse } from "@/lib/utils";
 import type { MirrorJob } from "@/lib/db/schema";
 import { repoStatusEnum } from "@/types/Repository";
+import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 
-export const GET: APIRoute = async ({ url }) => {
+export const GET: APIRoute = async ({ request, locals }) => {
   try {
-    const searchParams = new URL(url).searchParams;
-    const userId = searchParams.get("userId");
-
-    if (!userId) {
-      return new Response(
-        JSON.stringify({ error: "Missing 'userId' in query parameters." }),
-        { status: 400, headers: { "Content-Type": "application/json" } }
-      );
-    }
+    const authResult = await requireAuthenticatedUserId({ request, locals });
+    if ("response" in authResult) return authResult.response;
+    const userId = authResult.userId;
 
     // Fetch mirror jobs associated with the user
     const jobs = await db

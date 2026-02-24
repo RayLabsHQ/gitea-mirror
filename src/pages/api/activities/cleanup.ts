@@ -2,28 +2,13 @@ import type { APIRoute } from "astro";
 import { db, mirrorJobs, events } from "@/lib/db";
 import { eq, count } from "drizzle-orm";
 import { createSecureErrorResponse } from "@/lib/utils";
+import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 
-export const POST: APIRoute = async ({ request }) => {
+export const POST: APIRoute = async ({ request, locals }) => {
   try {
-    let body;
-    try {
-      body = await request.json();
-    } catch (jsonError) {
-      console.error("Invalid JSON in request body:", jsonError);
-      return new Response(
-        JSON.stringify({ error: "Invalid JSON in request body." }),
-        { status: 400, headers: { "Content-Type": "application/json" } }
-      );
-    }
-
-    const { userId } = body || {};
-
-    if (!userId) {
-      return new Response(
-        JSON.stringify({ error: "Missing 'userId' in request body." }),
-        { status: 400, headers: { "Content-Type": "application/json" } }
-      );
-    }
+    const authResult = await requireAuthenticatedUserId({ request, locals });
+    if ("response" in authResult) return authResult.response;
+    const userId = authResult.userId;
 
     // Start a transaction to ensure all operations succeed or fail together
     const result = await db.transaction(async (tx) => {

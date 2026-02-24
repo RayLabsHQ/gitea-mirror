@@ -6,18 +6,15 @@ import { RateLimitManager } from "@/lib/rate-limit-manager";
 import { createGitHubClient } from "@/lib/github";
 import { getDecryptedGitHubToken } from "@/lib/utils/config-encryption";
 import { configs } from "@/lib/db";
+import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 
-export const GET: APIRoute = async ({ request }) => {
+export const GET: APIRoute = async ({ request, locals }) => {
+  const authResult = await requireAuthenticatedUserId({ request, locals });
+  if ("response" in authResult) return authResult.response;
+  const userId = authResult.userId;
+
   const url = new URL(request.url);
-  const userId = url.searchParams.get("userId");
   const refresh = url.searchParams.get("refresh") === "true";
-
-  if (!userId) {
-    return jsonResponse({
-      data: { error: "Missing userId" },
-      status: 400,
-    });
-  }
 
   try {
     // If refresh is requested, fetch current rate limit from GitHub

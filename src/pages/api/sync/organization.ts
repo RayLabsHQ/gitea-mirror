@@ -10,15 +10,20 @@ import type { RepositoryVisibility, RepoStatus } from "@/types/Repository";
 import { v4 as uuidv4 } from "uuid";
 import { decryptConfigTokens } from "@/lib/utils/config-encryption";
 import { createGitHubClient } from "@/lib/github";
+import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 
-export const POST: APIRoute = async ({ request }) => {
+export const POST: APIRoute = async ({ request, locals }) => {
   try {
-    const body: AddOrganizationApiRequest = await request.json();
-    const { role, org, userId, force = false } = body;
+    const authResult = await requireAuthenticatedUserId({ request, locals });
+    if ("response" in authResult) return authResult.response;
+    const userId = authResult.userId;
 
-    if (!org || !userId || !role) {
+    const body: AddOrganizationApiRequest = await request.json();
+    const { role, org, force = false } = body;
+
+    if (!org || !role) {
       return jsonResponse({
-        data: { success: false, error: "Missing org, role or userId" },
+        data: { success: false, error: "Missing org or role" },
         status: 400,
       });
     }

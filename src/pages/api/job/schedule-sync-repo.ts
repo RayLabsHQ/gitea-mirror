@@ -1,6 +1,6 @@
 import type { APIRoute } from "astro";
 import { db, configs, repositories } from "@/lib/db";
-import { eq, or } from "drizzle-orm";
+import { and, eq, or } from "drizzle-orm";
 import { repoStatusEnum, repositoryVisibilityEnum } from "@/types/Repository";
 import { isRepoPresentInGitea, syncGiteaRepo } from "@/lib/gitea";
 import type {
@@ -9,22 +9,15 @@ import type {
 } from "@/types/sync";
 import { createSecureErrorResponse } from "@/lib/utils";
 import { parseInterval } from "@/lib/utils/duration-parser";
+import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 
-export const POST: APIRoute = async ({ request }) => {
+export const POST: APIRoute = async ({ request, locals }) => {
   try {
-    const body: ScheduleSyncRepoRequest = await request.json();
-    const { userId } = body;
+    const authResult = await requireAuthenticatedUserId({ request, locals });
+    if ("response" in authResult) return authResult.response;
+    const userId = authResult.userId;
 
-    if (!userId) {
-      return new Response(
-        JSON.stringify({
-          success: false,
-          error: "Missing userId in request body.",
-          repositories: [],
-        } satisfies ScheduleSyncRepoResponse),
-        { status: 400, headers: { "Content-Type": "application/json" } }
-      );
-    }
+    await request.json().catch(() => ({} as ScheduleSyncRepoRequest));
 
     // Fetch config for the user
     const configResult = await db
@@ -51,12 +44,14 @@ export const POST: APIRoute = async ({ request }) => {
       .select()
       .from(repositories)
       .where(
-        eq(repositories.userId, userId) &&
+        and(
+          eq(repositories.userId, userId),
           or(
             eq(repositories.status, "mirrored"),
             eq(repositories.status, "synced"),
             eq(repositories.status, "failed")
           )
+        )
       );
 
     if (!repos.length) {

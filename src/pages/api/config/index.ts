@@ -2,7 +2,6 @@ import type { APIRoute } from "astro";
 import { db, configs, users } from "@/lib/db";
 import { v4 as uuidv4 } from "uuid";
 import { eq } from "drizzle-orm";
-import { calculateCleanupInterval } from "@/lib/cleanup-service";
 import { createSecureErrorResponse } from "@/lib/utils";
 import { 
   mapUiToDbConfig, 
@@ -12,20 +11,25 @@ import {
   mapDbScheduleToUi,
   mapDbCleanupToUi 
 } from "@/lib/utils/config-mapper";
-import { encrypt, decrypt, migrateToken } from "@/lib/utils/encryption";
+import { encrypt, decrypt } from "@/lib/utils/encryption";
 import { createDefaultConfig } from "@/lib/utils/config-defaults";
+import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 
-export const POST: APIRoute = async ({ request }) => {
+export const POST: APIRoute = async ({ request, locals }) => {
   try {
-    const body = await request.json();
-    const { userId, githubConfig, giteaConfig, scheduleConfig, cleanupConfig, mirrorOptions, advancedOptions } = body;
+    const authResult = await requireAuthenticatedUserId({ request, locals });
+    if ("response" in authResult) return authResult.response;
+    const userId = authResult.userId;
 
-    if (!userId || !githubConfig || !giteaConfig || !scheduleConfig || !cleanupConfig || !mirrorOptions || !advancedOptions) {
+    const body = await request.json();
+    const { githubConfig, giteaConfig, scheduleConfig, cleanupConfig, mirrorOptions, advancedOptions } = body;
+
+    if (!githubConfig || !giteaConfig || !scheduleConfig || !cleanupConfig || !mirrorOptions || !advancedOptions) {
       return new Response(
         JSON.stringify({
           success: false,
           message:
-            "userId, githubConfig, giteaConfig, scheduleConfig, cleanupConfig, mirrorOptions, and advancedOptions are required.",
+            "githubConfig, giteaConfig, scheduleConfig, cleanupConfig, mirrorOptions, and advancedOptions are required.",
         }),
         {
           status: 400,
@@ -172,17 +176,11 @@ export const POST: APIRoute = async ({ request }) => {
   }
 };
 
-export const GET: APIRoute = async ({ request }) => {
+export const GET: APIRoute = async ({ request, locals }) => {
   try {
-    const url = new URL(request.url);
-    const userId = url.searchParams.get("userId");
-
-    if (!userId) {
-      return new Response(JSON.stringify({ error: "User ID is required" }), {
-        status: 400,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
+    const authResult = await requireAuthenticatedUserId({ request, locals });
+    if ("response" in authResult) return authResult.response;
+    const userId = authResult.userId;
 
     // Fetch the configuration for the user
     const config = await db

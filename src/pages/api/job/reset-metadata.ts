@@ -4,17 +4,22 @@ import { db, configs, repositories } from "@/lib/db";
 import { repositoryVisibilityEnum, repoStatusEnum } from "@/types/Repository";
 import type { ResetMetadataRequest, ResetMetadataResponse } from "@/types/reset-metadata";
 import { createSecureErrorResponse } from "@/lib/utils";
+import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 
-export const POST: APIRoute = async ({ request }) => {
+export const POST: APIRoute = async ({ request, locals }) => {
   try {
-    const body: ResetMetadataRequest = await request.json();
-    const { userId, repositoryIds } = body;
+    const authResult = await requireAuthenticatedUserId({ request, locals });
+    if ("response" in authResult) return authResult.response;
+    const userId = authResult.userId;
 
-    if (!userId || !repositoryIds || !Array.isArray(repositoryIds)) {
+    const body: ResetMetadataRequest = await request.json();
+    const { repositoryIds } = body;
+
+    if (!repositoryIds || !Array.isArray(repositoryIds)) {
       return new Response(
         JSON.stringify({
           success: false,
-          message: "userId and repositoryIds are required.",
+          message: "repositoryIds are required.",
         }),
         { status: 400, headers: { "Content-Type": "application/json" } }
       );

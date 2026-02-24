@@ -12,14 +12,12 @@ import {
 import { jsonResponse, createSecureErrorResponse } from "@/lib/utils";
 import { mergeGitReposPreferStarred, calcBatchSizeForInsert } from "@/lib/repo-utils";
 import { getDecryptedGitHubToken } from "@/lib/utils/config-encryption";
+import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 
-export const POST: APIRoute = async ({ request }) => {
-  const url = new URL(request.url);
-  const userId = url.searchParams.get("userId");
-
-  if (!userId) {
-    return jsonResponse({ data: { error: "Missing userId" }, status: 400 });
-  }
+export const POST: APIRoute = async ({ request, locals }) => {
+  const authResult = await requireAuthenticatedUserId({ request, locals });
+  if ("response" in authResult) return authResult.response;
+  const userId = authResult.userId;
 
   try {
     const [config] = await db
