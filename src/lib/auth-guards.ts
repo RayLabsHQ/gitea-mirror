@@ -28,9 +28,14 @@ export async function requireAuthenticatedUserId(
     return { userId: localUserId };
   }
 
-  const session = await auth.api.getSession({
-    headers: context.request.headers,
-  });
+  let session: Awaited<ReturnType<typeof auth.api.getSession>> | null = null;
+  try {
+    session = await auth.api.getSession({
+      headers: context.request.headers,
+    });
+  } catch {
+    return { response: unauthorizedResponse() };
+  }
 
   if (!session?.user?.id) {
     return { response: unauthorizedResponse() };
