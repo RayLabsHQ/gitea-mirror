@@ -130,7 +130,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       );
       insertedOrgs = newOrgs.filter((o) => !existingOrgNames.has(o.normalizedName));
 
-      // Batch insert repositories to avoid SQLite parameter limit (dynamic by column count)
+      // Batch insert new repositories
       const sample = newRepos[0];
       const columnCount = Object.keys(sample ?? {}).length || 1;
       const REPO_BATCH_SIZE = calcBatchSizeForInsert(columnCount);
@@ -142,6 +142,26 @@ export const POST: APIRoute = async ({ request, locals }) => {
             .values(batch)
             .onConflictDoNothing({ target: [repositories.userId, repositories.normalizedFullName] });
         }
+      }
+
+      // Update existing repositories with latest GitHub data
+      const reposToUpdate = newRepos.filter((r) => existingRepoNames.has(r.normalizedFullName));
+      for (const repo of reposToUpdate) {
+        await tx
+          .update(repositories)
+          .set({
+            description: repo.description,
+            visibility: repo.visibility,
+            isArchived: repo.isArchived,
+            isPrivate: repo.isPrivate,
+            isStarred: repo.isStarred,
+            size: repo.size,
+            language: repo.language,
+            defaultBranch: repo.defaultBranch,
+            hasIssues: repo.hasIssues,
+            updatedAt: new Date(),
+          })
+          .where(eq(repositories.normalizedFullName, repo.normalizedFullName));
       }
 
       // Batch insert organizations (they have fewer fields, so we can use larger batches)
