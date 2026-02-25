@@ -191,17 +191,46 @@ export const POST: APIRoute = async ({ request, locals }) => {
       };
     });
 
-    // Batch insert repositories to avoid SQLite parameter limit
+    // Batch insert new repositories and update existing ones
     // Compute batch size based on column count
     const sample = repoRecords[0];
     const columnCount = Object.keys(sample ?? {}).length || 1;
     const BATCH_SIZE = Math.max(1, Math.floor(999 / columnCount));
-    for (let i = 0; i < repoRecords.length; i += BATCH_SIZE) {
-      const batch = repoRecords.slice(i, i + BATCH_SIZE);
+
+    // Get existing repos for this user
+    const existingRepos = await db
+      .select({ normalizedFullName: repositories.normalizedFullName })
+      .from(repositories)
+      .where(eq(repositories.userId, userId));
+    const existingRepoNames = new Set(existingRepos.map((r) => r.normalizedFullName));
+
+    // Insert new repos
+    const newRepos = repoRecords.filter((r) => !existingRepoNames.has(r.normalizedFullName));
+    for (let i = 0; i < newRepos.length; i += BATCH_SIZE) {
+      const batch = newRepos.slice(i, i + BATCH_SIZE);
       await db
         .insert(repositories)
         .values(batch)
         .onConflictDoNothing({ target: [repositories.userId, repositories.normalizedFullName] });
+    }
+
+    // Update existing repos with latest GitHub data
+    const reposToUpdate = repoRecords.filter((r) => existingRepoNames.has(r.normalizedFullName));
+    for (const repo of reposToUpdate) {
+      await db
+        .update(repositories)
+        .set({
+          description: repo.description,
+          visibility: repo.visibility,
+          isArchived: repo.isArchived,
+          isPrivate: repo.isPrivate,
+          size: repo.size,
+          language: repo.language,
+          defaultBranch: repo.defaultBranch,
+          hasIssues: repo.hasIssues,
+          updatedAt: new Date(),
+        })
+        .where(eq(repositories.normalizedFullName, repo.normalizedFullName));
     }
 
     // Insert organization metadata
