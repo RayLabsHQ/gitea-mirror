@@ -129,6 +129,29 @@ async function runScheduledSync(config: any): Promise<void> {
         } else {
           console.log(`[Scheduler] No new repositories found for user ${userId}`);
         }
+
+        // Update existing repositories with latest GitHub data
+        const reposToUpdate = allGithubRepos.filter(r => existingRepoNames.has(r.fullName.toLowerCase()));
+        if (reposToUpdate.length > 0) {
+          console.log(`[Scheduler] Updating ${reposToUpdate.length} existing repositories for user ${userId}`);
+          for (const repo of reposToUpdate) {
+            await db
+              .update(repositories)
+              .set({
+                description: repo.description ?? null,
+                visibility: repo.visibility,
+                isArchived: repo.isArchived,
+                isPrivate: repo.isPrivate,
+                isStarred: repo.isStarred,
+                size: repo.size,
+                language: repo.language ?? null,
+                defaultBranch: repo.defaultBranch,
+                hasIssues: repo.hasIssues,
+                updatedAt: new Date(),
+              })
+              .where(eq(repositories.normalizedFullName, repo.fullName.toLowerCase()));
+          }
+        }
       } catch (error) {
         console.error(`[Scheduler] Failed to auto-import repositories for user ${userId}:`, error);
       }
@@ -461,6 +484,29 @@ async function performInitialAutoStart(): Promise<void> {
           console.log(`[Scheduler] Successfully imported ${reposToImport.length} repositories`);
         } else {
           console.log(`[Scheduler] No new repositories to import for user ${config.userId}`);
+        }
+
+        // Update existing repositories with latest GitHub data
+        const reposToUpdate = allGithubRepos.filter(r => existingRepoNames.has(r.fullName.toLowerCase()));
+        if (reposToUpdate.length > 0) {
+          console.log(`[Scheduler] Updating ${reposToUpdate.length} existing repositories for user ${config.userId}`);
+          for (const repo of reposToUpdate) {
+            await db
+              .update(repositories)
+              .set({
+                description: repo.description ?? null,
+                visibility: repo.visibility,
+                isArchived: repo.isArchived,
+                isPrivate: repo.isPrivate,
+                isStarred: repo.isStarred,
+                size: repo.size,
+                language: repo.language ?? null,
+                defaultBranch: repo.defaultBranch,
+                hasIssues: repo.hasIssues,
+                updatedAt: new Date(),
+              })
+              .where(eq(repositories.normalizedFullName, repo.fullName.toLowerCase()));
+          }
         }
         
         // Check if we already have mirrored repositories (indicating this isn't first run)
