@@ -313,21 +313,43 @@ export async function syncGiteaRepoEnhanced({
       throw new Error(`Repository ${repository.name} is not a mirror. Cannot sync.`);
     }
 
-    // Update mirror interval if needed
-    if (config.giteaConfig?.mirrorInterval) {
-      try {
-        console.log(`[Sync] Updating mirror interval for ${repository.name} to ${config.giteaConfig.mirrorInterval}`);
-        const updateUrl = `${config.giteaConfig.url}/api/v1/repos/${repoOwner}/${repository.name}`;
-        await httpPatch(updateUrl, {
-          mirror_interval: config.giteaConfig.mirrorInterval,
-        }, {
+    // Update repository metadata in Gitea (description, archived status, etc.)
+    try {
+      const updateUrl = `${config.giteaConfig.url}/api/v1/repos/${repoOwner}/${repository.name}`;
+      const updatePayload: Record<string, any> = {};
+
+      // Add mirror interval if configured
+      if (config.giteaConfig?.mirrorInterval) {
+        updatePayload.mirror_interval = config.giteaConfig.mirrorInterval;
+      }
+
+      // Sync metadata from GitHub to Gitea
+      if (repository.description !== undefined) {
+        updatePayload.description = repository.description || "";
+      }
+      if (repository.isArchived !== undefined) {
+        updatePayload.archived = repository.isArchived;
+      }
+      if (repository.isPrivate !== undefined) {
+        updatePayload.private = repository.isPrivate;
+      }
+      if (repository.hasIssues !== undefined) {
+        updatePayload.has_issues = repository.hasIssues;
+      }
+      if (repository.defaultBranch) {
+        updatePayload.default_branch = repository.defaultBranch;
+      }
+
+      if (Object.keys(updatePayload).length > 0) {
+        console.log(`[Sync] Updating Gitea repo metadata for ${repository.name}`);
+        await httpPatch(updateUrl, updatePayload, {
           Authorization: `token ${decryptedConfig.giteaConfig.token}`,
         });
-        console.log(`[Sync] Successfully updated mirror interval for ${repository.name}`);
-      } catch (updateError) {
-        console.warn(`[Sync] Failed to update mirror interval for ${repository.name}:`, updateError);
-        // Continue with sync even if interval update fails
+        console.log(`[Sync] Successfully updated Gitea metadata for ${repository.name}`);
       }
+    } catch (updateError) {
+      console.warn(`[Sync] Failed to update Gitea metadata for ${repository.name}:`, updateError);
+      // Continue with sync even if metadata update fails
     }
 
     // Perform the sync
