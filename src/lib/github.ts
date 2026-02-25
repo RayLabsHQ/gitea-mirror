@@ -217,7 +217,10 @@ export async function getGithubRepositories({
     );
 
     const skipForks = config.githubConfig?.skipForks ?? false;
-
+    
+    // Skip disabled repositories (DMCA takedowns, ToS violations, etc.)
+    if (repo.disabled) return false;
+    
     const filteredRepos = repos.filter((repo) => {
       const isForkAllowed = !skipForks || !repo.fork;
       return isForkAllowed;
@@ -284,7 +287,10 @@ export async function getGithubStarredRepositories({
       }
     );
 
-    return starredRepos.map((repo) => ({
+    // Filter out disabled repositories
+    const filteredRepos = starredRepos.filter((repo) => !repo.disabled);
+
+    return filteredRepos.map((repo) => ({
       name: repo.name,
       fullName: repo.full_name,
       url: repo.html_url,
@@ -408,7 +414,10 @@ export async function getGithubOrganizationRepositories({
       per_page: 100,
     });
 
-    return repos.map((repo) => ({
+    // Filter out disabled repositories
+    const filteredRepos = repos.filter((repo) => !repo.disabled);
+
+    return filteredRepos.map((repo) => ({
       name: repo.name,
       fullName: repo.full_name,
       url: repo.html_url,
