@@ -49,7 +49,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const normalizedRepo = trimmedRepo.toLowerCase();
     const normalizedFullName = `${normalizedOwner}/${normalizedRepo}`;
 
-    // Check if repository with the same owner, name, and userId already exists
+    // Check if repository already exists for this user
     const [existingRepo] = await db
       .select()
       .from(repositories)
@@ -60,17 +60,6 @@ export const POST: APIRoute = async ({ request, locals }) => {
         )
       )
       .limit(1);
-
-    if (existingRepo && !force) {
-      return jsonResponse({
-        data: {
-          success: false,
-          error:
-            "Repository with this name and owner already exists for this user",
-        },
-        status: 409,
-      });
-    }
 
     // Get user's active config
     const [config] = await db
@@ -128,7 +117,8 @@ export const POST: APIRoute = async ({ request, locals }) => {
         : new Date(),
     };
 
-    if (existingRepo && force) {
+    if (existingRepo) {
+      // Update existing repository with latest GitHub data
       const [updatedRepo] = await db
         .update(repositories)
         .set({
@@ -142,7 +132,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
       const resPayload: AddRepositoriesApiResponse = {
         success: true,
         repository: updatedRepo ?? existingRepo,
-        message: "Repository already exists; metadata refreshed.",
+        message: force
+          ? "Repository already exists; metadata refreshed."
+          : "Repository updated with latest GitHub data.",
       };
 
       return jsonResponse({ data: resPayload, status: 200 });
