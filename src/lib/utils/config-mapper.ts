@@ -100,6 +100,10 @@ export function mapUiToDbConfig(
     mirrorPullRequests: mirrorOptions.mirrorMetadata && mirrorOptions.metadataComponents.pullRequests,
     mirrorLabels: mirrorOptions.mirrorMetadata && mirrorOptions.metadataComponents.labels,
     mirrorMilestones: mirrorOptions.mirrorMetadata && mirrorOptions.metadataComponents.milestones,
+    backupBeforeSync: giteaConfig.backupBeforeSync ?? true,
+    backupRetentionCount: giteaConfig.backupRetentionCount ?? 20,
+    backupDirectory: giteaConfig.backupDirectory?.trim() || undefined,
+    blockSyncOnBackupFailure: giteaConfig.blockSyncOnBackupFailure ?? true,
   };
 
   return {
@@ -140,6 +144,10 @@ export function mapDbToUiConfig(dbConfig: any): {
     personalReposOrg: undefined, // Not stored in current schema
     issueConcurrency: dbConfig.giteaConfig?.issueConcurrency ?? 3,
     pullRequestConcurrency: dbConfig.giteaConfig?.pullRequestConcurrency ?? 5,
+    backupBeforeSync: dbConfig.giteaConfig?.backupBeforeSync ?? true,
+    backupRetentionCount: dbConfig.giteaConfig?.backupRetentionCount ?? 20,
+    backupDirectory: dbConfig.giteaConfig?.backupDirectory || "data/repo-backups",
+    blockSyncOnBackupFailure: dbConfig.giteaConfig?.blockSyncOnBackupFailure ?? true,
   };
 
   // Map mirror options from various database fields

@@ -65,6 +65,10 @@ export const giteaConfigSchema = z.object({
   mirrorPullRequests: z.boolean().default(false),
   mirrorLabels: z.boolean().default(false),
   mirrorMilestones: z.boolean().default(false),
+  backupBeforeSync: z.boolean().default(true),
+  backupRetentionCount: z.number().int().min(1).default(20),
+  backupDirectory: z.string().optional(),
+  blockSyncOnBackupFailure: z.boolean().default(true),
 });
 
 export const scheduleConfigSchema = z.object({

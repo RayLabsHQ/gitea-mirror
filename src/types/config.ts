@@ -18,6 +18,10 @@ export interface GiteaConfig {
   personalReposOrg?: string; // Override destination for personal repos
   issueConcurrency?: number;
   pullRequestConcurrency?: number;
+  backupBeforeSync?: boolean;
+  backupRetentionCount?: number;
+  backupDirectory?: string;
+  blockSyncOnBackupFailure?: boolean;
 }
 
 export interface ScheduleConfig {

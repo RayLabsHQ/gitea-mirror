@@ -13,6 +13,11 @@ const mockMirrorGitRepoPullRequestsToGitea = mock(() => Promise.resolve());
 const mockMirrorGitRepoLabelsToGitea = mock(() => Promise.resolve());
 const mockMirrorGitRepoMilestonesToGitea = mock(() => Promise.resolve());
 const mockGetGiteaRepoOwnerAsync = mock(() => Promise.resolve("starred"));
+const mockCreatePreSyncBundleBackup = mock(() =>
+  Promise.resolve({ bundlePath: "/tmp/mock.bundle" })
+);
+let mockShouldCreatePreSyncBackup = false;
+let mockShouldBlockSyncOnBackupFailure = true;
 
 // Mock the database module
 const mockDb = {
@@ -235,6 +240,12 @@ mock.module("@/lib/http-client", () => ({
   HttpError: MockHttpError
 }));
 
+mock.module("@/lib/repo-backup", () => ({
+  createPreSyncBundleBackup: mockCreatePreSyncBundleBackup,
+  shouldCreatePreSyncBackup: () => mockShouldCreatePreSyncBackup,
+  shouldBlockSyncOnBackupFailure: () => mockShouldBlockSyncOnBackupFailure,
+}));
+
 // Now import the modules we're testing
 import { 
   getGiteaRepoInfo, 
@@ -264,6 +275,15 @@ describe("Enhanced Gitea Operations", () => {
     mockMirrorGitRepoMilestonesToGitea.mockClear();
     mockGetGiteaRepoOwnerAsync.mockClear();
     mockGetGiteaRepoOwnerAsync.mockImplementation(() => Promise.resolve("starred"));
+    mockHttpGet.mockClear();
+    mockHttpPost.mockClear();
+    mockHttpDelete.mockClear();
+    mockCreatePreSyncBundleBackup.mockClear();
+    mockCreatePreSyncBundleBackup.mockImplementation(() =>
+      Promise.resolve({ bundlePath: "/tmp/mock.bundle" })
+    );
+    mockShouldCreatePreSyncBackup = false;
+    mockShouldBlockSyncOnBackupFailure = true;
     // Reset tracking variables
     orgCheckCount = 0;
     orgTestContext = "";
@@ -527,6 +547,125 @@ describe("Enhanced Gitea Operations", () => {
       expect(releaseCall.giteaRepoName).toBe("mirror-repo");
       expect(releaseCall.config.githubConfig?.token).toBe("github-token");
       expect(releaseCall.octokit).toBeDefined();
+    });
+
+    test("blocks sync when pre-sync snapshot fails and blocking is enabled", async () => {
+      mockShouldCreatePreSyncBackup = true;
+      mockShouldBlockSyncOnBackupFailure = true;
+      mockCreatePreSyncBundleBackup.mockImplementation(() =>
+        Promise.reject(new Error("simulated backup failure"))
+      );
+
+      const config: Partial<Config> = {
+        userId: "user123",
+        githubConfig: {
+          username: "testuser",
+          token: "github-token",
+          privateRepositories: false,
+          mirrorStarred: true,
+        },
+        giteaConfig: {
+          url: "https://gitea.example.com",
+          token: "encrypted-token",
+          defaultOwner: "testuser",
+          mirrorReleases: false,
+          backupBeforeSync: true,
+          blockSyncOnBackupFailure: true,
+        },
+      };
+
+      const repository: Repository = {
+        id: "repo456",
+        name: "mirror-repo",
+        fullName: "user/mirror-repo",
+        owner: "user",
+        cloneUrl: "https://github.com/user/mirror-repo.git",
+        isPrivate: false,
+        isStarred: true,
+        status: repoStatusEnum.parse("mirrored"),
+        visibility: "public",
+        userId: "user123",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      await expect(
+        syncGiteaRepoEnhanced(
+          { config, repository },
+          {
+            getGiteaRepoOwnerAsync: mockGetGiteaRepoOwnerAsync,
+            mirrorGitHubReleasesToGitea: mockMirrorGitHubReleasesToGitea,
+            mirrorGitRepoIssuesToGitea: mockMirrorGitRepoIssuesToGitea,
+            mirrorGitRepoPullRequestsToGitea: mockMirrorGitRepoPullRequestsToGitea,
+            mirrorGitRepoLabelsToGitea: mockMirrorGitRepoLabelsToGitea,
+            mirrorGitRepoMilestonesToGitea: mockMirrorGitRepoMilestonesToGitea,
+          }
+        )
+      ).rejects.toThrow("Snapshot failed; sync blocked to protect history.");
+
+      const mirrorSyncCalls = mockHttpPost.mock.calls.filter((call) =>
+        String(call[0]).includes("/mirror-sync")
+      );
+      expect(mirrorSyncCalls.length).toBe(0);
+    });
+
+    test("continues sync when pre-sync snapshot fails and blocking is disabled", async () => {
+      mockShouldCreatePreSyncBackup = true;
+      mockShouldBlockSyncOnBackupFailure = false;
+      mockCreatePreSyncBundleBackup.mockImplementation(() =>
+        Promise.reject(new Error("simulated backup failure"))
+      );
+
+      const config: Partial<Config> = {
+        userId: "user123",
+        githubConfig: {
+          username: "testuser",
+          token: "github-token",
+          privateRepositories: false,
+          mirrorStarred: true,
+        },
+        giteaConfig: {
+          url: "https://gitea.example.com",
+          token: "encrypted-token",
+          defaultOwner: "testuser",
+          mirrorReleases: false,
+          backupBeforeSync: true,
+          blockSyncOnBackupFailure: false,
+        },
+      };
+
+      const repository: Repository = {
+        id: "repo457",
+        name: "mirror-repo",
+        fullName: "user/mirror-repo",
+        owner: "user",
+        cloneUrl: "https://github.com/user/mirror-repo.git",
+        isPrivate: false,
+        isStarred: true,
+        status: repoStatusEnum.parse("mirrored"),
+        visibility: "public",
+        userId: "user123",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      const result = await syncGiteaRepoEnhanced(
+        { config, repository },
+        {
+          getGiteaRepoOwnerAsync: mockGetGiteaRepoOwnerAsync,
+          mirrorGitHubReleasesToGitea: mockMirrorGitHubReleasesToGitea,
+          mirrorGitRepoIssuesToGitea: mockMirrorGitRepoIssuesToGitea,
+          mirrorGitRepoPullRequestsToGitea: mockMirrorGitRepoPullRequestsToGitea,
+          mirrorGitRepoLabelsToGitea: mockMirrorGitRepoLabelsToGitea,
+          mirrorGitRepoMilestonesToGitea: mockMirrorGitRepoMilestonesToGitea,
+        }
+      );
+
+      expect(result).toEqual({ success: true });
+      const mirrorSyncCalls = mockHttpPost.mock.calls.filter((call) =>
+        String(call[0]).includes("/mirror-sync")
+      );
+      expect(mirrorSyncCalls.length).toBe(1);
     });
 
     test("mirrors metadata components when enabled and not previously synced", async () => {

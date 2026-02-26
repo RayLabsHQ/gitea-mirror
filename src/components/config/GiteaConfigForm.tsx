@@ -100,9 +100,16 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
       );
     }
 
+    const normalizedValue =
+      type === "checkbox"
+        ? checked
+        : name === "backupRetentionCount"
+          ? Math.max(1, Number.parseInt(value, 10) || 20)
+          : value;
+
     const newConfig = {
       ...config,
-      [name]: type === "checkbox" ? checked : value,
+      [name]: normalizedValue,
     };
     setConfig(newConfig);
 
@@ -286,7 +293,77 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
             if (onAutoSave) onAutoSave(newConfig);
           }}
         />
-        
+
+        <Separator />
+
+        <div className="space-y-4">
+          <h3 className="text-sm font-semibold">Destructive Update Protection</h3>
+          <label className="flex items-start gap-3 text-sm">
+            <input
+              name="backupBeforeSync"
+              type="checkbox"
+              checked={Boolean(config.backupBeforeSync)}
+              onChange={handleChange}
+              className="mt-0.5 rounded border-input"
+            />
+            <span>
+              Create snapshot before each sync
+              <p className="text-xs text-muted-foreground">
+                Saves a restore point so force-pushes or rewritten upstream history can be recovered.
+              </p>
+            </span>
+          </label>
+
+          {config.backupBeforeSync && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label htmlFor="gitea-backup-retention" className="block text-sm font-medium mb-1.5">
+                  Snapshot retention count
+                </label>
+                <input
+                  id="gitea-backup-retention"
+                  name="backupRetentionCount"
+                  type="number"
+                  min={1}
+                  value={config.backupRetentionCount ?? 20}
+                  onChange={handleChange}
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                />
+              </div>
+              <div>
+                <label htmlFor="gitea-backup-directory" className="block text-sm font-medium mb-1.5">
+                  Snapshot directory
+                </label>
+                <input
+                  id="gitea-backup-directory"
+                  name="backupDirectory"
+                  type="text"
+                  value={config.backupDirectory || "data/repo-backups"}
+                  onChange={handleChange}
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                  placeholder="data/repo-backups"
+                />
+              </div>
+            </div>
+          )}
+
+          <label className="flex items-start gap-3 text-sm">
+            <input
+              name="blockSyncOnBackupFailure"
+              type="checkbox"
+              checked={Boolean(config.blockSyncOnBackupFailure)}
+              onChange={handleChange}
+              className="mt-0.5 rounded border-input"
+            />
+            <span>
+              Block sync when snapshot fails
+              <p className="text-xs text-muted-foreground">
+                Recommended for backup-first behavior. If disabled, sync continues even when snapshot creation fails.
+              </p>
+            </span>
+          </label>
+        </div>
+
         {/* Mobile: Show button at bottom */}
         <Button
           type="button"

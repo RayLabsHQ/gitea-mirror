@@ -50,6 +50,10 @@ export function ConfigTabs() {
       starredReposOrg: 'starred',
       starredReposMode: 'dedicated-org',
       preserveOrgStructure: false,
+      backupBeforeSync: true,
+      backupRetentionCount: 20,
+      backupDirectory: 'data/repo-backups',
+      blockSyncOnBackupFailure: true,
     },
     scheduleConfig: {
       enabled: false, // Don't set defaults here - will be loaded from API

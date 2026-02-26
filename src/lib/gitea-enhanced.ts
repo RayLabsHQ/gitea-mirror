@@ -16,6 +16,11 @@ import { db, repositories } from "./db";
 import { eq } from "drizzle-orm";
 import { repoStatusEnum } from "@/types/Repository";
 import {
+  createPreSyncBundleBackup,
+  shouldCreatePreSyncBackup,
+  shouldBlockSyncOnBackupFailure,
+} from "./repo-backup";
+import {
   parseRepositoryMetadataState,
   serializeRepositoryMetadataState,
 } from "./metadata-state";
@@ -311,6 +316,61 @@ export async function syncGiteaRepoEnhanced({
       });
 
       throw new Error(`Repository ${repository.name} is not a mirror. Cannot sync.`);
+    }
+
+    if (shouldCreatePreSyncBackup(config)) {
+      const cloneUrl =
+        repoInfo.clone_url ||
+        `${config.giteaConfig.url.replace(/\/$/, "")}/${repoOwner}/${repository.name}.git`;
+
+      try {
+        const backupResult = await createPreSyncBundleBackup({
+          config,
+          owner: repoOwner,
+          repoName: repository.name,
+          cloneUrl,
+        });
+
+        await createMirrorJob({
+          userId: config.userId,
+          repositoryId: repository.id,
+          repositoryName: repository.name,
+          message: `Snapshot created for ${repository.name}`,
+          details: `Pre-sync snapshot created at ${backupResult.bundlePath}.`,
+          status: "syncing",
+        });
+      } catch (backupError) {
+        const errorMessage =
+          backupError instanceof Error ? backupError.message : String(backupError);
+
+        await createMirrorJob({
+          userId: config.userId,
+          repositoryId: repository.id,
+          repositoryName: repository.name,
+          message: `Snapshot failed for ${repository.name}`,
+          details: `Pre-sync snapshot failed: ${errorMessage}`,
+          status: "failed",
+        });
+
+        if (shouldBlockSyncOnBackupFailure(config)) {
+          await db
+            .update(repositories)
+            .set({
+              status: repoStatusEnum.parse("failed"),
+              updatedAt: new Date(),
+              errorMessage: `Snapshot failed; sync blocked to protect history. ${errorMessage}`,
+            })
+            .where(eq(repositories.id, repository.id!));
+
+          throw new Error(
+            `Snapshot failed; sync blocked to protect history. ${errorMessage}`
+          );
+        }
+
+        console.warn(
+          `[Sync] Snapshot failed for ${repository.name}, continuing because blockSyncOnBackupFailure=false: ${errorMessage}`
+        );
+      }
     }
 
     // Update mirror interval if needed
