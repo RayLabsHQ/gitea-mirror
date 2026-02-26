@@ -27,8 +27,14 @@ mock.module("@/lib/db", () => {
         })
       })
     },
+    users: {},
+    configs: {},
     repositories: {},
-    organizations: {}
+    organizations: {},
+    mirrorJobs: {},
+    events: {},
+    accounts: {},
+    sessions: {},
   };
 });
 

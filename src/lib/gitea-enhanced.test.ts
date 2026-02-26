@@ -33,8 +33,14 @@ const mockDb = {
 
 mock.module("@/lib/db", () => ({
   db: mockDb,
+  users: {},
+  configs: {},
+  organizations: {},
   mirrorJobs: {},
-  repositories: {}
+  repositories: {},
+  events: {},
+  accounts: {},
+  sessions: {},
 }));
 
 // Mock config encryption

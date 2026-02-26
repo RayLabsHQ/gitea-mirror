@@ -24,9 +24,14 @@ mock.module("@/lib/db", () => {
         values: mock(() => Promise.resolve())
       }))
     },
+    users: {},
+    configs: {},
     repositories: {},
     organizations: {},
-    events: {}
+    events: {},
+    mirrorJobs: {},
+    accounts: {},
+    sessions: {},
   };
 });
 

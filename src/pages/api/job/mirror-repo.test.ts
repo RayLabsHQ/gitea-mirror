@@ -62,7 +62,13 @@ const mockRepositories = {};
 mock.module("@/lib/db", () => ({
   db: mockDb,
   configs: mockConfigs,
-  repositories: mockRepositories
+  repositories: mockRepositories,
+  users: {},
+  organizations: {},
+  mirrorJobs: {},
+  events: {},
+  accounts: {},
+  sessions: {}
 }));
 
 // Mock the gitea module
@@ -71,7 +77,10 @@ const mockMirrorGitHubOrgRepoToGiteaOrg = mock(() => Promise.resolve());
 
 mock.module("@/lib/gitea", () => ({
   mirrorGithubRepoToGitea: mockMirrorGithubRepoToGitea,
-  mirrorGitHubOrgRepoToGiteaOrg: mockMirrorGitHubOrgRepoToGiteaOrg
+  mirrorGitHubOrgRepoToGiteaOrg: mockMirrorGitHubOrgRepoToGiteaOrg,
+  getGiteaRepoOwnerAsync: mock(() => Promise.resolve("test-owner")),
+  isRepoPresentInGitea: mock(() => Promise.resolve(true)),
+  syncGiteaRepo: mock(() => Promise.resolve({ success: true })),
 }));
 
 // Mock the github module
