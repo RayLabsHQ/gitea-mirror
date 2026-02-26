@@ -325,8 +325,8 @@ bun test
 
 4. **Create release**:
 ```bash
-git tag v2.23.0
-git push origin v2.23.0
+git tag vX.Y.Z
+git push origin vX.Y.Z
 ```
 
 5. **Create GitHub release**
@@ -349,6 +349,6 @@ git push origin v2.23.0
 
 ## Getting Help
 
-- Check existing [issues](https://github.com/yourusername/gitea-mirror/issues)
-- Join [discussions](https://github.com/yourusername/gitea-mirror/discussions)
-- Read the [FAQ](./FAQ.md)
+- Check existing [issues](https://github.com/RayLabsHQ/gitea-mirror/issues)
+- Join [discussions](https://github.com/RayLabsHQ/gitea-mirror/discussions)
+- Review project docs in [docs/README.md](./README.md)

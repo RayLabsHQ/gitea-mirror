@@ -7,6 +7,8 @@ This folder contains engineering and operations references for the open-source G
 ### Core workflow
 - **[DEVELOPMENT_WORKFLOW.md](./DEVELOPMENT_WORKFLOW.md)** – Set up a local environment, run scripts, and understand the repo layout (app + marketing site).
 - **[ENVIRONMENT_VARIABLES.md](./ENVIRONMENT_VARIABLES.md)** – Complete reference for every configuration flag supported by the app and Docker images.
+- **[NIX_DEPLOYMENT.md](./NIX_DEPLOYMENT.md)** – User-facing deployment guide for Nix and NixOS.
+- **[NIX_DISTRIBUTION.md](./NIX_DISTRIBUTION.md)** – Maintainer notes for packaging, releases, and distribution strategy.
 
 ### Reliability & recovery
 - **[GRACEFUL_SHUTDOWN.md](./GRACEFUL_SHUTDOWN.md)** – How signal handling, shutdown coordination, and job persistence work in v3.
@@ -32,8 +34,6 @@ The first user you create locally becomes the administrator. All other configura
 ## Contributing & support
 
 - 🎯 Contribution guide: [../CONTRIBUTING.md](../CONTRIBUTING.md)
-- 📘 Code of conduct: [../CODE_OF_CONDUCT.md](../CODE_OF_CONDUCT.md)
 - 🐞 Issues & feature requests: <https://github.com/RayLabsHQ/gitea-mirror/issues>
 - 💬 Discussions: <https://github.com/RayLabsHQ/gitea-mirror/discussions>
-
-Security disclosures should follow the process in [../SECURITY.md](../SECURITY.md).
+- 🔐 Security policy & advisories: <https://github.com/RayLabsHQ/gitea-mirror/security>

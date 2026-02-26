@@ -112,7 +112,7 @@ docker compose up -d
 #### Using Pre-built Image Directly
 
 ```bash
-docker pull ghcr.io/raylabshq/gitea-mirror:v3.1.1
+docker pull ghcr.io/raylabshq/gitea-mirror:latest
 ```
 
 ### Configuration Options
@@ -483,7 +483,7 @@ Contributions are welcome! Please read our [Contributing Guidelines](CONTRIBUTIN
 
 ## License
 
-GNU General Public License v3.0 - see [LICENSE](LICENSE) file for details.
+GNU Affero General Public License v3.0 (AGPL-3.0) - see [LICENSE](LICENSE) file for details.
 
 ## Star History
 
@@ -498,7 +498,7 @@ GNU General Public License v3.0 - see [LICENSE](LICENSE) file for details.
 ## Support
 
 - 📖 [Documentation](https://github.com/RayLabsHQ/gitea-mirror/tree/main/docs)
-- 🔐 [Custom CA Certificates](docs/CA_CERTIFICATES.md)
+- 🔐 [Environment Variables](docs/ENVIRONMENT_VARIABLES.md)
 - 🐛 [Report Issues](https://github.com/RayLabsHQ/gitea-mirror/issues)
 - 💬 [Discussions](https://github.com/RayLabsHQ/gitea-mirror/discussions)
 - 🔧 [Proxmox VE Script](https://community-scripts.github.io/ProxmoxVE/scripts?id=gitea-mirror)

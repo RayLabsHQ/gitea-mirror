@@ -16,7 +16,7 @@ nix run --extra-experimental-features 'nix-command flakes' github:RayLabsHQ/gite
 nix run github:RayLabsHQ/gitea-mirror/abc123def
 
 # Pin to git tag
-nix run github:RayLabsHQ/gitea-mirror/v3.8.11
+nix run github:RayLabsHQ/gitea-mirror/vX.Y.Z
 ```
 
 **How it works:**
@@ -110,11 +110,11 @@ GitHub Actions workflow validates builds on every push/PR:
 Tag releases for version pinning:
 
 ```bash
-git tag v3.8.11
-git push origin v3.8.11
+git tag vX.Y.Z
+git push origin vX.Y.Z
 
 # Users can then pin:
-nix run github:RayLabsHQ/gitea-mirror/v3.8.11
+nix run github:RayLabsHQ/gitea-mirror/vX.Y.Z
 ```
 
 ### Phase 4: nixpkgs Submission (Long Term)
@@ -143,13 +143,13 @@ nix profile install --extra-experimental-features 'nix-command flakes' github:Ra
 
 ```bash
 # Pin to git tag
-nix run github:RayLabsHQ/gitea-mirror/v3.8.11
+nix run github:RayLabsHQ/gitea-mirror/vX.Y.Z
 
 # Pin to commit
 nix run github:RayLabsHQ/gitea-mirror/abc123def
 
 # Lock in flake.nix
-inputs.gitea-mirror.url = "github:RayLabsHQ/gitea-mirror/v3.8.11";
+inputs.gitea-mirror.url = "github:RayLabsHQ/gitea-mirror/vX.Y.Z";
 ```
 
 #### Option 3: NixOS Configuration
@@ -160,7 +160,7 @@ inputs.gitea-mirror.url = "github:RayLabsHQ/gitea-mirror/v3.8.11";
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     gitea-mirror.url = "github:RayLabsHQ/gitea-mirror";
     # Or pin to version:
-    # gitea-mirror.url = "github:RayLabsHQ/gitea-mirror/v3.8.11";
+    # gitea-mirror.url = "github:RayLabsHQ/gitea-mirror/vX.Y.Z";
   };
 
   outputs = { nixpkgs, gitea-mirror, ... }: {
@@ -257,7 +257,7 @@ git tag -l
 git ls-remote --tags origin
 
 # Test specific tag
-nix run github:RayLabsHQ/gitea-mirror/v3.8.11
+nix run github:RayLabsHQ/gitea-mirror/vX.Y.Z
 ```
 
 ---

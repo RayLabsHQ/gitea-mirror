@@ -24,7 +24,7 @@ Secrets auto-generate, database auto-initializes, and the web UI starts at http:
 nix run --extra-experimental-features 'nix-command flakes' github:RayLabsHQ/gitea-mirror
 
 # Pin to specific version
-nix run github:RayLabsHQ/gitea-mirror/v3.8.11
+nix run github:RayLabsHQ/gitea-mirror/vX.Y.Z
 ```
 
 ### 2. Install to Profile
