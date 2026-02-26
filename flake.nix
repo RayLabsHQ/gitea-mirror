@@ -52,7 +52,10 @@
             cp -r dist $out/lib/gitea-mirror/
             cp -r node_modules $out/lib/gitea-mirror/
             cp -r scripts $out/lib/gitea-mirror/
+            cp -r src $out/lib/gitea-mirror/
+            cp -r drizzle $out/lib/gitea-mirror/
             cp package.json $out/lib/gitea-mirror/
+            cp tsconfig.json $out/lib/gitea-mirror/
 
             # Create entrypoint script that matches Docker behavior
             cat > $out/bin/gitea-mirror <<'EOF'
@@ -78,7 +81,8 @@ export MIRROR_PULL_REQUEST_CONCURRENCY=''${MIRROR_PULL_REQUEST_CONCURRENCY:-5}
 
 # Create data directory
 mkdir -p "$DATA_DIR"
-cd $out/lib/gitea-mirror
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR/../lib/gitea-mirror"
 
 # === AUTO-GENERATE SECRETS ===
 BETTER_AUTH_SECRET_FILE="$DATA_DIR/.better_auth_secret"
@@ -176,7 +180,8 @@ EOF
 #!${pkgs.bash}/bin/bash
 export DATA_DIR=''${DATA_DIR:-"$HOME/.local/share/gitea-mirror"}
 mkdir -p "$DATA_DIR"
-cd $out/lib/gitea-mirror
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+cd "$SCRIPT_DIR/../lib/gitea-mirror"
 exec ${pkgs.bun}/bin/bun scripts/manage-db.ts "$@"
 EOF
             chmod +x $out/bin/gitea-mirror-db
