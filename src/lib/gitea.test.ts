@@ -61,6 +61,31 @@ mock.module("@/lib/http-client", () => {
 
 // Mock the gitea module itself
 mock.module("./gitea", () => {
+  const mockGetGiteaRepoOwner = mock(({ config, repository }: any) => {
+    if (repository?.isStarred && config?.githubConfig?.starredReposMode === "preserve-owner") {
+      return repository.organization || repository.owner;
+    }
+    if (repository?.isStarred) {
+      return config?.githubConfig?.starredReposOrg || "starred";
+    }
+
+    const mirrorStrategy =
+      config?.githubConfig?.mirrorStrategy ||
+      (config?.giteaConfig?.preserveOrgStructure ? "preserve" : "flat-user");
+
+    switch (mirrorStrategy) {
+      case "preserve":
+        return repository?.organization || config?.giteaConfig?.defaultOwner || "giteauser";
+      case "single-org":
+        return config?.giteaConfig?.organization || config?.giteaConfig?.defaultOwner || "giteauser";
+      case "mixed":
+        if (repository?.organization) return repository.organization;
+        return config?.giteaConfig?.organization || config?.giteaConfig?.defaultOwner || "giteauser";
+      case "flat-user":
+      default:
+        return config?.giteaConfig?.defaultOwner || "giteauser";
+    }
+  });
   const mockGetGiteaRepoOwnerAsync = mock(async ({ config, repository }: any) => {
     if (repository?.isStarred && config?.githubConfig?.starredReposMode === "preserve-owner") {
       return repository.organization || repository.owner;
@@ -78,6 +103,7 @@ mock.module("./gitea", () => {
   });
   return {
     isRepoPresentInGitea: mockIsRepoPresentInGitea,
+    getGiteaRepoOwner: mockGetGiteaRepoOwner,
     getGiteaRepoOwnerAsync: mockGetGiteaRepoOwnerAsync,
     mirrorGithubRepoToGitea: mock(async () => {}),
     mirrorGitHubOrgRepoToGiteaOrg: mock(async () => {})

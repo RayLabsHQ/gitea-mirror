@@ -66,11 +66,13 @@ const mockMirrorGitHubOrgRepoToGiteaOrg = mock(async () => {});
 const mockIsRepoPresentInGitea = mock(async () => false);
 const mockMirrorGithubRepoToGitea = mock(async () => {});
 const mockGetGiteaRepoOwnerAsync = mock(async () => "starred");
+const mockGetGiteaRepoOwner = mock(() => "starred");
 
 mock.module("./gitea", () => ({
   getOrCreateGiteaOrg: mockGetOrCreateGiteaOrg,
   mirrorGitHubOrgRepoToGiteaOrg: mockMirrorGitHubOrgRepoToGiteaOrg,
   mirrorGithubRepoToGitea: mockMirrorGithubRepoToGitea,
+  getGiteaRepoOwner: mockGetGiteaRepoOwner,
   getGiteaRepoOwnerAsync: mockGetGiteaRepoOwnerAsync,
   isRepoPresentInGitea: mockIsRepoPresentInGitea
 }));
