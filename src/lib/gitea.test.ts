@@ -61,8 +61,24 @@ mock.module("@/lib/http-client", () => {
 
 // Mock the gitea module itself
 mock.module("./gitea", () => {
+  const mockGetGiteaRepoOwnerAsync = mock(async ({ config, repository }: any) => {
+    if (repository?.isStarred && config?.githubConfig?.starredReposMode === "preserve-owner") {
+      return repository.organization || repository.owner;
+    }
+
+    if (repository?.destinationOrg) {
+      return repository.destinationOrg;
+    }
+
+    if (repository?.organization && mockDbSelectResult[0]?.destinationOrg) {
+      return mockDbSelectResult[0].destinationOrg;
+    }
+
+    return config?.giteaConfig?.defaultOwner || "giteauser";
+  });
   return {
     isRepoPresentInGitea: mockIsRepoPresentInGitea,
+    getGiteaRepoOwnerAsync: mockGetGiteaRepoOwnerAsync,
     mirrorGithubRepoToGitea: mock(async () => {}),
     mirrorGitHubOrgRepoToGiteaOrg: mock(async () => {})
   };
