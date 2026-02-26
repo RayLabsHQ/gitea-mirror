@@ -86,6 +86,30 @@ export interface ParsedErrorMessage {
   isStructured: boolean;
 }
 
+function getInvalidOriginGuidance(title: string, description?: string): ParsedErrorMessage | null {
+  const fullMessage = `${title} ${description ?? ""}`.trim();
+  if (!/invalid origin/i.test(fullMessage)) {
+    return null;
+  }
+
+  const urlMatch = fullMessage.match(/https?:\/\/[^\s'")]+/i);
+  let originHint = "this URL";
+
+  if (urlMatch) {
+    try {
+      originHint = new URL(urlMatch[0]).origin;
+    } catch {
+      originHint = urlMatch[0];
+    }
+  }
+
+  return {
+    title: "Invalid Origin",
+    description: `Add ${originHint} to BETTER_AUTH_TRUSTED_ORIGINS and restart the app.`,
+    isStructured: true,
+  };
+}
+
 export function parseErrorMessage(error: unknown): ParsedErrorMessage {
   // Handle Error objects
   if (error instanceof Error) {
@@ -102,29 +126,32 @@ export function parseErrorMessage(error: unknown): ParsedErrorMessage {
       if (typeof parsed === "object" && parsed !== null) {
         // Format 1: { error: "message", errorType: "type", troubleshooting: "info" }
         if (parsed.error) {
-          return {
+          const formatted = {
             title: parsed.error,
             description: parsed.troubleshooting || parsed.errorType || undefined,
             isStructured: true,
           };
+          return getInvalidOriginGuidance(formatted.title, formatted.description) || formatted;
         }
 
         // Format 2: { title: "title", description: "desc" }
         if (parsed.title) {
-          return {
+          const formatted = {
             title: parsed.title,
             description: parsed.description || undefined,
             isStructured: true,
           };
+          return getInvalidOriginGuidance(formatted.title, formatted.description) || formatted;
         }
 
         // Format 3: { message: "msg", details: "details" }
         if (parsed.message) {
-          return {
+          const formatted = {
             title: parsed.message,
             description: parsed.details || undefined,
             isStructured: true,
           };
+          return getInvalidOriginGuidance(formatted.title, formatted.description) || formatted;
         }
       }
     } catch {
@@ -132,11 +159,12 @@ export function parseErrorMessage(error: unknown): ParsedErrorMessage {
     }
 
     // Plain string message
-    return {
+    const formatted = {
       title: error,
       description: undefined,
       isStructured: false,
     };
+    return getInvalidOriginGuidance(formatted.title, formatted.description) || formatted;
   }
 
   // Handle objects directly
@@ -144,36 +172,40 @@ export function parseErrorMessage(error: unknown): ParsedErrorMessage {
     const errorObj = error as any;
 
     if (errorObj.error) {
-      return {
+      const formatted = {
         title: errorObj.error,
         description: errorObj.troubleshooting || errorObj.errorType || undefined,
         isStructured: true,
       };
+      return getInvalidOriginGuidance(formatted.title, formatted.description) || formatted;
     }
 
     if (errorObj.title) {
-      return {
+      const formatted = {
         title: errorObj.title,
         description: errorObj.description || undefined,
         isStructured: true,
       };
+      return getInvalidOriginGuidance(formatted.title, formatted.description) || formatted;
     }
 
     if (errorObj.message) {
-      return {
+      const formatted = {
         title: errorObj.message,
         description: errorObj.details || undefined,
         isStructured: true,
       };
+      return getInvalidOriginGuidance(formatted.title, formatted.description) || formatted;
     }
   }
 
   // Fallback for unknown types
-  return {
+  const fallback = {
     title: String(error),
     description: undefined,
     isStructured: false,
   };
+  return getInvalidOriginGuidance(fallback.title, fallback.description) || fallback;
 }
 
 // Enhanced toast helper that parses structured error messages

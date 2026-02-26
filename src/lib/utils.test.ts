@@ -169,4 +169,31 @@ describe("parseErrorMessage", () => {
     expect(result.description).toBeUndefined();
     expect(result.isStructured).toBe(false);
   });
+
+  test("adds trusted origins guidance for invalid origin errors", () => {
+    const errorMessage = "Invalid Origin: https://mirror.example.com";
+
+    const result = parseErrorMessage(errorMessage);
+
+    expect(result.title).toBe("Invalid Origin");
+    expect(result.description).toContain("BETTER_AUTH_TRUSTED_ORIGINS");
+    expect(result.description).toContain("https://mirror.example.com");
+    expect(result.isStructured).toBe(true);
+  });
+});
+
+describe("showErrorToast", () => {
+  test("shows invalid origin guidance in toast description", () => {
+    const calls: any[] = [];
+    const toast = {
+      error: (...args: any[]) => calls.push(args),
+    };
+
+    showErrorToast("Invalid Origin: http://10.10.20.45:4321", toast);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0][0]).toBe("Invalid Origin");
+    expect(calls[0][1].description).toContain("BETTER_AUTH_TRUSTED_ORIGINS");
+    expect(calls[0][1].description).toContain("http://10.10.20.45:4321");
+  });
 });
