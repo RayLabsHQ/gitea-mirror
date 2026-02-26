@@ -70,6 +70,7 @@ export interface GitRepo {
   visibility: RepositoryVisibility;
 
   status: RepoStatus;
+  isDisabled?: boolean;
   lastMirrored?: Date;
   errorMessage?: string;
 

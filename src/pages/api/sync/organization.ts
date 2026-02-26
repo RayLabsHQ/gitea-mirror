@@ -150,9 +150,10 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const existingIds = new Set(allRepos.map(r => r.id));
     const uniqueMemberRepos = memberRepos.filter(r => !existingIds.has(r.id));
     allRepos.push(...uniqueMemberRepos);
+    const mirrorableRepos = allRepos.filter((repo) => !repo.disabled);
 
     // Insert repositories
-    const repoRecords = allRepos.map((repo) => {
+    const repoRecords = mirrorableRepos.map((repo) => {
       const normalizedOwner = repo.owner.login.trim().toLowerCase();
       const normalizedRepoName = repo.name.trim().toLowerCase();
 

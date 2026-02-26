@@ -13,6 +13,7 @@ import { jsonResponse, createSecureErrorResponse } from "@/lib/utils";
 import { mergeGitReposPreferStarred, calcBatchSizeForInsert } from "@/lib/repo-utils";
 import { getDecryptedGitHubToken } from "@/lib/utils/config-encryption";
 import { requireAuthenticatedUserId } from "@/lib/auth-guards";
+import { isMirrorableGitHubRepo } from "@/lib/repo-eligibility";
 
 export const POST: APIRoute = async ({ request, locals }) => {
   const authResult = await requireAuthenticatedUserId({ request, locals });
@@ -56,9 +57,10 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     // Merge and de-duplicate by fullName, preferring starred variant when duplicated
     const allGithubRepos = mergeGitReposPreferStarred(basicAndForkedRepos, starredRepos);
+    const mirrorableGithubRepos = allGithubRepos.filter(isMirrorableGitHubRepo);
 
     // Prepare full list of repos and orgs
-    const newRepos = allGithubRepos.map((repo) => ({
+    const newRepos = mirrorableGithubRepos.map((repo) => ({
       id: uuidv4(),
       userId,
       configId: config.id,
@@ -186,6 +188,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
         message: "Repositories and organizations synced successfully",
         newRepositories: insertedRepos.length,
         newOrganizations: insertedOrgs.length,
+        skippedDisabledRepositories: allGithubRepos.length - mirrorableGithubRepos.length,
       },
     });
   } catch (error) {

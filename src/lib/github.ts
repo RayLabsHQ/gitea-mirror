@@ -254,6 +254,7 @@ export async function getGithubRepositories({
       visibility: (repo.visibility ?? "public") as GitRepo["visibility"],
 
       status: "imported",
+      isDisabled: repo.disabled ?? false,
       lastMirrored: undefined,
       errorMessage: undefined,
 
@@ -275,7 +276,7 @@ export async function getGithubStarredRepositories({
 }: {
   octokit: Octokit;
   config: Partial<Config>;
-}) {
+}): Promise<GitRepo[]> {
   try {
     const starredRepos = await octokit.paginate(
       octokit.activity.listReposStarredByAuthenticatedUser,
@@ -314,6 +315,7 @@ export async function getGithubStarredRepositories({
       visibility: (repo.visibility ?? "public") as GitRepo["visibility"],
 
       status: "imported",
+      isDisabled: repo.disabled ?? false,
       lastMirrored: undefined,
       errorMessage: undefined,
 
@@ -438,6 +440,7 @@ export async function getGithubOrganizationRepositories({
       visibility: (repo.visibility ?? "public") as GitRepo["visibility"],
 
       status: "imported",
+      isDisabled: repo.disabled ?? false,
       lastMirrored: undefined,
       errorMessage: undefined,
 
