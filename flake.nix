@@ -7,14 +7,17 @@
   };
 
   outputs = { self, nixpkgs, flake-utils }:
-    flake-utils.lib.eachDefaultSystem (system:
+    let
+      forEachSystem = flake-utils.lib.eachDefaultSystem;
+    in
+    (forEachSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
 
         # Build the application
         gitea-mirror = pkgs.stdenv.mkDerivation {
           pname = "gitea-mirror";
-          version = "3.8.11";
+          version = "3.9.4";
 
           src = ./.;
 
@@ -53,7 +56,7 @@
 
             # Create entrypoint script that matches Docker behavior
             cat > $out/bin/gitea-mirror <<'EOF'
-#!/usr/bin/env bash
+#!${pkgs.bash}/bin/bash
 set -e
 
 # === DEFAULT CONFIGURATION ===
@@ -112,7 +115,7 @@ if [ -z "$ENCRYPTION_SECRET" ]; then
 fi
 
 # === DATABASE INITIALIZATION ===
-DB_PATH=$(echo "$DATABASE_URL" | sed 's|^file:||')
+DB_PATH=$(echo "$DATABASE_URL" | ${pkgs.gnused}/bin/sed 's|^file:||')
 if [ ! -f "$DB_PATH" ]; then
   echo "Database not found. It will be created and initialized via Drizzle migrations on first app startup..."
   touch "$DB_PATH"
@@ -123,25 +126,25 @@ fi
 # === STARTUP SCRIPTS ===
 # Initialize configuration from environment variables
 echo "Checking for environment configuration..."
-if [ -f "dist/scripts/startup-env-config.js" ]; then
+if [ -f "scripts/startup-env-config.ts" ]; then
   echo "Loading configuration from environment variables..."
-  ${pkgs.bun}/bin/bun dist/scripts/startup-env-config.js && \
+  ${pkgs.bun}/bin/bun scripts/startup-env-config.ts && \
     echo "✅ Environment configuration loaded successfully" || \
     echo "⚠️  Environment configuration loading completed with warnings"
 fi
 
 # Run startup recovery
 echo "Running startup recovery..."
-if [ -f "dist/scripts/startup-recovery.js" ]; then
-  ${pkgs.bun}/bin/bun dist/scripts/startup-recovery.js --timeout=30000 && \
+if [ -f "scripts/startup-recovery.ts" ]; then
+  ${pkgs.bun}/bin/bun scripts/startup-recovery.ts --timeout=30000 && \
     echo "✅ Startup recovery completed successfully" || \
     echo "⚠️  Startup recovery completed with warnings"
 fi
 
 # Run repository status repair
 echo "Running repository status repair..."
-if [ -f "dist/scripts/repair-mirrored-repos.js" ]; then
-  ${pkgs.bun}/bin/bun dist/scripts/repair-mirrored-repos.js --startup && \
+if [ -f "scripts/repair-mirrored-repos.ts" ]; then
+  ${pkgs.bun}/bin/bun scripts/repair-mirrored-repos.ts --startup && \
     echo "✅ Repository status repair completed successfully" || \
     echo "⚠️  Repository status repair completed with warnings"
 fi
@@ -170,7 +173,7 @@ EOF
 
             # Create database management helper
             cat > $out/bin/gitea-mirror-db <<'EOF'
-#!/usr/bin/env bash
+#!${pkgs.bash}/bin/bash
 export DATA_DIR=''${DATA_DIR:-"$HOME/.local/share/gitea-mirror"}
 mkdir -p "$DATA_DIR"
 cd $out/lib/gitea-mirror
@@ -217,176 +220,175 @@ EOF
           '';
         };
 
-        # NixOS module
-        nixosModules.default = { config, lib, pkgs, ... }:
-          with lib;
-          let
-            cfg = config.services.gitea-mirror;
-          in {
-            options.services.gitea-mirror = {
-              enable = mkEnableOption "Gitea Mirror service";
+      }
+    )) // {
+      nixosModules.default = { config, lib, pkgs, ... }:
+        with lib;
+        let
+          cfg = config.services.gitea-mirror;
+        in {
+          options.services.gitea-mirror = {
+            enable = mkEnableOption "Gitea Mirror service";
 
-              package = mkOption {
-                type = types.package;
-                default = self.packages.${system}.default;
-                description = "The Gitea Mirror package to use";
-              };
-
-              dataDir = mkOption {
-                type = types.path;
-                default = "/var/lib/gitea-mirror";
-                description = "Directory to store data and database";
-              };
-
-              user = mkOption {
-                type = types.str;
-                default = "gitea-mirror";
-                description = "User account under which Gitea Mirror runs";
-              };
-
-              group = mkOption {
-                type = types.str;
-                default = "gitea-mirror";
-                description = "Group under which Gitea Mirror runs";
-              };
-
-              host = mkOption {
-                type = types.str;
-                default = "0.0.0.0";
-                description = "Host to bind to";
-              };
-
-              port = mkOption {
-                type = types.port;
-                default = 4321;
-                description = "Port to listen on";
-              };
-
-              betterAuthUrl = mkOption {
-                type = types.str;
-                default = "http://localhost:4321";
-                description = "Better Auth URL (external URL of the service)";
-              };
-
-              betterAuthTrustedOrigins = mkOption {
-                type = types.str;
-                default = "http://localhost:4321";
-                description = "Comma-separated list of trusted origins for Better Auth";
-              };
-
-              mirrorIssueConcurrency = mkOption {
-                type = types.int;
-                default = 3;
-                description = "Number of concurrent issue mirror operations (set to 1 for perfect ordering)";
-              };
-
-              mirrorPullRequestConcurrency = mkOption {
-                type = types.int;
-                default = 5;
-                description = "Number of concurrent PR mirror operations (set to 1 for perfect ordering)";
-              };
-
-              environmentFile = mkOption {
-                type = types.nullOr types.path;
-                default = null;
-                description = ''
-                  Path to file containing environment variables.
-                  Only needed if you want to set BETTER_AUTH_SECRET or ENCRYPTION_SECRET manually.
-                  Otherwise, secrets will be auto-generated and stored in the data directory.
-
-                  Example:
-                    BETTER_AUTH_SECRET=your-32-character-secret-here
-                    ENCRYPTION_SECRET=your-encryption-secret-here
-                '';
-              };
-
-              openFirewall = mkOption {
-                type = types.bool;
-                default = false;
-                description = "Open the firewall for the specified port";
-              };
+            package = mkOption {
+              type = types.package;
+              default = self.packages.${pkgs.system}.default;
+              description = "The Gitea Mirror package to use";
             };
 
-            config = mkIf cfg.enable {
-              users.users.${cfg.user} = {
-                isSystemUser = true;
-                group = cfg.group;
-                home = cfg.dataDir;
-                createHome = true;
-              };
+            dataDir = mkOption {
+              type = types.path;
+              default = "/var/lib/gitea-mirror";
+              description = "Directory to store data and database";
+            };
 
-              users.groups.${cfg.group} = {};
+            user = mkOption {
+              type = types.str;
+              default = "gitea-mirror";
+              description = "User account under which Gitea Mirror runs";
+            };
 
-              systemd.services.gitea-mirror = {
-                description = "Gitea Mirror - GitHub to Gitea mirroring service";
-                after = [ "network.target" ];
-                wantedBy = [ "multi-user.target" ];
+            group = mkOption {
+              type = types.str;
+              default = "gitea-mirror";
+              description = "Group under which Gitea Mirror runs";
+            };
 
-                environment = {
-                  DATA_DIR = cfg.dataDir;
-                  DATABASE_URL = "file:${cfg.dataDir}/gitea-mirror.db";
-                  HOST = cfg.host;
-                  PORT = toString cfg.port;
-                  NODE_ENV = "production";
-                  BETTER_AUTH_URL = cfg.betterAuthUrl;
-                  BETTER_AUTH_TRUSTED_ORIGINS = cfg.betterAuthTrustedOrigins;
-                  PUBLIC_BETTER_AUTH_URL = cfg.betterAuthUrl;
-                  MIRROR_ISSUE_CONCURRENCY = toString cfg.mirrorIssueConcurrency;
-                  MIRROR_PULL_REQUEST_CONCURRENCY = toString cfg.mirrorPullRequestConcurrency;
-                };
+            host = mkOption {
+              type = types.str;
+              default = "0.0.0.0";
+              description = "Host to bind to";
+            };
 
-                serviceConfig = {
-                  Type = "simple";
-                  User = cfg.user;
-                  Group = cfg.group;
-                  ExecStart = "${cfg.package}/bin/gitea-mirror";
-                  Restart = "always";
-                  RestartSec = "10s";
+            port = mkOption {
+              type = types.port;
+              default = 4321;
+              description = "Port to listen on";
+            };
 
-                  # Security hardening
-                  NoNewPrivileges = true;
-                  PrivateTmp = true;
-                  ProtectSystem = "strict";
-                  ProtectHome = true;
-                  ReadWritePaths = [ cfg.dataDir ];
+            betterAuthUrl = mkOption {
+              type = types.str;
+              default = "http://localhost:4321";
+              description = "Better Auth URL (external URL of the service)";
+            };
 
-                  # Load environment file if specified (optional)
-                  EnvironmentFile = mkIf (cfg.environmentFile != null) cfg.environmentFile;
+            betterAuthTrustedOrigins = mkOption {
+              type = types.str;
+              default = "http://localhost:4321";
+              description = "Comma-separated list of trusted origins for Better Auth";
+            };
 
-                  # Graceful shutdown
-                  TimeoutStopSec = "30s";
-                  KillMode = "mixed";
-                  KillSignal = "SIGTERM";
-                };
-              };
+            mirrorIssueConcurrency = mkOption {
+              type = types.int;
+              default = 3;
+              description = "Number of concurrent issue mirror operations (set to 1 for perfect ordering)";
+            };
 
-              # Health check timer (optional monitoring)
-              systemd.timers.gitea-mirror-healthcheck = mkIf cfg.enable {
-                description = "Gitea Mirror health check timer";
-                wantedBy = [ "timers.target" ];
-                timerConfig = {
-                  OnBootSec = "5min";
-                  OnUnitActiveSec = "5min";
-                };
-              };
+            mirrorPullRequestConcurrency = mkOption {
+              type = types.int;
+              default = 5;
+              description = "Number of concurrent PR mirror operations (set to 1 for perfect ordering)";
+            };
 
-              systemd.services.gitea-mirror-healthcheck = mkIf cfg.enable {
-                description = "Gitea Mirror health check";
-                after = [ "gitea-mirror.service" ];
-                serviceConfig = {
-                  Type = "oneshot";
-                  ExecStart = "${pkgs.curl}/bin/curl -f http://${cfg.host}:${toString cfg.port}/api/health || true";
-                  User = "nobody";
-                };
-              };
+            environmentFile = mkOption {
+              type = types.nullOr types.path;
+              default = null;
+              description = ''
+                Path to file containing environment variables.
+                Only needed if you want to set BETTER_AUTH_SECRET or ENCRYPTION_SECRET manually.
+                Otherwise, secrets will be auto-generated and stored in the data directory.
 
-              networking.firewall = mkIf cfg.openFirewall {
-                allowedTCPPorts = [ cfg.port ];
-              };
+                Example:
+                  BETTER_AUTH_SECRET=your-32-character-secret-here
+                  ENCRYPTION_SECRET=your-encryption-secret-here
+              '';
+            };
+
+            openFirewall = mkOption {
+              type = types.bool;
+              default = false;
+              description = "Open the firewall for the specified port";
             };
           };
-      }
-    ) // {
+
+          config = mkIf cfg.enable {
+            users.users.${cfg.user} = {
+              isSystemUser = true;
+              group = cfg.group;
+              home = cfg.dataDir;
+              createHome = true;
+            };
+
+            users.groups.${cfg.group} = {};
+
+            systemd.services.gitea-mirror = {
+              description = "Gitea Mirror - GitHub to Gitea mirroring service";
+              after = [ "network.target" ];
+              wantedBy = [ "multi-user.target" ];
+
+              environment = {
+                DATA_DIR = cfg.dataDir;
+                DATABASE_URL = "file:${cfg.dataDir}/gitea-mirror.db";
+                HOST = cfg.host;
+                PORT = toString cfg.port;
+                NODE_ENV = "production";
+                BETTER_AUTH_URL = cfg.betterAuthUrl;
+                BETTER_AUTH_TRUSTED_ORIGINS = cfg.betterAuthTrustedOrigins;
+                PUBLIC_BETTER_AUTH_URL = cfg.betterAuthUrl;
+                MIRROR_ISSUE_CONCURRENCY = toString cfg.mirrorIssueConcurrency;
+                MIRROR_PULL_REQUEST_CONCURRENCY = toString cfg.mirrorPullRequestConcurrency;
+              };
+
+              serviceConfig = {
+                Type = "simple";
+                User = cfg.user;
+                Group = cfg.group;
+                ExecStart = "${cfg.package}/bin/gitea-mirror";
+                Restart = "always";
+                RestartSec = "10s";
+
+                # Security hardening
+                NoNewPrivileges = true;
+                PrivateTmp = true;
+                ProtectSystem = "strict";
+                ProtectHome = true;
+                ReadWritePaths = [ cfg.dataDir ];
+
+                # Graceful shutdown
+                TimeoutStopSec = "30s";
+                KillMode = "mixed";
+                KillSignal = "SIGTERM";
+              } // optionalAttrs (cfg.environmentFile != null) {
+                EnvironmentFile = cfg.environmentFile;
+              };
+            };
+
+            # Health check timer (optional monitoring)
+            systemd.timers.gitea-mirror-healthcheck = {
+              description = "Gitea Mirror health check timer";
+              wantedBy = [ "timers.target" ];
+              timerConfig = {
+                OnBootSec = "5min";
+                OnUnitActiveSec = "5min";
+              };
+            };
+
+            systemd.services.gitea-mirror-healthcheck = {
+              description = "Gitea Mirror health check";
+              after = [ "gitea-mirror.service" ];
+              serviceConfig = {
+                Type = "oneshot";
+                ExecStart = "${pkgs.bash}/bin/bash -c '${pkgs.curl}/bin/curl -f http://127.0.0.1:${toString cfg.port}/api/health || true'";
+                User = "nobody";
+              };
+            };
+
+            networking.firewall = mkIf cfg.openFirewall {
+              allowedTCPPorts = [ cfg.port ];
+            };
+          };
+        };
+
       # Overlay for adding to nixpkgs
       overlays.default = final: prev: {
         gitea-mirror = self.packages.${final.system}.default;
