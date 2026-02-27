@@ -33,13 +33,5 @@ jobs:
       - name: Show flake info
         run: nix flake show
 
-      - name: Evaluate package
-        run: |
-          # Evaluate the derivation without building (validates the Nix expression)
-          nix eval .#packages.$(nix eval --impure --expr 'builtins.currentSystem').default.name
-          echo "Flake evaluation successful"
-
-      # Note: Full build requires network access for bun install.
-      # Nix sandboxed builds block network access.
-      # To build locally: nix build --option sandbox false
-      # Or use: nix develop && bun install && bun run build
+      - name: Build package
+        run: nix build --print-build-logs

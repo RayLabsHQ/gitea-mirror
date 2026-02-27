@@ -1,18 +1,32 @@
 {
   description = "Gitea Mirror - Self-hosted GitHub to Gitea mirroring service";
 
+  nixConfig = {
+    extra-substituters = [
+      "https://nix-community.cachix.org"
+    ];
+    extra-trusted-public-keys = [
+      "nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs="
+    ];
+  };
+
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
+    bun2nix = {
+      url = "github:nix-community/bun2nix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils }:
+  outputs = { self, nixpkgs, flake-utils, bun2nix }:
     let
       forEachSystem = flake-utils.lib.eachDefaultSystem;
     in
     (forEachSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
+        b2n = bun2nix.packages.${system}.default;
 
         # Build the application
         gitea-mirror = pkgs.stdenv.mkDerivation {
@@ -21,8 +35,9 @@
 
           src = ./.;
 
-          nativeBuildInputs = with pkgs; [
-            bun
+          nativeBuildInputs = [
+            pkgs.bun
+            b2n.hook
           ];
 
           buildInputs = with pkgs; [
@@ -30,21 +45,40 @@
             openssl
           ];
 
-          configurePhase = ''
-            export HOME=$TMPDIR
-            export BUN_INSTALL=$TMPDIR/.bun
-            export PATH=$BUN_INSTALL/bin:$PATH
-          '';
+          bunDeps = b2n.fetchBunDeps {
+            bunNix = ./bun.nix;
+          };
+
+          # Let the bun2nix hook handle dependency installation via the
+          # pre-fetched cache, but skip its default build/check/install
+          # phases since we have custom ones.
+          dontUseBunBuild = true;
+          dontUseBunCheck = true;
+          dontUseBunInstall = true;
 
           buildPhase = ''
-            # Install dependencies
-            bun install --frozen-lockfile --no-progress
+            runHook preBuild
+            export HOME=$TMPDIR
 
-            # Build the application
+            # The bun2nix cache is in the read-only Nix store, but bunx/astro
+            # may try to write to it at build time. Copy the cache to a
+            # writable location.
+            if [ -n "$BUN_INSTALL_CACHE_DIR" ] && [ -d "$BUN_INSTALL_CACHE_DIR" ]; then
+              WRITABLE_CACHE="$TMPDIR/bun-cache"
+              cp -rL "$BUN_INSTALL_CACHE_DIR" "$WRITABLE_CACHE" 2>/dev/null || true
+              chmod -R u+w "$WRITABLE_CACHE" 2>/dev/null || true
+              export BUN_INSTALL_CACHE_DIR="$WRITABLE_CACHE"
+            fi
+
+            # Build the Astro application
             bun run build
+
+            runHook postBuild
           '';
 
           installPhase = ''
+            runHook preInstall
+
             mkdir -p $out/lib/gitea-mirror
             mkdir -p $out/bin
 
@@ -185,6 +219,8 @@ cd "$SCRIPT_DIR/../lib/gitea-mirror"
 exec ${pkgs.bun}/bin/bun scripts/manage-db.ts "$@"
 EOF
             chmod +x $out/bin/gitea-mirror-db
+
+            runHook postInstall
           '';
 
           meta = with pkgs.lib; {
@@ -209,6 +245,7 @@ EOF
             bun
             sqlite
             openssl
+            b2n
           ];
 
           shellHook = ''
@@ -218,6 +255,10 @@ EOF
             echo "  bun install       # Install dependencies"
             echo "  bun run dev       # Start development server"
             echo "  bun run build     # Build for production"
+            echo ""
+            echo "Nix packaging:"
+            echo "  bun2nix -o bun.nix  # Regenerate bun.nix after dependency changes"
+            echo "  nix build           # Build the package"
             echo ""
             echo "Database:"
             echo "  bun run manage-db init   # Initialize database"
