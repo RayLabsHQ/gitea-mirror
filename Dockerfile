@@ -29,7 +29,8 @@ RUN bun install --production --omit=peer --frozen-lockfile
 FROM oven/bun:1.3.9-debian AS runner
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
-  wget sqlite3 openssl ca-certificates \
+  git git-lfs wget sqlite3 openssl ca-certificates \
+  && git lfs install \
   && rm -rf /var/lib/apt/lists/*
 COPY --from=pruner /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
