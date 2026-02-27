@@ -116,7 +116,18 @@ export MIRROR_PULL_REQUEST_CONCURRENCY=''${MIRROR_PULL_REQUEST_CONCURRENCY:-5}
 # Create data directory
 mkdir -p "$DATA_DIR"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-cd "$SCRIPT_DIR/../lib/gitea-mirror"
+APP_DIR="$SCRIPT_DIR/../lib/gitea-mirror"
+
+# The app uses process.cwd()/data for the database, but the Nix store
+# is read-only. Create a writable working directory with symlinks to
+# the app files and a real data directory.
+WORK_DIR="$DATA_DIR/.workdir"
+mkdir -p "$WORK_DIR"
+for item in dist node_modules scripts src drizzle package.json tsconfig.json; do
+  ln -sfn "$APP_DIR/$item" "$WORK_DIR/$item"
+done
+ln -sfn "$DATA_DIR" "$WORK_DIR/data"
+cd "$WORK_DIR"
 
 # === AUTO-GENERATE SECRETS ===
 BETTER_AUTH_SECRET_FILE="$DATA_DIR/.better_auth_secret"
