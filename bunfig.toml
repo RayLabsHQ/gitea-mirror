@@ -4,3 +4,6 @@ timeout = 5000
 
 # Preload the setup file
 preload = ["./src/tests/setup.bun.ts"]
+
+# Only run tests in src/ directory (excludes tests/e2e/ which are Playwright tests)
+root = "./src/"
