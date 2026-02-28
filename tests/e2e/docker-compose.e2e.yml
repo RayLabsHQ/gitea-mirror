@@ -1,0 +1,43 @@
+# E2E testing environment
+# Spins up a Gitea instance for integration testing
+# Usage: podman-compose -f tests/e2e/docker-compose.e2e.yml up -d
+
+services:
+  gitea-e2e:
+    image: gitea/gitea:1.22
+    container_name: gitea-e2e
+    environment:
+      - USER_UID=1000
+      - USER_GID=1000
+      - GITEA__database__DB_TYPE=sqlite3
+      - GITEA__database__PATH=/data/gitea/gitea.db
+      - GITEA__server__DOMAIN=localhost
+      - GITEA__server__ROOT_URL=http://localhost:3333/
+      - GITEA__server__HTTP_PORT=3000
+      - GITEA__server__SSH_DOMAIN=localhost
+      - GITEA__server__START_SSH_SERVER=false
+      - GITEA__security__INSTALL_LOCK=true
+      - GITEA__service__DISABLE_REGISTRATION=false
+      - GITEA__service__REQUIRE_SIGNIN_VIEW=false
+      - GITEA__api__ENABLE_SWAGGER=false
+      - GITEA__log__MODE=console
+      - GITEA__log__LEVEL=Warn
+      - GITEA__mirror__ENABLED=true
+      - GITEA__mirror__DEFAULT_INTERVAL=1m
+      - GITEA__mirror__MIN_INTERVAL=1m
+    ports:
+      - "3333:3000"
+    volumes:
+      - e2e-gitea-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    tmpfs:
+      - /tmp
+
+volumes:
+  e2e-gitea-data:
+    driver: local

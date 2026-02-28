@@ -36,6 +36,10 @@
     "test": "bun test",
     "test:watch": "bun test --watch",
     "test:coverage": "bun test --coverage",
+    "test:e2e": "bash tests/e2e/run-e2e.sh",
+    "test:e2e:ci": "bash tests/e2e/run-e2e.sh --ci",
+    "test:e2e:keep": "bash tests/e2e/run-e2e.sh --keep",
+    "test:e2e:cleanup": "bash tests/e2e/cleanup.sh",
     "astro": "bunx --bun astro"
   },
   "overrides": {
