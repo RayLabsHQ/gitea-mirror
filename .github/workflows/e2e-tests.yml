@@ -177,7 +177,8 @@ jobs:
           # Rebuild with latest code changes
           bun run build
 
-          bun run start &
+          # Start app with logging
+          bun run start > /tmp/app.log 2>&1 &
           echo $! > /tmp/app.pid
 
           echo "Waiting for gitea-mirror app..."
@@ -190,11 +191,13 @@ jobs:
               break
             fi
             if ! kill -0 $(cat /tmp/app.pid) 2>/dev/null; then
-              echo "ERROR: App process died"
+              echo "ERROR: App process died. Logs:"
+              cat /tmp/app.log || true
               exit 1
             fi
             if [ $i -eq 90 ]; then
-              echo "ERROR: gitea-mirror app did not start within 180s"
+              echo "ERROR: gitea-mirror app did not start within 180s. Logs:"
+              cat /tmp/app.log || true
               exit 1
             fi
             sleep 2
@@ -235,6 +238,10 @@ jobs:
           echo ""
           echo "── App status ──"
           curl -sf http://localhost:${{ env.APP_PORT }}/api/health 2>/dev/null || echo "(unreachable)"
+
+          echo ""
+          echo "── App logs ──"
+          cat /tmp/app.log 2>/dev/null || echo "(no logs)"
 
           echo ""
           echo "── Docker containers ──"
