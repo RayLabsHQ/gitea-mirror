@@ -145,7 +145,19 @@ export async function listGitHubBranches({
   repo: string;
 }): Promise<BranchRef[]> {
   const { Octokit } = await import("@octokit/rest");
-  const octokit = new Octokit(githubToken ? { auth: githubToken } : undefined);
+
+  // Respect GH_API_URL / GITHUB_API_URL so that E2E tests (and custom
+  // GitHub Enterprise deployments) hit the correct server.  This mirrors
+  // the logic in src/lib/github.ts → createGitHubClient().
+  const baseUrl =
+    process.env.GH_API_URL ||
+    process.env.GITHUB_API_URL ||
+    "https://api.github.com";
+
+  const octokitOpts: ConstructorParameters<typeof Octokit>[0] = { baseUrl };
+  if (githubToken) octokitOpts.auth = githubToken;
+
+  const octokit = new Octokit(octokitOpts);
 
   const branches: BranchRef[] = [];
   let page = 1;
