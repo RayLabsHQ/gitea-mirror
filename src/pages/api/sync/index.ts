@@ -203,10 +203,18 @@ export const POST: APIRoute = async ({ request, locals }) => {
       },
     });
   } catch (error) {
-    console.error("[Sync Debug] Error during sync:", error);
-    if (error instanceof Error) {
-      console.error("[Sync Debug] Error stack:", error.stack);
-    }
-    return createSecureErrorResponse(error, "GitHub data sync", 500);
+    // TEMPORARY: Return detailed error for debugging E2E tests
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const errorStack = error instanceof Error ? error.stack : undefined;
+    console.error("[Sync] Error during sync:", errorMessage);
+    return jsonResponse({
+      data: {
+        error: "GitHub data sync failed",
+        message: errorMessage,
+        stack: errorStack,
+        timestamp: new Date().toISOString(),
+      },
+      status: 500,
+    });
   }
 };

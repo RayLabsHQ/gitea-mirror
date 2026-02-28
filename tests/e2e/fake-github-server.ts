@@ -923,6 +923,9 @@ const server = http.createServer(async (req, res) => {
   const method = (req.method || "GET").toUpperCase();
   const pathname = url.pathname;
 
+  // Log all incoming requests
+  console.log(`[FakeGitHub] ${method} ${pathname}`);
+
   // CORS for local development
   res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader(
