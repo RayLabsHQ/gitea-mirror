@@ -7,12 +7,13 @@ export const repoStatusEnum = z.enum([
   "mirrored",
   "failed",
   "skipped",
-  "ignored",  // User explicitly wants to ignore this repository
+  "ignored", // User explicitly wants to ignore this repository
   "deleting",
   "deleted",
   "syncing",
   "synced",
   "archived",
+  "pending-approval", // Force push detected, waiting for manual approval to sync
 ]);
 
 export type RepoStatus = z.infer<typeof repoStatusEnum>;

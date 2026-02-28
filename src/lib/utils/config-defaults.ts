@@ -23,7 +23,10 @@ export interface DefaultConfigOptions {
  * Creates a default configuration for a new user with sensible defaults
  * Environment variables can override these defaults
  */
-export async function createDefaultConfig({ userId, envOverrides = {} }: DefaultConfigOptions) {
+export async function createDefaultConfig({
+  userId,
+  envOverrides = {},
+}: DefaultConfigOptions) {
   // Check if config already exists
   const existingConfig = await db
     .select()
@@ -36,25 +39,36 @@ export async function createDefaultConfig({ userId, envOverrides = {} }: Default
   }
 
   // Read environment variables for overrides
-  const githubToken = envOverrides.githubToken || process.env.GITHUB_TOKEN || "";
-  const githubUsername = envOverrides.githubUsername || process.env.GITHUB_USERNAME || "";
+  const githubToken =
+    envOverrides.githubToken || process.env.GITHUB_TOKEN || "";
+  const githubUsername =
+    envOverrides.githubUsername || process.env.GITHUB_USERNAME || "";
   const giteaUrl = envOverrides.giteaUrl || process.env.GITEA_URL || "";
   const giteaExternalUrl =
     envOverrides.giteaExternalUrl || process.env.GITEA_EXTERNAL_URL || "";
   const giteaToken = envOverrides.giteaToken || process.env.GITEA_TOKEN || "";
-  const giteaUsername = envOverrides.giteaUsername || process.env.GITEA_USERNAME || "";
-  
+  const giteaUsername =
+    envOverrides.giteaUsername || process.env.GITEA_USERNAME || "";
+
   // Schedule config from env - default to ENABLED
-  const scheduleEnabled = envOverrides.scheduleEnabled ?? 
+  const scheduleEnabled =
+    envOverrides.scheduleEnabled ??
     (process.env.SCHEDULE_ENABLED === "false" ? false : true); // Default: ENABLED
-  const scheduleInterval = envOverrides.scheduleInterval ?? 
-    (process.env.SCHEDULE_INTERVAL ? parseInt(process.env.SCHEDULE_INTERVAL, 10) : 86400); // Default: daily
-  
+  const scheduleInterval =
+    envOverrides.scheduleInterval ??
+    (process.env.SCHEDULE_INTERVAL
+      ? parseInt(process.env.SCHEDULE_INTERVAL, 10)
+      : 86400); // Default: daily
+
   // Cleanup config from env - default to ENABLED
-  const cleanupEnabled = envOverrides.cleanupEnabled ?? 
+  const cleanupEnabled =
+    envOverrides.cleanupEnabled ??
     (process.env.CLEANUP_ENABLED === "false" ? false : true); // Default: ENABLED
-  const cleanupRetentionDays = envOverrides.cleanupRetentionDays ?? 
-    (process.env.CLEANUP_RETENTION_DAYS ? parseInt(process.env.CLEANUP_RETENTION_DAYS, 10) * 86400 : 604800); // Default: 7 days
+  const cleanupRetentionDays =
+    envOverrides.cleanupRetentionDays ??
+    (process.env.CLEANUP_RETENTION_DAYS
+      ? parseInt(process.env.CLEANUP_RETENTION_DAYS, 10) * 86400
+      : 604800); // Default: 7 days
 
   // Create default configuration
   const configId = uuidv4();
@@ -97,6 +111,7 @@ export async function createDefaultConfig({ userId, envOverrides = {} }: Default
       backupRetentionCount: 20,
       backupDirectory: "data/repo-backups",
       blockSyncOnBackupFailure: true,
+      forcePushAction: "allow",
     },
     include: [],
     exclude: [],
@@ -106,7 +121,9 @@ export async function createDefaultConfig({ userId, envOverrides = {} }: Default
       concurrent: false,
       batchSize: 5, // Reduced from 10 to be more conservative with GitHub API limits
       lastRun: null,
-      nextRun: scheduleEnabled ? new Date(Date.now() + scheduleInterval * 1000) : null,
+      nextRun: scheduleEnabled
+        ? new Date(Date.now() + scheduleInterval * 1000)
+        : null,
     },
     cleanupConfig: {
       enabled: cleanupEnabled,
@@ -119,7 +136,9 @@ export async function createDefaultConfig({ userId, envOverrides = {} }: Default
       batchSize: 10,
       pauseBetweenDeletes: 2000,
       lastRun: null,
-      nextRun: cleanupEnabled ? new Date(Date.now() + getCleanupInterval(cleanupRetentionDays) * 1000) : null,
+      nextRun: cleanupEnabled
+        ? new Date(Date.now() + getCleanupInterval(cleanupRetentionDays) * 1000)
+        : null,
     },
     createdAt: new Date(),
     updatedAt: new Date(),

@@ -1,13 +1,12 @@
 import React, { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { giteaApi } from "@/lib/api";
-import type { GiteaConfig, MirrorStrategy } from "@/types/config";
+import type {
+  GiteaConfig,
+  MirrorStrategy,
+  ForcePushAction,
+} from "@/types/config";
 import { toast } from "sonner";
 import { OrganizationStrategy } from "./OrganizationStrategy";
 import { OrganizationConfiguration } from "./OrganizationConfiguration";
@@ -21,25 +20,38 @@ interface GiteaConfigFormProps {
   githubUsername?: string;
 }
 
-export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, githubUsername }: GiteaConfigFormProps) {
+export function GiteaConfigForm({
+  config,
+  setConfig,
+  onAutoSave,
+  isAutoSaving,
+  githubUsername,
+}: GiteaConfigFormProps) {
   const [isLoading, setIsLoading] = useState(false);
-  
+
   // Derive the mirror strategy from existing config for backward compatibility
   const getMirrorStrategy = (): MirrorStrategy => {
     if (config.mirrorStrategy) return config.mirrorStrategy;
     // Check for mixed mode: when we have both organization and personalReposOrg defined
-    if (config.organization && config.personalReposOrg && !config.preserveOrgStructure) return "mixed";
+    if (
+      config.organization &&
+      config.personalReposOrg &&
+      !config.preserveOrgStructure
+    )
+      return "mixed";
     if (config.preserveOrgStructure) return "preserve";
-    if (config.organization && config.organization !== config.username) return "single-org";
+    if (config.organization && config.organization !== config.username)
+      return "single-org";
     return "flat-user";
   };
-  
-  const [mirrorStrategy, setMirrorStrategy] = useState<MirrorStrategy>(getMirrorStrategy());
-  
+
+  const [mirrorStrategy, setMirrorStrategy] =
+    useState<MirrorStrategy>(getMirrorStrategy());
+
   // Update config when strategy changes
   useEffect(() => {
     const newConfig = { ...config };
-    
+
     switch (mirrorStrategy) {
       case "preserve":
         newConfig.preserveOrgStructure = true;
@@ -50,7 +62,11 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
         newConfig.preserveOrgStructure = false;
         newConfig.mirrorStrategy = "single-org";
         // Reset to default if coming from mixed mode where it was personal repos org
-        if (config.mirrorStrategy === "mixed" || !newConfig.organization || newConfig.organization === "github-personal") {
+        if (
+          config.mirrorStrategy === "mixed" ||
+          !newConfig.organization ||
+          newConfig.organization === "github-personal"
+        ) {
           newConfig.organization = "github-mirrors";
         }
         break;
@@ -64,7 +80,11 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
         newConfig.mirrorStrategy = "mixed";
         // In mixed mode, organization field represents personal repos org
         // Reset it to default if coming from single-org mode
-        if (config.mirrorStrategy === "single-org" || !newConfig.organization || newConfig.organization === "github-mirrors") {
+        if (
+          config.mirrorStrategy === "single-org" ||
+          !newConfig.organization ||
+          newConfig.organization === "github-mirrors"
+        ) {
           newConfig.organization = "github-personal";
         }
         if (!newConfig.personalReposOrg) {
@@ -72,7 +92,7 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
         }
         break;
     }
-    
+
     setConfig(newConfig);
     if (onAutoSave) {
       onAutoSave(newConfig);
@@ -80,10 +100,11 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
   }, [mirrorStrategy]);
 
   const handleChange = (
-    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
+    e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>,
   ) => {
     const { name, value, type } = e.target;
-    const checked = type === "checkbox" ? (e.target as HTMLInputElement).checked : undefined;
+    const checked =
+      type === "checkbox" ? (e.target as HTMLInputElement).checked : undefined;
 
     // Special handling for preserveOrgStructure changes
     if (
@@ -96,7 +117,7 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
         {
           duration: 6000,
           position: "top-center",
-        }
+        },
       );
     }
 
@@ -133,12 +154,12 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
         toast.success("Successfully connected to Gitea!");
       } else {
         toast.error(
-          "Failed to connect to Gitea. Please check your URL and token."
+          "Failed to connect to Gitea. Please check your URL and token.",
         );
       }
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "An unknown error occurred"
+        error instanceof Error ? error.message : "An unknown error occurred",
       );
     } finally {
       setIsLoading(false);
@@ -247,7 +268,7 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
         </div>
 
         <Separator />
-        
+
         <OrganizationStrategy
           strategy={mirrorStrategy}
           destinationOrg={config.organization}
@@ -257,9 +278,9 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
           githubUsername={githubUsername}
           giteaUsername={config.username}
         />
-        
+
         <Separator />
-        
+
         <OrganizationConfiguration
           strategy={mirrorStrategy}
           destinationOrg={config.organization}
@@ -297,7 +318,51 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
         <Separator />
 
         <div className="space-y-4">
-          <h3 className="text-sm font-semibold">Destructive Update Protection</h3>
+          <h3 className="text-sm font-semibold">
+            Destructive Update Protection
+          </h3>
+
+          <div>
+            <label
+              htmlFor="gitea-force-push-action"
+              className="block text-sm font-medium mb-1.5"
+            >
+              Force-push protection
+            </label>
+            <select
+              id="gitea-force-push-action"
+              name="forcePushAction"
+              value={config.forcePushAction ?? "allow"}
+              onChange={(e) => {
+                const newConfig = {
+                  ...config,
+                  forcePushAction: e.target.value as ForcePushAction,
+                };
+                setConfig(newConfig);
+                if (onAutoSave) onAutoSave(newConfig);
+              }}
+              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            >
+              <option value="allow">
+                Allow — sync immediately (no detection)
+              </option>
+              <option value="backup-branch">
+                Backup branch — create _branch_backup_timestamp refs before
+                syncing
+              </option>
+              <option value="block">
+                Block — require manual approval before syncing
+              </option>
+            </select>
+            <p className="text-xs text-muted-foreground mt-1">
+              {config.forcePushAction === "backup-branch"
+                ? "When upstream history is rewritten, lightweight backup branches are created inside Gitea before the mirror sync proceeds. Very storage-efficient — only adds a ref, no data duplication."
+                : config.forcePushAction === "block"
+                  ? 'When upstream history is rewritten, the sync is blocked and the repository is marked as "pending approval". You must manually approve or dismiss from the dashboard.'
+                  : "No force-push detection. Upstream rewrites are synced without any protection beyond the optional snapshot below."}
+            </p>
+          </div>
+
           <label className="flex items-start gap-3 text-sm">
             <input
               name="backupBeforeSync"
@@ -309,7 +374,9 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
             <span>
               Create snapshot before each sync
               <p className="text-xs text-muted-foreground">
-                Saves a restore point so force-pushes or rewritten upstream history can be recovered.
+                Saves a full bundle restore point so force-pushes or rewritten
+                upstream history can be recovered. For large mirrors (&gt;100
+                GiB), consider using backup-branch protection above instead.
               </p>
             </span>
           </label>
@@ -317,7 +384,10 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
           {config.backupBeforeSync && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label htmlFor="gitea-backup-retention" className="block text-sm font-medium mb-1.5">
+                <label
+                  htmlFor="gitea-backup-retention"
+                  className="block text-sm font-medium mb-1.5"
+                >
                   Snapshot retention count
                 </label>
                 <input
@@ -331,7 +401,10 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
                 />
               </div>
               <div>
-                <label htmlFor="gitea-backup-directory" className="block text-sm font-medium mb-1.5">
+                <label
+                  htmlFor="gitea-backup-directory"
+                  className="block text-sm font-medium mb-1.5"
+                >
                   Snapshot directory
                 </label>
                 <input
@@ -358,7 +431,8 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
             <span>
               Block sync when snapshot fails
               <p className="text-xs text-muted-foreground">
-                Recommended for backup-first behavior. If disabled, sync continues even when snapshot creation fails.
+                Recommended for backup-first behavior. If disabled, sync
+                continues even when snapshot creation fails.
               </p>
             </span>
           </label>

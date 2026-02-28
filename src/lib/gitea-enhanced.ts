@@ -21,17 +21,21 @@ import {
   shouldBlockSyncOnBackupFailure,
 } from "./repo-backup";
 import {
+  handleForcePushProtection,
+  getForcePushAction,
+} from "./force-push-detection";
+import {
   parseRepositoryMetadataState,
   serializeRepositoryMetadataState,
 } from "./metadata-state";
 
 type SyncDependencies = {
-  getGiteaRepoOwnerAsync: typeof import("./gitea")["getGiteaRepoOwnerAsync"];
-  mirrorGitHubReleasesToGitea: typeof import("./gitea")["mirrorGitHubReleasesToGitea"];
-  mirrorGitRepoIssuesToGitea: typeof import("./gitea")["mirrorGitRepoIssuesToGitea"];
-  mirrorGitRepoPullRequestsToGitea: typeof import("./gitea")["mirrorGitRepoPullRequestsToGitea"];
-  mirrorGitRepoLabelsToGitea: typeof import("./gitea")["mirrorGitRepoLabelsToGitea"];
-  mirrorGitRepoMilestonesToGitea: typeof import("./gitea")["mirrorGitRepoMilestonesToGitea"];
+  getGiteaRepoOwnerAsync: (typeof import("./gitea"))["getGiteaRepoOwnerAsync"];
+  mirrorGitHubReleasesToGitea: (typeof import("./gitea"))["mirrorGitHubReleasesToGitea"];
+  mirrorGitRepoIssuesToGitea: (typeof import("./gitea"))["mirrorGitRepoIssuesToGitea"];
+  mirrorGitRepoPullRequestsToGitea: (typeof import("./gitea"))["mirrorGitRepoPullRequestsToGitea"];
+  mirrorGitRepoLabelsToGitea: (typeof import("./gitea"))["mirrorGitRepoLabelsToGitea"];
+  mirrorGitRepoMilestonesToGitea: (typeof import("./gitea"))["mirrorGitRepoMilestonesToGitea"];
 };
 
 /**
@@ -65,12 +69,12 @@ export async function getGiteaRepoInfo({
     }
 
     const decryptedConfig = decryptConfigTokens(config as Config);
-    
+
     const response = await httpGet<GiteaRepoInfo>(
       `${config.giteaConfig.url}/api/v1/repos/${owner}/${repoName}`,
       {
         Authorization: `token ${decryptedConfig.giteaConfig.token}`,
-      }
+      },
     );
 
     return response.data;
@@ -98,34 +102,53 @@ export async function getOrCreateGiteaOrgEnhanced({
   maxRetries?: number;
   retryDelay?: number;
 }): Promise<number> {
-  if (!config.giteaConfig?.url || !config.giteaConfig?.token || !config.userId) {
+  if (
+    !config.giteaConfig?.url ||
+    !config.giteaConfig?.token ||
+    !config.userId
+  ) {
     throw new Error("Gitea config is required.");
   }
 
   const decryptedConfig = decryptConfigTokens(config as Config);
-  
+
   // First, validate the user's authentication by getting their information
-  console.log(`[Org Creation] Validating user authentication before organization operations`);
+  console.log(
+    `[Org Creation] Validating user authentication before organization operations`,
+  );
   try {
     const userResponse = await httpGet(
       `${config.giteaConfig.url}/api/v1/user`,
       {
         Authorization: `token ${decryptedConfig.giteaConfig.token}`,
-      }
+      },
     );
-    console.log(`[Org Creation] Authenticated as user: ${userResponse.data.username || userResponse.data.login} (ID: ${userResponse.data.id})`);
+    console.log(
+      `[Org Creation] Authenticated as user: ${userResponse.data.username || userResponse.data.login} (ID: ${userResponse.data.id})`,
+    );
   } catch (authError) {
     if (authError instanceof HttpError && authError.status === 401) {
-      console.error(`[Org Creation] Authentication failed: Invalid or expired token`);
-      throw new Error(`Authentication failed: Please check your Gitea token has the required permissions. The token may be invalid or expired.`);
+      console.error(
+        `[Org Creation] Authentication failed: Invalid or expired token`,
+      );
+      throw new Error(
+        `Authentication failed: Please check your Gitea token has the required permissions. The token may be invalid or expired.`,
+      );
     }
-    console.error(`[Org Creation] Failed to validate authentication:`, authError);
-    throw new Error(`Failed to validate Gitea authentication: ${authError instanceof Error ? authError.message : String(authError)}`);
+    console.error(
+      `[Org Creation] Failed to validate authentication:`,
+      authError,
+    );
+    throw new Error(
+      `Failed to validate Gitea authentication: ${authError instanceof Error ? authError.message : String(authError)}`,
+    );
   }
-  
+
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     try {
-      console.log(`[Org Creation] Attempting to get or create organization: ${orgName} (attempt ${attempt + 1}/${maxRetries})`);
+      console.log(
+        `[Org Creation] Attempting to get or create organization: ${orgName} (attempt ${attempt + 1}/${maxRetries})`,
+      );
 
       // Check if org exists
       try {
@@ -133,10 +156,12 @@ export async function getOrCreateGiteaOrgEnhanced({
           `${config.giteaConfig.url}/api/v1/orgs/${orgName}`,
           {
             Authorization: `token ${decryptedConfig.giteaConfig.token}`,
-          }
+          },
         );
 
-        console.log(`[Org Creation] Organization ${orgName} already exists with ID: ${orgResponse.data.id}`);
+        console.log(
+          `[Org Creation] Organization ${orgName} already exists with ID: ${orgResponse.data.id}`,
+        );
         return orgResponse.data.id;
       } catch (error) {
         if (!(error instanceof HttpError) || error.status !== 404) {
@@ -146,15 +171,18 @@ export async function getOrCreateGiteaOrgEnhanced({
       }
 
       // Try to create the organization
-      console.log(`[Org Creation] Organization ${orgName} not found. Creating new organization.`);
+      console.log(
+        `[Org Creation] Organization ${orgName} not found. Creating new organization.`,
+      );
 
       const visibility = config.giteaConfig.visibility || "public";
       const createOrgPayload = {
         username: orgName,
         full_name: orgName === "starred" ? "Starred Repositories" : orgName,
-        description: orgName === "starred" 
-          ? "Repositories starred on GitHub" 
-          : `Mirrored from GitHub organization: ${orgName}`,
+        description:
+          orgName === "starred"
+            ? "Repositories starred on GitHub"
+            : `Mirrored from GitHub organization: ${orgName}`,
         website: "",
         location: "",
         visibility: visibility,
@@ -166,11 +194,13 @@ export async function getOrCreateGiteaOrgEnhanced({
           createOrgPayload,
           {
             Authorization: `token ${decryptedConfig.giteaConfig.token}`,
-          }
+          },
         );
 
-        console.log(`[Org Creation] Successfully created organization ${orgName} with ID: ${createResponse.data.id}`);
-        
+        console.log(
+          `[Org Creation] Successfully created organization ${orgName} with ID: ${createResponse.data.id}`,
+        );
+
         await createMirrorJob({
           userId: config.userId,
           organizationId: orgId,
@@ -185,44 +215,60 @@ export async function getOrCreateGiteaOrgEnhanced({
         // Check if it's a duplicate error
         if (createError instanceof HttpError) {
           const errorResponse = createError.response?.toLowerCase() || "";
-          const isDuplicateError = 
+          const isDuplicateError =
             errorResponse.includes("duplicate") ||
             errorResponse.includes("already exists") ||
             errorResponse.includes("uqe_user_lower_name") ||
             errorResponse.includes("constraint");
 
           if (isDuplicateError && attempt < maxRetries - 1) {
-            console.log(`[Org Creation] Organization creation failed due to duplicate. Will retry check.`);
-            
+            console.log(
+              `[Org Creation] Organization creation failed due to duplicate. Will retry check.`,
+            );
+
             // Wait before retry with exponential backoff
-            const delay = process.env.NODE_ENV === 'test' ? 0 : retryDelay * Math.pow(2, attempt);
+            const delay =
+              process.env.NODE_ENV === "test"
+                ? 0
+                : retryDelay * Math.pow(2, attempt);
             console.log(`[Org Creation] Waiting ${delay}ms before retry...`);
             if (delay > 0) {
-              await new Promise(resolve => setTimeout(resolve, delay));
+              await new Promise((resolve) => setTimeout(resolve, delay));
             }
             continue; // Retry the loop
           }
-          
+
           // Check for permission errors
           if (createError.status === 403) {
-            console.error(`[Org Creation] Permission denied: User may not have rights to create organizations`);
-            throw new Error(`Permission denied: Your Gitea user account does not have permission to create organizations. Please ensure your account has the necessary privileges or contact your Gitea administrator.`);
+            console.error(
+              `[Org Creation] Permission denied: User may not have rights to create organizations`,
+            );
+            throw new Error(
+              `Permission denied: Your Gitea user account does not have permission to create organizations. Please ensure your account has the necessary privileges or contact your Gitea administrator.`,
+            );
           }
-          
+
           // Check for authentication errors
           if (createError.status === 401) {
-            console.error(`[Org Creation] Authentication failed when creating organization`);
-            throw new Error(`Authentication failed: The Gitea token does not have sufficient permissions to create organizations. Please ensure your token has 'write:organization' scope.`);
+            console.error(
+              `[Org Creation] Authentication failed when creating organization`,
+            );
+            throw new Error(
+              `Authentication failed: The Gitea token does not have sufficient permissions to create organizations. Please ensure your token has 'write:organization' scope.`,
+            );
           }
         }
         throw createError;
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Unknown error";
+      const errorMessage =
+        error instanceof Error ? error.message : "Unknown error";
 
       if (attempt === maxRetries - 1) {
         // Final attempt failed
-        console.error(`[Org Creation] Failed to get or create organization ${orgName} after ${maxRetries} attempts: ${errorMessage}`);
+        console.error(
+          `[Org Creation] Failed to get or create organization ${orgName} after ${maxRetries} attempts: ${errorMessage}`,
+        );
 
         await createMirrorJob({
           userId: config.userId,
@@ -233,34 +279,47 @@ export async function getOrCreateGiteaOrgEnhanced({
           details: `Error after ${maxRetries} attempts: ${errorMessage}`,
         });
 
-        throw new Error(`Failed to create organization ${orgName}: ${errorMessage}`);
+        throw new Error(
+          `Failed to create organization ${orgName}: ${errorMessage}`,
+        );
       }
 
       // Log retry attempt
-      console.warn(`[Org Creation] Attempt ${attempt + 1} failed for organization ${orgName}: ${errorMessage}. Retrying...`);
-      
+      console.warn(
+        `[Org Creation] Attempt ${attempt + 1} failed for organization ${orgName}: ${errorMessage}. Retrying...`,
+      );
+
       // Wait before retry
       const delay = retryDelay * Math.pow(2, attempt);
-      await new Promise(resolve => setTimeout(resolve, delay));
+      await new Promise((resolve) => setTimeout(resolve, delay));
     }
   }
 
   // Should never reach here
-  throw new Error(`Failed to create organization ${orgName} after ${maxRetries} attempts`);
+  throw new Error(
+    `Failed to create organization ${orgName} after ${maxRetries} attempts`,
+  );
 }
 
 /**
  * Enhanced sync operation that handles non-mirror repositories
  */
-export async function syncGiteaRepoEnhanced({
-  config,
-  repository,
-}: {
-  config: Partial<Config>;
-  repository: Repository;
-}, deps?: SyncDependencies): Promise<any> {
+export async function syncGiteaRepoEnhanced(
+  {
+    config,
+    repository,
+  }: {
+    config: Partial<Config>;
+    repository: Repository;
+  },
+  deps?: SyncDependencies,
+): Promise<any> {
   try {
-    if (!config.userId || !config.giteaConfig?.url || !config.giteaConfig?.token) {
+    if (
+      !config.userId ||
+      !config.giteaConfig?.url ||
+      !config.giteaConfig?.token
+    ) {
       throw new Error("Gitea config is required.");
     }
 
@@ -279,7 +338,10 @@ export async function syncGiteaRepoEnhanced({
 
     // Get the expected owner
     const dependencies = deps ?? (await import("./gitea"));
-    const repoOwner = await dependencies.getGiteaRepoOwnerAsync({ config, repository });
+    const repoOwner = await dependencies.getGiteaRepoOwnerAsync({
+      config,
+      repository,
+    });
 
     // Check if repo exists and get its info
     const repoInfo = await getGiteaRepoInfo({
@@ -289,20 +351,25 @@ export async function syncGiteaRepoEnhanced({
     });
 
     if (!repoInfo) {
-      throw new Error(`Repository ${repository.name} not found in Gitea at ${repoOwner}/${repository.name}`);
+      throw new Error(
+        `Repository ${repository.name} not found in Gitea at ${repoOwner}/${repository.name}`,
+      );
     }
 
     // Check if it's a mirror repository
     if (!repoInfo.mirror) {
-      console.warn(`[Sync] Repository ${repository.name} exists but is not configured as a mirror`);
-      
+      console.warn(
+        `[Sync] Repository ${repository.name} exists but is not configured as a mirror`,
+      );
+
       // Update database to reflect this status
       await db
         .update(repositories)
         .set({
           status: repoStatusEnum.parse("failed"),
           updatedAt: new Date(),
-          errorMessage: "Repository exists in Gitea but is not configured as a mirror. Manual intervention required.",
+          errorMessage:
+            "Repository exists in Gitea but is not configured as a mirror. Manual intervention required.",
         })
         .where(eq(repositories.id, repository.id!));
 
@@ -315,7 +382,37 @@ export async function syncGiteaRepoEnhanced({
         status: "failed",
       });
 
-      throw new Error(`Repository ${repository.name} is not a mirror. Cannot sync.`);
+      throw new Error(
+        `Repository ${repository.name} is not a mirror. Cannot sync.`,
+      );
+    }
+
+    // ── Force-push detection ──────────────────────────────────────────────
+    // Runs BEFORE backup and mirror-sync so we can create backup branches
+    // or block the sync when a force-push is detected upstream.
+    const forcePushAction = getForcePushAction(config);
+    if (forcePushAction !== "allow") {
+      try {
+        const { shouldSync } = await handleForcePushProtection({
+          config,
+          repository,
+          giteaOwner: repoOwner,
+          githubOwner: repository.owner,
+          githubRepo: repository.name,
+        });
+
+        if (!shouldSync) {
+          // The handler already updated the repo status and created a mirror job
+          return;
+        }
+      } catch (fpError) {
+        const fpMsg =
+          fpError instanceof Error ? fpError.message : String(fpError);
+        console.warn(
+          `[Sync] Force-push detection failed for ${repository.name}, continuing with sync: ${fpMsg}`,
+        );
+        // Non-fatal: if detection itself fails, fall through to normal sync
+      }
     }
 
     if (shouldCreatePreSyncBackup(config)) {
@@ -341,7 +438,9 @@ export async function syncGiteaRepoEnhanced({
         });
       } catch (backupError) {
         const errorMessage =
-          backupError instanceof Error ? backupError.message : String(backupError);
+          backupError instanceof Error
+            ? backupError.message
+            : String(backupError);
 
         await createMirrorJob({
           userId: config.userId,
@@ -363,12 +462,12 @@ export async function syncGiteaRepoEnhanced({
             .where(eq(repositories.id, repository.id!));
 
           throw new Error(
-            `Snapshot failed; sync blocked to protect history. ${errorMessage}`
+            `Snapshot failed; sync blocked to protect history. ${errorMessage}`,
           );
         }
 
         console.warn(
-          `[Sync] Snapshot failed for ${repository.name}, continuing because blockSyncOnBackupFailure=false: ${errorMessage}`
+          `[Sync] Snapshot failed for ${repository.name}, continuing because blockSyncOnBackupFailure=false: ${errorMessage}`,
         );
       }
     }
@@ -376,16 +475,27 @@ export async function syncGiteaRepoEnhanced({
     // Update mirror interval if needed
     if (config.giteaConfig?.mirrorInterval) {
       try {
-        console.log(`[Sync] Updating mirror interval for ${repository.name} to ${config.giteaConfig.mirrorInterval}`);
+        console.log(
+          `[Sync] Updating mirror interval for ${repository.name} to ${config.giteaConfig.mirrorInterval}`,
+        );
         const updateUrl = `${config.giteaConfig.url}/api/v1/repos/${repoOwner}/${repository.name}`;
-        await httpPatch(updateUrl, {
-          mirror_interval: config.giteaConfig.mirrorInterval,
-        }, {
-          Authorization: `token ${decryptedConfig.giteaConfig.token}`,
-        });
-        console.log(`[Sync] Successfully updated mirror interval for ${repository.name}`);
+        await httpPatch(
+          updateUrl,
+          {
+            mirror_interval: config.giteaConfig.mirrorInterval,
+          },
+          {
+            Authorization: `token ${decryptedConfig.giteaConfig.token}`,
+          },
+        );
+        console.log(
+          `[Sync] Successfully updated mirror interval for ${repository.name}`,
+        );
       } catch (updateError) {
-        console.warn(`[Sync] Failed to update mirror interval for ${repository.name}:`, updateError);
+        console.warn(
+          `[Sync] Failed to update mirror interval for ${repository.name}:`,
+          updateError,
+        );
         // Continue with sync even if interval update fails
       }
     }
@@ -420,11 +530,9 @@ export async function syncGiteaRepoEnhanced({
       const shouldMirrorReleases =
         !!config.giteaConfig?.mirrorReleases && !skipMetadataForStarred;
       const shouldMirrorIssuesThisRun =
-        !!config.giteaConfig?.mirrorIssues &&
-        !skipMetadataForStarred;
+        !!config.giteaConfig?.mirrorIssues && !skipMetadataForStarred;
       const shouldMirrorPullRequests =
-        !!config.giteaConfig?.mirrorPullRequests &&
-        !skipMetadataForStarred;
+        !!config.giteaConfig?.mirrorPullRequests && !skipMetadataForStarred;
       const shouldMirrorLabels =
         !!config.giteaConfig?.mirrorLabels &&
         !skipMetadataForStarred &&
@@ -439,7 +547,7 @@ export async function syncGiteaRepoEnhanced({
         const octokit = ensureOctokit();
         if (!octokit) {
           console.warn(
-            `[Sync] Skipping release mirroring for ${repository.name}: Missing GitHub token`
+            `[Sync] Skipping release mirroring for ${repository.name}: Missing GitHub token`,
           );
         } else {
           try {
@@ -453,7 +561,7 @@ export async function syncGiteaRepoEnhanced({
             metadataState.components.releases = true;
             metadataUpdated = true;
             console.log(
-              `[Sync] Mirrored releases for ${repository.name} after sync`
+              `[Sync] Mirrored releases for ${repository.name} after sync`,
             );
           } catch (releaseError) {
             console.error(
@@ -461,7 +569,7 @@ export async function syncGiteaRepoEnhanced({
                 releaseError instanceof Error
                   ? releaseError.message
                   : String(releaseError)
-              }`
+              }`,
             );
           }
         }
@@ -471,7 +579,7 @@ export async function syncGiteaRepoEnhanced({
         const octokit = ensureOctokit();
         if (!octokit) {
           console.warn(
-            `[Sync] Skipping issue mirroring for ${repository.name}: Missing GitHub token`
+            `[Sync] Skipping issue mirroring for ${repository.name}: Missing GitHub token`,
           );
         } else {
           try {
@@ -486,7 +594,7 @@ export async function syncGiteaRepoEnhanced({
             metadataState.components.labels = true;
             metadataUpdated = true;
             console.log(
-              `[Sync] Mirrored issues for ${repository.name} after sync`
+              `[Sync] Mirrored issues for ${repository.name} after sync`,
             );
           } catch (issueError) {
             console.error(
@@ -494,7 +602,7 @@ export async function syncGiteaRepoEnhanced({
                 issueError instanceof Error
                   ? issueError.message
                   : String(issueError)
-              }`
+              }`,
             );
           }
         }
@@ -504,7 +612,7 @@ export async function syncGiteaRepoEnhanced({
         const octokit = ensureOctokit();
         if (!octokit) {
           console.warn(
-            `[Sync] Skipping pull request mirroring for ${repository.name}: Missing GitHub token`
+            `[Sync] Skipping pull request mirroring for ${repository.name}: Missing GitHub token`,
           );
         } else {
           try {
@@ -518,13 +626,13 @@ export async function syncGiteaRepoEnhanced({
             metadataState.components.pullRequests = true;
             metadataUpdated = true;
             console.log(
-              `[Sync] Mirrored pull requests for ${repository.name} after sync`
+              `[Sync] Mirrored pull requests for ${repository.name} after sync`,
             );
           } catch (prError) {
             console.error(
               `[Sync] Failed to mirror pull requests for ${repository.name}: ${
                 prError instanceof Error ? prError.message : String(prError)
-              }`
+              }`,
             );
           }
         }
@@ -534,7 +642,7 @@ export async function syncGiteaRepoEnhanced({
         const octokit = ensureOctokit();
         if (!octokit) {
           console.warn(
-            `[Sync] Skipping label mirroring for ${repository.name}: Missing GitHub token`
+            `[Sync] Skipping label mirroring for ${repository.name}: Missing GitHub token`,
           );
         } else {
           try {
@@ -548,7 +656,7 @@ export async function syncGiteaRepoEnhanced({
             metadataState.components.labels = true;
             metadataUpdated = true;
             console.log(
-              `[Sync] Mirrored labels for ${repository.name} after sync`
+              `[Sync] Mirrored labels for ${repository.name} after sync`,
             );
           } catch (labelError) {
             console.error(
@@ -556,7 +664,7 @@ export async function syncGiteaRepoEnhanced({
                 labelError instanceof Error
                   ? labelError.message
                   : String(labelError)
-              }`
+              }`,
             );
           }
         }
@@ -565,7 +673,7 @@ export async function syncGiteaRepoEnhanced({
         metadataState.components.labels
       ) {
         console.log(
-          `[Sync] Labels already mirrored for ${repository.name}; skipping`
+          `[Sync] Labels already mirrored for ${repository.name}; skipping`,
         );
       }
 
@@ -573,7 +681,7 @@ export async function syncGiteaRepoEnhanced({
         const octokit = ensureOctokit();
         if (!octokit) {
           console.warn(
-            `[Sync] Skipping milestone mirroring for ${repository.name}: Missing GitHub token`
+            `[Sync] Skipping milestone mirroring for ${repository.name}: Missing GitHub token`,
           );
         } else {
           try {
@@ -587,7 +695,7 @@ export async function syncGiteaRepoEnhanced({
             metadataState.components.milestones = true;
             metadataUpdated = true;
             console.log(
-              `[Sync] Mirrored milestones for ${repository.name} after sync`
+              `[Sync] Mirrored milestones for ${repository.name} after sync`,
             );
           } catch (milestoneError) {
             console.error(
@@ -595,7 +703,7 @@ export async function syncGiteaRepoEnhanced({
                 milestoneError instanceof Error
                   ? milestoneError.message
                   : String(milestoneError)
-              }`
+              }`,
             );
           }
         }
@@ -604,7 +712,7 @@ export async function syncGiteaRepoEnhanced({
         metadataState.components.milestones
       ) {
         console.log(
-          `[Sync] Milestones already mirrored for ${repository.name}; skipping`
+          `[Sync] Milestones already mirrored for ${repository.name}; skipping`,
         );
       }
 
@@ -623,7 +731,7 @@ export async function syncGiteaRepoEnhanced({
           mirroredLocation: `${repoOwner}/${repository.name}`,
           metadata: metadataUpdated
             ? serializeRepositoryMetadataState(metadataState)
-            : repository.metadata ?? null,
+            : (repository.metadata ?? null),
         })
         .where(eq(repositories.id, repository.id!));
 
@@ -636,7 +744,9 @@ export async function syncGiteaRepoEnhanced({
         status: "synced",
       });
 
-      console.log(`[Sync] Mirror sync requested for repository ${repository.name}`);
+      console.log(
+        `[Sync] Mirror sync requested for repository ${repository.name}`,
+      );
       return response.data;
     } catch (syncError) {
       if (syncError instanceof HttpError && syncError.status === 400) {
@@ -658,7 +768,8 @@ export async function syncGiteaRepoEnhanced({
             repositoryId: repository.id,
             repositoryName: repository.name,
             message: `Sync failed: ${repository.name} is not a mirror`,
-            details: "The repository exists in Gitea but is not configured as a mirror. Manual intervention required.",
+            details:
+              "The repository exists in Gitea but is not configured as a mirror. Manual intervention required.",
             status: "failed",
           });
         }
@@ -666,7 +777,10 @@ export async function syncGiteaRepoEnhanced({
       throw syncError;
     }
   } catch (error) {
-    console.error(`[Sync] Error while syncing repository ${repository.name}:`, error);
+    console.error(
+      `[Sync] Error while syncing repository ${repository.name}:`,
+      error,
+    );
 
     // Update repo with error status
     await db
@@ -710,7 +824,7 @@ export async function deleteGiteaRepo({
   }
 
   const decryptedConfig = decryptConfigTokens(config as Config);
-  
+
   const response = await fetch(
     `${config.giteaConfig.url}/api/v1/repos/${owner}/${repoName}`,
     {
@@ -718,7 +832,7 @@ export async function deleteGiteaRepo({
       headers: {
         Authorization: `token ${decryptedConfig.giteaConfig.token}`,
       },
-    }
+    },
   );
 
   if (!response.ok && response.status !== 404) {
@@ -743,7 +857,9 @@ export async function convertToMirror({
 }): Promise<boolean> {
   // This is a placeholder - actual implementation depends on Gitea API support
   // Most Gitea versions don't support converting existing repos to mirrors
-  console.warn(`[Convert] Converting existing repositories to mirrors is not supported in most Gitea versions`);
+  console.warn(
+    `[Convert] Converting existing repositories to mirrors is not supported in most Gitea versions`,
+  );
   return false;
 }
 
@@ -758,7 +874,7 @@ export async function createOrganizationsSequentially({
   orgNames: string[];
 }): Promise<Map<string, number>> {
   const orgIdMap = new Map<string, number>();
-  
+
   for (const orgName of orgNames) {
     try {
       const orgId = await getOrCreateGiteaOrgEnhanced({
@@ -773,7 +889,7 @@ export async function createOrganizationsSequentially({
       // Continue with other organizations
     }
   }
-  
+
   return orgIdMap;
 }
 
@@ -791,13 +907,16 @@ export async function handleExistingNonMirrorRepo({
   repoInfo: GiteaRepoInfo;
   strategy?: "skip" | "delete" | "rename";
 }): Promise<void> {
-  const owner = typeof repoInfo.owner === 'string' ? repoInfo.owner : repoInfo.owner.login;
+  const owner =
+    typeof repoInfo.owner === "string" ? repoInfo.owner : repoInfo.owner.login;
   const repoName = repoInfo.name;
 
   switch (strategy) {
     case "skip":
-      console.log(`[Handle] Skipping existing non-mirror repository: ${owner}/${repoName}`);
-      
+      console.log(
+        `[Handle] Skipping existing non-mirror repository: ${owner}/${repoName}`,
+      );
+
       await db
         .update(repositories)
         .set({
@@ -806,23 +925,29 @@ export async function handleExistingNonMirrorRepo({
           errorMessage: "Repository exists but is not a mirror. Skipped.",
         })
         .where(eq(repositories.id, repository.id!));
-      
+
       break;
 
     case "delete":
-      console.log(`[Handle] Deleting existing non-mirror repository: ${owner}/${repoName}`);
-      
+      console.log(
+        `[Handle] Deleting existing non-mirror repository: ${owner}/${repoName}`,
+      );
+
       await deleteGiteaRepo({
         config,
         owner,
         repoName,
       });
-      
-      console.log(`[Handle] Deleted repository ${owner}/${repoName}. It can now be recreated as a mirror.`);
+
+      console.log(
+        `[Handle] Deleted repository ${owner}/${repoName}. It can now be recreated as a mirror.`,
+      );
       break;
 
     case "rename":
-      console.log(`[Handle] Renaming strategy not implemented yet for: ${owner}/${repoName}`);
+      console.log(
+        `[Handle] Renaming strategy not implemented yet for: ${owner}/${repoName}`,
+      );
       // TODO: Implement rename strategy if needed
       break;
   }
