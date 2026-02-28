@@ -126,10 +126,16 @@ export async function createPreSyncBundleBackup({
     throw new Error("Decrypted Gitea token is required for pre-sync backup.");
   }
 
-  const backupRoot =
+  let backupRoot =
     config.giteaConfig?.backupDirectory?.trim() ||
     process.env.PRE_SYNC_BACKUP_DIR?.trim() ||
     path.join(process.cwd(), "data", "repo-backups");
+
+  // Ensure backupRoot is absolute - relative paths break git bundle creation
+  // because git runs with -C mirrorClonePath and interprets relative paths from there
+  if (!path.isAbsolute(backupRoot)) {
+    backupRoot = path.resolve(process.cwd(), backupRoot);
+  }
   const retention = Math.max(
     1,
     Number.isFinite(config.giteaConfig?.backupRetentionCount)
