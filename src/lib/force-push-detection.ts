@@ -3,12 +3,17 @@
  *
  * This module provides:
  * 1. Detection of force-pushes by comparing branch SHAs between GitHub and Gitea
- * 2. Creation of backup branches in Gitea (`_<branch>_backup_<timestamp>`)
- * 3. Blocking sync when force-push is detected (pending manual approval)
+ * 2. Detection of branch deletions (branch exists in Gitea but not in GitHub)
+ * 3. Creation of backup branches in Gitea (`_<branch>_backup_<timestamp>`)
+ * 4. Blocking sync when destructive changes are detected (pending manual approval)
+ *
+ * Both force-pushes and branch deletions are considered "destructive changes"
+ * because they can cause commits to become unreachable and effectively lost.
  *
  * The backup-branch approach is far more storage-efficient than full bundle
  * backups because it only adds a lightweight ref inside the existing Gitea repo
- * rather than duplicating the entire repository.
+ * rather than duplicating the entire repository.  This makes it the ideal
+ * default for large mirrors (100+ GiB).
  */
 
 import type { Config, ForcePushAction } from "@/types/config";
@@ -28,18 +33,34 @@ export interface BranchRef {
 }
 
 export interface ForcePushDetectionResult {
-  /** true when at least one branch was force-pushed */
+  /**
+   * true when at least one branch was force-pushed OR deleted upstream.
+   * This is the single flag callers should check to decide whether
+   * protective action is needed.
+   */
+  destructiveChangesDetected: boolean;
+
+  /** @deprecated Use `destructiveChangesDetected` instead. Kept for compat. */
   forcePushDetected: boolean;
-  /** branches that were force-pushed (old SHA → new SHA) */
+
+  /** branches whose SHA differs between Gitea and GitHub (potential force-push / rebase) */
   affectedBranches: Array<{
     branch: string;
     giteaSha: string;
     githubSha: string;
   }>;
-  /** branches that advanced normally (fast-forward) */
+
+  /** branches that are in sync (same SHA on both sides) */
   normalBranches: string[];
-  /** branches only on one side */
+
+  /** branches that exist on GitHub but not yet on Gitea (new upstream branches) */
   newBranches: string[];
+
+  /**
+   * Branches that exist on Gitea but NOT on GitHub — they were deleted
+   * upstream and the mirror sync will remove them from Gitea, losing any
+   * commits unique to those branches.
+   */
   deletedBranches: string[];
 }
 
@@ -52,10 +73,14 @@ export interface BackupBranchResult {
 
 /**
  * Returns the configured force-push action for the given config.
- * Falls back to `"allow"` when the field is absent (backward compat).
+ *
+ * Defaults to `"backup-branch"` when the field is absent.  This is the
+ * recommended default because it is storage-efficient (just a ref, no data
+ * duplication) and non-disruptive (sync still proceeds).  Users who want the
+ * old behavior can explicitly set `"allow"`.
  */
 export function getForcePushAction(config: Partial<Config>): ForcePushAction {
-  return config.giteaConfig?.forcePushAction ?? "allow";
+  return config.giteaConfig?.forcePushAction ?? "backup-branch";
 }
 
 // ─── Gitea branch helpers ────────────────────────────────────────────────────
@@ -151,16 +176,24 @@ export async function listGitHubBranches({
 
 /**
  * Compares branches between GitHub (source) and Gitea (destination) to detect
- * force-pushes.
+ * destructive changes: force-pushes AND branch deletions.
  *
- * A force-push is detected when both sides have the same branch but the SHAs
- * differ.  We cannot cheaply verify ancestry without cloning, so any SHA
+ * A **force-push** is detected when both sides have the same branch but the
+ * SHAs differ.  We cannot cheaply verify ancestry without cloning, so any SHA
  * mismatch on an existing branch is treated as a *potential* force-push.
+ *
+ * A **branch deletion** is detected when a branch exists in Gitea but not in
+ * GitHub — the mirror sync will remove it, losing any commits unique to that
+ * branch.
  *
  * This is intentionally conservative: a normal fast-forward push will also
  * show up as "affected" until Gitea syncs.  The caller should invoke this
  * *before* triggering the mirror-sync so that the Gitea side still has the
  * old SHAs.
+ *
+ * Note: backup branches (names starting with `_` and containing `_backup_`)
+ * are excluded from deletion detection to avoid flagging our own backups as
+ * "deleted upstream".
  */
 export function detectForcePushes(
   giteaBranches: BranchRef[],
@@ -189,15 +222,23 @@ export function detectForcePushes(
     }
   }
 
-  // Branches only on Gitea → they were deleted upstream
+  // Branches only on Gitea → they were deleted upstream.
+  // Skip backup branches we created ourselves (they start with `_` and
+  // contain `_backup_`) so we don't endlessly back up our own backups.
+  const BACKUP_BRANCH_RE = /^_.*_backup_/;
   for (const [name] of giteaMap) {
-    if (!githubMap.has(name)) {
+    if (!githubMap.has(name) && !BACKUP_BRANCH_RE.test(name)) {
       deletedBranches.push(name);
     }
   }
 
+  const forcePushDetected = affectedBranches.length > 0;
+  const destructiveChangesDetected =
+    forcePushDetected || deletedBranches.length > 0;
+
   return {
-    forcePushDetected: affectedBranches.length > 0,
+    destructiveChangesDetected,
+    forcePushDetected,
     affectedBranches,
     normalBranches,
     newBranches,
@@ -213,7 +254,7 @@ function buildTimestamp(): string {
 
 /**
  * Creates lightweight backup branches in the Gitea repository for every
- * branch that is about to be force-pushed.
+ * branch that is about to be overwritten or deleted.
  *
  * The naming convention is `_<branch>_backup_<ISO-timestamp>`, e.g.
  * `_main_backup_2026-02-25T18-34-22-123Z`.
@@ -255,8 +296,10 @@ export async function createBackupBranches({
       );
       created.push({ branch, backupBranch });
     } catch (err) {
-      // If the branch create fails (e.g. branch already exists), try with
-      // the SHA directly using the git refs API
+      // If the branch create fails (e.g. branch already exists or source
+      // branch name doesn't work), try with the SHA directly using the
+      // git refs API.  This is especially important for deleted branches
+      // where old_branch_name may no longer be valid.
       try {
         const refUrl = `${giteaUrl}/api/v1/repos/${owner}/${repo}/git/refs`;
         await httpPost(
@@ -279,8 +322,29 @@ export async function createBackupBranches({
 // ─── High-level integration ──────────────────────────────────────────────────
 
 /**
- * Runs force-push detection and applies the configured protection action
- * *before* the mirror-sync is triggered.
+ * Builds a human-readable summary of what destructive changes were detected.
+ */
+function summarizeDestructiveChanges(
+  detection: ForcePushDetectionResult,
+): string {
+  const parts: string[] = [];
+
+  if (detection.affectedBranches.length > 0) {
+    const names = detection.affectedBranches.map((b) => b.branch).join(", ");
+    parts.push(`Force-push detected on: ${names}`);
+  }
+
+  if (detection.deletedBranches.length > 0) {
+    const names = detection.deletedBranches.join(", ");
+    parts.push(`Branch(es) deleted upstream: ${names}`);
+  }
+
+  return parts.join(". ");
+}
+
+/**
+ * Runs force-push AND branch-deletion detection and applies the configured
+ * protection action *before* the mirror-sync is triggered.
  *
  * Returns `{ shouldSync: boolean }`.  When `false`, the caller must NOT
  * proceed with the Gitea mirror-sync API call.
@@ -297,7 +361,10 @@ export async function handleForcePushProtection({
   giteaOwner: string;
   githubOwner: string;
   githubRepo: string;
-}): Promise<{ shouldSync: boolean; detection: ForcePushDetectionResult | null }> {
+}): Promise<{
+  shouldSync: boolean;
+  detection: ForcePushDetectionResult | null;
+}> {
   const action = getForcePushAction(config);
 
   // "allow" means no detection at all – just sync
@@ -362,19 +429,35 @@ export async function handleForcePushProtection({
   // ── Detect ────────────────────────────────────────────────────────────
   const detection = detectForcePushes(giteaBranches, githubBranches);
 
-  if (!detection.forcePushDetected) {
+  if (!detection.destructiveChangesDetected) {
     console.log(
-      `[ForcePush] No force-push detected for ${repository.name}, sync will proceed`,
+      `[ForcePush] No destructive changes detected for ${repository.name}, sync will proceed`,
     );
     return { shouldSync: true, detection };
   }
 
-  const branchNames = detection.affectedBranches
-    .map((b) => b.branch)
-    .join(", ");
+  const summary = summarizeDestructiveChanges(detection);
   console.log(
-    `[ForcePush] Force-push detected on branch(es) [${branchNames}] for ${repository.name}`,
+    `[ForcePush] Destructive changes for ${repository.name}: ${summary}`,
   );
+
+  // ── Collect branches that need backup ─────────────────────────────────
+  // Both force-pushed branches (preserve old SHA) AND deleted branches
+  // (preserve current Gitea SHA before the mirror sync removes them).
+  const giteaMap = new Map(giteaBranches.map((b) => [b.name, b.sha]));
+
+  const branchesToBackup: Array<{ branch: string; sha: string }> = [];
+
+  for (const b of detection.affectedBranches) {
+    branchesToBackup.push({ branch: b.branch, sha: b.giteaSha });
+  }
+
+  for (const name of detection.deletedBranches) {
+    const sha = giteaMap.get(name);
+    if (sha) {
+      branchesToBackup.push({ branch: name, sha });
+    }
+  }
 
   // ── Apply action ──────────────────────────────────────────────────────
   if (action === "backup-branch") {
@@ -383,10 +466,7 @@ export async function handleForcePushProtection({
       token: giteaToken,
       owner: giteaOwner,
       repo: repository.name,
-      branches: detection.affectedBranches.map((b) => ({
-        branch: b.branch,
-        sha: b.giteaSha,
-      })),
+      branches: branchesToBackup,
     });
 
     // Log the backup results
@@ -408,7 +488,7 @@ export async function handleForcePushProtection({
       repositoryName: repository.name,
       message: `Backup branches created for ${repository.name}`,
       details: [
-        `Force-push detected on: ${branchNames}.`,
+        summary,
         `Created ${backupResult.created.length} backup branch(es).`,
         backupResult.failed.length > 0
           ? `Failed to create ${backupResult.failed.length} backup branch(es): ${backupResult.failed.map((f) => `${f.branch}: ${f.error}`).join("; ")}`
@@ -430,7 +510,7 @@ export async function handleForcePushProtection({
       .set({
         status: repoStatusEnum.parse("pending-approval"),
         updatedAt: new Date(),
-        errorMessage: `Force-push detected on branch(es): ${branchNames}. Sync blocked – manual approval required.`,
+        errorMessage: `${summary}. Sync blocked – manual approval required.`,
       })
       .where(eq(repositories.id, repository.id!));
 
@@ -438,8 +518,8 @@ export async function handleForcePushProtection({
       userId: config.userId!,
       repositoryId: repository.id,
       repositoryName: repository.name,
-      message: `Sync blocked for ${repository.name} – force-push detected`,
-      details: `Force-push detected on: ${branchNames}. The sync has been blocked. Approve or dismiss from the dashboard to continue.`,
+      message: `Sync blocked for ${repository.name} – destructive changes detected`,
+      details: `${summary}. The sync has been blocked. Approve or dismiss from the dashboard to continue.`,
       status: "failed",
     });
 

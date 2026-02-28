@@ -117,7 +117,7 @@ export function mapUiToDbConfig(
     backupRetentionCount: giteaConfig.backupRetentionCount ?? 20,
     backupDirectory: giteaConfig.backupDirectory?.trim() || undefined,
     blockSyncOnBackupFailure: giteaConfig.blockSyncOnBackupFailure ?? true,
-    forcePushAction: giteaConfig.forcePushAction ?? "allow",
+    forcePushAction: giteaConfig.forcePushAction ?? "backup-branch",
   };
 
   return {
@@ -168,7 +168,7 @@ export function mapDbToUiConfig(dbConfig: any): {
       dbConfig.giteaConfig?.backupDirectory || "data/repo-backups",
     blockSyncOnBackupFailure:
       dbConfig.giteaConfig?.blockSyncOnBackupFailure ?? true,
-    forcePushAction: dbConfig.giteaConfig?.forcePushAction ?? "allow",
+    forcePushAction: dbConfig.giteaConfig?.forcePushAction ?? "backup-branch",
   };
 
   // Map mirror options from various database fields

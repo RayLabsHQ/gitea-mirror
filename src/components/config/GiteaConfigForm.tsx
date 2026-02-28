@@ -332,7 +332,7 @@ export function GiteaConfigForm({
             <select
               id="gitea-force-push-action"
               name="forcePushAction"
-              value={config.forcePushAction ?? "allow"}
+              value={config.forcePushAction ?? "backup-branch"}
               onChange={(e) => {
                 const newConfig = {
                   ...config,
@@ -343,23 +343,23 @@ export function GiteaConfigForm({
               }}
               className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
             >
-              <option value="allow">
-                Allow — sync immediately (no detection)
-              </option>
               <option value="backup-branch">
-                Backup branch — create _branch_backup_timestamp refs before
-                syncing
+                Backup branch (recommended) — create _branch_backup_timestamp
+                refs before syncing
               </option>
               <option value="block">
                 Block — require manual approval before syncing
               </option>
+              <option value="allow">
+                Allow — sync immediately (no detection)
+              </option>
             </select>
             <p className="text-xs text-muted-foreground mt-1">
-              {config.forcePushAction === "backup-branch"
-                ? "When upstream history is rewritten, lightweight backup branches are created inside Gitea before the mirror sync proceeds. Very storage-efficient — only adds a ref, no data duplication."
+              {config.forcePushAction === "allow"
+                ? "No force-push or branch-deletion detection. Upstream rewrites and deletions are synced without any protection beyond the optional snapshot below."
                 : config.forcePushAction === "block"
-                  ? 'When upstream history is rewritten, the sync is blocked and the repository is marked as "pending approval". You must manually approve or dismiss from the dashboard.'
-                  : "No force-push detection. Upstream rewrites are synced without any protection beyond the optional snapshot below."}
+                  ? 'When upstream history is rewritten or branches are deleted, the sync is blocked and the repository is marked as "pending approval". You must manually approve or dismiss from the dashboard.'
+                  : "When upstream history is rewritten or branches are deleted, lightweight backup branches are created inside Gitea before the mirror sync proceeds. Very storage-efficient — only adds a ref, no data duplication. Also protects against upstream branch deletions."}
             </p>
           </div>
 

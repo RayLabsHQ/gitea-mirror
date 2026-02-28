@@ -80,7 +80,9 @@ export const giteaConfigSchema = z.object({
   backupRetentionCount: z.number().int().min(1).default(20),
   backupDirectory: z.string().optional(),
   blockSyncOnBackupFailure: z.boolean().default(true),
-  forcePushAction: z.enum(["allow", "backup-branch", "block"]).default("allow"),
+  forcePushAction: z
+    .enum(["allow", "backup-branch", "block"])
+    .default("backup-branch"),
 });
 
 export const scheduleConfigSchema = z.object({

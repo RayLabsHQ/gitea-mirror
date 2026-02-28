@@ -111,7 +111,7 @@ export async function createDefaultConfig({
       backupRetentionCount: 20,
       backupDirectory: "data/repo-backups",
       blockSyncOnBackupFailure: true,
-      forcePushAction: "allow",
+      forcePushAction: "backup-branch",
     },
     include: [],
     exclude: [],
