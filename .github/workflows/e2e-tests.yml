@@ -170,6 +170,7 @@ jobs:
           PRE_SYNC_BACKUP_ENABLED: "false"
           ENCRYPTION_SECRET: "e2e-encryption-secret-32char!!"
         run: |
+          echo "GITHUB_API_URL=$GITHUB_API_URL"
           # Re-init DB in case build step cleared it
           bun run manage-db init 2>/dev/null || true
 
@@ -178,9 +179,11 @@ jobs:
 
           echo "Waiting for gitea-mirror app..."
           for i in $(seq 1 90); do
-            if curl -sf http://localhost:${{ env.APP_PORT }}/api/health > /dev/null 2>&1 || \
-               curl -sf -o /dev/null -w "%{http_code}" http://localhost:${{ env.APP_PORT }}/ 2>/dev/null | grep -q "^[23]"; then
+            health_resp=$(curl -sf http://localhost:${{ env.APP_PORT }}/api/health 2>/dev/null)
+            if [ -n "$health_resp" ]; then
               echo "✓ gitea-mirror app is ready"
+              echo "Health check response:"
+              echo "$health_resp" | jq .
               break
             fi
             if ! kill -0 $(cat /tmp/app.pid) 2>/dev/null; then
