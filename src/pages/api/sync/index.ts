@@ -42,17 +42,11 @@ export const POST: APIRoute = async ({ request, locals }) => {
     }
 
     // Decrypt the GitHub token before using it
-    console.log("[Sync Debug] About to decrypt GitHub token");
     const decryptedToken = getDecryptedGitHubToken(config);
-    console.log("[Sync Debug] Token decrypted successfully, length:", decryptedToken.length);
-    
     const githubUsername = config.githubConfig?.owner || undefined;
-    console.log("[Sync Debug] Creating GitHub client with GH_API_URL:", process.env.GH_API_URL, "GITHUB_API_URL:", process.env.GITHUB_API_URL);
     const octokit = createGitHubClient(decryptedToken, userId, githubUsername);
-    console.log("[Sync Debug] GitHub client created");
 
     // Fetch GitHub data in parallel
-    console.log("[Sync Debug] Fetching GitHub data...");
     const [basicAndForkedRepos, starredRepos, gitOrgs] = await Promise.all([
       getGithubRepositories({ octokit, config }),
       config.githubConfig?.includeStarred
@@ -60,11 +54,6 @@ export const POST: APIRoute = async ({ request, locals }) => {
         : Promise.resolve([]),
       getGithubOrganizations({ octokit, config }),
     ]);
-    console.log("[Sync Debug] GitHub data fetched:", {
-      basicAndForkedRepos: basicAndForkedRepos.length,
-      starredRepos: starredRepos.length,
-      gitOrgs: gitOrgs.length
-    });
 
     // Merge and de-duplicate by fullName, preferring starred variant when duplicated
     const allGithubRepos = mergeGitReposPreferStarred(basicAndForkedRepos, starredRepos);
@@ -203,18 +192,6 @@ export const POST: APIRoute = async ({ request, locals }) => {
       },
     });
   } catch (error) {
-    // TEMPORARY: Return detailed error for debugging E2E tests
-    const errorMessage = error instanceof Error ? error.message : String(error);
-    const errorStack = error instanceof Error ? error.stack : undefined;
-    console.error("[Sync] Error during sync:", errorMessage);
-    return jsonResponse({
-      data: {
-        error: "GitHub data sync failed",
-        message: errorMessage,
-        stack: errorStack,
-        timestamp: new Date().toISOString(),
-      },
-      status: 500,
-    });
+    return createSecureErrorResponse(error, "GitHub data sync", 500);
   }
 };

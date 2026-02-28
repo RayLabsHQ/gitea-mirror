@@ -170,41 +170,25 @@ jobs:
           PRE_SYNC_BACKUP_ENABLED: "false"
           ENCRYPTION_SECRET: "e2e-encryption-secret-32char!!"
         run: |
-          echo "GH_API_URL=$GH_API_URL"
           # Re-init DB in case build step cleared it
           bun run manage-db init 2>/dev/null || true
 
-          # Clean and rebuild with latest code changes
-          rm -rf dist/
-          bun run build
-
-          # Start app with logging
-          bun run start > /tmp/app.log 2>&1 &
+          bun run start &
           echo $! > /tmp/app.pid
-          
-          # Give the app a moment to start
-          sleep 3
-          echo "App started, checking startup logs..."
-          cat /tmp/app.log || true
 
           echo "Waiting for gitea-mirror app..."
           for i in $(seq 1 90); do
-            # Try HTTPS first (app may auto-use TLS), fallback to HTTP
-            health_resp=$(curl -sfk --max-time 5 https://localhost:${{ env.APP_PORT }}/api/health 2>/dev/null || curl -sf --max-time 5 http://localhost:${{ env.APP_PORT }}/api/health 2>/dev/null)
-            if [ -n "$health_resp" ]; then
+            if curl -sf http://localhost:${{ env.APP_PORT }}/api/health > /dev/null 2>&1 || \
+               curl -sf -o /dev/null -w "%{http_code}" http://localhost:${{ env.APP_PORT }}/ 2>/dev/null | grep -q "^[23]"; then
               echo "✓ gitea-mirror app is ready"
-              echo "Health check response:"
-              echo "$health_resp" | jq .
               break
             fi
             if ! kill -0 $(cat /tmp/app.pid) 2>/dev/null; then
-              echo "ERROR: App process died. Logs:"
-              cat /tmp/app.log || true
+              echo "ERROR: App process died"
               exit 1
             fi
             if [ $i -eq 90 ]; then
-              echo "ERROR: gitea-mirror app did not start within 180s. Logs:"
-              cat /tmp/app.log || true
+              echo "ERROR: gitea-mirror app did not start within 180s"
               exit 1
             fi
             sleep 2
@@ -244,11 +228,7 @@ jobs:
 
           echo ""
           echo "── App status ──"
-          curl -sfk https://localhost:${{ env.APP_PORT }}/api/health 2>/dev/null || curl -sf http://localhost:${{ env.APP_PORT }}/api/health 2>/dev/null || echo "(unreachable)"
-
-          echo ""
-          echo "── App logs ──"
-          cat /tmp/app.log 2>/dev/null || echo "(no logs)"
+          curl -sf http://localhost:${{ env.APP_PORT }}/api/health 2>/dev/null || echo "(unreachable)"
 
           echo ""
           echo "── Docker containers ──"
