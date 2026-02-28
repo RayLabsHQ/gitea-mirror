@@ -198,13 +198,25 @@ test.describe("E2E: Backup configuration", () => {
     const orgRepos = await giteaApi.listOrgRepos(GITEA_MIRROR_ORG);
     if (orgRepos.length > 0) {
       // With repos in Gitea, the backup system should have tried to create
-      // snapshots. The snapshots may succeed or fail (e.g. path issues in
-      // certain environments), but the attempts should be logged.
+      // snapshots. All snapshots should succeed.
       expect(
         backupJobs.length,
         "Expected at least one backup/snapshot activity entry when " +
           "backupBeforeSync is enabled and repos exist in Gitea",
       ).toBeGreaterThan(0);
+
+      // Check for any failed backups
+      const failedBackups = backupJobs.filter(
+        (j: any) =>
+          j.status === "failed" &&
+          (j.message?.toLowerCase().includes("snapshot") ||
+            j.details?.toLowerCase().includes("snapshot")),
+      );
+      expect(
+        failedBackups.length,
+        `Expected all backups to succeed, but ${failedBackups.length} backup(s) failed. ` +
+          `Failed: ${failedBackups.map((j: any) => `${j.repositoryName}: ${j.details?.substring(0, 100)}`).join("; ")}`,
+      ).toBe(0);
 
       console.log(
         `[Backup] Confirmed: backup system was invoked for ${backupJobs.length} repos`,

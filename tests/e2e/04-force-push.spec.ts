@@ -740,9 +740,7 @@ test.describe("E2E: Force-push simulation", () => {
       );
     }
 
-    // The backup system should have been invoked. Whether it succeeds or fails
-    // depends on the environment (the git bundle path bug may cause failures),
-    // but the ATTEMPT must be recorded.
+    // The backup system should have been invoked and must succeed.
     expect(
       backupJobs.length,
       "At least one backup/snapshot activity should exist for my-project " +
@@ -771,8 +769,7 @@ test.describe("E2E: Force-push simulation", () => {
     }
     if (failedBackups.length > 0) {
       console.log(
-        `[ForcePush] ⚠ ${failedBackups.length} backup(s) FAILED — ` +
-          `this is a known issue with relative backup directory paths`,
+        `[ForcePush] ⚠ ${failedBackups.length} backup(s) FAILED`,
       );
       // Extract and log the first failure reason for visibility
       const firstFailure = failedBackups[0];
@@ -782,7 +779,7 @@ test.describe("E2E: Force-push simulation", () => {
     }
 
     console.log(
-      "\n[ForcePush] ════════════════════════════════════════════════════",
+      "[ForcePush] ════════════════════════════════════════════════════",
     );
     if (successfulBackups.length > 0) {
       console.log(
@@ -790,16 +787,17 @@ test.describe("E2E: Force-push simulation", () => {
       );
     } else {
       console.log("[ForcePush]  RESULT: Backup system was INVOKED but FAILED.");
-      console.log(
-        "[ForcePush]  The backup code path ran (which is what we're testing),",
-      );
-      console.log(
-        "[ForcePush]  but the bundle creation has a known path resolution bug.",
-      );
     }
     console.log(
       "[ForcePush] ════════════════════════════════════════════════════\n",
     );
+
+    // Fail the test if any backups failed
+    expect(
+      failedBackups.length,
+      `Expected all backups to succeed, but ${failedBackups.length} backup(s) failed. ` +
+        `First failure: ${failedBackups[0]?.details || "unknown error"}`,
+    ).toBe(0);
   });
 
   // ── F8: Restore source repo for subsequent test suites ───────────────────
