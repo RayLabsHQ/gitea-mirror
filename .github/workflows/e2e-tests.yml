@@ -183,7 +183,8 @@ jobs:
 
           echo "Waiting for gitea-mirror app..."
           for i in $(seq 1 90); do
-            health_resp=$(curl -sf http://localhost:${{ env.APP_PORT }}/api/health 2>/dev/null)
+            # Try HTTPS first (app may auto-use TLS), fallback to HTTP
+            health_resp=$(curl -sfk https://localhost:${{ env.APP_PORT }}/api/health 2>/dev/null || curl -sf http://localhost:${{ env.APP_PORT }}/api/health 2>/dev/null)
             if [ -n "$health_resp" ]; then
               echo "✓ gitea-mirror app is ready"
               echo "Health check response:"
@@ -237,7 +238,7 @@ jobs:
 
           echo ""
           echo "── App status ──"
-          curl -sf http://localhost:${{ env.APP_PORT }}/api/health 2>/dev/null || echo "(unreachable)"
+          curl -sfk https://localhost:${{ env.APP_PORT }}/api/health 2>/dev/null || curl -sf http://localhost:${{ env.APP_PORT }}/api/health 2>/dev/null || echo "(unreachable)"
 
           echo ""
           echo "── App logs ──"
