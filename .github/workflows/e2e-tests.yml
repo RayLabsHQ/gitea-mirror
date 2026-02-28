@@ -174,17 +174,23 @@ jobs:
           # Re-init DB in case build step cleared it
           bun run manage-db init 2>/dev/null || true
 
-          # Rebuild with latest code changes
+          # Clean and rebuild with latest code changes
+          rm -rf dist/
           bun run build
 
           # Start app with logging
           bun run start > /tmp/app.log 2>&1 &
           echo $! > /tmp/app.pid
+          
+          # Give the app a moment to start
+          sleep 3
+          echo "App started, checking startup logs..."
+          cat /tmp/app.log || true
 
           echo "Waiting for gitea-mirror app..."
           for i in $(seq 1 90); do
             # Try HTTPS first (app may auto-use TLS), fallback to HTTP
-            health_resp=$(curl -sfk https://localhost:${{ env.APP_PORT }}/api/health 2>/dev/null || curl -sf http://localhost:${{ env.APP_PORT }}/api/health 2>/dev/null)
+            health_resp=$(curl -sfk --max-time 5 https://localhost:${{ env.APP_PORT }}/api/health 2>/dev/null || curl -sf --max-time 5 http://localhost:${{ env.APP_PORT }}/api/health 2>/dev/null)
             if [ -n "$health_resp" ]; then
               echo "✓ gitea-mirror app is ready"
               echo "Health check response:"
