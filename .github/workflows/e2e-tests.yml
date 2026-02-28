@@ -125,7 +125,7 @@ jobs:
 
       - name: Build application
         env:
-          GITHUB_API_URL: http://localhost:4580
+          GH_API_URL: http://localhost:4580
           BETTER_AUTH_SECRET: e2e-test-secret
         run: |
           bun run build
@@ -160,7 +160,7 @@ jobs:
 
       - name: Start gitea-mirror application
         env:
-          GITHUB_API_URL: http://localhost:4580
+          GH_API_URL: http://localhost:4580
           BETTER_AUTH_SECRET: e2e-test-secret
           BETTER_AUTH_URL: http://localhost:4321
           DATABASE_URL: file:data/gitea-mirror.db
@@ -170,7 +170,7 @@ jobs:
           PRE_SYNC_BACKUP_ENABLED: "false"
           ENCRYPTION_SECRET: "e2e-encryption-secret-32char!!"
         run: |
-          echo "GITHUB_API_URL=$GITHUB_API_URL"
+          echo "GH_API_URL=$GH_API_URL"
           # Re-init DB in case build step cleared it
           bun run manage-db init 2>/dev/null || true
 

@@ -38,7 +38,9 @@ export function createGitHubClient(
     ? `gitea-mirror/3.5.4 (user:${username})`
     : "gitea-mirror/3.5.4";
 
-  const baseUrl = process.env.GITHUB_API_URL || "https://api.github.com";
+  // Support GH_API_URL (preferred) or GITHUB_API_URL (may conflict with GitHub Actions)
+  // GitHub Actions sets GITHUB_API_URL to https://api.github.com by default
+  const baseUrl = process.env.GH_API_URL || process.env.GITHUB_API_URL || "https://api.github.com";
   console.log("[GitHub Client] Creating client with baseUrl:", baseUrl);
 
   const octokit = new MyOctokit({

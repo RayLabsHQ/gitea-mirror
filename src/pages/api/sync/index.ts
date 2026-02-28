@@ -47,7 +47,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     console.log("[Sync Debug] Token decrypted successfully, length:", decryptedToken.length);
     
     const githubUsername = config.githubConfig?.owner || undefined;
-    console.log("[Sync Debug] Creating GitHub client with GITHUB_API_URL:", process.env.GITHUB_API_URL);
+    console.log("[Sync Debug] Creating GitHub client with GH_API_URL:", process.env.GH_API_URL, "GITHUB_API_URL:", process.env.GITHUB_API_URL);
     const octokit = createGitHubClient(decryptedToken, userId, githubUsername);
     console.log("[Sync Debug] GitHub client created");
 

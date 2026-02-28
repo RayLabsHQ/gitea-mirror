@@ -63,6 +63,7 @@ export const GET: APIRoute = async () => {
       recovery: recoveryStatus,
       system: systemInfo,
       debug: {
+        GH_API_URL: process.env.GH_API_URL || "(not set)",
         GITHUB_API_URL: process.env.GITHUB_API_URL || "(not set)",
         NODE_ENV: process.env.NODE_ENV || "(not set)",
       },
