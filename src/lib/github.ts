@@ -38,10 +38,13 @@ export function createGitHubClient(
     ? `gitea-mirror/3.5.4 (user:${username})`
     : "gitea-mirror/3.5.4";
 
+  const baseUrl = process.env.GITHUB_API_URL || "https://api.github.com";
+  console.log("[GitHub Client] Creating client with baseUrl:", baseUrl);
+
   const octokit = new MyOctokit({
     auth: token, // Always use token for authentication (5000 req/hr vs 60 for unauthenticated)
     userAgent, // Identify our application and user
-    baseUrl: process.env.GITHUB_API_URL || "https://api.github.com", // Configurable for E2E testing
+    baseUrl, // Configurable for E2E testing
     log: {
       debug: () => {},
       info: console.log,
@@ -148,56 +151,52 @@ export function createGitHubClient(
     },
   });
 
-  // Add additional rate limit tracking if userId is provided and RateLimitManager is available
-  if (userId && RateLimitManager) {
-    octokit.hook.after("request", async (response: any, options: any) => {
-      // Update rate limit from response headers
-      if (response.headers) {
-        await RateLimitManager.updateFromResponse(userId, response.headers);
-      }
-    });
-
-    octokit.hook.error("request", async (error: any, options: any) => {
-      // Handle rate limit errors
-      if (error.status === 403 || error.status === 429) {
-        const message = error.message || "";
-
-        if (
-          message.includes("rate limit") ||
-          message.includes("API rate limit")
-        ) {
-          console.error(
-            `[GitHub] Rate limit error for user ${userId}: ${message}`,
-          );
-
-          // Update rate limit status from error response (if available)
-          if (error.response?.headers && RateLimitManager) {
-            await RateLimitManager.updateFromResponse(
-              userId,
-              error.response.headers,
-            );
-          }
-
-          // Create error event for UI (if available)
-          if (publishEvent) {
-            await publishEvent({
-              userId,
-              channel: "rate-limit",
-              payload: {
-                type: "error",
-                provider: "github",
-                error: message,
-                endpoint: options.url,
-                message: `Rate limit exceeded: ${message}`,
-              },
-            });
-          }
+  // Add logging hooks for debugging
+  octokit.hook.before("request", async (options: any) => {
+    console.log(`[GitHub Request] ${options.method} ${options.url}`);
+  });
+  
+  octokit.hook.after("request", async (response: any, options: any) => {
+    console.log(`[GitHub Response] ${options.method} ${options.url} -> ${response.status}`);
+    // Update rate limit from response headers
+    if (userId && RateLimitManager && response.headers) {
+      await RateLimitManager.updateFromResponse(userId, response.headers);
+    }
+  });
+  
+  octokit.hook.error("request", async (error: any, options: any) => {
+    console.error(`[GitHub Error] ${options.method} ${options.url} -> ${error.status}: ${error.message}`);
+    
+    // Handle rate limit errors
+    if (userId && (error.status === 403 || error.status === 429)) {
+      const message = error.message || "";
+      if (message.includes("rate limit") || message.includes("API rate limit")) {
+        console.error(`[GitHub] Rate limit error for user ${userId}: ${message}`);
+        
+        // Update rate limit status from error response (if available)
+        if (error.response?.headers && RateLimitManager) {
+          await RateLimitManager.updateFromResponse(userId, error.response.headers);
+        }
+        
+        // Create error event for UI (if available)
+        if (publishEvent) {
+          await publishEvent({
+            userId,
+            channel: "rate-limit",
+            payload: {
+              type: "error",
+              provider: "github",
+              error: message,
+              endpoint: options.url,
+              message: `Rate limit exceeded: ${message}`,
+            },
+          });
         }
       }
-
-      throw error;
-    });
-  }
+    }
+    
+    throw error;
+  });
 
   return octokit;
 }
