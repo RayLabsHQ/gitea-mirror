@@ -864,6 +864,7 @@ function matchRoute(
   method: string,
   pathname: string,
 ): { route: Route; params: Record<string, string> } | null {
+  // Try matching the pathname directly first
   for (const r of routes) {
     if (r.method !== method) continue;
     const match = pathname.match(r.pattern);
@@ -875,6 +876,24 @@ function matchRoute(
       return { route: r, params };
     }
   }
+
+  // If no match, try stripping /api/v3 prefix (Octokit adds this for custom baseUrl)
+  const apiV3Prefix = "/api/v3";
+  if (pathname.startsWith(apiV3Prefix)) {
+    const strippedPath = pathname.slice(apiV3Prefix.length) || "/";
+    for (const r of routes) {
+      if (r.method !== method) continue;
+      const match = strippedPath.match(r.pattern);
+      if (match) {
+        const params: Record<string, string> = {};
+        r.paramNames.forEach((name, i) => {
+          params[name] = decodeURIComponent(match[i + 1]);
+        });
+        return { route: r, params };
+      }
+    }
+  }
+
   return null;
 }
 
