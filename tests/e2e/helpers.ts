@@ -282,13 +282,10 @@ export class GiteaAPI {
     if (opts?.sha) params.set("sha", opts.sha);
     if (opts?.limit) params.set("limit", String(opts.limit));
     const qs = params.toString() ? `?${params.toString()}` : "";
-    const resp = await ctx.get(
-      `/api/v1/repos/${owner}/${name}/commits${qs}`,
-      {
-        headers: { Authorization: `token ${token}` },
-        failOnStatusCode: false,
-      },
-    );
+    const resp = await ctx.get(`/api/v1/repos/${owner}/${name}/commits${qs}`, {
+      headers: { Authorization: `token ${token}` },
+      failOnStatusCode: false,
+    });
     if (!resp.ok()) return [];
     return resp.json();
   }
@@ -356,13 +353,10 @@ export class GiteaAPI {
   async triggerMirrorSync(owner: string, name: string): Promise<boolean> {
     const ctx = await this.getCtx();
     const token = await this.createToken();
-    const resp = await ctx.post(
-      `/api/v1/repos/${owner}/${name}/mirror-sync`,
-      {
-        headers: { Authorization: `token ${token}` },
-        failOnStatusCode: false,
-      },
-    );
+    const resp = await ctx.post(`/api/v1/repos/${owner}/${name}/mirror-sync`, {
+      headers: { Authorization: `token ${token}` },
+      failOnStatusCode: false,
+    });
     return resp.ok() || resp.status() === 200;
   }
 
@@ -663,4 +657,88 @@ export async function triggerSyncRepo(
     await new Promise((r) => setTimeout(r, waitMs));
   }
   return status;
+}
+
+// ─── Fake GitHub management helpers ──────────────────────────────────────────
+
+/**
+ * Update the branch list for a repo in the fake GitHub server.
+ * This is used to simulate force-pushes (changing SHAs) or branch additions
+ * from the perspective of the force-push detection code which compares
+ * GitHub branch SHAs with Gitea branch SHAs.
+ */
+export async function updateFakeGitHubBranches(
+  request: APIRequestContext,
+  owner: string,
+  repo: string,
+  branches: Array<{ name: string; sha: string }>,
+): Promise<void> {
+  const resp = await request.post(
+    `${FAKE_GITHUB_URL}/___mgmt/update-repo-branches`,
+    {
+      data: { owner, repo, branches },
+      failOnStatusCode: false,
+    },
+  );
+  const status = resp.status();
+  if (status >= 400) {
+    const body = await resp.text();
+    console.log(`[FakeGitHub] update-repo-branches error (${status}): ${body}`);
+  }
+  expect(status, "update-repo-branches should succeed").toBeLessThan(400);
+}
+
+/**
+ * Delete a single branch from a repo in the fake GitHub server.
+ * Simulates an upstream branch deletion so force-push detection sees
+ * a branch that exists in Gitea but not in GitHub.
+ */
+export async function deleteFakeGitHubBranch(
+  request: APIRequestContext,
+  owner: string,
+  repo: string,
+  branch: string,
+): Promise<void> {
+  const resp = await request.post(
+    `${FAKE_GITHUB_URL}/___mgmt/delete-repo-branch`,
+    {
+      data: { owner, repo, branch },
+      failOnStatusCode: false,
+    },
+  );
+  const status = resp.status();
+  if (status >= 400) {
+    const body = await resp.text();
+    console.log(`[FakeGitHub] delete-repo-branch error (${status}): ${body}`);
+  }
+  expect(status, "delete-repo-branch should succeed").toBeLessThan(400);
+}
+
+/**
+ * Approve or dismiss a repository whose sync was blocked by force-push
+ * detection (status = "pending-approval").
+ */
+export async function approveSyncRepo(
+  request: APIRequestContext,
+  cookies: string,
+  repositoryId: string,
+  action: "approve" | "dismiss",
+): Promise<{ status: number; body: any }> {
+  const resp = await request.post(`${APP_URL}/api/job/approve-sync`, {
+    headers: {
+      "Content-Type": "application/json",
+      Cookie: cookies,
+    },
+    data: { repositoryId, action },
+    failOnStatusCode: false,
+  });
+
+  const status = resp.status();
+  let body: any = {};
+  try {
+    body = await resp.json();
+  } catch {
+    body = { raw: await resp.text() };
+  }
+  return { status, body };
 }

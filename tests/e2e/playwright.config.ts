@@ -16,6 +16,7 @@ import { defineConfig, devices } from "@playwright/test";
  *   03-backup.spec.ts          – backup config toggling
  *   04-force-push.spec.ts      – force-push simulation & backup verification
  *   05-sync-verification.spec.ts – dynamic repos, content integrity, reset
+ *   06-backup-branch.spec.ts   – backup-branch protection (force-push detection, block mode, approve/dismiss)
  */
 export default defineConfig({
   testDir: ".",
