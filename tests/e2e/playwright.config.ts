@@ -5,12 +5,21 @@ import { defineConfig, devices } from "@playwright/test";
  *
  * Expected services (started by run-e2e.sh before Playwright launches):
  *   - Fake GitHub API server on http://localhost:4580
+ *   - Git HTTP server on http://localhost:4590
  *   - Gitea instance on http://localhost:3333
  *   - gitea-mirror app on http://localhost:4321
+ *
+ * Test files are numbered to enforce execution order (they share state
+ * via a single Gitea + app instance):
+ *   01-health.spec.ts          – service smoke tests
+ *   02-mirror-workflow.spec.ts – full first-mirror journey
+ *   03-backup.spec.ts          – backup config toggling
+ *   04-force-push.spec.ts      – force-push simulation & backup verification
+ *   05-sync-verification.spec.ts – dynamic repos, content integrity, reset
  */
 export default defineConfig({
   testDir: ".",
-  testMatch: "*.spec.ts",
+  testMatch: /\d+-.*\.spec\.ts$/,
 
   /* Fail the build on CI if test.only is left in source */
   forbidOnly: !!process.env.CI,
