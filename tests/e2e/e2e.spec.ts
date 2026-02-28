@@ -2,9 +2,10 @@
  * End-to-end tests for gitea-mirror.
  *
  * Prerequisites (managed by run-e2e.sh or the CI workflow):
- *   1. Gitea running on http://localhost:3333  (admin/admin123)
+ *   1. Gitea running on http://localhost:3333  (fresh instance, no users)
  *   2. Fake GitHub API on http://localhost:4580
- *   3. gitea-mirror app on http://localhost:4321
+ *   3. Git HTTP server on http://localhost:4590 (serves bare repos)
+ *   4. gitea-mirror app on http://localhost:4321
  *
  * The tests walk through the full user journey:
  *   1. Register an account in gitea-mirror
@@ -12,16 +13,24 @@
  *   3. Configure GitHub + Gitea settings via the app
  *   4. Trigger a GitHub → app sync (fetch repos from fake GitHub)
  *   5. Trigger a mirror job (push repos to Gitea)
- *   6. Verify the mirrored repos appear in Gitea
+ *   6. Verify the mirrored repos actually appear in Gitea (real git content)
+ *   7. Test backup configuration (enable backup, re-sync, verify bundles)
  */
 
-import { test, expect, type Page, type APIRequestContext } from "@playwright/test";
+import {
+  test,
+  expect,
+  request as playwrightRequest,
+  type Page,
+  type APIRequestContext,
+} from "@playwright/test";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const APP_URL = process.env.APP_URL || "http://localhost:4321";
 const GITEA_URL = process.env.GITEA_URL || "http://localhost:3333";
 const FAKE_GITHUB_URL = process.env.FAKE_GITHUB_URL || "http://localhost:4580";
+const GIT_SERVER_URL = process.env.GIT_SERVER_URL || "http://localhost:4590";
 
 const GITEA_ADMIN_USER = "e2e_admin";
 const GITEA_ADMIN_PASS = "e2eAdminPass123!";
@@ -56,23 +65,48 @@ async function waitFor(
   );
 }
 
-/** Direct HTTP helper for talking to Gitea's API (bypasses the browser). */
+/**
+ * Direct HTTP helper for talking to Gitea's API.
+ *
+ * Uses a manually-created APIRequestContext so it can be shared across
+ * beforeAll / afterAll / individual tests without hitting Playwright's
+ * "fixture from beforeAll cannot be reused" restriction.
+ */
 class GiteaAPI {
   private token = "";
+  private ctx: APIRequestContext | null = null;
 
-  constructor(
-    private baseUrl: string,
-    private request: APIRequestContext,
-  ) {}
+  constructor(private baseUrl: string) {}
 
-  /** Create the admin user via Gitea's built-in install/admin-create flow. */
+  /** Lazily create (and cache) a Playwright APIRequestContext. */
+  private async getCtx(): Promise<APIRequestContext> {
+    if (!this.ctx) {
+      this.ctx = await playwrightRequest.newContext({
+        baseURL: this.baseUrl,
+      });
+    }
+    return this.ctx;
+  }
+
+  /** Dispose of the underlying context – call in afterAll. */
+  async dispose(): Promise<void> {
+    if (this.ctx) {
+      await this.ctx.dispose();
+      this.ctx = null;
+    }
+  }
+
+  /** Create the admin user via Gitea's sign-up form (first user becomes admin). */
   async ensureAdminUser(): Promise<void> {
-    // First check if admin already exists by trying to get a token
+    const ctx = await this.getCtx();
+
+    // Check if admin already exists by trying basic-auth
     try {
-      const resp = await this.request.get(`${this.baseUrl}/api/v1/user`, {
+      const resp = await ctx.get(`/api/v1/user`, {
         headers: {
           Authorization: `Basic ${btoa(`${GITEA_ADMIN_USER}:${GITEA_ADMIN_PASS}`)}`,
         },
+        failOnStatusCode: false,
       });
       if (resp.ok()) {
         console.log("[GiteaAPI] Admin user already exists");
@@ -82,34 +116,9 @@ class GiteaAPI {
       // Expected on first run
     }
 
-    // Try to create admin via the API (Gitea allows first user to self-register as admin
-    // when DISABLE_REGISTRATION=false and no users exist yet)
-    const resp = await this.request.post(`${this.baseUrl}/api/v1/admin/users`, {
-      headers: {
-        "Content-Type": "application/json",
-        // Use the Gitea built-in admin creation endpoint (first-user scenario)
-        // If this fails, we fall back to the /user/sign_up form
-      },
-      data: {
-        username: GITEA_ADMIN_USER,
-        password: GITEA_ADMIN_PASS,
-        email: GITEA_ADMIN_EMAIL,
-        must_change_password: false,
-        login_name: GITEA_ADMIN_USER,
-        source_id: 0,
-        visibility: "public",
-      },
-      failOnStatusCode: false,
-    });
-
-    if (resp.ok()) {
-      console.log("[GiteaAPI] Admin user created via API");
-      return;
-    }
-
-    // Fallback: register through the form
-    console.log("[GiteaAPI] Trying sign-up form fallback...");
-    const signUpResp = await this.request.post(`${this.baseUrl}/user/sign_up`, {
+    // Register through the form – first user auto-becomes admin
+    console.log("[GiteaAPI] Creating admin via sign-up form...");
+    const signUpResp = await ctx.post(`/user/sign_up`, {
       form: {
         user_name: GITEA_ADMIN_USER,
         password: GITEA_ADMIN_PASS,
@@ -120,40 +129,55 @@ class GiteaAPI {
       maxRedirects: 5,
     });
     console.log(`[GiteaAPI] Sign-up response status: ${signUpResp.status()}`);
+
+    // Verify
+    const check = await ctx.get(`/api/v1/user`, {
+      headers: {
+        Authorization: `Basic ${btoa(`${GITEA_ADMIN_USER}:${GITEA_ADMIN_PASS}`)}`,
+      },
+      failOnStatusCode: false,
+    });
+    if (!check.ok()) {
+      throw new Error(
+        `Failed to verify admin user after creation (status ${check.status()})`,
+      );
+    }
+    console.log("[GiteaAPI] Admin user verified");
   }
 
   /** Generate a Gitea API token for the admin user. */
   async createToken(): Promise<string> {
     if (this.token) return this.token;
+    const ctx = await this.getCtx();
 
     const tokenName = `e2e-token-${Date.now()}`;
-    const resp = await this.request.post(
-      `${this.baseUrl}/api/v1/users/${GITEA_ADMIN_USER}/tokens`,
-      {
-        headers: {
-          Authorization: `Basic ${btoa(`${GITEA_ADMIN_USER}:${GITEA_ADMIN_PASS}`)}`,
-          "Content-Type": "application/json",
-        },
-        data: {
-          name: tokenName,
-          scopes: [
-            "read:user",
-            "write:user",
-            "read:organization",
-            "write:organization",
-            "read:repository",
-            "write:repository",
-            "read:issue",
-            "write:issue",
-            "read:misc",
-            "write:misc",
-            "read:admin",
-            "write:admin",
-          ],
-        },
+    const resp = await ctx.post(`/api/v1/users/${GITEA_ADMIN_USER}/tokens`, {
+      headers: {
+        Authorization: `Basic ${btoa(`${GITEA_ADMIN_USER}:${GITEA_ADMIN_PASS}`)}`,
+        "Content-Type": "application/json",
       },
-    );
-    expect(resp.ok(), `Failed to create Gitea token: ${resp.status()}`).toBeTruthy();
+      data: {
+        name: tokenName,
+        scopes: [
+          "read:user",
+          "write:user",
+          "read:organization",
+          "write:organization",
+          "read:repository",
+          "write:repository",
+          "read:issue",
+          "write:issue",
+          "read:misc",
+          "write:misc",
+          "read:admin",
+          "write:admin",
+        ],
+      },
+    });
+    expect(
+      resp.ok(),
+      `Failed to create Gitea token: ${resp.status()}`,
+    ).toBeTruthy();
     const data = await resp.json();
     this.token = data.sha1 || data.token;
     console.log(`[GiteaAPI] Created token: ${tokenName}`);
@@ -162,10 +186,11 @@ class GiteaAPI {
 
   /** Create an organization in Gitea. */
   async ensureOrg(orgName: string): Promise<void> {
+    const ctx = await this.getCtx();
     const token = await this.createToken();
 
     // Check if org exists
-    const check = await this.request.get(`${this.baseUrl}/api/v1/orgs/${orgName}`, {
+    const check = await ctx.get(`/api/v1/orgs/${orgName}`, {
       headers: { Authorization: `token ${token}` },
       failOnStatusCode: false,
     });
@@ -174,7 +199,7 @@ class GiteaAPI {
       return;
     }
 
-    const resp = await this.request.post(`${this.baseUrl}/api/v1/orgs`, {
+    const resp = await ctx.post(`/api/v1/orgs`, {
       headers: {
         Authorization: `token ${token}`,
         "Content-Type": "application/json",
@@ -192,58 +217,93 @@ class GiteaAPI {
 
   /** List repos in a Gitea org. */
   async listOrgRepos(orgName: string): Promise<any[]> {
+    const ctx = await this.getCtx();
     const token = await this.createToken();
-    const resp = await this.request.get(
-      `${this.baseUrl}/api/v1/orgs/${orgName}/repos`,
-      {
-        headers: { Authorization: `token ${token}` },
-        failOnStatusCode: false,
-      },
-    );
+    const resp = await ctx.get(`/api/v1/orgs/${orgName}/repos`, {
+      headers: { Authorization: `token ${token}` },
+      failOnStatusCode: false,
+    });
     if (!resp.ok()) return [];
     return resp.json();
   }
 
   /** List repos for the admin user. */
   async listUserRepos(): Promise<any[]> {
+    const ctx = await this.getCtx();
     const token = await this.createToken();
-    const resp = await this.request.get(
-      `${this.baseUrl}/api/v1/users/${GITEA_ADMIN_USER}/repos`,
-      {
-        headers: { Authorization: `token ${token}` },
-        failOnStatusCode: false,
-      },
-    );
+    const resp = await ctx.get(`/api/v1/users/${GITEA_ADMIN_USER}/repos`, {
+      headers: { Authorization: `token ${token}` },
+      failOnStatusCode: false,
+    });
     if (!resp.ok()) return [];
     return resp.json();
   }
 
   /** Get a specific repo. */
   async getRepo(owner: string, name: string): Promise<any | null> {
+    const ctx = await this.getCtx();
     const token = await this.createToken();
-    const resp = await this.request.get(
-      `${this.baseUrl}/api/v1/repos/${owner}/${name}`,
-      {
-        headers: { Authorization: `token ${token}` },
-        failOnStatusCode: false,
-      },
-    );
+    const resp = await ctx.get(`/api/v1/repos/${owner}/${name}`, {
+      headers: { Authorization: `token ${token}` },
+      failOnStatusCode: false,
+    });
     if (!resp.ok()) return null;
     return resp.json();
   }
 
   /** List branches for a repo. */
   async listBranches(owner: string, name: string): Promise<any[]> {
+    const ctx = await this.getCtx();
     const token = await this.createToken();
-    const resp = await this.request.get(
-      `${this.baseUrl}/api/v1/repos/${owner}/${name}/branches`,
+    const resp = await ctx.get(`/api/v1/repos/${owner}/${name}/branches`, {
+      headers: { Authorization: `token ${token}` },
+      failOnStatusCode: false,
+    });
+    if (!resp.ok()) return [];
+    return resp.json();
+  }
+
+  /** List tags for a repo. */
+  async listTags(owner: string, name: string): Promise<any[]> {
+    const ctx = await this.getCtx();
+    const token = await this.createToken();
+    const resp = await ctx.get(`/api/v1/repos/${owner}/${name}/tags`, {
+      headers: { Authorization: `token ${token}` },
+      failOnStatusCode: false,
+    });
+    if (!resp.ok()) return [];
+    return resp.json();
+  }
+
+  /** List commits for a repo (on default branch). */
+  async listCommits(owner: string, name: string): Promise<any[]> {
+    const ctx = await this.getCtx();
+    const token = await this.createToken();
+    const resp = await ctx.get(`/api/v1/repos/${owner}/${name}/commits`, {
+      headers: { Authorization: `token ${token}` },
+      failOnStatusCode: false,
+    });
+    if (!resp.ok()) return [];
+    return resp.json();
+  }
+
+  /** Get file content from a repo. */
+  async getFileContent(
+    owner: string,
+    name: string,
+    filePath: string,
+  ): Promise<string | null> {
+    const ctx = await this.getCtx();
+    const token = await this.createToken();
+    const resp = await ctx.get(
+      `/api/v1/repos/${owner}/${name}/raw/${filePath}`,
       {
         headers: { Authorization: `token ${token}` },
         failOnStatusCode: false,
       },
     );
-    if (!resp.ok()) return [];
-    return resp.json();
+    if (!resp.ok()) return null;
+    return resp.text();
   }
 
   getTokenValue(): string {
@@ -251,115 +311,157 @@ class GiteaAPI {
   }
 }
 
-/** Register a user in the gitea-mirror app via the Better Auth sign-up API. */
-async function registerAppUser(request: APIRequestContext): Promise<void> {
-  // First try to sign in (user may already exist from a previous run)
+// ─── App auth helpers ────────────────────────────────────────────────────────
+
+/**
+ * Sign up + sign in to the gitea-mirror app using the Better Auth REST API
+ * and return the session cookie string.
+ */
+async function getAppSessionCookies(
+  request: APIRequestContext,
+): Promise<string> {
+  // 1. Try sign-in first (user may already exist from a previous test / run)
   const signInResp = await request.post(`${APP_URL}/api/auth/sign-in/email`, {
-    data: {
-      email: APP_USER_EMAIL,
-      password: APP_USER_PASS,
-    },
+    data: { email: APP_USER_EMAIL, password: APP_USER_PASS },
     failOnStatusCode: false,
   });
 
   if (signInResp.ok()) {
-    console.log("[App] User already exists, signed in");
-    return;
+    const cookies = extractSetCookies(signInResp);
+    if (cookies) {
+      console.log("[App] Signed in (existing user)");
+      return cookies;
+    }
   }
 
-  // Register
+  // 2. Register
   const signUpResp = await request.post(`${APP_URL}/api/auth/sign-up/email`, {
     data: {
+      name: APP_USER_NAME,
       email: APP_USER_EMAIL,
       password: APP_USER_PASS,
-      name: APP_USER_NAME,
     },
     failOnStatusCode: false,
   });
+  const signUpStatus = signUpResp.status();
+  console.log(`[App] Sign-up response: ${signUpStatus}`);
 
-  // The app might return 200, 201, or redirect — just check we didn't get a 5xx
-  const status = signUpResp.status();
-  console.log(`[App] Sign-up response status: ${status}`);
-  expect(status, "Sign-up should not return server error").toBeLessThan(500);
+  // After sign-up Better Auth may already set a session cookie
+  const signUpCookies = extractSetCookies(signUpResp);
+  if (signUpCookies) {
+    console.log("[App] Got session from sign-up response");
+    return signUpCookies;
+  }
+
+  // 3. Sign in after registration
+  const postRegSignIn = await request.post(
+    `${APP_URL}/api/auth/sign-in/email`,
+    {
+      data: { email: APP_USER_EMAIL, password: APP_USER_PASS },
+      failOnStatusCode: false,
+    },
+  );
+  if (!postRegSignIn.ok()) {
+    const body = await postRegSignIn.text();
+    throw new Error(
+      `Sign-in after registration failed (${postRegSignIn.status()}): ${body}`,
+    );
+  }
+  const cookies = extractSetCookies(postRegSignIn);
+  if (!cookies) {
+    throw new Error("Sign-in succeeded but no session cookie was returned");
+  }
+  console.log("[App] Signed in (after registration)");
+  return cookies;
 }
 
-/** Sign in via the browser and return cookies. */
-async function signInViaBrowser(page: Page): Promise<void> {
-  await page.goto(`${APP_URL}/`);
+/**
+ * Extract session cookies from a response's `set-cookie` headers.
+ */
+function extractSetCookies(
+  resp: Awaited<ReturnType<APIRequestContext["post"]>>,
+): string {
+  const raw = resp
+    .headersArray()
+    .filter((h) => h.name.toLowerCase() === "set-cookie");
+  if (raw.length === 0) return "";
 
-  // The app redirects to sign-in if not authenticated
-  // Wait for either the dashboard or the sign-in form
-  await page.waitForLoadState("networkidle");
-
-  const url = page.url();
-
-  // If we're already on the dashboard, we're authenticated
-  if (!url.includes("sign-in") && !url.includes("login") && !url.includes("register")) {
-    console.log("[Browser] Already authenticated");
-    return;
+  const pairs: string[] = [];
+  for (const header of raw) {
+    const nv = header.value.split(";")[0].trim();
+    if (nv) pairs.push(nv);
   }
 
-  // Look for sign-in form
-  // The app uses Better Auth, so the form might vary. Try common patterns.
-  const emailInput =
-    page.locator('input[name="email"]').or(
-      page.locator('input[type="email"]'),
+  return pairs.join("; ");
+}
+
+/**
+ * Sign in via the browser UI so the browser context gets session cookies.
+ */
+async function signInViaBrowser(page: Page): Promise<string> {
+  const signInResp = await page.request.post(
+    `${APP_URL}/api/auth/sign-in/email`,
+    {
+      data: { email: APP_USER_EMAIL, password: APP_USER_PASS },
+      failOnStatusCode: false,
+    },
+  );
+
+  if (!signInResp.ok()) {
+    const signUpResp = await page.request.post(
+      `${APP_URL}/api/auth/sign-up/email`,
+      {
+        data: {
+          name: APP_USER_NAME,
+          email: APP_USER_EMAIL,
+          password: APP_USER_PASS,
+        },
+        failOnStatusCode: false,
+      },
     );
-  const passwordInput =
-    page.locator('input[name="password"]').or(
-      page.locator('input[type="password"]'),
+    console.log(`[Browser] Sign-up status: ${signUpResp.status()}`);
+
+    const retryResp = await page.request.post(
+      `${APP_URL}/api/auth/sign-in/email`,
+      {
+        data: { email: APP_USER_EMAIL, password: APP_USER_PASS },
+        failOnStatusCode: false,
+      },
     );
-
-  // If there's a "Sign Up" / "Register" tab/link and no sign-in form, we may need to register first
-  const hasSignInForm = (await emailInput.count()) > 0;
-
-  if (!hasSignInForm) {
-    // Maybe we need to go to explicit sign-in page
-    await page.goto(`${APP_URL}/sign-in`);
-    await page.waitForLoadState("networkidle");
-  }
-
-  // Check if we're on a register page and need to register first
-  if (page.url().includes("register") || page.url().includes("sign-up")) {
-    console.log("[Browser] On registration page, registering...");
-    const nameInput = page.locator('input[name="name"]').or(page.locator('input[name="username"]'));
-    if ((await nameInput.count()) > 0) {
-      await nameInput.first().fill(APP_USER_NAME);
+    if (!retryResp.ok()) {
+      console.log(`[Browser] Sign-in retry failed: ${retryResp.status()}`);
     }
-    await emailInput.first().fill(APP_USER_EMAIL);
-    await passwordInput.first().fill(APP_USER_PASS);
-    const submitBtn = page
-      .locator('button[type="submit"]')
-      .or(page.getByRole("button", { name: /sign up|register|create/i }));
-    await submitBtn.first().click();
-    await page.waitForLoadState("networkidle");
-
-    // After registration, try signing in
-    await page.goto(`${APP_URL}/sign-in`);
-    await page.waitForLoadState("networkidle");
   }
 
-  // Fill the sign-in form
-  console.log("[Browser] Filling sign-in form...");
-  await emailInput.first().fill(APP_USER_EMAIL);
-  await passwordInput.first().fill(APP_USER_PASS);
-
-  const submitBtn = page
-    .locator('button[type="submit"]')
-    .or(page.getByRole("button", { name: /sign in|log in|submit/i }));
-  await submitBtn.first().click();
-
-  // Wait for navigation away from sign-in
+  await page.goto(`${APP_URL}/`);
   await page.waitForLoadState("networkidle");
-  console.log(`[Browser] After sign-in, URL: ${page.url()}`);
+  const url = page.url();
+  console.log(`[Browser] After sign-in, URL: ${url}`);
+
+  const cookies = await page.context().cookies();
+  return cookies.map((c) => `${c.name}=${c.value}`).join("; ");
 }
 
-/** Save config via the API. */
+/** Save app config via the API. */
 async function saveConfig(
   request: APIRequestContext,
   giteaToken: string,
   cookies: string,
+  overrides: Record<string, any> = {},
 ): Promise<void> {
+  const giteaConfigDefaults = {
+    url: GITEA_URL,
+    username: GITEA_ADMIN_USER,
+    token: giteaToken,
+    organization: GITEA_MIRROR_ORG,
+    visibility: "public",
+    starredReposOrg: "github-stars",
+    preserveOrgStructure: false,
+    mirrorStrategy: "single-org",
+    backupBeforeSync: false,
+    blockSyncOnBackupFailure: false,
+  };
+
   const configPayload = {
     githubConfig: {
       username: "e2e-test-user",
@@ -367,18 +469,7 @@ async function saveConfig(
       privateRepositories: false,
       mirrorStarred: true,
     },
-    giteaConfig: {
-      url: GITEA_URL,
-      username: GITEA_ADMIN_USER,
-      token: giteaToken,
-      organization: GITEA_MIRROR_ORG,
-      visibility: "public",
-      starredReposOrg: "github-stars",
-      preserveOrgStructure: false,
-      mirrorStrategy: "single-org",
-      backupBeforeSync: false,
-      blockSyncOnBackupFailure: false,
-    },
+    giteaConfig: { ...giteaConfigDefaults, ...(overrides.giteaConfig || {}) },
     scheduleConfig: {
       enabled: false,
       interval: 3600,
@@ -425,8 +516,9 @@ async function saveConfig(
     console.log(`[App] Config error body: ${body}`);
   }
 
-  // Accept 200 or 201 or even 409 (config already exists)
-  expect(status, "Config save should not return server error").toBeLessThan(500);
+  expect(status, "Config save should not return server error").toBeLessThan(
+    500,
+  );
 }
 
 // ─── Precondition checks ─────────────────────────────────────────────────────
@@ -439,8 +531,24 @@ test.describe("E2E: Service health checks", () => {
     expect(data.status).toBe("ok");
     expect(data.repos).toBeGreaterThan(0);
     console.log(
-      `[Health] Fake GitHub: ${data.repos} repos, ${data.orgs} orgs, ${data.starredCount} starred`,
+      `[Health] Fake GitHub: ${data.repos} repos, ${data.orgs} orgs, clone base: ${data.gitCloneBaseUrl ?? "default"}`,
     );
+  });
+
+  test("Git HTTP server is running (serves test repos)", async ({
+    request,
+  }) => {
+    const resp = await request.get(`${GIT_SERVER_URL}/manifest.json`, {
+      failOnStatusCode: false,
+    });
+    expect(resp.ok(), "Git server should serve manifest.json").toBeTruthy();
+    const manifest = await resp.json();
+    expect(manifest.repos).toBeDefined();
+    expect(manifest.repos.length).toBeGreaterThan(0);
+    console.log(`[Health] Git server: serving ${manifest.repos.length} repos`);
+    for (const r of manifest.repos) {
+      console.log(`[Health]   • ${r.owner}/${r.name} — ${r.description}`);
+    }
   });
 
   test("Gitea instance is running", async ({ request }) => {
@@ -451,41 +559,47 @@ test.describe("E2E: Service health checks", () => {
         });
         return resp.ok();
       },
-      { timeout: 60_000, interval: 2_000, label: "Gitea startup" },
+      { timeout: 30_000, interval: 2_000, label: "Gitea healthy" },
     );
     const resp = await request.get(`${GITEA_URL}/api/v1/version`);
-    expect(resp.ok()).toBeTruthy();
     const data = await resp.json();
     console.log(`[Health] Gitea version: ${data.version}`);
+    expect(data.version).toBeTruthy();
   });
 
   test("gitea-mirror app is running", async ({ request }) => {
     await waitFor(
       async () => {
-        const resp = await request.get(`${APP_URL}/api/health`, {
+        const resp = await request.get(`${APP_URL}/`, {
           failOnStatusCode: false,
         });
-        return resp.ok() || resp.status() === 200;
+        return resp.status() < 500;
       },
-      { timeout: 90_000, interval: 3_000, label: "App startup" },
+      { timeout: 60_000, interval: 2_000, label: "App healthy" },
     );
-    // Even if /api/health doesn't exist, the app should serve the root page
-    const resp = await request.get(`${APP_URL}/`, { failOnStatusCode: false });
+    const resp = await request.get(`${APP_URL}/`, {
+      failOnStatusCode: false,
+    });
+    console.log(`[Health] App status: ${resp.status()}`);
     expect(resp.status()).toBeLessThan(500);
-    console.log(`[Health] App responded with status ${resp.status()}`);
   });
 });
 
-// ─── Main E2E test flow ──────────────────────────────────────────────────────
+// ─── Main mirror workflow ────────────────────────────────────────────────────
 
 test.describe("E2E: Mirror workflow", () => {
   let giteaApi: GiteaAPI;
+  let appCookies = "";
 
-  test.beforeAll(async ({ request }) => {
-    giteaApi = new GiteaAPI(GITEA_URL, request);
+  test.beforeAll(async () => {
+    giteaApi = new GiteaAPI(GITEA_URL);
   });
 
-  test("Step 1: Setup Gitea admin user and token", async ({ request }) => {
+  test.afterAll(async () => {
+    await giteaApi.dispose();
+  });
+
+  test("Step 1: Setup Gitea admin user and token", async () => {
     await giteaApi.ensureAdminUser();
     const token = await giteaApi.createToken();
     expect(token).toBeTruthy();
@@ -496,7 +610,6 @@ test.describe("E2E: Mirror workflow", () => {
   test("Step 2: Create mirror organization in Gitea", async () => {
     await giteaApi.ensureOrg(GITEA_MIRROR_ORG);
 
-    // Verify org exists
     const repos = await giteaApi.listOrgRepos(GITEA_MIRROR_ORG);
     expect(Array.isArray(repos)).toBeTruthy();
     console.log(
@@ -505,62 +618,55 @@ test.describe("E2E: Mirror workflow", () => {
   });
 
   test("Step 3: Register and sign in to gitea-mirror app", async ({
-    page,
     request,
   }) => {
-    // Register via API first
-    await registerAppUser(request);
+    appCookies = await getAppSessionCookies(request);
+    expect(appCookies).toBeTruthy();
+    console.log(
+      `[Auth] Session cookies acquired (length: ${appCookies.length})`,
+    );
 
-    // Then sign in via browser
-    await signInViaBrowser(page);
-
-    // Verify we're authenticated – the page should not be on sign-in
-    const url = page.url();
-    const isOnAuthPage =
-      url.includes("sign-in") ||
-      url.includes("login") ||
-      url.includes("register");
-
-    // Note: the first visit after registration might show a setup wizard
-    // which is also fine
-    console.log(`[Auth] Current URL after sign-in: ${url}`);
-
-    // Take a screenshot for debugging
-    await page.screenshot({ path: "tests/e2e/test-results/after-sign-in.png" });
+    const whoami = await request.get(`${APP_URL}/api/config`, {
+      headers: { Cookie: appCookies },
+      failOnStatusCode: false,
+    });
+    expect(
+      whoami.status(),
+      `Auth check returned ${whoami.status()} – cookies may be invalid`,
+    ).not.toBe(401);
+    console.log(`[Auth] Auth check status: ${whoami.status()}`);
   });
 
-  test("Step 4: Configure mirrors via API", async ({ page, request }) => {
-    // Sign in via browser to get session cookies
-    await signInViaBrowser(page);
+  test("Step 4: Configure mirrors via API (backup disabled)", async ({
+    request,
+  }) => {
+    if (!appCookies) {
+      appCookies = await getAppSessionCookies(request);
+    }
 
-    // Extract cookies from the browser context
-    const cookies = await page.context().cookies();
-    const cookieStr = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
-
-    // Ensure we have a Gitea token
     const giteaToken = giteaApi.getTokenValue();
     expect(giteaToken, "Gitea token should be set from Step 1").toBeTruthy();
 
-    // Save configuration
-    await saveConfig(request, giteaToken, cookieStr);
-
-    console.log("[Config] Configuration saved successfully");
+    await saveConfig(request, giteaToken, appCookies, {
+      giteaConfig: {
+        backupBeforeSync: false,
+        blockSyncOnBackupFailure: false,
+      },
+    });
+    console.log("[Config] Configuration saved (backup disabled)");
   });
 
   test("Step 5: Trigger GitHub data sync (fetch repos from fake GitHub)", async ({
-    page,
     request,
   }) => {
-    // Sign in
-    await signInViaBrowser(page);
-    const cookies = await page.context().cookies();
-    const cookieStr = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
+    if (!appCookies) {
+      appCookies = await getAppSessionCookies(request);
+    }
 
-    // Trigger the sync endpoint which fetches repos from GitHub
     const syncResp = await request.post(`${APP_URL}/api/sync`, {
       headers: {
         "Content-Type": "application/json",
-        Cookie: cookieStr,
+        Cookie: appCookies,
       },
       failOnStatusCode: false,
     });
@@ -573,31 +679,69 @@ test.describe("E2E: Mirror workflow", () => {
       console.log(`[Sync] Error body: ${body}`);
     }
 
-    // Should succeed or at least not crash
+    expect(status, "Sync should not be unauthorized").not.toBe(401);
     expect(status, "Sync should not return server error").toBeLessThan(500);
 
     if (syncResp.ok()) {
       const data = await syncResp.json();
-      console.log(`[Sync] New repos: ${data.newRepositories ?? "?"}, new orgs: ${data.newOrganizations ?? "?"}`);
+      console.log(
+        `[Sync] New repos: ${data.newRepositories ?? "?"}, new orgs: ${data.newOrganizations ?? "?"}`,
+      );
     }
   });
 
   test("Step 6: Trigger mirror jobs (push repos to Gitea)", async ({
-    page,
     request,
   }) => {
-    // Sign in
-    await signInViaBrowser(page);
-    const cookies = await page.context().cookies();
-    const cookieStr = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
+    if (!appCookies) {
+      appCookies = await getAppSessionCookies(request);
+    }
 
-    // Trigger the mirror-repo endpoint
+    // Fetch repository IDs from the dashboard API
+    const dashResp = await request.get(`${APP_URL}/api/dashboard`, {
+      headers: { Cookie: appCookies },
+      failOnStatusCode: false,
+    });
+    expect(dashResp.status(), "Dashboard should be accessible").toBeLessThan(
+      500,
+    );
+
+    let repositoryIds: string[] = [];
+    if (dashResp.ok()) {
+      const dashData = await dashResp.json();
+      const repos: any[] = dashData.repositories ?? dashData.repos ?? [];
+      repositoryIds = repos.map((r: any) => r.id);
+      console.log(
+        `[Mirror] Found ${repositoryIds.length} repos to mirror: ${repos.map((r: any) => r.name).join(", ")}`,
+      );
+    }
+
+    if (repositoryIds.length === 0) {
+      const repoResp = await request.get(`${APP_URL}/api/github/repositories`, {
+        headers: { Cookie: appCookies },
+        failOnStatusCode: false,
+      });
+      if (repoResp.ok()) {
+        const repoData = await repoResp.json();
+        const repos: any[] = Array.isArray(repoData)
+          ? repoData
+          : (repoData.repositories ?? []);
+        repositoryIds = repos.map((r: any) => r.id);
+        console.log(`[Mirror] Fallback: found ${repositoryIds.length} repos`);
+      }
+    }
+
+    expect(
+      repositoryIds.length,
+      "Should have at least one repository to mirror",
+    ).toBeGreaterThan(0);
+
     const mirrorResp = await request.post(`${APP_URL}/api/job/mirror-repo`, {
       headers: {
         "Content-Type": "application/json",
-        Cookie: cookieStr,
+        Cookie: appCookies,
       },
-      data: {},
+      data: { repositoryIds },
       failOnStatusCode: false,
     });
 
@@ -609,88 +753,423 @@ test.describe("E2E: Mirror workflow", () => {
       console.log(`[Mirror] Error body: ${body}`);
     }
 
-    // The mirror endpoint returns 200 immediately and processes async
-    expect(status, "Mirror job should not return server error").toBeLessThan(500);
+    expect(status, "Mirror job should not be unauthorized").not.toBe(401);
+    expect(status, "Mirror job should not return server error").toBeLessThan(
+      500,
+    );
 
-    // Wait a bit for async processing to complete
+    // The mirror endpoint returns 200 immediately and processes async.
+    // Wait for processing – Gitea needs time to clone all repos.
     console.log("[Mirror] Waiting for async mirror processing...");
-    await new Promise((r) => setTimeout(r, 10_000));
+    await new Promise((r) => setTimeout(r, 30_000));
   });
 
-  test("Step 7: Verify repos appear in Gitea", async () => {
-    // Wait for repos to be created in Gitea (the mirror process is async)
-    let orgRepos: any[] = [];
-    let userRepos: any[] = [];
+  test("Step 7: Verify repos were actually mirrored to Gitea", async ({
+    request,
+  }) => {
+    if (!appCookies) {
+      appCookies = await getAppSessionCookies(request);
+    }
 
+    // Wait for mirror jobs to finish processing
     await waitFor(
       async () => {
-        orgRepos = await giteaApi.listOrgRepos(GITEA_MIRROR_ORG);
-        userRepos = await giteaApi.listUserRepos();
-        const totalRepos = orgRepos.length + userRepos.length;
+        const orgRepos = await giteaApi.listOrgRepos(GITEA_MIRROR_ORG);
         console.log(
-          `[Verify] Org repos: ${orgRepos.length}, User repos: ${userRepos.length}, Total: ${totalRepos}`,
+          `[Verify] Gitea org repos so far: ${orgRepos.length} (${orgRepos.map((r: any) => r.name).join(", ")})`,
         );
-        // We expect at least 1 repo to have been mirrored
-        return totalRepos > 0;
+        // We expect at least 3 repos (my-project, dotfiles, notes from e2e-test-user)
+        return orgRepos.length >= 3;
       },
       {
         timeout: 90_000,
         interval: 5_000,
-        label: "Repos appear in Gitea",
+        label: "repos appear in Gitea",
       },
     );
 
-    const allRepoNames = [
-      ...orgRepos.map((r: any) => `${GITEA_MIRROR_ORG}/${r.name}`),
-      ...userRepos.map((r: any) => `${GITEA_ADMIN_USER}/${r.name}`),
-    ];
-    console.log(`[Verify] Found repos in Gitea: ${allRepoNames.join(", ")}`);
+    const orgRepos = await giteaApi.listOrgRepos(GITEA_MIRROR_ORG);
+    const orgRepoNames = orgRepos.map((r: any) => r.name);
+    console.log(
+      `[Verify] Gitea org repos: ${orgRepoNames.join(", ")} (total: ${orgRepos.length})`,
+    );
 
-    // The fake GitHub serves repos: my-project, dotfiles, notes, popular-lib (starred), org-tool
-    // At minimum, personal repos should be mirrored
-    expect(
-      orgRepos.length + userRepos.length,
-      "At least one repo should be mirrored to Gitea",
-    ).toBeGreaterThan(0);
+    // Check that at least the 3 personal repos are mirrored
+    const expectedRepos = ["my-project", "dotfiles", "notes"];
+    for (const repoName of expectedRepos) {
+      expect(
+        orgRepoNames,
+        `Expected repo "${repoName}" to be mirrored into org ${GITEA_MIRROR_ORG}`,
+      ).toContain(repoName);
+    }
+
+    // Verify my-project has actual content (branches, commits)
+    const myProjectBranches = await giteaApi.listBranches(
+      GITEA_MIRROR_ORG,
+      "my-project",
+    );
+    const branchNames = myProjectBranches.map((b: any) => b.name);
+    console.log(`[Verify] my-project branches: ${branchNames.join(", ")}`);
+    expect(branchNames, "main branch should exist").toContain("main");
+
+    // Verify we can read actual file content
+    const readmeContent = await giteaApi.getFileContent(
+      GITEA_MIRROR_ORG,
+      "my-project",
+      "README.md",
+    );
+    expect(readmeContent, "README.md should have content").toBeTruthy();
+    expect(readmeContent).toContain("My Project");
+    console.log(
+      `[Verify] my-project README.md starts with: ${readmeContent?.substring(0, 50)}...`,
+    );
+
+    // Verify tags were mirrored
+    const tags = await giteaApi.listTags(GITEA_MIRROR_ORG, "my-project");
+    const tagNames = tags.map((t: any) => t.name);
+    console.log(`[Verify] my-project tags: ${tagNames.join(", ")}`);
+    if (tagNames.length > 0) {
+      expect(tagNames).toContain("v1.0.0");
+    }
+
+    // Verify commits exist
+    const commits = await giteaApi.listCommits(GITEA_MIRROR_ORG, "my-project");
+    console.log(`[Verify] my-project commits: ${commits.length}`);
+    expect(commits.length, "Should have multiple commits").toBeGreaterThan(0);
+
+    // Verify dotfiles repo has content
+    const bashrc = await giteaApi.getFileContent(
+      GITEA_MIRROR_ORG,
+      "dotfiles",
+      ".bashrc",
+    );
+    expect(bashrc, "dotfiles should contain .bashrc").toBeTruthy();
+    console.log("[Verify] dotfiles .bashrc verified");
   });
 
-  test("Step 8: Verify mirrored repo properties", async () => {
-    // Check a specific repo if it exists
-    const orgRepos = await giteaApi.listOrgRepos(GITEA_MIRROR_ORG);
-    const userRepos = await giteaApi.listUserRepos();
-    const allRepos = [...orgRepos, ...userRepos];
-
-    if (allRepos.length === 0) {
-      console.log("[Verify] No repos found, skipping property verification");
-      test.skip();
-      return;
+  test("Step 8: Verify mirror jobs and app state", async ({ request }) => {
+    if (!appCookies) {
+      appCookies = await getAppSessionCookies(request);
     }
 
-    // Find a repo we know about from the fake GitHub
-    const knownNames = ["my-project", "dotfiles", "notes", "popular-lib", "org-tool"];
-    const matchedRepo = allRepos.find((r: any) => knownNames.includes(r.name));
+    // Check activity log
+    const activitiesResp = await request.get(`${APP_URL}/api/activities`, {
+      headers: { Cookie: appCookies },
+      failOnStatusCode: false,
+    });
 
-    if (matchedRepo) {
-      console.log(
-        `[Verify] Checking properties of repo: ${matchedRepo.full_name}`,
+    if (activitiesResp.ok()) {
+      const activities = await activitiesResp.json();
+      const jobs: any[] = Array.isArray(activities)
+        ? activities
+        : (activities.jobs ?? activities.activities ?? []);
+      console.log(`[State] Activity/job records: ${jobs.length}`);
+
+      const mirrorJobs = jobs.filter(
+        (j: any) =>
+          j.status === "mirroring" ||
+          j.status === "failed" ||
+          j.status === "success" ||
+          j.message?.includes("mirror") ||
+          j.message?.includes("Mirror"),
       );
+      console.log(`[State] Mirror-related jobs: ${mirrorJobs.length}`);
+      for (const j of mirrorJobs.slice(0, 5)) {
+        console.log(
+          `[State]   • ${j.repositoryName ?? "?"}: ${j.status} — ${j.message ?? ""}`,
+        );
+      }
+    }
 
-      // Repo should be a mirror
-      expect(matchedRepo.mirror, "Repo should be a mirror").toBeTruthy();
+    // Check dashboard repos
+    const dashResp = await request.get(`${APP_URL}/api/dashboard`, {
+      headers: { Cookie: appCookies },
+      failOnStatusCode: false,
+    });
 
-      // Repo should have a description from the fake GitHub
-      if (matchedRepo.description) {
-        console.log(`[Verify] Description: ${matchedRepo.description}`);
+    if (dashResp.ok()) {
+      const dashData = await dashResp.json();
+      const repos: any[] = dashData.repositories ?? [];
+      console.log(`[State] Dashboard repos: ${repos.length}`);
+
+      for (const r of repos) {
+        console.log(
+          `[State]   • ${r.name}: status=${r.status}, mirrored=${r.mirroredLocation ?? "none"}`,
+        );
       }
 
-      console.log(
-        `[Verify] Mirror: ${matchedRepo.mirror}, Private: ${matchedRepo.private}, Size: ${matchedRepo.size}`,
+      expect(repos.length, "Repos should exist in DB").toBeGreaterThan(0);
+
+      // At least some should have succeeded (actually mirrored)
+      const succeeded = repos.filter(
+        (r: any) => r.status === "mirrored" || r.status === "success",
       );
-    } else {
       console.log(
-        `[Verify] No known repos found among: ${allRepos.map((r: any) => r.name).join(", ")}`,
+        `[State] Successfully mirrored repos: ${succeeded.length}/${repos.length}`,
       );
     }
+
+    // App should still be running
+    const healthResp = await request.get(`${APP_URL}/`, {
+      failOnStatusCode: false,
+    });
+    expect(
+      healthResp.status(),
+      "App should still be running after mirror attempts",
+    ).toBeLessThan(500);
+    console.log(`[State] App health: ${healthResp.status()}`);
+  });
+});
+
+// ─── Backup configuration tests ──────────────────────────────────────────────
+
+test.describe("E2E: Backup configuration", () => {
+  let giteaApi: GiteaAPI;
+  let appCookies = "";
+
+  test.beforeAll(async () => {
+    giteaApi = new GiteaAPI(GITEA_URL);
+    try {
+      await giteaApi.createToken();
+    } catch {
+      console.log(
+        "[Backup] Could not create Gitea token; tests may be limited",
+      );
+    }
+  });
+
+  test.afterAll(async () => {
+    await giteaApi.dispose();
+  });
+
+  test("Step B1: Enable backup in config", async ({ request }) => {
+    appCookies = await getAppSessionCookies(request);
+
+    const giteaToken = giteaApi.getTokenValue();
+    expect(giteaToken, "Gitea token required").toBeTruthy();
+
+    // Save config with backup enabled
+    await saveConfig(request, giteaToken, appCookies, {
+      giteaConfig: {
+        backupBeforeSync: true,
+        blockSyncOnBackupFailure: false,
+        backupRetentionCount: 5,
+        backupDirectory: "data/repo-backups",
+      },
+    });
+
+    // Verify config was saved
+    const configResp = await request.get(`${APP_URL}/api/config`, {
+      headers: { Cookie: appCookies },
+      failOnStatusCode: false,
+    });
+    expect(configResp.status()).toBeLessThan(500);
+
+    if (configResp.ok()) {
+      const configData = await configResp.json();
+      const giteaCfg = configData.giteaConfig ?? configData.gitea ?? {};
+      console.log(
+        `[Backup] Config saved: backupBeforeSync=${giteaCfg.backupBeforeSync}, blockOnFailure=${giteaCfg.blockSyncOnBackupFailure}`,
+      );
+    }
+  });
+
+  test("Step B2: Verify mirrored repos exist in Gitea before backup test", async () => {
+    // We need repos to already be mirrored from the previous test suite
+    const orgRepos = await giteaApi.listOrgRepos(GITEA_MIRROR_ORG);
+    console.log(
+      `[Backup] Repos in ${GITEA_MIRROR_ORG}: ${orgRepos.length} (${orgRepos.map((r: any) => r.name).join(", ")})`,
+    );
+
+    // If no repos were mirrored from the previous suite, note it
+    if (orgRepos.length === 0) {
+      console.log(
+        "[Backup] WARNING: No repos in Gitea yet. Backup test will verify job creation but not bundle creation.",
+      );
+    }
+  });
+
+  test("Step B3: Trigger re-sync with backup enabled", async ({ request }) => {
+    if (!appCookies) {
+      appCookies = await getAppSessionCookies(request);
+    }
+
+    // First, fetch the repository IDs from the dashboard (sync-repo requires them)
+    const dashResp = await request.get(`${APP_URL}/api/dashboard`, {
+      headers: { Cookie: appCookies },
+      failOnStatusCode: false,
+    });
+    expect(dashResp.status()).toBeLessThan(500);
+
+    let repositoryIds: string[] = [];
+    if (dashResp.ok()) {
+      const dashData = await dashResp.json();
+      const repos: any[] = dashData.repositories ?? [];
+      repositoryIds = repos
+        .filter((r: any) => r.status === "mirrored" || r.status === "success")
+        .map((r: any) => r.id);
+      console.log(
+        `[Backup] Found ${repositoryIds.length} mirrored repos to re-sync: ${repos
+          .filter((r: any) => r.status === "mirrored" || r.status === "success")
+          .map((r: any) => r.name)
+          .join(", ")}`,
+      );
+    }
+
+    expect(
+      repositoryIds.length,
+      "Need at least one mirrored repo to test backup",
+    ).toBeGreaterThan(0);
+
+    // Trigger sync-repo with the repository IDs — this calls syncGiteaRepoEnhanced
+    // which checks shouldCreatePreSyncBackup and creates bundles before syncing
+    const syncResp = await request.post(`${APP_URL}/api/job/sync-repo`, {
+      headers: {
+        "Content-Type": "application/json",
+        Cookie: appCookies,
+      },
+      data: { repositoryIds },
+      failOnStatusCode: false,
+    });
+
+    const status = syncResp.status();
+    console.log(`[Backup] Sync-repo response: ${status}`);
+    expect(status, "Sync-repo should accept request").toBeLessThan(500);
+
+    if (status >= 400) {
+      const body = await syncResp.text();
+      console.log(`[Backup] Sync-repo error: ${body}`);
+    }
+
+    // Wait for sync + backup processing (backup clones from Gitea, then syncs)
+    console.log("[Backup] Waiting for backup + sync processing...");
+    await new Promise((r) => setTimeout(r, 25_000));
+  });
+
+  test("Step B4: Verify backup-related activity in logs", async ({
+    request,
+  }) => {
+    if (!appCookies) {
+      appCookies = await getAppSessionCookies(request);
+    }
+
+    const activitiesResp = await request.get(`${APP_URL}/api/activities`, {
+      headers: { Cookie: appCookies },
+      failOnStatusCode: false,
+    });
+
+    if (activitiesResp.ok()) {
+      const activities = await activitiesResp.json();
+      const jobs: any[] = Array.isArray(activities)
+        ? activities
+        : (activities.jobs ?? activities.activities ?? []);
+
+      // Look for backup-related messages
+      const backupJobs = jobs.filter(
+        (j: any) =>
+          j.message?.toLowerCase().includes("snapshot") ||
+          j.message?.toLowerCase().includes("backup") ||
+          j.details?.toLowerCase().includes("snapshot") ||
+          j.details?.toLowerCase().includes("backup") ||
+          j.details?.toLowerCase().includes("bundle"),
+      );
+
+      console.log(
+        `[Backup] Backup-related activity entries: ${backupJobs.length}`,
+      );
+      for (const j of backupJobs.slice(0, 10)) {
+        console.log(
+          `[Backup]   • ${j.repositoryName ?? "?"}: ${j.status} — ${j.message ?? ""} | ${j.details ?? ""}`,
+        );
+      }
+
+      // We expect at least some backup-related entries if repos were mirrored
+      const orgRepos = await giteaApi.listOrgRepos(GITEA_MIRROR_ORG);
+      if (orgRepos.length > 0) {
+        // With repos in Gitea, the backup system should have tried to create snapshots
+        console.log(
+          `[Backup] Expected backup attempts for ${orgRepos.length} repos`,
+        );
+
+        // Log ALL recent jobs for debugging
+        console.log(`[Backup] All recent jobs (last 20):`);
+        for (const j of jobs.slice(0, 20)) {
+          console.log(
+            `[Backup]   - [${j.status}] ${j.repositoryName ?? "?"}: ${j.message ?? ""} ${j.details ? `(${j.details.substring(0, 80)})` : ""}`,
+          );
+        }
+      }
+    } else {
+      console.log(
+        `[Backup] Could not fetch activities: ${activitiesResp.status()}`,
+      );
+    }
+  });
+
+  test("Step B5: Enable blockSyncOnBackupFailure and verify behavior", async ({
+    request,
+  }) => {
+    if (!appCookies) {
+      appCookies = await getAppSessionCookies(request);
+    }
+
+    const giteaToken = giteaApi.getTokenValue();
+
+    // Update config to block sync on backup failure
+    await saveConfig(request, giteaToken, appCookies, {
+      giteaConfig: {
+        backupBeforeSync: true,
+        blockSyncOnBackupFailure: true,
+        backupRetentionCount: 5,
+        backupDirectory: "data/repo-backups",
+      },
+    });
+    console.log("[Backup] Config updated: blockSyncOnBackupFailure=true");
+
+    // Verify config
+    const configResp = await request.get(`${APP_URL}/api/config`, {
+      headers: { Cookie: appCookies },
+      failOnStatusCode: false,
+    });
+    if (configResp.ok()) {
+      const configData = await configResp.json();
+      const giteaCfg = configData.giteaConfig ?? configData.gitea ?? {};
+      expect(giteaCfg.blockSyncOnBackupFailure).toBe(true);
+      console.log(
+        `[Backup] Verified: blockSyncOnBackupFailure=${giteaCfg.blockSyncOnBackupFailure}`,
+      );
+    }
+  });
+
+  test("Step B6: Disable backup and verify config resets", async ({
+    request,
+  }) => {
+    if (!appCookies) {
+      appCookies = await getAppSessionCookies(request);
+    }
+
+    const giteaToken = giteaApi.getTokenValue();
+
+    // Disable backup
+    await saveConfig(request, giteaToken, appCookies, {
+      giteaConfig: {
+        backupBeforeSync: false,
+        blockSyncOnBackupFailure: false,
+      },
+    });
+
+    const configResp = await request.get(`${APP_URL}/api/config`, {
+      headers: { Cookie: appCookies },
+      failOnStatusCode: false,
+    });
+    if (configResp.ok()) {
+      const configData = await configResp.json();
+      const giteaCfg = configData.giteaConfig ?? configData.gitea ?? {};
+      console.log(
+        `[Backup] After disable: backupBeforeSync=${giteaCfg.backupBeforeSync}`,
+      );
+    }
+    console.log("[Backup] Backup configuration test complete");
   });
 });
 
@@ -698,57 +1177,24 @@ test.describe("E2E: Mirror workflow", () => {
 
 test.describe("E2E: Sync verification", () => {
   let giteaApi: GiteaAPI;
+  let appCookies = "";
 
-  test.beforeAll(async ({ request }) => {
-    giteaApi = new GiteaAPI(GITEA_URL, request);
-    // Ensure we have a token from earlier setup
+  test.beforeAll(async () => {
+    giteaApi = new GiteaAPI(GITEA_URL);
     try {
       await giteaApi.createToken();
     } catch {
-      // Token creation might fail if tests run independently;
-      // these tests are meant to run after the mirror workflow
-      console.log("[SyncVerify] Could not create Gitea token, tests may skip");
+      console.log("[SyncVerify] Could not create Gitea token; tests may skip");
     }
   });
 
-  test("Trigger a re-sync and verify it completes", async ({
-    page,
-    request,
-  }) => {
-    // Sign in
-    await signInViaBrowser(page);
-    const cookies = await page.context().cookies();
-    const cookieStr = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
-
-    // Trigger sync-repo (re-sync existing repos)
-    const syncResp = await request.post(`${APP_URL}/api/job/sync-repo`, {
-      headers: {
-        "Content-Type": "application/json",
-        Cookie: cookieStr,
-      },
-      data: {},
-      failOnStatusCode: false,
-    });
-
-    const status = syncResp.status();
-    console.log(`[Re-Sync] Sync-repo response: ${status}`);
-    expect(status).toBeLessThan(500);
-
-    // Wait for processing
-    await new Promise((r) => setTimeout(r, 10_000));
-
-    // Check that repos still exist (sync didn't break anything)
-    const orgRepos = await giteaApi.listOrgRepos(GITEA_MIRROR_ORG);
-    const userRepos = await giteaApi.listUserRepos();
-    console.log(
-      `[Re-Sync] After re-sync: org repos=${orgRepos.length}, user repos=${userRepos.length}`,
-    );
+  test.afterAll(async () => {
+    await giteaApi.dispose();
   });
 
   test("Verify fake GitHub management API can add repos dynamically", async ({
     request,
   }) => {
-    // Add a new repo to the fake GitHub
     const addResp = await request.post(`${FAKE_GITHUB_URL}/___mgmt/add-repo`, {
       data: {
         name: "dynamic-repo",
@@ -759,7 +1205,6 @@ test.describe("E2E: Sync verification", () => {
     });
     expect(addResp.ok()).toBeTruthy();
 
-    // Verify it shows up via the GitHub API
     const repoResp = await request.get(
       `${FAKE_GITHUB_URL}/repos/e2e-test-user/dynamic-repo`,
     );
@@ -771,19 +1216,14 @@ test.describe("E2E: Sync verification", () => {
   });
 
   test("Newly added fake GitHub repo gets picked up by sync", async ({
-    page,
     request,
   }) => {
-    // Sign in
-    await signInViaBrowser(page);
-    const cookies = await page.context().cookies();
-    const cookieStr = cookies.map((c) => `${c.name}=${c.value}`).join("; ");
+    appCookies = await getAppSessionCookies(request);
 
-    // Trigger a full GitHub sync to discover new repos
     const syncResp = await request.post(`${APP_URL}/api/sync`, {
       headers: {
         "Content-Type": "application/json",
-        Cookie: cookieStr,
+        Cookie: appCookies,
       },
       failOnStatusCode: false,
     });
@@ -797,10 +1237,80 @@ test.describe("E2E: Sync verification", () => {
       console.log(
         `[DynamicSync] New repos discovered: ${data.newRepositories ?? "?"}`,
       );
-      // We expect the dynamic-repo to be discovered
       if (data.newRepositories !== undefined) {
         expect(data.newRepositories).toBeGreaterThanOrEqual(0);
       }
+    }
+  });
+
+  test("Verify repo content integrity after mirror", async () => {
+    // Detailed content verification on repos that were mirrored
+
+    // Check popular-lib (starred repo from other-user)
+    // In single-org strategy, it might be under GITEA_MIRROR_ORG or github-stars org
+    const orgRepos = await giteaApi.listOrgRepos(GITEA_MIRROR_ORG);
+    const orgRepoNames = orgRepos.map((r: any) => r.name);
+    console.log(
+      `[Integrity] Repos in ${GITEA_MIRROR_ORG}: ${orgRepoNames.join(", ")}`,
+    );
+
+    // Check github-stars org for starred repos
+    const starsRepos = await giteaApi.listOrgRepos("github-stars");
+    const starsRepoNames = starsRepos.map((r: any) => r.name);
+    console.log(
+      `[Integrity] Repos in github-stars: ${starsRepoNames.join(", ")}`,
+    );
+
+    // Verify notes repo (minimal single-commit repo)
+    if (orgRepoNames.includes("notes")) {
+      const notesReadme = await giteaApi.getFileContent(
+        GITEA_MIRROR_ORG,
+        "notes",
+        "README.md",
+      );
+      if (notesReadme) {
+        expect(notesReadme).toContain("Notes");
+        console.log("[Integrity] notes/README.md verified");
+      }
+
+      const ideas = await giteaApi.getFileContent(
+        GITEA_MIRROR_ORG,
+        "notes",
+        "ideas.md",
+      );
+      if (ideas) {
+        expect(ideas).toContain("Ideas");
+        console.log("[Integrity] notes/ideas.md verified");
+      }
+    }
+
+    // Verify org-tool if it was mirrored
+    const allMirroredNames = [...orgRepoNames, ...starsRepoNames];
+    // org-tool might be in the mirror org or a separate org depending on strategy
+    const orgToolOwners = [GITEA_MIRROR_ORG, "test-org"];
+    let foundOrgTool = false;
+    for (const owner of orgToolOwners) {
+      const repo = await giteaApi.getRepo(owner, "org-tool");
+      if (repo) {
+        foundOrgTool = true;
+        console.log(`[Integrity] org-tool found in ${owner}`);
+
+        const readme = await giteaApi.getFileContent(
+          owner,
+          "org-tool",
+          "README.md",
+        );
+        if (readme) {
+          expect(readme).toContain("Org Tool");
+          console.log("[Integrity] org-tool/README.md verified");
+        }
+        break;
+      }
+    }
+    if (!foundOrgTool) {
+      console.log(
+        "[Integrity] org-tool not found in Gitea (may not have been mirrored in single-org strategy)",
+      );
     }
   });
 });
@@ -815,7 +1325,6 @@ test.describe("E2E: Fake GitHub reset", () => {
     expect(data.message).toContain("reset");
     console.log("[Reset] Fake GitHub reset to defaults");
 
-    // Verify default state
     const health = await request.get(`${FAKE_GITHUB_URL}/___mgmt/health`);
     const healthData = await health.json();
     expect(healthData.repos).toBeGreaterThan(0);

@@ -44,3 +44,11 @@ tests/e2e/.auth/
 tests/e2e/e2e-storage-state.json
 tests/e2e/.fake-github.pid
 tests/e2e/.app.pid
+tests/e2e/git-repos/
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/playwright/.auth/

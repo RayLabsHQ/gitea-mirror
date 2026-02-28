@@ -35,6 +35,15 @@
 import http from "node:http";
 import { URL } from "node:url";
 
+// ─── Clone URL Configuration ─────────────────────────────────────────────────
+// When GIT_SERVER_URL is set, clone_url fields will point to a real git HTTP
+// server (e.g. http://git-server) so Gitea can actually clone the repos.
+// When unset, clone_url uses the unreachable https://fake-github.test/ default.
+let GIT_CLONE_BASE_URL =
+  process.env.GIT_SERVER_URL || "https://fake-github.test";
+// For html_url we always use the fake domain (it's cosmetic / not cloned)
+const HTML_BASE_URL = "https://fake-github.test";
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 interface FakeUser {
@@ -133,7 +142,12 @@ interface FakeRelease {
   prerelease: boolean;
   created_at: string;
   published_at: string;
-  assets: { id: number; name: string; size: number; browser_download_url: string }[];
+  assets: {
+    id: number;
+    name: string;
+    size: number;
+    browser_download_url: string;
+  }[];
 }
 
 interface FakeBranch {
@@ -182,7 +196,9 @@ function now(): string {
   return new Date().toISOString();
 }
 
-function makeRepo(overrides: Partial<FakeRepo> & { name: string; owner_login: string }): FakeRepo {
+function makeRepo(
+  overrides: Partial<FakeRepo> & { name: string; owner_login: string },
+): FakeRepo {
   const ownerLogin = overrides.owner_login;
   const ownerType = overrides.owner?.type ?? "User";
   const ts = now();
@@ -194,11 +210,15 @@ function makeRepo(overrides: Partial<FakeRepo> & { name: string; owner_login: st
       login: ownerLogin,
       id: overrides.owner?.id ?? genId(),
       type: ownerType,
-      avatar_url: overrides.owner?.avatar_url ?? `https://fake-github.test/avatars/${ownerLogin}`,
+      avatar_url:
+        overrides.owner?.avatar_url ??
+        `https://fake-github.test/avatars/${ownerLogin}`,
     },
     private: overrides.private ?? false,
-    html_url: `https://fake-github.test/${ownerLogin}/${overrides.name}`,
-    clone_url: `https://fake-github.test/${ownerLogin}/${overrides.name}.git`,
+    html_url: `${HTML_BASE_URL}/${ownerLogin}/${overrides.name}`,
+    clone_url:
+      overrides.clone_url ??
+      `${GIT_CLONE_BASE_URL}/${ownerLogin}/${overrides.name}.git`,
     description: overrides.description ?? `Fake repo ${overrides.name}`,
     fork: overrides.fork ?? false,
     archived: overrides.archived ?? false,
@@ -226,8 +246,18 @@ function makeRepoData(repo: FakeRepo): FakeRepoData {
     pullRequests: [],
     releases: [],
     labels: [
-      { id: genId(), name: "bug", color: "d73a4a", description: "Something isn't working" },
-      { id: genId(), name: "enhancement", color: "a2eeef", description: "New feature" },
+      {
+        id: genId(),
+        name: "bug",
+        color: "d73a4a",
+        description: "Something isn't working",
+      },
+      {
+        id: genId(),
+        name: "enhancement",
+        color: "a2eeef",
+        description: "New feature",
+      },
     ],
     milestones: [],
   };
@@ -333,7 +363,12 @@ function defaultStore(): Store {
   const orgRepo = makeRepo({
     name: "org-tool",
     owner_login: orgLogin,
-    owner: { login: orgLogin, id: genId(), type: "Organization", avatar_url: "" },
+    owner: {
+      login: orgLogin,
+      id: genId(),
+      type: "Organization",
+      avatar_url: "",
+    },
   });
   const orgRepoKey = `${orgLogin}/org-tool`;
   repos.set(orgRepoKey, makeRepoData(orgRepo));
@@ -468,7 +503,11 @@ const routes: Route[] = [
     const key = `${params.owner}/${params.repo}`;
     const rd = store.repos.get(key);
     if (!rd) return { status: 404, body: { message: "Not Found" } };
-    return { status: 200, body: paginate(rd.branches, query), headers: rateLimitHeaders() };
+    return {
+      status: 200,
+      body: paginate(rd.branches, query),
+      headers: rateLimitHeaders(),
+    };
   }),
 
   // ── Git refs ────────────────────────────────────────────────────
@@ -492,7 +531,11 @@ const routes: Route[] = [
     if (!rd) return { status: 404, body: { message: "Not Found" } };
     // GitHub's issues endpoint also returns PRs; we filter them out
     // unless explicitly requested (the app uses separate endpoints)
-    return { status: 200, body: paginate(rd.issues, query), headers: rateLimitHeaders() };
+    return {
+      status: 200,
+      body: paginate(rd.issues, query),
+      headers: rateLimitHeaders(),
+    };
   }),
 
   // ── Issue comments ──────────────────────────────────────────────
@@ -506,7 +549,11 @@ const routes: Route[] = [
     const key = `${params.owner}/${params.repo}`;
     const rd = store.repos.get(key);
     if (!rd) return { status: 404, body: { message: "Not Found" } };
-    return { status: 200, body: paginate(rd.pullRequests, query), headers: rateLimitHeaders() };
+    return {
+      status: 200,
+      body: paginate(rd.pullRequests, query),
+      headers: rateLimitHeaders(),
+    };
   }),
 
   // ── Single pull request detail ──────────────────────────────────
@@ -514,7 +561,9 @@ const routes: Route[] = [
     const key = `${params.owner}/${params.repo}`;
     const rd = store.repos.get(key);
     if (!rd) return { status: 404, body: { message: "Not Found" } };
-    const pr = rd.pullRequests.find((p) => p.number === parseInt(params.pull_number, 10));
+    const pr = rd.pullRequests.find(
+      (p) => p.number === parseInt(params.pull_number, 10),
+    );
     if (!pr) return { status: 404, body: { message: "Not Found" } };
     return { status: 200, body: pr, headers: rateLimitHeaders() };
   }),
@@ -560,7 +609,11 @@ const routes: Route[] = [
     const key = `${params.owner}/${params.repo}`;
     const rd = store.repos.get(key);
     if (!rd) return { status: 404, body: { message: "Not Found" } };
-    return { status: 200, body: paginate(rd.releases, query), headers: rateLimitHeaders() };
+    return {
+      status: 200,
+      body: paginate(rd.releases, query),
+      headers: rateLimitHeaders(),
+    };
   }),
 
   // ── Release assets ──────────────────────────────────────────────
@@ -573,7 +626,11 @@ const routes: Route[] = [
     const key = `${params.owner}/${params.repo}`;
     const rd = store.repos.get(key);
     if (!rd) return { status: 404, body: { message: "Not Found" } };
-    return { status: 200, body: paginate(rd.labels, query), headers: rateLimitHeaders() };
+    return {
+      status: 200,
+      body: paginate(rd.labels, query),
+      headers: rateLimitHeaders(),
+    };
   }),
 
   // ── Milestones ──────────────────────────────────────────────────
@@ -581,7 +638,11 @@ const routes: Route[] = [
     const key = `${params.owner}/${params.repo}`;
     const rd = store.repos.get(key);
     if (!rd) return { status: 404, body: { message: "Not Found" } };
-    return { status: 200, body: paginate(rd.milestones, query), headers: rateLimitHeaders() };
+    return {
+      status: 200,
+      body: paginate(rd.milestones, query),
+      headers: rateLimitHeaders(),
+    };
   }),
 
   // ── Organization details ────────────────────────────────────────
@@ -595,7 +656,11 @@ const routes: Route[] = [
   route("GET", "/orgs/:org/repos", (params, query) => {
     const keys = store.orgRepoKeys.get(params.org) ?? [];
     const orgRepos = keys.map((k) => store.repos.get(k)?.repo).filter(Boolean);
-    return { status: 200, body: paginate(orgRepos as FakeRepo[], query), headers: rateLimitHeaders() };
+    return {
+      status: 200,
+      body: paginate(orgRepos as FakeRepo[], query),
+      headers: rateLimitHeaders(),
+    };
   }),
 
   // ── Rate limit ──────────────────────────────────────────────────
@@ -622,18 +687,57 @@ const routes: Route[] = [
       repos: store.repos.size,
       orgs: store.orgs.size,
       starredCount: store.starredRepoKeys.size,
+      gitCloneBaseUrl: GIT_CLONE_BASE_URL,
     },
   })),
+
+  // Set the git clone base URL at runtime (for when the git-server starts later)
+  route("POST", "/___mgmt/set-clone-url", (_p, _q, body) => {
+    if (!body || !body.url) {
+      return { status: 400, body: { message: "url is required" } };
+    }
+    const oldUrl = GIT_CLONE_BASE_URL;
+    GIT_CLONE_BASE_URL = body.url.replace(/\/$/, "");
+
+    // Update clone_url on all existing repos
+    for (const [key, rd] of store.repos.entries()) {
+      const owner = rd.repo.owner.login;
+      const name = rd.repo.name;
+      rd.repo.clone_url = `${GIT_CLONE_BASE_URL}/${owner}/${name}.git`;
+    }
+
+    console.log(
+      `[FakeGitHub] Clone base URL changed: ${oldUrl} → ${GIT_CLONE_BASE_URL}`,
+    );
+    return {
+      status: 200,
+      body: {
+        message: "Clone URL base updated",
+        oldUrl,
+        newUrl: GIT_CLONE_BASE_URL,
+        reposUpdated: store.repos.size,
+      },
+    };
+  }),
 
   route("POST", "/___mgmt/reset", () => {
     nextId = 1000;
     store = defaultStore();
-    return { status: 200, body: { message: "Store reset to defaults" } };
+    return {
+      status: 200,
+      body: {
+        message: "Store reset to defaults",
+        gitCloneBaseUrl: GIT_CLONE_BASE_URL,
+      },
+    };
   }),
 
   route("POST", "/___mgmt/add-repo", (_p, _q, body) => {
     if (!body || !body.name || !body.owner_login) {
-      return { status: 400, body: { message: "name and owner_login required" } };
+      return {
+        status: 400,
+        body: { message: "name and owner_login required" },
+      };
     }
     const repo = makeRepo(body);
     const key = repo.full_name;
@@ -682,7 +786,8 @@ const routes: Route[] = [
     const org: FakeOrg = {
       login: body.login,
       id: body.id ?? genId(),
-      avatar_url: body.avatar_url ?? `https://fake-github.test/avatars/${body.login}`,
+      avatar_url:
+        body.avatar_url ?? `https://fake-github.test/avatars/${body.login}`,
       description: body.description ?? "",
       public_repos: body.public_repos ?? 0,
       total_private_repos: body.total_private_repos ?? 0,
@@ -755,7 +860,10 @@ const routes: Route[] = [
 
 // ─── Server ──────────────────────────────────────────────────────────────────
 
-function matchRoute(method: string, pathname: string): { route: Route; params: Record<string, string> } | null {
+function matchRoute(
+  method: string,
+  pathname: string,
+): { route: Route; params: Record<string, string> } | null {
   for (const r of routes) {
     if (r.method !== method) continue;
     const match = pathname.match(r.pattern);
@@ -786,7 +894,10 @@ async function readBody(req: http.IncomingMessage): Promise<any> {
   });
 }
 
-const PORT = parseInt(process.env.PORT || process.env.FAKE_GITHUB_PORT || "4580", 10);
+const PORT = parseInt(
+  process.env.PORT || process.env.FAKE_GITHUB_PORT || "4580",
+  10,
+);
 
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || "/", `http://localhost:${PORT}`);
@@ -795,8 +906,14 @@ const server = http.createServer(async (req, res) => {
 
   // CORS for local development
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept");
+  res.setHeader(
+    "Access-Control-Allow-Methods",
+    "GET, POST, PUT, DELETE, PATCH, OPTIONS",
+  );
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Authorization, Accept",
+  );
 
   if (method === "OPTIONS") {
     res.writeHead(204);
@@ -810,16 +927,26 @@ const server = http.createServer(async (req, res) => {
     // Log unmatched requests for debugging
     console.warn(`[FakeGitHub] 404 ${method} ${pathname}`);
     res.writeHead(404, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ message: "Not Found", documentation_url: "https://docs.github.com/rest" }));
+    res.end(
+      JSON.stringify({
+        message: "Not Found",
+        documentation_url: "https://docs.github.com/rest",
+      }),
+    );
     return;
   }
 
   try {
-    const body = method === "POST" || method === "PUT" || method === "PATCH"
-      ? await readBody(req)
-      : null;
+    const body =
+      method === "POST" || method === "PUT" || method === "PATCH"
+        ? await readBody(req)
+        : null;
 
-    const result = matched.route.handler(matched.params, url.searchParams, body);
+    const result = matched.route.handler(
+      matched.params,
+      url.searchParams,
+      body,
+    );
 
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
@@ -832,7 +959,8 @@ const server = http.createServer(async (req, res) => {
       const perPage = parseInt(url.searchParams.get("per_page") || "30", 10);
       // If we returned a full page, indicate there might be more
       if (result.body.length === perPage) {
-        headers["link"] = `<${url.origin}${pathname}?page=${page + 1}&per_page=${perPage}>; rel="next"`;
+        headers["link"] =
+          `<${url.origin}${pathname}?page=${page + 1}&per_page=${perPage}>; rel="next"`;
       }
     }
 
@@ -846,13 +974,25 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, "0.0.0.0", () => {
-  console.log(`[FakeGitHub] Fake GitHub API server running on http://0.0.0.0:${PORT}`);
-  console.log(`[FakeGitHub] Management API: POST http://localhost:${PORT}/___mgmt/{seed,add-repo,add-org,reset}`);
-  console.log(`[FakeGitHub] Health check:   GET  http://localhost:${PORT}/___mgmt/health`);
+  console.log(
+    `[FakeGitHub] Fake GitHub API server running on http://0.0.0.0:${PORT}`,
+  );
+  console.log(
+    `[FakeGitHub] Management API: POST http://localhost:${PORT}/___mgmt/{seed,add-repo,add-org,reset}`,
+  );
+  console.log(
+    `[FakeGitHub] Health check:   GET  http://localhost:${PORT}/___mgmt/health`,
+  );
   console.log(`[FakeGitHub] Default user: ${store.user.login}`);
-  console.log(`[FakeGitHub] Default repos: ${Array.from(store.repos.keys()).join(", ")}`);
-  console.log(`[FakeGitHub] Default starred: ${Array.from(store.starredRepoKeys).join(", ") || "(none)"}`);
-  console.log(`[FakeGitHub] Default orgs: ${Array.from(store.orgs.keys()).join(", ") || "(none)"}`);
+  console.log(
+    `[FakeGitHub] Default repos: ${Array.from(store.repos.keys()).join(", ")}`,
+  );
+  console.log(
+    `[FakeGitHub] Default starred: ${Array.from(store.starredRepoKeys).join(", ") || "(none)"}`,
+  );
+  console.log(
+    `[FakeGitHub] Default orgs: ${Array.from(store.orgs.keys()).join(", ") || "(none)"}`,
+  );
 });
 
 // Graceful shutdown

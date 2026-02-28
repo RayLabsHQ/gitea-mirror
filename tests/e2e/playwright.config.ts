@@ -28,8 +28,14 @@ export default defineConfig({
 
   /* Reporter */
   reporter: process.env.CI
-    ? [["github"], ["html", { open: "never", outputFolder: "playwright-report" }]]
-    : [["list"], ["html", { open: "on-failure", outputFolder: "playwright-report" }]],
+    ? [
+        ["github"],
+        ["html", { open: "never", outputFolder: "playwright-report" }],
+      ]
+    : [
+        ["list"],
+        ["html", { open: "on-failure", outputFolder: "playwright-report" }],
+      ],
 
   outputDir: "test-results",
 

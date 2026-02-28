@@ -35,7 +35,7 @@ else
 fi
 
 echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║              E2E Test Cleanup                               ║"
+echo "║              E2E Test Cleanup                                ║"
 echo "╚══════════════════════════════════════════════════════════════╝"
 echo ""
 
@@ -72,8 +72,8 @@ if pgrep -f "fake-github-server" &>/dev/null; then
   pkill -f "fake-github-server" 2>/dev/null || true
 fi
 
-# Kill any stray node/tsx processes on our E2E ports
-for port in 4580 4321 3333; do
+# Kill any stray node/tsx processes on our E2E ports (including git-server on 4590)
+for port in 4580 4590 4321 3333; do
   pid=$(lsof -ti :"$port" 2>/dev/null || true)
   if [[ -n "$pid" ]]; then
     echo "[cleanup] Killing process on port $port (PID: $pid)..."
@@ -92,8 +92,14 @@ rm -f "$PROJECT_ROOT/data/gitea-mirror.db" 2>/dev/null || true
 rm -f "$PROJECT_ROOT/e2e-gitea-mirror.db" 2>/dev/null || true
 
 # Remove test backup data
-rm -rf "$PROJECT_ROOT/data/repo-backups/e2e-"* 2>/dev/null || true
-rm -rf "$PROJECT_ROOT/data/repo-backups/unknown-user" 2>/dev/null || true
+rm -rf "$PROJECT_ROOT/data/repo-backups"* 2>/dev/null || true
+
+# Remove programmatically created test git repositories
+if [[ -d "$SCRIPT_DIR/git-repos" ]]; then
+  echo "[cleanup] Removing test git repos..."
+  rm -rf "$SCRIPT_DIR/git-repos" 2>/dev/null || true
+  echo "[cleanup] ✓ Test git repos removed"
+fi
 
 # Remove Playwright state/artifacts from previous runs
 rm -rf "$SCRIPT_DIR/test-results" 2>/dev/null || true

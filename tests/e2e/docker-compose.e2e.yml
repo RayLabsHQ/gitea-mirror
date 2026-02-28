@@ -1,10 +1,15 @@
 # E2E testing environment
-# Spins up a Gitea instance for integration testing
+# Spins up a Gitea instance and a git HTTP server for integration testing.
+#
+# The git-server container serves bare git repositories created by
+# create-test-repos.ts via the "dumb HTTP" protocol so that Gitea can
+# actually clone them during mirror operations.
+#
 # Usage: podman-compose -f tests/e2e/docker-compose.e2e.yml up -d
 
 services:
   gitea-e2e:
-    image: gitea/gitea:1.22
+    image: docker.io/gitea/gitea:1.22
     container_name: gitea-e2e
     environment:
       - USER_UID=1000
@@ -25,18 +30,75 @@ services:
       - GITEA__mirror__ENABLED=true
       - GITEA__mirror__DEFAULT_INTERVAL=1m
       - GITEA__mirror__MIN_INTERVAL=1m
+      # Allow migrations from any domain including the git-server container
+      - GITEA__migrations__ALLOWED_DOMAINS=*
+      - GITEA__migrations__ALLOW_LOCAL_NETWORKS=true
+      - GITEA__migrations__SKIP_TLS_VERIFY=true
     ports:
       - "3333:3000"
     volumes:
       - e2e-gitea-data:/data
+    depends_on:
+      git-server:
+        condition: service_started
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/"]
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:3000/",
+        ]
       interval: 5s
       timeout: 5s
       retries: 30
       start_period: 10s
     tmpfs:
       - /tmp
+    networks:
+      - e2e-net
+
+  # Lightweight HTTP server that serves bare git repositories.
+  # Repos are created on the host by create-test-repos.ts and bind-mounted
+  # into this container. Gitea clones from http://git-server/<owner>/<name>.git
+  # using the "dumb HTTP" protocol (repos have git update-server-info run).
+  git-server:
+    image: docker.io/alpine:3.19
+    container_name: git-server
+    command:
+      - sh
+      - -c
+      - |
+        apk add --no-cache darkhttpd >/dev/null 2>&1
+        echo "[git-server] Serving repos from /repos on port 80"
+        ls -la /repos/ 2>/dev/null || echo "[git-server] WARNING: /repos is empty"
+        exec darkhttpd /repos --port 80 --no-listing --log /dev/stdout
+    volumes:
+      - ./git-repos:/repos:ro
+    ports:
+      - "4590:80"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--no-verbose",
+          "--tries=1",
+          "--spider",
+          "http://localhost:80/manifest.json",
+        ]
+      interval: 3s
+      timeout: 3s
+      retries: 15
+      start_period: 5s
+    networks:
+      - e2e-net
+
+networks:
+  e2e-net:
+    driver: bridge
 
 volumes:
   e2e-gitea-data:

@@ -33,10 +33,14 @@ COMPOSE_FILE="$SCRIPT_DIR/docker-compose.e2e.yml"
 GITEA_PORT="${GITEA_PORT:-3333}"
 FAKE_GITHUB_PORT="${FAKE_GITHUB_PORT:-4580}"
 APP_PORT="${APP_PORT:-4321}"
+GIT_SERVER_PORT="${GIT_SERVER_PORT:-4590}"
 
 GITEA_URL="http://localhost:${GITEA_PORT}"
 FAKE_GITHUB_URL="http://localhost:${FAKE_GITHUB_PORT}"
 APP_URL="http://localhost:${APP_PORT}"
+GIT_SERVER_URL="http://localhost:${GIT_SERVER_PORT}"
+# URL that Gitea (inside Docker) uses to reach the git-server container
+GIT_SERVER_INTERNAL_URL="http://git-server"
 
 NO_BUILD=false
 KEEP_RUNNING=false
@@ -95,7 +99,7 @@ else
 fi
 
 echo "╔══════════════════════════════════════════════════════════════╗"
-echo "║              E2E Test Orchestrator                          ║"
+echo "║              E2E Test Orchestrator                           ║"
 echo "╠══════════════════════════════════════════════════════════════╣"
 echo "║  Container runtime : $COMPOSE_CMD"
 echo "║  Bun command       : $BUN_CMD"
@@ -103,6 +107,8 @@ echo "║  TSX command       : $TSX_CMD"
 echo "║  Gitea URL         : $GITEA_URL"
 echo "║  Fake GitHub URL   : $FAKE_GITHUB_URL"
 echo "║  App URL           : $APP_URL"
+echo "║  Git Server URL    : $GIT_SERVER_URL"
+echo "║  Git Server (int)  : $GIT_SERVER_INTERNAL_URL"
 echo "║  CI mode           : $CI_MODE"
 echo "╚══════════════════════════════════════════════════════════════╝"
 echo ""
@@ -158,7 +164,7 @@ trap cleanup_on_exit EXIT INT TERM
 # ─── Step 0: Cleanup previous run ────────────────────────────────────────────
 if [[ "${SKIP_CLEANUP:-false}" != "true" ]]; then
   echo "┌──────────────────────────────────────────────────────────────┐"
-  echo "│  Step 0: Cleanup previous E2E run                           │"
+  echo "│  Step 0: Cleanup previous E2E run                            │"
   echo "└──────────────────────────────────────────────────────────────┘"
   bash "$SCRIPT_DIR/cleanup.sh" --soft 2>/dev/null || true
   echo ""
@@ -166,7 +172,7 @@ fi
 
 # ─── Step 1: Install dependencies ────────────────────────────────────────────
 echo "┌──────────────────────────────────────────────────────────────┐"
-echo "│  Step 1: Install dependencies                               │"
+echo "│  Step 1: Install dependencies                                │"
 echo "└──────────────────────────────────────────────────────────────┘"
 cd "$PROJECT_ROOT"
 $BUN_CMD install 2>&1 | tail -5
@@ -185,10 +191,28 @@ fi
 echo "[deps] ✓ Playwright ready"
 echo ""
 
+# ─── Step 1.5: Create test git repositories ─────────────────────────────────
+echo "┌──────────────────────────────────────────────────────────────┐"
+echo "│  Step 1.5: Create test git repositories                      │"
+echo "└──────────────────────────────────────────────────────────────┘"
+
+GIT_REPOS_DIR="$SCRIPT_DIR/git-repos"
+echo "[git-repos] Creating bare git repos in $GIT_REPOS_DIR ..."
+$BUN_CMD run "$SCRIPT_DIR/create-test-repos.ts" --output-dir "$GIT_REPOS_DIR" 2>&1
+
+if [[ ! -f "$GIT_REPOS_DIR/manifest.json" ]]; then
+  echo "ERROR: Test git repos were not created (manifest.json missing)"
+  EXIT_CODE=1
+  exit 1
+fi
+
+echo "[git-repos] ✓ Test repositories created"
+echo ""
+
 # ─── Step 2: Build the app ──────────────────────────────────────────────────
 if [[ "$NO_BUILD" == false ]]; then
   echo "┌──────────────────────────────────────────────────────────────┐"
-  echo "│  Step 2: Build gitea-mirror                                 │"
+  echo "│  Step 2: Build gitea-mirror                                  │"
   echo "└──────────────────────────────────────────────────────────────┘"
   cd "$PROJECT_ROOT"
 
@@ -211,10 +235,32 @@ fi
 
 # ─── Step 3: Start Gitea container ──────────────────────────────────────────
 echo "┌──────────────────────────────────────────────────────────────┐"
-echo "│  Step 3: Start Gitea container                              │"
+echo "│  Step 3: Start Gitea container                               │"
 echo "└──────────────────────────────────────────────────────────────┘"
 
 $COMPOSE_CMD -f "$COMPOSE_FILE" up -d 2>&1
+
+# Wait for git-server to be healthy first (Gitea depends on it)
+echo "[git-server] Waiting for git HTTP server..."
+GIT_SERVER_READY=false
+for i in $(seq 1 30); do
+  if curl -sf "${GIT_SERVER_URL}/manifest.json" &>/dev/null; then
+    GIT_SERVER_READY=true
+    break
+  fi
+  printf "."
+  sleep 1
+done
+echo ""
+
+if [[ "$GIT_SERVER_READY" != true ]]; then
+  echo "ERROR: Git HTTP server did not start within 30 seconds"
+  echo "[git-server] Container logs:"
+  $COMPOSE_CMD -f "$COMPOSE_FILE" logs git-server --tail=20 2>/dev/null || true
+  EXIT_CODE=1
+  exit 1
+fi
+echo "[git-server] ✓ Git HTTP server is ready on $GIT_SERVER_URL"
 
 echo "[gitea] Waiting for Gitea to become healthy..."
 GITEA_READY=false
@@ -231,7 +277,7 @@ echo ""
 if [[ "$GITEA_READY" != true ]]; then
   echo "ERROR: Gitea did not become healthy within 120 seconds"
   echo "[gitea] Container logs:"
-  $COMPOSE_CMD -f "$COMPOSE_FILE" logs --tail=30 2>/dev/null || true
+  $COMPOSE_CMD -f "$COMPOSE_FILE" logs gitea-e2e --tail=30 2>/dev/null || true
   EXIT_CODE=1
   exit 1
 fi
@@ -242,10 +288,11 @@ echo ""
 
 # ─── Step 4: Start fake GitHub API ──────────────────────────────────────────
 echo "┌──────────────────────────────────────────────────────────────┐"
-echo "│  Step 4: Start fake GitHub API server                       │"
+echo "│  Step 4: Start fake GitHub API server                        │"
 echo "└──────────────────────────────────────────────────────────────┘"
 
-PORT=$FAKE_GITHUB_PORT $TSX_CMD "$SCRIPT_DIR/fake-github-server.ts" &
+PORT=$FAKE_GITHUB_PORT GIT_SERVER_URL="$GIT_SERVER_INTERNAL_URL" \
+  $TSX_CMD "$SCRIPT_DIR/fake-github-server.ts" &
 FAKE_GITHUB_PID=$!
 echo "$FAKE_GITHUB_PID" > "$SCRIPT_DIR/.fake-github.pid"
 
@@ -276,11 +323,19 @@ if [[ "$FAKE_READY" != true ]]; then
 fi
 
 echo "[fake-github] ✓ Fake GitHub API is ready on $FAKE_GITHUB_URL"
+
+# Tell the fake GitHub server to use the git-server container URL for clone_url
+# (This updates existing repos in the store so Gitea can actually clone them)
+echo "[fake-github] Setting clone URL base to $GIT_SERVER_INTERNAL_URL ..."
+curl -sf -X POST "${FAKE_GITHUB_URL}/___mgmt/set-clone-url" \
+  -H "Content-Type: application/json" \
+  -d "{\"url\": \"${GIT_SERVER_INTERNAL_URL}\"}" || true
+echo "[fake-github] ✓ Clone URLs configured"
 echo ""
 
 # ─── Step 5: Start gitea-mirror app ────────────────────────────────────────
 echo "┌──────────────────────────────────────────────────────────────┐"
-echo "│  Step 5: Start gitea-mirror application                     │"
+echo "│  Step 5: Start gitea-mirror application                      │"
 echo "└──────────────────────────────────────────────────────────────┘"
 
 cd "$PROJECT_ROOT"
@@ -336,7 +391,7 @@ echo ""
 
 # ─── Step 6: Run Playwright E2E tests ──────────────────────────────────────
 echo "┌──────────────────────────────────────────────────────────────┐"
-echo "│  Step 6: Run Playwright E2E tests                           │"
+echo "│  Step 6: Run Playwright E2E tests                            │"
 echo "└──────────────────────────────────────────────────────────────┘"
 
 cd "$PROJECT_ROOT"
@@ -372,7 +427,13 @@ else
   $COMPOSE_CMD -f "$COMPOSE_FILE" ps 2>/dev/null || true
   echo ""
   echo "[diag] Gitea container logs (last 20 lines):"
-  $COMPOSE_CMD -f "$COMPOSE_FILE" logs --tail=20 2>/dev/null || true
+  $COMPOSE_CMD -f "$COMPOSE_FILE" logs gitea-e2e --tail=20 2>/dev/null || true
+  echo ""
+  echo "[diag] Git server logs (last 10 lines):"
+  $COMPOSE_CMD -f "$COMPOSE_FILE" logs git-server --tail=10 2>/dev/null || true
+  echo ""
+  echo "[diag] Git server health:"
+  curl -sf "${GIT_SERVER_URL}/manifest.json" 2>/dev/null || echo "(unreachable)"
   echo ""
   echo "[diag] Fake GitHub health:"
   curl -sf "${FAKE_GITHUB_URL}/___mgmt/health" 2>/dev/null || echo "(unreachable)"

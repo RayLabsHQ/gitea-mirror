@@ -2,25 +2,25 @@ name: E2E Integration Tests
 
 on:
   push:
-    branches: ['*']
+    branches: ["*"]
     paths-ignore:
-      - 'README.md'
-      - 'docs/**'
-      - 'CHANGELOG.md'
-      - 'LICENSE'
+      - "README.md"
+      - "docs/**"
+      - "CHANGELOG.md"
+      - "LICENSE"
   pull_request:
-    branches: ['*']
+    branches: ["*"]
     paths-ignore:
-      - 'README.md'
-      - 'docs/**'
-      - 'CHANGELOG.md'
-      - 'LICENSE'
+      - "README.md"
+      - "docs/**"
+      - "CHANGELOG.md"
+      - "LICENSE"
   workflow_dispatch:
     inputs:
       debug_enabled:
-        description: 'Enable debug logging'
+        description: "Enable debug logging"
         required: false
-        default: 'false'
+        default: "false"
         type: boolean
 
 permissions:
@@ -34,45 +34,15 @@ concurrency:
 env:
   GITEA_PORT: 3333
   FAKE_GITHUB_PORT: 4580
+  GIT_SERVER_PORT: 4590
   APP_PORT: 4321
-  BUN_VERSION: '1.3.6'
-  GITEA_IMAGE: 'gitea/gitea:1.22'
+  BUN_VERSION: "1.3.6"
 
 jobs:
   e2e-tests:
     name: E2E Integration Tests
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-
-    services:
-      gitea:
-        image: gitea/gitea:1.22
-        ports:
-          - 3333:3000
-        env:
-          USER_UID: 1000
-          USER_GID: 1000
-          GITEA__database__DB_TYPE: sqlite3
-          GITEA__database__PATH: /data/gitea/gitea.db
-          GITEA__server__DOMAIN: localhost
-          GITEA__server__ROOT_URL: http://localhost:3333/
-          GITEA__server__HTTP_PORT: 3000
-          GITEA__server__START_SSH_SERVER: false
-          GITEA__security__INSTALL_LOCK: true
-          GITEA__service__DISABLE_REGISTRATION: false
-          GITEA__service__REQUIRE_SIGNIN_VIEW: false
-          GITEA__api__ENABLE_SWAGGER: false
-          GITEA__log__MODE: console
-          GITEA__log__LEVEL: Warn
-          GITEA__mirror__ENABLED: true
-          GITEA__mirror__DEFAULT_INTERVAL: 1m
-          GITEA__mirror__MIN_INTERVAL: 1m
-        options: >-
-          --health-cmd="wget --no-verbose --tries=1 --spider http://localhost:3000/ || exit 1"
-          --health-interval=5s
-          --health-timeout=5s
-          --health-retries=30
-          --health-start-period=15s
+    timeout-minutes: 25
 
     steps:
       - name: Checkout repository
@@ -86,7 +56,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: "22"
 
       - name: Install dependencies
         run: |
@@ -98,6 +68,55 @@ jobs:
           npx playwright install chromium
           npx playwright install-deps chromium
           echo "✓ Playwright ready"
+
+      - name: Create test git repositories
+        run: |
+          echo "Creating bare git repos for E2E testing..."
+          bun run tests/e2e/create-test-repos.ts --output-dir tests/e2e/git-repos
+
+          if [ ! -f tests/e2e/git-repos/manifest.json ]; then
+            echo "ERROR: Test git repos were not created (manifest.json missing)"
+            exit 1
+          fi
+
+          echo "✓ Test repos created:"
+          cat tests/e2e/git-repos/manifest.json | jq -r '.repos[] | "  • \(.owner)/\(.name) — \(.description)"'
+
+      - name: Start Gitea and git-server containers
+        run: |
+          echo "Starting containers via docker compose..."
+          docker compose -f tests/e2e/docker-compose.e2e.yml up -d
+
+          # Wait for git-server
+          echo "Waiting for git HTTP server..."
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:${{ env.GIT_SERVER_PORT }}/manifest.json > /dev/null 2>&1; then
+              echo "✓ Git HTTP server is ready"
+              break
+            fi
+            if [ $i -eq 30 ]; then
+              echo "ERROR: Git HTTP server did not start"
+              docker compose -f tests/e2e/docker-compose.e2e.yml logs git-server
+              exit 1
+            fi
+            sleep 1
+          done
+
+          # Wait for Gitea
+          echo "Waiting for Gitea to be ready..."
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:${{ env.GITEA_PORT }}/api/v1/version > /dev/null 2>&1; then
+              version=$(curl -sf http://localhost:${{ env.GITEA_PORT }}/api/v1/version | jq -r '.version // "unknown"')
+              echo "✓ Gitea is ready (version: $version)"
+              break
+            fi
+            if [ $i -eq 60 ]; then
+              echo "ERROR: Gitea did not become healthy within 120s"
+              docker compose -f tests/e2e/docker-compose.e2e.yml logs gitea-e2e --tail=30
+              exit 1
+            fi
+            sleep 2
+          done
 
       - name: Initialize database
         run: |
@@ -112,42 +131,32 @@ jobs:
           bun run build
           echo "✓ Build complete"
 
-      - name: Wait for Gitea to be healthy
-        run: |
-          echo "Waiting for Gitea to be ready..."
-          timeout=120
-          elapsed=0
-          while [ $elapsed -lt $timeout ]; do
-            if curl -sf http://localhost:${{ env.GITEA_PORT }}/api/v1/version > /dev/null 2>&1; then
-              version=$(curl -sf http://localhost:${{ env.GITEA_PORT }}/api/v1/version | jq -r '.version // "unknown"')
-              echo "✓ Gitea is ready (version: $version)"
-              exit 0
-            fi
-            sleep 2
-            elapsed=$((elapsed + 2))
-            printf "."
-          done
-          echo ""
-          echo "ERROR: Gitea did not become healthy within ${timeout}s"
-          docker logs $(docker ps -q --filter "ancestor=${{ env.GITEA_IMAGE }}") 2>/dev/null || true
-          exit 1
-
       - name: Start fake GitHub API server
         run: |
-          PORT=${{ env.FAKE_GITHUB_PORT }} npx tsx tests/e2e/fake-github-server.ts &
+          # Start with GIT_SERVER_URL pointing to the git-server container name
+          # (Gitea will resolve it via Docker networking)
+          PORT=${{ env.FAKE_GITHUB_PORT }} GIT_SERVER_URL="http://git-server" \
+            npx tsx tests/e2e/fake-github-server.ts &
           echo $! > /tmp/fake-github.pid
 
-          # Wait for it to be ready
           echo "Waiting for fake GitHub API..."
           for i in $(seq 1 30); do
             if curl -sf http://localhost:${{ env.FAKE_GITHUB_PORT }}/___mgmt/health > /dev/null 2>&1; then
               echo "✓ Fake GitHub API is ready"
-              exit 0
+              break
+            fi
+            if [ $i -eq 30 ]; then
+              echo "ERROR: Fake GitHub API did not start"
+              exit 1
             fi
             sleep 1
           done
-          echo "ERROR: Fake GitHub API did not start"
-          exit 1
+
+          # Ensure clone URLs are set for the git-server container
+          curl -sf -X POST http://localhost:${{ env.FAKE_GITHUB_PORT }}/___mgmt/set-clone-url \
+            -H "Content-Type: application/json" \
+            -d '{"url": "http://git-server"}' || true
+          echo "✓ Clone URLs configured for git-server container"
 
       - name: Start gitea-mirror application
         env:
@@ -158,8 +167,8 @@ jobs:
           HOST: 0.0.0.0
           PORT: ${{ env.APP_PORT }}
           NODE_ENV: production
-          PRE_SYNC_BACKUP_ENABLED: 'false'
-          ENCRYPTION_SECRET: 'e2e-encryption-secret-32char!!'
+          PRE_SYNC_BACKUP_ENABLED: "false"
+          ENCRYPTION_SECRET: "e2e-encryption-secret-32char!!"
         run: |
           # Re-init DB in case build step cleared it
           bun run manage-db init 2>/dev/null || true
@@ -167,29 +176,30 @@ jobs:
           bun run start &
           echo $! > /tmp/app.pid
 
-          # Wait for the app to be ready
           echo "Waiting for gitea-mirror app..."
           for i in $(seq 1 90); do
             if curl -sf http://localhost:${{ env.APP_PORT }}/api/health > /dev/null 2>&1 || \
                curl -sf -o /dev/null -w "%{http_code}" http://localhost:${{ env.APP_PORT }}/ 2>/dev/null | grep -q "^[23]"; then
               echo "✓ gitea-mirror app is ready"
-              exit 0
+              break
             fi
-            # Check if process died
             if ! kill -0 $(cat /tmp/app.pid) 2>/dev/null; then
               echo "ERROR: App process died"
               exit 1
             fi
+            if [ $i -eq 90 ]; then
+              echo "ERROR: gitea-mirror app did not start within 180s"
+              exit 1
+            fi
             sleep 2
           done
-          echo "ERROR: gitea-mirror app did not start within 180s"
-          exit 1
 
       - name: Run E2E tests
         env:
           APP_URL: http://localhost:${{ env.APP_PORT }}
           GITEA_URL: http://localhost:${{ env.GITEA_PORT }}
           FAKE_GITHUB_URL: http://localhost:${{ env.FAKE_GITHUB_PORT }}
+          GIT_SERVER_URL: http://localhost:${{ env.GIT_SERVER_PORT }}
           CI: true
         run: |
           mkdir -p tests/e2e/test-results
@@ -205,12 +215,16 @@ jobs:
           echo "═══════════════════════════════════════════════════════════"
 
           echo ""
+          echo "── Git server status ──"
+          curl -sf http://localhost:${{ env.GIT_SERVER_PORT }}/manifest.json 2>/dev/null | jq . || echo "(unreachable)"
+
+          echo ""
           echo "── Gitea status ──"
           curl -sf http://localhost:${{ env.GITEA_PORT }}/api/v1/version 2>/dev/null || echo "(unreachable)"
 
           echo ""
           echo "── Fake GitHub status ──"
-          curl -sf http://localhost:${{ env.FAKE_GITHUB_PORT }}/___mgmt/health 2>/dev/null || echo "(unreachable)"
+          curl -sf http://localhost:${{ env.FAKE_GITHUB_PORT }}/___mgmt/health 2>/dev/null | jq . || echo "(unreachable)"
 
           echo ""
           echo "── App status ──"
@@ -218,11 +232,15 @@ jobs:
 
           echo ""
           echo "── Docker containers ──"
-          docker ps -a 2>/dev/null || true
+          docker compose -f tests/e2e/docker-compose.e2e.yml ps 2>/dev/null || true
 
           echo ""
           echo "── Gitea container logs (last 50 lines) ──"
-          docker logs $(docker ps -q --filter "ancestor=${{ env.GITEA_IMAGE }}" 2>/dev/null) --tail=50 2>/dev/null || echo "(no container)"
+          docker compose -f tests/e2e/docker-compose.e2e.yml logs gitea-e2e --tail=50 2>/dev/null || echo "(no container)"
+
+          echo ""
+          echo "── Git server logs (last 20 lines) ──"
+          docker compose -f tests/e2e/docker-compose.e2e.yml logs git-server --tail=20 2>/dev/null || echo "(no container)"
 
           echo ""
           echo "── Running processes ──"
@@ -244,19 +262,20 @@ jobs:
           path: tests/e2e/test-results/
           retention-days: 14
 
-      - name: Cleanup background processes
+      - name: Cleanup
         if: always()
         run: |
-          # Stop fake GitHub server
+          # Stop background processes
           if [ -f /tmp/fake-github.pid ]; then
             kill $(cat /tmp/fake-github.pid) 2>/dev/null || true
             rm -f /tmp/fake-github.pid
           fi
-
-          # Stop app server
           if [ -f /tmp/app.pid ]; then
             kill $(cat /tmp/app.pid) 2>/dev/null || true
             rm -f /tmp/app.pid
           fi
 
-          echo "✓ Background processes cleaned up"
+          # Stop containers
+          docker compose -f tests/e2e/docker-compose.e2e.yml down --volumes --remove-orphans 2>/dev/null || true
+
+          echo "✓ Cleanup complete"
