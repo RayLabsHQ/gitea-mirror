@@ -300,6 +300,8 @@ export async function createBackupBranches({
     const backupBranch = `_${branch}_backup_${ts}`;
     const url = `${giteaUrl}/api/v1/repos/${owner}/${repo}/branches`;
 
+    console.log(`[ForcePush] Creating backup branch ${backupBranch} from ${branch} (sha: ${sha.substring(0, 8)})`);
+
     try {
       await httpPost(
         url,
@@ -310,7 +312,11 @@ export async function createBackupBranches({
         { Authorization: `token ${token}` },
       );
       created.push({ branch, backupBranch });
+      console.log(`[ForcePush] ✓ Created backup branch ${backupBranch} via branch API`);
     } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      console.log(`[ForcePush] Branch API failed for ${backupBranch}: ${errMsg}, trying git refs API...`);
+
       // If the branch create fails (e.g. branch already exists or source
       // branch name doesn't work), try with the SHA directly using the
       // git refs API.  This is especially important for deleted branches
@@ -323,9 +329,11 @@ export async function createBackupBranches({
           { Authorization: `token ${token}` },
         );
         created.push({ branch, backupBranch });
+        console.log(`[ForcePush] ✓ Created backup branch ${backupBranch} via git refs API`);
       } catch (innerErr) {
         const msg =
           innerErr instanceof Error ? innerErr.message : String(innerErr);
+        console.error(`[ForcePush] ✗ Failed to create backup branch ${backupBranch}: ${msg}`);
         failed.push({ branch, error: msg });
       }
     }
