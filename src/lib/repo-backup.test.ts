@@ -1,29 +1,17 @@
 import path from "node:path";
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { Config } from "@/types/config";
-import { createPreSyncBundleBackup } from "@/lib/repo-backup";
+import { resolveBackupPaths } from "@/lib/repo-backup";
 
-function createEmptyStream(): ReadableStream<Uint8Array> {
-  return new ReadableStream<Uint8Array>({
-    start(controller) {
-      controller.close();
-    },
-  });
-}
-
-describe("createPreSyncBundleBackup", () => {
-  let originalSpawn: typeof Bun.spawn;
+describe("resolveBackupPaths", () => {
   let originalBackupDirEnv: string | undefined;
 
   beforeEach(() => {
-    originalSpawn = Bun.spawn;
     originalBackupDirEnv = process.env.PRE_SYNC_BACKUP_DIR;
     delete process.env.PRE_SYNC_BACKUP_DIR;
   });
 
   afterEach(() => {
-    (Bun as any).spawn = originalSpawn;
-
     if (originalBackupDirEnv === undefined) {
       delete process.env.PRE_SYNC_BACKUP_DIR;
     } else {
@@ -31,55 +19,97 @@ describe("createPreSyncBundleBackup", () => {
     }
   });
 
-  test("passes an absolute bundle path to git when backupDirectory is relative", async () => {
-    const spawnCalls: string[][] = [];
-
-    (Bun as any).spawn = mock(({ cmd }: { cmd: string[] }) => {
-      spawnCalls.push(cmd);
-
-      return {
-        stdout: createEmptyStream(),
-        stderr: createEmptyStream(),
-        exited: Promise.resolve(0),
-      };
-    });
-
+  test("returns absolute paths when backupDirectory is relative", () => {
     const config: Partial<Config> = {
       userId: "user-123",
       giteaConfig: {
-        token: "gitea-token",
-        backupBeforeSync: true,
         backupDirectory: "data/repo-backups",
       } as Config["giteaConfig"],
     };
 
-    const result = await createPreSyncBundleBackup({
+    const { backupRoot, repoBackupDir } = resolveBackupPaths({
       config,
       owner: "RayLabsHQ",
       repoName: "gitea-mirror",
-      cloneUrl: "https://github.com/RayLabsHQ/gitea-mirror.git",
     });
 
-    expect(path.isAbsolute(result.bundlePath)).toBe(true);
-
-    const bundleCommand = spawnCalls.find(
-      (cmd) => cmd[0] === "git" && cmd[3] === "bundle" && cmd[4] === "create"
+    expect(path.isAbsolute(backupRoot)).toBe(true);
+    expect(path.isAbsolute(repoBackupDir)).toBe(true);
+    expect(repoBackupDir).toBe(
+      path.join(backupRoot, "user-123", "RayLabsHQ", "gitea-mirror")
     );
+  });
 
-    expect(bundleCommand).toBeDefined();
+  test("returns absolute paths when backupDirectory is already absolute", () => {
+    const config: Partial<Config> = {
+      userId: "user-123",
+      giteaConfig: {
+        backupDirectory: "/data/repo-backups",
+      } as Config["giteaConfig"],
+    };
 
-    const bundlePathArg = bundleCommand?.[5];
-    expect(bundlePathArg).toBe(result.bundlePath);
-    expect(path.isAbsolute(bundlePathArg ?? "")).toBe(true);
+    const { backupRoot, repoBackupDir } = resolveBackupPaths({
+      config,
+      owner: "owner",
+      repoName: "repo",
+    });
 
-    const expectedRepoBackupDir = path.resolve(
-      "data/repo-backups",
-      "user-123",
-      "RayLabsHQ",
-      "gitea-mirror"
+    expect(backupRoot).toBe("/data/repo-backups");
+    expect(path.isAbsolute(repoBackupDir)).toBe(true);
+  });
+
+  test("falls back to cwd-based path when no backupDirectory is set", () => {
+    const config: Partial<Config> = {
+      userId: "user-123",
+      giteaConfig: {} as Config["giteaConfig"],
+    };
+
+    const { backupRoot } = resolveBackupPaths({
+      config,
+      owner: "owner",
+      repoName: "repo",
+    });
+
+    expect(path.isAbsolute(backupRoot)).toBe(true);
+    expect(backupRoot).toBe(
+      path.resolve(process.cwd(), "data", "repo-backups")
     );
+  });
 
-    expect(bundlePathArg?.startsWith(`${expectedRepoBackupDir}${path.sep}`)).toBe(true);
-    expect(bundlePathArg?.endsWith(".bundle")).toBe(true);
+  test("uses PRE_SYNC_BACKUP_DIR env var when config has no backupDirectory", () => {
+    process.env.PRE_SYNC_BACKUP_DIR = "custom/backup/path";
+
+    const config: Partial<Config> = {
+      userId: "user-123",
+      giteaConfig: {} as Config["giteaConfig"],
+    };
+
+    const { backupRoot } = resolveBackupPaths({
+      config,
+      owner: "owner",
+      repoName: "repo",
+    });
+
+    expect(path.isAbsolute(backupRoot)).toBe(true);
+    expect(backupRoot).toBe(path.resolve("custom/backup/path"));
+  });
+
+  test("sanitizes owner and repoName in path segments", () => {
+    const config: Partial<Config> = {
+      userId: "user-123",
+      giteaConfig: {
+        backupDirectory: "/backups",
+      } as Config["giteaConfig"],
+    };
+
+    const { repoBackupDir } = resolveBackupPaths({
+      config,
+      owner: "org/with-slash",
+      repoName: "repo name!",
+    });
+
+    expect(repoBackupDir).toBe(
+      path.join("/backups", "user-123", "org_with-slash", "repo_name_")
+    );
   });
 });

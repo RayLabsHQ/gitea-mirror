@@ -101,6 +101,36 @@ export function shouldBlockSyncOnBackupFailure(config: Partial<Config>): boolean
   return configSetting === undefined ? true : Boolean(configSetting);
 }
 
+export function resolveBackupPaths({
+  config,
+  owner,
+  repoName,
+}: {
+  config: Partial<Config>;
+  owner: string;
+  repoName: string;
+}): { backupRoot: string; repoBackupDir: string } {
+  let backupRoot =
+    config.giteaConfig?.backupDirectory?.trim() ||
+    process.env.PRE_SYNC_BACKUP_DIR?.trim() ||
+    path.join(process.cwd(), "data", "repo-backups");
+
+  // Ensure backupRoot is absolute - relative paths break git bundle creation
+  // because git runs with -C mirrorClonePath and interprets relative paths from there.
+  // Always use path.resolve() which guarantees an absolute path, rather than a
+  // conditional check that can miss edge cases (e.g., NixOS systemd services).
+  backupRoot = path.resolve(backupRoot);
+
+  const repoBackupDir = path.join(
+    backupRoot,
+    sanitizePathSegment(config.userId || "unknown-user"),
+    sanitizePathSegment(owner),
+    sanitizePathSegment(repoName)
+  );
+
+  return { backupRoot, repoBackupDir };
+}
+
 export async function createPreSyncBundleBackup({
   config,
   owner,
@@ -126,28 +156,12 @@ export async function createPreSyncBundleBackup({
     throw new Error("Decrypted Gitea token is required for pre-sync backup.");
   }
 
-  let backupRoot =
-    config.giteaConfig?.backupDirectory?.trim() ||
-    process.env.PRE_SYNC_BACKUP_DIR?.trim() ||
-    path.join(process.cwd(), "data", "repo-backups");
-
-  // Ensure backupRoot is absolute - relative paths break git bundle creation
-  // because git runs with -C mirrorClonePath and interprets relative paths from there.
-  // Always use path.resolve() which guarantees an absolute path, rather than a
-  // conditional check that can miss edge cases (e.g., NixOS systemd services).
-  backupRoot = path.resolve(backupRoot);
+  const { repoBackupDir } = resolveBackupPaths({ config, owner, repoName });
   const retention = Math.max(
     1,
     Number.isFinite(config.giteaConfig?.backupRetentionCount)
       ? Number(config.giteaConfig?.backupRetentionCount)
       : parsePositiveInt(process.env.PRE_SYNC_BACKUP_KEEP_COUNT, 20)
-  );
-
-  const repoBackupDir = path.join(
-    backupRoot,
-    sanitizePathSegment(config.userId || "unknown-user"),
-    sanitizePathSegment(owner),
-    sanitizePathSegment(repoName)
   );
 
   await mkdir(repoBackupDir, { recursive: true });
