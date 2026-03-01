@@ -132,10 +132,10 @@ export async function createPreSyncBundleBackup({
     path.join(process.cwd(), "data", "repo-backups");
 
   // Ensure backupRoot is absolute - relative paths break git bundle creation
-  // because git runs with -C mirrorClonePath and interprets relative paths from there
-  if (!path.isAbsolute(backupRoot)) {
-    backupRoot = path.resolve(process.cwd(), backupRoot);
-  }
+  // because git runs with -C mirrorClonePath and interprets relative paths from there.
+  // Always use path.resolve() which guarantees an absolute path, rather than a
+  // conditional check that can miss edge cases (e.g., NixOS systemd services).
+  backupRoot = path.resolve(backupRoot);
   const retention = Math.max(
     1,
     Number.isFinite(config.giteaConfig?.backupRetentionCount)
@@ -154,7 +154,9 @@ export async function createPreSyncBundleBackup({
 
   const tmpDir = await mkdtemp(path.join(os.tmpdir(), "gitea-mirror-backup-"));
   const mirrorClonePath = path.join(tmpDir, "repo.git");
-  const bundlePath = path.join(repoBackupDir, `${buildTimestamp()}.bundle`);
+  // path.resolve guarantees an absolute path, critical because git -C changes
+  // the working directory and would misinterpret a relative bundlePath
+  const bundlePath = path.resolve(repoBackupDir, `${buildTimestamp()}.bundle`);
 
   try {
     const authCloneUrl = buildAuthenticatedCloneUrl(cloneUrl, giteaToken);
