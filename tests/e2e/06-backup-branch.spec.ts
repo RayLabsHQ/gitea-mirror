@@ -465,7 +465,7 @@ test.describe("E2E: Backup-branch protection", () => {
     );
     for (const a of backupActivities.slice(0, 5)) {
       console.log(
-        `[BackupBranch]   • [${a.status}] ${a.message ?? ""} | ${(a.details ?? "").substring(0, 120)}`,
+        `[BackupBranch]   • [${a.status}] ${a.message ?? ""} | ${(a.details ?? "").substring(0, 500)}`,
       );
     }
 
