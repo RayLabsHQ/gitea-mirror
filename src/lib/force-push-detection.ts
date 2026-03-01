@@ -80,7 +80,9 @@ export interface BackupBranchResult {
  * old behavior can explicitly set `"allow"`.
  */
 export function getForcePushAction(config: Partial<Config>): ForcePushAction {
-  return config.giteaConfig?.forcePushAction ?? "backup-branch";
+  const action = config.giteaConfig?.forcePushAction ?? "backup-branch";
+  console.log(`[ForcePush] Configured action: ${action} (from config: ${config.giteaConfig?.forcePushAction ?? "not set, using default"})`);
+  return action;
 }
 
 // ─── Gitea branch helpers ────────────────────────────────────────────────────
@@ -153,6 +155,7 @@ export async function listGitHubBranches({
     process.env.GH_API_URL ||
     process.env.GITHUB_API_URL ||
     "https://api.github.com";
+  console.log(`[ForcePush] GitHub API URL: ${baseUrl} (GH_API_URL=${process.env.GH_API_URL}, GITHUB_API_URL=${process.env.GITHUB_API_URL})`);
 
   const octokitOpts: ConstructorParameters<typeof Octokit>[0] = { baseUrl };
   if (githubToken) octokitOpts.auth = githubToken;
@@ -377,6 +380,7 @@ export async function handleForcePushProtection({
   shouldSync: boolean;
   detection: ForcePushDetectionResult | null;
 }> {
+  console.log(`[ForcePush] Starting protection check for ${repository.name} (giteaOwner: ${giteaOwner}, githubOwner: ${githubOwner})`);
   const action = getForcePushAction(config);
 
   // "allow" means no detection at all – just sync
@@ -422,8 +426,10 @@ export async function handleForcePushProtection({
 
   // If Gitea has no branches yet (first mirror), nothing to protect
   if (giteaBranches.length === 0) {
+    console.log(`[ForcePush] No branches in Gitea for ${giteaOwner}/${repository.name}, skipping protection`);
     return { shouldSync: true, detection: null };
   }
+  console.log(`[ForcePush] Found ${giteaBranches.length} branches in Gitea: ${giteaBranches.map(b => b.name).join(", ")}`);
 
   try {
     githubBranches = await listGitHubBranches({
@@ -431,6 +437,7 @@ export async function handleForcePushProtection({
       owner: githubOwner,
       repo: githubRepo,
     });
+    console.log(`[ForcePush] Found ${githubBranches.length} branches in GitHub: ${githubBranches.map(b => `${b.name}=${b.sha.substring(0, 8)}`).join(", ")}`);
   } catch (err) {
     console.warn(
       `[ForcePush] Failed to list GitHub branches for ${githubOwner}/${githubRepo}: ${err}`,
@@ -440,6 +447,10 @@ export async function handleForcePushProtection({
 
   // ── Detect ────────────────────────────────────────────────────────────
   const detection = detectForcePushes(giteaBranches, githubBranches);
+  console.log(`[ForcePush] Detection results for ${repository.name}: affected=${detection.affectedBranches.length}, deleted=${detection.deletedBranches.length}, new=${detection.newBranches.length}`);
+  if (detection.affectedBranches.length > 0) {
+    console.log(`[ForcePush] Affected branches: ${detection.affectedBranches.map(b => `${b.branch}(gitea:${b.giteaSha.substring(0, 8)},github:${b.githubSha.substring(0, 8)})`).join("; ")}`);
+  }
 
   if (!detection.destructiveChangesDetected) {
     console.log(
@@ -482,6 +493,7 @@ export async function handleForcePushProtection({
     });
 
     // Log the backup results
+    console.log(`[ForcePush] Backup branch creation results for ${repository.name}: ${backupResult.created.length} created, ${backupResult.failed.length} failed`);
     for (const { branch, backupBranch } of backupResult.created) {
       console.log(
         `[ForcePush] Created backup branch ${backupBranch} for ${branch} in ${giteaOwner}/${repository.name}`,
