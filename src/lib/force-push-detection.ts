@@ -490,6 +490,11 @@ export async function handleForcePushProtection({
     }
   }
 
+  console.log(`[ForcePush] Branches to backup for ${repository.name}: ${branchesToBackup.length} total`);
+  for (const b of branchesToBackup) {
+    console.log(`[ForcePush]  - ${b.branch}: ${b.sha.substring(0, 8)}`);
+  }
+
   // ── Apply action ──────────────────────────────────────────────────────
   if (action === "backup-branch") {
     const backupResult = await createBackupBranches({
@@ -502,6 +507,9 @@ export async function handleForcePushProtection({
 
     // Log the backup results
     console.log(`[ForcePush] Backup branch creation results for ${repository.name}: ${backupResult.created.length} created, ${backupResult.failed.length} failed`);
+    if (backupResult.failed.length > 0) {
+      console.error(`[ForcePush] FAILED backup branches: ${backupResult.failed.map(f => `${f.branch}: ${f.error}`).join("; ")}`);
+    }
     for (const { branch, backupBranch } of backupResult.created) {
       console.log(
         `[ForcePush] Created backup branch ${backupBranch} for ${branch} in ${giteaOwner}/${repository.name}`,
