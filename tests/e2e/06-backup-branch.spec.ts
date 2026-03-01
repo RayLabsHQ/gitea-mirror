@@ -184,6 +184,25 @@ test.describe("E2E: Backup-branch protection", () => {
     }
   });
 
+  /**
+   * Helper: ensure we have myProjectId (re-fetch on retry if needed)
+   */
+  async function ensureMyProjectId(request: any): Promise<string> {
+    if (myProjectId) return myProjectId;
+    
+    if (!appCookies) {
+      appCookies = await getAppSessionCookies(request);
+    }
+    
+    const { repos } = await getRepositoryIds(request, appCookies);
+    const myProj = repos.find((r: any) => r.name === "my-project");
+    if (myProj) {
+      myProjectId = myProj.id;
+      console.log(`[BackupBranch] Re-fetched my-project ID: ${myProjectId}`);
+    }
+    return myProjectId;
+  }
+
   test.afterAll(async () => {
     cleanupWorkDir();
     await giteaApi.dispose();
@@ -310,7 +329,7 @@ test.describe("E2E: Backup-branch protection", () => {
     const syncStatus = await triggerSyncRepo(
       request,
       appCookies,
-      [myProjectId],
+      [await ensureMyProjectId(request)],
       30_000,
     );
     console.log(`[BackupBranch] sync-repo response: ${syncStatus}`);
@@ -613,8 +632,8 @@ test.describe("E2E: Backup-branch protection", () => {
     const syncStatus = await triggerSyncRepo(
       request,
       appCookies,
-      [myProjectId],
-      30_000,
+      [await ensureMyProjectId(request)],
+      25_000,
     );
     console.log(`[BackupBranch] sync-repo response: ${syncStatus}`);
     expect(syncStatus).toBeLessThan(500);
@@ -748,7 +767,7 @@ test.describe("E2E: Backup-branch protection", () => {
     const syncStatus = await triggerSyncRepo(
       request,
       appCookies,
-      [myProjectId],
+      [await ensureMyProjectId(request)],
       25_000,
     );
     console.log(`[BackupBranch] sync-repo response: ${syncStatus}`);
@@ -836,7 +855,7 @@ test.describe("E2E: Backup-branch protection", () => {
     const { status, body } = await approveSyncRepo(
       request,
       appCookies,
-      myProjectId,
+      await ensureMyProjectId(request),
       "dismiss",
     );
     console.log(
@@ -929,7 +948,7 @@ test.describe("E2E: Backup-branch protection", () => {
     });
 
     // Trigger sync — should be blocked again
-    await triggerSyncRepo(request, appCookies, [myProjectId], 25_000);
+    await triggerSyncRepo(request, appCookies, [await ensureMyProjectId(request)], 25_000);
 
     // Wait for pending-approval status
     await waitFor(
@@ -951,7 +970,7 @@ test.describe("E2E: Backup-branch protection", () => {
     const { status: approveStatus, body: approveBody } = await approveSyncRepo(
       request,
       appCookies,
-      myProjectId,
+      await ensureMyProjectId(request),
       "approve",
     );
     console.log(
@@ -1059,7 +1078,7 @@ test.describe("E2E: Backup-branch protection", () => {
     const syncStatus = await triggerSyncRepo(
       request,
       appCookies,
-      [myProjectId],
+      [await ensureMyProjectId(request)],
       25_000,
     );
     console.log(`[BackupBranch] Allow mode sync-repo response: ${syncStatus}`);
