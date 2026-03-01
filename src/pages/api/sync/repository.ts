@@ -20,7 +20,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const userId = authResult.userId;
 
     const body: AddRepositoriesApiRequest = await request.json();
-    const { owner, repo, force = false } = body;
+    const { owner, repo, force = false, destinationOrg } = body;
 
     if (!owner || !repo) {
       return new Response(
@@ -122,7 +122,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       lastMirrored: existingRepo?.lastMirrored ?? null,
       errorMessage: existingRepo?.errorMessage ?? null,
       mirroredLocation: existingRepo?.mirroredLocation ?? "",
-      destinationOrg: existingRepo?.destinationOrg ?? null,
+      destinationOrg: destinationOrg?.trim() || existingRepo?.destinationOrg || null,
       updatedAt: repoData.updated_at
         ? new Date(repoData.updated_at)
         : new Date(),

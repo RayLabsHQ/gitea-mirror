@@ -698,10 +698,12 @@ export default function Repository() {
     repo,
     owner,
     force = false,
+    destinationOrg,
   }: {
     repo: string;
     owner: string;
     force?: boolean;
+    destinationOrg?: string;
   }) => {
     if (!user || !user.id) {
       return;
@@ -736,6 +738,7 @@ export default function Repository() {
         repo: trimmedRepo,
         owner: trimmedOwner,
         force,
+        ...(destinationOrg ? { destinationOrg } : {}),
       };
 
       const response = await apiRequest<AddRepositoriesApiResponse>(

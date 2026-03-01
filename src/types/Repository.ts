@@ -83,6 +83,7 @@ export interface AddRepositoriesApiRequest {
   repo: string;
   owner: string;
   force?: boolean;
+  destinationOrg?: string;
 }
 
 export interface AddRepositoriesApiResponse {

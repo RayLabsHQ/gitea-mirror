@@ -18,10 +18,12 @@ interface AddRepositoryDialogProps {
     repo,
     owner,
     force,
+    destinationOrg,
   }: {
     repo: string;
     owner: string;
     force?: boolean;
+    destinationOrg?: string;
   }) => Promise<void>;
 }
 
@@ -32,6 +34,7 @@ export default function AddRepositoryDialog({
 }: AddRepositoryDialogProps) {
   const [repo, setRepo] = useState<string>("");
   const [owner, setOwner] = useState<string>("");
+  const [destinationOrg, setDestinationOrg] = useState<string>("");
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>("");
 
@@ -40,6 +43,7 @@ export default function AddRepositoryDialog({
       setError("");
       setRepo("");
       setOwner("");
+      setDestinationOrg("");
     }
   }, [isDialogOpen]);
 
@@ -54,11 +58,16 @@ export default function AddRepositoryDialog({
     try {
       setIsLoading(true);
 
-      await onAddRepository({ repo, owner });
+      await onAddRepository({
+        repo,
+        owner,
+        destinationOrg: destinationOrg.trim() || undefined,
+      });
 
       setError("");
       setRepo("");
       setOwner("");
+      setDestinationOrg("");
       setIsDialogOpen(false);
     } catch (err: any) {
       setError(err?.message || "Failed to add repository.");
@@ -121,6 +130,27 @@ export default function AddRepositoryDialog({
                 placeholder="e.g., vercel"
                 autoComplete="off"
                 required
+              />
+            </div>
+
+            <div>
+              <label
+                htmlFor="destinationOrg"
+                className="block text-sm font-medium mb-1.5"
+              >
+                Target Organization{" "}
+                <span className="text-muted-foreground font-normal">
+                  (optional)
+                </span>
+              </label>
+              <input
+                id="destinationOrg"
+                type="text"
+                value={destinationOrg}
+                onChange={(e) => setDestinationOrg(e.target.value)}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                placeholder="Gitea org or user (uses default strategy if empty)"
+                autoComplete="off"
               />
             </div>
 
