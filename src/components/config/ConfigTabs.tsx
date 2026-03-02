@@ -50,7 +50,7 @@ export function ConfigTabs() {
       starredReposOrg: 'starred',
       starredReposMode: 'dedicated-org',
       preserveOrgStructure: false,
-      backupBeforeSync: true,
+      backupStrategy: "on-force-push",
       backupRetentionCount: 20,
       backupDirectory: 'data/repo-backups',
       blockSyncOnBackupFailure: true,
@@ -660,9 +660,20 @@ export function ConfigTabs() {
                       : update,
                 }))
               }
+              giteaConfig={config.giteaConfig}
+              setGiteaConfig={update =>
+                setConfig(prev => ({
+                  ...prev,
+                  giteaConfig:
+                    typeof update === 'function'
+                      ? update(prev.giteaConfig)
+                      : update,
+                }))
+              }
               onAutoSave={autoSaveGitHubConfig}
               onMirrorOptionsAutoSave={autoSaveMirrorOptions}
               onAdvancedOptionsAutoSave={autoSaveAdvancedOptions}
+              onGiteaAutoSave={autoSaveGiteaConfig}
               isAutoSaving={isAutoSavingGitHub}
             />
             <GiteaConfigForm
