@@ -131,6 +131,16 @@ jobs:
           bun run build
           echo "✓ Build complete"
 
+      - name: Verify build output
+        run: |
+          echo "Checking built API routes..."
+          ls -la dist/server/pages/api/job/
+          if [ ! -f "dist/server/pages/api/job/approve-sync.astro.mjs" ]; then
+            echo "ERROR: approve-sync endpoint not found in build output!"
+            exit 1
+          fi
+          echo "✓ approve-sync endpoint found"
+
       - name: Start fake GitHub API server
         run: |
           # Start with GIT_SERVER_URL pointing to the git-server container name
@@ -194,6 +204,11 @@ jobs:
             sleep 2
           done
 
+          # Verify API endpoints are accessible
+          echo "Verifying API endpoints..."
+          curl -sf http://localhost:${{ env.APP_PORT }}/api/job/sync-repo -X POST -H "Content-Type: application/json" -d '{"test":"test"}' > /dev/null 2>&1 || true
+          curl -sf http://localhost:${{ env.APP_PORT }}/api/job/approve-sync -X POST -H "Content-Type: application/json" -d '{"test":"test"}' > /dev/null 2>&1 && echo "✓ approve-sync endpoint accessible" || echo "⚠ approve-sync endpoint check failed (may need auth)"
+
       - name: Run E2E tests
         env:
           APP_URL: http://localhost:${{ env.APP_PORT }}
@@ -229,6 +244,14 @@ jobs:
           echo ""
           echo "── App status ──"
           curl -sf http://localhost:${{ env.APP_PORT }}/api/health 2>/dev/null || echo "(unreachable)"
+
+          echo ""
+          echo "── API endpoint check ──"
+          echo "Checking approve-sync endpoint..."
+          curl -sf http://localhost:${{ env.APP_PORT }}/api/job/approve-sync -X POST -H "Content-Type: application/json" -d '{"test":"test"}' 2>&1 | head -20 || echo "(endpoint not accessible)"
+          echo ""
+          echo "Built API routes:"
+          ls -la dist/server/pages/api/job/ 2>/dev/null || echo "(dist folder not found)"
 
           echo ""
           echo "── Docker containers ──"

@@ -55,6 +55,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     }
 
     // Fetch repos
+    console.log(`[SyncRepo] Looking up repos for user ${userId}, IDs: ${repositoryIds.join(", ")}`);
     const repos = await db
       .select()
       .from(repositories)
@@ -65,7 +66,10 @@ export const POST: APIRoute = async ({ request, locals }) => {
         )
       );
 
+    console.log(`[SyncRepo] Found ${repos.length} repos: ${repos.map(r => `${r.name}(${r.id}, status:${r.status})`).join(", ")}`);
+
     if (!repos.length) {
+      console.log(`[SyncRepo] No repos found for IDs ${repositoryIds.join(", ")}, returning 404`);
       return new Response(
         JSON.stringify({ error: "No repositories found for the given IDs." }),
         { status: 404, headers: { "Content-Type": "application/json" } }

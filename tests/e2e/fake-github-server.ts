@@ -856,6 +856,78 @@ const routes: Route[] = [
       },
     };
   }),
+
+  // ── Update branches for a repo (used by force-push E2E tests) ────
+  // Body: { owner: string, repo: string, branches: Array<{ name, sha }> }
+  // Replaces the entire branch list for the given repo.
+  route("POST", "/___mgmt/update-repo-branches", (_p, _q, body) => {
+    if (!body || !body.owner || !body.repo || !Array.isArray(body.branches)) {
+      return {
+        status: 400,
+        body: { message: "owner, repo, and branches[] required" },
+      };
+    }
+    const key = `${body.owner}/${body.repo}`;
+    const rd = store.repos.get(key);
+    if (!rd) {
+      return { status: 404, body: { message: `Repo ${key} not found` } };
+    }
+
+    rd.branches = body.branches.map(
+      (b: { name: string; sha: string; protected?: boolean }) => ({
+        name: b.name,
+        commit: { sha: b.sha, url: "" },
+        protected: b.protected ?? false,
+      }),
+    );
+
+    console.log(
+      `[FakeGitHub] Updated branches for ${key}: ${rd.branches.map((b: any) => `${b.name}=${b.commit.sha.substring(0, 12)}`).join(", ")}`,
+    );
+
+    return {
+      status: 200,
+      body: {
+        message: `Branches updated for ${key}`,
+        branches: rd.branches.length,
+      },
+    };
+  }),
+
+  // ── Delete a single branch from a repo (simulates upstream branch deletion) ──
+  // Body: { owner: string, repo: string, branch: string }
+  route("POST", "/___mgmt/delete-repo-branch", (_p, _q, body) => {
+    if (!body || !body.owner || !body.repo || !body.branch) {
+      return {
+        status: 400,
+        body: { message: "owner, repo, and branch required" },
+      };
+    }
+    const key = `${body.owner}/${body.repo}`;
+    const rd = store.repos.get(key);
+    if (!rd) {
+      return { status: 404, body: { message: `Repo ${key} not found` } };
+    }
+
+    const before = rd.branches.length;
+    rd.branches = rd.branches.filter((b: any) => b.name !== body.branch);
+    const removed = before - rd.branches.length;
+
+    console.log(
+      `[FakeGitHub] Deleted branch "${body.branch}" from ${key} (removed=${removed})`,
+    );
+
+    return {
+      status: 200,
+      body: {
+        message: removed
+          ? `Branch "${body.branch}" deleted from ${key}`
+          : `Branch "${body.branch}" not found in ${key}`,
+        removed,
+        remainingBranches: rd.branches.length,
+      },
+    };
+  }),
 ];
 
 // ─── Server ──────────────────────────────────────────────────────────────────

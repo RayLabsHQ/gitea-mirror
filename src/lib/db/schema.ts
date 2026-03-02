@@ -1,5 +1,11 @@
 import { z } from "zod";
-import { sqliteTable, text, integer, index, uniqueIndex } from "drizzle-orm/sqlite-core";
+import {
+  sqliteTable,
+  text,
+  integer,
+  index,
+  uniqueIndex,
+} from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
 // ===== Zod Validation Schemas =====
@@ -25,12 +31,19 @@ export const githubConfigSchema = z.object({
   includePublic: z.boolean().default(true),
   includeOrganizations: z.array(z.string()).default([]),
   starredReposOrg: z.string().optional(),
-  starredReposMode: z.enum(["dedicated-org", "preserve-owner"]).default("dedicated-org"),
-  mirrorStrategy: z.enum(["preserve", "single-org", "flat-user", "mixed"]).default("preserve"),
+  starredReposMode: z
+    .enum(["dedicated-org", "preserve-owner"])
+    .default("dedicated-org"),
+  mirrorStrategy: z
+    .enum(["preserve", "single-org", "flat-user", "mixed"])
+    .default("preserve"),
   defaultOrg: z.string().optional(),
   starredCodeOnly: z.boolean().default(false),
   skipStarredIssues: z.boolean().optional(), // Deprecated: kept for backward compatibility, use starredCodeOnly instead
-  starredDuplicateStrategy: z.enum(["suffix", "prefix", "owner-org"]).default("suffix").optional(),
+  starredDuplicateStrategy: z
+    .enum(["suffix", "prefix", "owner-org"])
+    .default("suffix")
+    .optional(),
 });
 
 export const giteaConfigSchema = z.object({
@@ -52,9 +65,7 @@ export const giteaConfigSchema = z.object({
   topicPrefix: z.string().optional(),
   preserveVisibility: z.boolean().default(true),
   preserveOrgStructure: z.boolean().default(false),
-  forkStrategy: z
-    .enum(["skip", "reference", "full-copy"])
-    .default("reference"),
+  forkStrategy: z.enum(["skip", "reference", "full-copy"]).default("reference"),
   // Mirror options
   issueConcurrency: z.number().int().min(1).default(3),
   pullRequestConcurrency: z.number().int().min(1).default(5),
@@ -69,6 +80,9 @@ export const giteaConfigSchema = z.object({
   backupRetentionCount: z.number().int().min(1).default(20),
   backupDirectory: z.string().optional(),
   blockSyncOnBackupFailure: z.boolean().default(true),
+  forcePushAction: z
+    .enum(["allow", "backup-branch", "block"])
+    .default("backup-branch"),
 });
 
 export const scheduleConfigSchema = z.object({
@@ -103,9 +117,7 @@ export const cleanupConfigSchema = z.object({
   deleteIfNotInGitHub: z.boolean().default(true),
   protectedRepos: z.array(z.string()).default([]),
   dryRun: z.boolean().default(false),
-  orphanedRepoAction: z
-    .enum(["skip", "archive", "delete"])
-    .default("archive"),
+  orphanedRepoAction: z.enum(["skip", "archive", "delete"]).default("archive"),
   batchSize: z.number().default(10),
   pauseBetweenDeletes: z.number().default(2000),
   lastRun: z.coerce.date().optional(),
@@ -159,12 +171,13 @@ export const repositorySchema = z.object({
       "mirrored",
       "failed",
       "skipped",
-      "ignored",  // User explicitly wants to ignore this repository
+      "ignored", // User explicitly wants to ignore this repository
       "deleting",
       "deleted",
       "syncing",
       "synced",
       "archived",
+      "pending-approval", // Force push detected, waiting for manual approval to sync
     ])
     .default("imported"),
   lastMirrored: z.coerce.date().optional().nullable(),
@@ -190,7 +203,7 @@ export const mirrorJobSchema = z.object({
       "mirrored",
       "failed",
       "skipped",
-      "ignored",  // User explicitly wants to ignore this repository
+      "ignored", // User explicitly wants to ignore this repository
       "deleting",
       "deleted",
       "syncing",
@@ -219,7 +232,9 @@ export const organizationSchema = z.object({
   name: z.string(),
   normalizedName: z.string(),
   avatarUrl: z.string(),
-  membershipRole: z.enum(["member", "admin", "owner", "billing_manager"]).default("member"),
+  membershipRole: z
+    .enum(["member", "admin", "owner", "billing_manager"])
+    .default("member"),
   isIncluded: z.boolean().default(true),
   destinationOrg: z.string().optional().nullable(),
   status: z
@@ -229,7 +244,7 @@ export const organizationSchema = z.object({
       "mirrored",
       "failed",
       "skipped",
-      "ignored",  // User explicitly wants to ignore this repository
+      "ignored", // User explicitly wants to ignore this repository
       "deleting",
       "deleted",
       "syncing",
@@ -257,402 +272,483 @@ export const eventSchema = z.object({
 
 // ===== Drizzle Table Definitions =====
 
-export const users = sqliteTable("users", {
-  id: text("id").primaryKey(),
-  name: text("name"),
-  email: text("email").notNull().unique(),
-  emailVerified: integer("email_verified", { mode: "boolean" }).notNull().default(false),
-  image: text("image"),
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`(unixepoch())`),
-  updatedAt: integer("updated_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`(unixepoch())`),
-  // Custom fields
-  username: text("username"),
-}, (_table) => []);
+export const users = sqliteTable(
+  "users",
+  {
+    id: text("id").primaryKey(),
+    name: text("name"),
+    email: text("email").notNull().unique(),
+    emailVerified: integer("email_verified", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    image: text("image"),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+    // Custom fields
+    username: text("username"),
+  },
+  (_table) => [],
+);
 
-export const events = sqliteTable("events", {
-  id: text("id").primaryKey(),
-  userId: text("user_id")
-    .notNull()
-    .references(() => users.id),
-  channel: text("channel").notNull(),
-  payload: text("payload", { mode: "json" }).notNull(),
-  read: integer("read", { mode: "boolean" }).notNull().default(false),
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`(unixepoch())`),
-}, (table) => [
-  index("idx_events_user_channel").on(table.userId, table.channel),
-  index("idx_events_created_at").on(table.createdAt),
-  index("idx_events_read").on(table.read),
-]);
+export const events = sqliteTable(
+  "events",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id),
+    channel: text("channel").notNull(),
+    payload: text("payload", { mode: "json" }).notNull(),
+    read: integer("read", { mode: "boolean" }).notNull().default(false),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (table) => [
+    index("idx_events_user_channel").on(table.userId, table.channel),
+    index("idx_events_created_at").on(table.createdAt),
+    index("idx_events_read").on(table.read),
+  ],
+);
 
-export const configs = sqliteTable("configs", {
-  id: text("id").primaryKey(),
-  userId: text("user_id")
-    .notNull()
-    .references(() => users.id),
-  name: text("name").notNull(),
-  isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
+export const configs = sqliteTable(
+  "configs",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id),
+    name: text("name").notNull(),
+    isActive: integer("is_active", { mode: "boolean" }).notNull().default(true),
 
-  githubConfig: text("github_config", { mode: "json" })
-    .$type<z.infer<typeof githubConfigSchema>>()
-    .notNull(),
+    githubConfig: text("github_config", { mode: "json" })
+      .$type<z.infer<typeof githubConfigSchema>>()
+      .notNull(),
 
-  giteaConfig: text("gitea_config", { mode: "json" })
-    .$type<z.infer<typeof giteaConfigSchema>>()
-    .notNull(),
+    giteaConfig: text("gitea_config", { mode: "json" })
+      .$type<z.infer<typeof giteaConfigSchema>>()
+      .notNull(),
 
-  include: text("include", { mode: "json" })
-    .$type<string[]>()
-    .notNull()
-    .default(sql`'["*"]'`),
+    include: text("include", { mode: "json" })
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'["*"]'`),
 
-  exclude: text("exclude", { mode: "json" })
-    .$type<string[]>()
-    .notNull()
-    .default(sql`'[]'`),
+    exclude: text("exclude", { mode: "json" })
+      .$type<string[]>()
+      .notNull()
+      .default(sql`'[]'`),
 
-  scheduleConfig: text("schedule_config", { mode: "json" })
-    .$type<z.infer<typeof scheduleConfigSchema>>()
-    .notNull(),
+    scheduleConfig: text("schedule_config", { mode: "json" })
+      .$type<z.infer<typeof scheduleConfigSchema>>()
+      .notNull(),
 
-  cleanupConfig: text("cleanup_config", { mode: "json" })
-    .$type<z.infer<typeof cleanupConfigSchema>>()
-    .notNull(),
+    cleanupConfig: text("cleanup_config", { mode: "json" })
+      .$type<z.infer<typeof cleanupConfigSchema>>()
+      .notNull(),
 
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`(unixepoch())`),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
 
-  updatedAt: integer("updated_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`(unixepoch())`),
-}, (_table) => []);
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (_table) => [],
+);
 
-export const repositories = sqliteTable("repositories", {
-  id: text("id").primaryKey(),
-  userId: text("user_id")
-    .notNull()
-    .references(() => users.id),
-  configId: text("config_id")
-    .notNull()
-    .references(() => configs.id),
-  name: text("name").notNull(),
-  fullName: text("full_name").notNull(),
-  normalizedFullName: text("normalized_full_name").notNull(),
-  url: text("url").notNull(),
-  cloneUrl: text("clone_url").notNull(),
-  owner: text("owner").notNull(),
-  organization: text("organization"),
-  mirroredLocation: text("mirrored_location").default(""),
+export const repositories = sqliteTable(
+  "repositories",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id),
+    configId: text("config_id")
+      .notNull()
+      .references(() => configs.id),
+    name: text("name").notNull(),
+    fullName: text("full_name").notNull(),
+    normalizedFullName: text("normalized_full_name").notNull(),
+    url: text("url").notNull(),
+    cloneUrl: text("clone_url").notNull(),
+    owner: text("owner").notNull(),
+    organization: text("organization"),
+    mirroredLocation: text("mirrored_location").default(""),
 
-  isPrivate: integer("is_private", { mode: "boolean" })
-    .notNull()
-    .default(false),
-  isForked: integer("is_fork", { mode: "boolean" }).notNull().default(false),
-  forkedFrom: text("forked_from"),
+    isPrivate: integer("is_private", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    isForked: integer("is_fork", { mode: "boolean" }).notNull().default(false),
+    forkedFrom: text("forked_from"),
 
-  hasIssues: integer("has_issues", { mode: "boolean" })
-    .notNull()
-    .default(false),
-  isStarred: integer("is_starred", { mode: "boolean" })
-    .notNull()
-    .default(false),
-  isArchived: integer("is_archived", { mode: "boolean" })
-    .notNull()
-    .default(false),
+    hasIssues: integer("has_issues", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    isStarred: integer("is_starred", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    isArchived: integer("is_archived", { mode: "boolean" })
+      .notNull()
+      .default(false),
 
-  size: integer("size").notNull().default(0),
-  hasLFS: integer("has_lfs", { mode: "boolean" }).notNull().default(false),
-  hasSubmodules: integer("has_submodules", { mode: "boolean" })
-    .notNull()
-    .default(false),
+    size: integer("size").notNull().default(0),
+    hasLFS: integer("has_lfs", { mode: "boolean" }).notNull().default(false),
+    hasSubmodules: integer("has_submodules", { mode: "boolean" })
+      .notNull()
+      .default(false),
 
-  language: text("language"),
-  description: text("description"),
-  defaultBranch: text("default_branch").notNull(),
-  visibility: text("visibility").notNull().default("public"),
+    language: text("language"),
+    description: text("description"),
+    defaultBranch: text("default_branch").notNull(),
+    visibility: text("visibility").notNull().default("public"),
 
-  status: text("status").notNull().default("imported"),
-  lastMirrored: integer("last_mirrored", { mode: "timestamp" }),
-  errorMessage: text("error_message"),
-  
-  destinationOrg: text("destination_org"),
+    status: text("status").notNull().default("imported"),
+    lastMirrored: integer("last_mirrored", { mode: "timestamp" }),
+    errorMessage: text("error_message"),
 
-  metadata: text("metadata"), // JSON string storing metadata sync state (issues, PRs, releases, etc.)
+    destinationOrg: text("destination_org"),
 
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`(unixepoch())`),
-  updatedAt: integer("updated_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`(unixepoch())`),
-}, (table) => [
-  index("idx_repositories_user_id").on(table.userId),
-  index("idx_repositories_config_id").on(table.configId),
-  index("idx_repositories_status").on(table.status),
-  index("idx_repositories_owner").on(table.owner),
-  index("idx_repositories_organization").on(table.organization),
-  index("idx_repositories_is_fork").on(table.isForked),
-  index("idx_repositories_is_starred").on(table.isStarred),
-  uniqueIndex("uniq_repositories_user_full_name").on(table.userId, table.fullName),
-  uniqueIndex("uniq_repositories_user_normalized_full_name").on(table.userId, table.normalizedFullName),
-]);
+    metadata: text("metadata"), // JSON string storing metadata sync state (issues, PRs, releases, etc.)
 
-export const mirrorJobs = sqliteTable("mirror_jobs", {
-  id: text("id").primaryKey(),
-  userId: text("user_id")
-    .notNull()
-    .references(() => users.id),
-  repositoryId: text("repository_id"),
-  repositoryName: text("repository_name"),
-  organizationId: text("organization_id"),
-  organizationName: text("organization_name"),
-  details: text("details"),
-  status: text("status").notNull().default("imported"),
-  message: text("message").notNull(),
-  timestamp: integer("timestamp", { mode: "timestamp" })
-    .notNull()
-    .default(sql`(unixepoch())`),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (table) => [
+    index("idx_repositories_user_id").on(table.userId),
+    index("idx_repositories_config_id").on(table.configId),
+    index("idx_repositories_status").on(table.status),
+    index("idx_repositories_owner").on(table.owner),
+    index("idx_repositories_organization").on(table.organization),
+    index("idx_repositories_is_fork").on(table.isForked),
+    index("idx_repositories_is_starred").on(table.isStarred),
+    uniqueIndex("uniq_repositories_user_full_name").on(
+      table.userId,
+      table.fullName,
+    ),
+    uniqueIndex("uniq_repositories_user_normalized_full_name").on(
+      table.userId,
+      table.normalizedFullName,
+    ),
+  ],
+);
 
-  // Job resilience fields
-  jobType: text("job_type").notNull().default("mirror"),
-  batchId: text("batch_id"),
-  totalItems: integer("total_items"),
-  completedItems: integer("completed_items").default(0),
-  itemIds: text("item_ids", { mode: "json" }).$type<string[]>(),
-  completedItemIds: text("completed_item_ids", { mode: "json" })
-    .$type<string[]>()
-    .default(sql`'[]'`),
-  inProgress: integer("in_progress", { mode: "boolean" })
-    .notNull()
-    .default(false),
-  startedAt: integer("started_at", { mode: "timestamp" }),
-  completedAt: integer("completed_at", { mode: "timestamp" }),
-  lastCheckpoint: integer("last_checkpoint", { mode: "timestamp" }),
-}, (table) => [
-  index("idx_mirror_jobs_user_id").on(table.userId),
-  index("idx_mirror_jobs_batch_id").on(table.batchId),
-  index("idx_mirror_jobs_in_progress").on(table.inProgress),
-  index("idx_mirror_jobs_job_type").on(table.jobType),
-  index("idx_mirror_jobs_timestamp").on(table.timestamp),
-]);
+export const mirrorJobs = sqliteTable(
+  "mirror_jobs",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id),
+    repositoryId: text("repository_id"),
+    repositoryName: text("repository_name"),
+    organizationId: text("organization_id"),
+    organizationName: text("organization_name"),
+    details: text("details"),
+    status: text("status").notNull().default("imported"),
+    message: text("message").notNull(),
+    timestamp: integer("timestamp", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
 
-export const organizations = sqliteTable("organizations", {
-  id: text("id").primaryKey(),
-  userId: text("user_id")
-    .notNull()
-    .references(() => users.id),
-  configId: text("config_id")
-    .notNull()
-    .references(() => configs.id),
-  name: text("name").notNull(),
-  normalizedName: text("normalized_name").notNull(),
+    // Job resilience fields
+    jobType: text("job_type").notNull().default("mirror"),
+    batchId: text("batch_id"),
+    totalItems: integer("total_items"),
+    completedItems: integer("completed_items").default(0),
+    itemIds: text("item_ids", { mode: "json" }).$type<string[]>(),
+    completedItemIds: text("completed_item_ids", { mode: "json" })
+      .$type<string[]>()
+      .default(sql`'[]'`),
+    inProgress: integer("in_progress", { mode: "boolean" })
+      .notNull()
+      .default(false),
+    startedAt: integer("started_at", { mode: "timestamp" }),
+    completedAt: integer("completed_at", { mode: "timestamp" }),
+    lastCheckpoint: integer("last_checkpoint", { mode: "timestamp" }),
+  },
+  (table) => [
+    index("idx_mirror_jobs_user_id").on(table.userId),
+    index("idx_mirror_jobs_batch_id").on(table.batchId),
+    index("idx_mirror_jobs_in_progress").on(table.inProgress),
+    index("idx_mirror_jobs_job_type").on(table.jobType),
+    index("idx_mirror_jobs_timestamp").on(table.timestamp),
+  ],
+);
 
-  avatarUrl: text("avatar_url").notNull(),
+export const organizations = sqliteTable(
+  "organizations",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id),
+    configId: text("config_id")
+      .notNull()
+      .references(() => configs.id),
+    name: text("name").notNull(),
+    normalizedName: text("normalized_name").notNull(),
 
-  membershipRole: text("membership_role").notNull().default("member"),
+    avatarUrl: text("avatar_url").notNull(),
 
-  isIncluded: integer("is_included", { mode: "boolean" })
-    .notNull()
-    .default(true),
+    membershipRole: text("membership_role").notNull().default("member"),
 
-  destinationOrg: text("destination_org"),
+    isIncluded: integer("is_included", { mode: "boolean" })
+      .notNull()
+      .default(true),
 
-  status: text("status").notNull().default("imported"),
-  lastMirrored: integer("last_mirrored", { mode: "timestamp" }),
-  errorMessage: text("error_message"),
+    destinationOrg: text("destination_org"),
 
-  repositoryCount: integer("repository_count").notNull().default(0),
-  publicRepositoryCount: integer("public_repository_count"),
-  privateRepositoryCount: integer("private_repository_count"),
-  forkRepositoryCount: integer("fork_repository_count"),
+    status: text("status").notNull().default("imported"),
+    lastMirrored: integer("last_mirrored", { mode: "timestamp" }),
+    errorMessage: text("error_message"),
 
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`(unixepoch())`),
-  updatedAt: integer("updated_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`(unixepoch())`),
-}, (table) => [
-  index("idx_organizations_user_id").on(table.userId),
-  index("idx_organizations_config_id").on(table.configId),
-  index("idx_organizations_status").on(table.status),
-  index("idx_organizations_is_included").on(table.isIncluded),
-  uniqueIndex("uniq_organizations_user_normalized_name").on(table.userId, table.normalizedName),
-]);
+    repositoryCount: integer("repository_count").notNull().default(0),
+    publicRepositoryCount: integer("public_repository_count"),
+    privateRepositoryCount: integer("private_repository_count"),
+    forkRepositoryCount: integer("fork_repository_count"),
+
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (table) => [
+    index("idx_organizations_user_id").on(table.userId),
+    index("idx_organizations_config_id").on(table.configId),
+    index("idx_organizations_status").on(table.status),
+    index("idx_organizations_is_included").on(table.isIncluded),
+    uniqueIndex("uniq_organizations_user_normalized_name").on(
+      table.userId,
+      table.normalizedName,
+    ),
+  ],
+);
 
 // ===== Better Auth Tables =====
 
 // Sessions table
-export const sessions = sqliteTable("sessions", {
-  id: text("id").primaryKey(),
-  token: text("token").notNull().unique(),
-  userId: text("user_id").notNull().references(() => users.id),
-  expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
-  ipAddress: text("ip_address"),
-  userAgent: text("user_agent"),
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`(unixepoch())`),
-  updatedAt: integer("updated_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`(unixepoch())`),
-}, (table) => [
-  index("idx_sessions_user_id").on(table.userId),
-  index("idx_sessions_token").on(table.token),
-  index("idx_sessions_expires_at").on(table.expiresAt),
-]);
+export const sessions = sqliteTable(
+  "sessions",
+  {
+    id: text("id").primaryKey(),
+    token: text("token").notNull().unique(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id),
+    expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+    ipAddress: text("ip_address"),
+    userAgent: text("user_agent"),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (table) => [
+    index("idx_sessions_user_id").on(table.userId),
+    index("idx_sessions_token").on(table.token),
+    index("idx_sessions_expires_at").on(table.expiresAt),
+  ],
+);
 
 // Accounts table (for OAuth providers and credentials)
-export const accounts = sqliteTable("accounts", {
-  id: text("id").primaryKey(),
-  accountId: text("account_id").notNull(), 
-  userId: text("user_id").notNull().references(() => users.id),
-  providerId: text("provider_id").notNull(),
-  providerUserId: text("provider_user_id"), // Make nullable for email/password auth
-  accessToken: text("access_token"),
-  refreshToken: text("refresh_token"),
-  idToken: text("id_token"),
-  accessTokenExpiresAt: integer("access_token_expires_at", { mode: "timestamp" }),
-  refreshTokenExpiresAt: integer("refresh_token_expires_at", { mode: "timestamp" }),
-  scope: text("scope"),
-  expiresAt: integer("expires_at", { mode: "timestamp" }),
-  password: text("password"), // For credential provider
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`(unixepoch())`),
-  updatedAt: integer("updated_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`(unixepoch())`),
-}, (table) => [
-  index("idx_accounts_account_id").on(table.accountId),
-  index("idx_accounts_user_id").on(table.userId),
-  index("idx_accounts_provider").on(table.providerId, table.providerUserId),
-]);
+export const accounts = sqliteTable(
+  "accounts",
+  {
+    id: text("id").primaryKey(),
+    accountId: text("account_id").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id),
+    providerId: text("provider_id").notNull(),
+    providerUserId: text("provider_user_id"), // Make nullable for email/password auth
+    accessToken: text("access_token"),
+    refreshToken: text("refresh_token"),
+    idToken: text("id_token"),
+    accessTokenExpiresAt: integer("access_token_expires_at", {
+      mode: "timestamp",
+    }),
+    refreshTokenExpiresAt: integer("refresh_token_expires_at", {
+      mode: "timestamp",
+    }),
+    scope: text("scope"),
+    expiresAt: integer("expires_at", { mode: "timestamp" }),
+    password: text("password"), // For credential provider
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (table) => [
+    index("idx_accounts_account_id").on(table.accountId),
+    index("idx_accounts_user_id").on(table.userId),
+    index("idx_accounts_provider").on(table.providerId, table.providerUserId),
+  ],
+);
 
 // Verification tokens table
-export const verificationTokens = sqliteTable("verification_tokens", {
-  id: text("id").primaryKey(),
-  token: text("token").notNull().unique(),
-  identifier: text("identifier").notNull(),
-  type: text("type").notNull(), // email, password-reset, etc
-  expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`(unixepoch())`),
-}, (table) => [
-  index("idx_verification_tokens_token").on(table.token),
-  index("idx_verification_tokens_identifier").on(table.identifier),
-]);
+export const verificationTokens = sqliteTable(
+  "verification_tokens",
+  {
+    id: text("id").primaryKey(),
+    token: text("token").notNull().unique(),
+    identifier: text("identifier").notNull(),
+    type: text("type").notNull(), // email, password-reset, etc
+    expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (table) => [
+    index("idx_verification_tokens_token").on(table.token),
+    index("idx_verification_tokens_identifier").on(table.identifier),
+  ],
+);
 
 // Verifications table (for Better Auth)
-export const verifications = sqliteTable("verifications", {
-  id: text("id").primaryKey(),
-  identifier: text("identifier").notNull(),
-  value: text("value").notNull(),
-  expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`(unixepoch())`),
-  updatedAt: integer("updated_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`(unixepoch())`),
-}, (table) => [
-  index("idx_verifications_identifier").on(table.identifier),
-]);
+export const verifications = sqliteTable(
+  "verifications",
+  {
+    id: text("id").primaryKey(),
+    identifier: text("identifier").notNull(),
+    value: text("value").notNull(),
+    expiresAt: integer("expires_at", { mode: "timestamp" }).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (table) => [index("idx_verifications_identifier").on(table.identifier)],
+);
 
 // ===== OIDC Provider Tables =====
 
 // OAuth Applications table
-export const oauthApplications = sqliteTable("oauth_applications", {
-  id: text("id").primaryKey(),
-  clientId: text("client_id").notNull().unique(),
-  clientSecret: text("client_secret").notNull(),
-  name: text("name").notNull(),
-  redirectURLs: text("redirect_urls").notNull(), // Comma-separated list
-  metadata: text("metadata"), // JSON string
-  type: text("type").notNull(), // web, mobile, etc
-  disabled: integer("disabled", { mode: "boolean" }).notNull().default(false),
-  userId: text("user_id"), // Optional - owner of the application
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`(unixepoch())`),
-  updatedAt: integer("updated_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`(unixepoch())`),
-}, (table) => [
-  index("idx_oauth_applications_client_id").on(table.clientId),
-  index("idx_oauth_applications_user_id").on(table.userId),
-]);
+export const oauthApplications = sqliteTable(
+  "oauth_applications",
+  {
+    id: text("id").primaryKey(),
+    clientId: text("client_id").notNull().unique(),
+    clientSecret: text("client_secret").notNull(),
+    name: text("name").notNull(),
+    redirectURLs: text("redirect_urls").notNull(), // Comma-separated list
+    metadata: text("metadata"), // JSON string
+    type: text("type").notNull(), // web, mobile, etc
+    disabled: integer("disabled", { mode: "boolean" }).notNull().default(false),
+    userId: text("user_id"), // Optional - owner of the application
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (table) => [
+    index("idx_oauth_applications_client_id").on(table.clientId),
+    index("idx_oauth_applications_user_id").on(table.userId),
+  ],
+);
 
 // OAuth Access Tokens table
-export const oauthAccessTokens = sqliteTable("oauth_access_tokens", {
-  id: text("id").primaryKey(),
-  accessToken: text("access_token").notNull(),
-  refreshToken: text("refresh_token"),
-  accessTokenExpiresAt: integer("access_token_expires_at", { mode: "timestamp" }).notNull(),
-  refreshTokenExpiresAt: integer("refresh_token_expires_at", { mode: "timestamp" }),
-  clientId: text("client_id").notNull(),
-  userId: text("user_id").notNull().references(() => users.id),
-  scopes: text("scopes").notNull(), // Comma-separated list
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`(unixepoch())`),
-  updatedAt: integer("updated_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`(unixepoch())`),
-}, (table) => [
-  index("idx_oauth_access_tokens_access_token").on(table.accessToken),
-  index("idx_oauth_access_tokens_user_id").on(table.userId),
-  index("idx_oauth_access_tokens_client_id").on(table.clientId),
-]);
+export const oauthAccessTokens = sqliteTable(
+  "oauth_access_tokens",
+  {
+    id: text("id").primaryKey(),
+    accessToken: text("access_token").notNull(),
+    refreshToken: text("refresh_token"),
+    accessTokenExpiresAt: integer("access_token_expires_at", {
+      mode: "timestamp",
+    }).notNull(),
+    refreshTokenExpiresAt: integer("refresh_token_expires_at", {
+      mode: "timestamp",
+    }),
+    clientId: text("client_id").notNull(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id),
+    scopes: text("scopes").notNull(), // Comma-separated list
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (table) => [
+    index("idx_oauth_access_tokens_access_token").on(table.accessToken),
+    index("idx_oauth_access_tokens_user_id").on(table.userId),
+    index("idx_oauth_access_tokens_client_id").on(table.clientId),
+  ],
+);
 
 // OAuth Consent table
-export const oauthConsent = sqliteTable("oauth_consent", {
-  id: text("id").primaryKey(),
-  userId: text("user_id").notNull().references(() => users.id),
-  clientId: text("client_id").notNull(),
-  scopes: text("scopes").notNull(), // Comma-separated list
-  consentGiven: integer("consent_given", { mode: "boolean" }).notNull(),
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`(unixepoch())`),
-  updatedAt: integer("updated_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`(unixepoch())`),
-}, (table) => [
-  index("idx_oauth_consent_user_id").on(table.userId),
-  index("idx_oauth_consent_client_id").on(table.clientId),
-  index("idx_oauth_consent_user_client").on(table.userId, table.clientId),
-]);
+export const oauthConsent = sqliteTable(
+  "oauth_consent",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id),
+    clientId: text("client_id").notNull(),
+    scopes: text("scopes").notNull(), // Comma-separated list
+    consentGiven: integer("consent_given", { mode: "boolean" }).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (table) => [
+    index("idx_oauth_consent_user_id").on(table.userId),
+    index("idx_oauth_consent_client_id").on(table.clientId),
+    index("idx_oauth_consent_user_client").on(table.userId, table.clientId),
+  ],
+);
 
 // ===== SSO Provider Tables =====
 
 // SSO Providers table
-export const ssoProviders = sqliteTable("sso_providers", {
-  id: text("id").primaryKey(),
-  issuer: text("issuer").notNull(),
-  domain: text("domain").notNull(),
-  oidcConfig: text("oidc_config").notNull(), // JSON string with OIDC configuration
-  userId: text("user_id").notNull(), // Admin who created this provider
-  providerId: text("provider_id").notNull().unique(), // Unique identifier for the provider
-  organizationId: text("organization_id"), // Optional - if provider is linked to an organization
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`(unixepoch())`),
-  updatedAt: integer("updated_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`(unixepoch())`),
-}, (table) => [
-  index("idx_sso_providers_provider_id").on(table.providerId),
-  index("idx_sso_providers_domain").on(table.domain),
-  index("idx_sso_providers_issuer").on(table.issuer),
-]);
+export const ssoProviders = sqliteTable(
+  "sso_providers",
+  {
+    id: text("id").primaryKey(),
+    issuer: text("issuer").notNull(),
+    domain: text("domain").notNull(),
+    oidcConfig: text("oidc_config").notNull(), // JSON string with OIDC configuration
+    userId: text("user_id").notNull(), // Admin who created this provider
+    providerId: text("provider_id").notNull().unique(), // Unique identifier for the provider
+    organizationId: text("organization_id"), // Optional - if provider is linked to an organization
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (table) => [
+    index("idx_sso_providers_provider_id").on(table.providerId),
+    index("idx_sso_providers_domain").on(table.domain),
+    index("idx_sso_providers_issuer").on(table.issuer),
+  ],
+);
 
 // ===== Rate Limit Tracking =====
 
@@ -671,29 +767,33 @@ export const rateLimitSchema = z.object({
   updatedAt: z.coerce.date(),
 });
 
-export const rateLimits = sqliteTable("rate_limits", {
-  id: text("id").primaryKey(),
-  userId: text("user_id")
-    .notNull()
-    .references(() => users.id),
-  provider: text("provider").notNull().default("github"),
-  limit: integer("limit").notNull(),
-  remaining: integer("remaining").notNull(),
-  used: integer("used").notNull(),
-  reset: integer("reset", { mode: "timestamp" }).notNull(),
-  retryAfter: integer("retry_after"), // seconds to wait
-  status: text("status").notNull().default("ok"),
-  lastChecked: integer("last_checked", { mode: "timestamp" }).notNull(),
-  createdAt: integer("created_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`(unixepoch())`),
-  updatedAt: integer("updated_at", { mode: "timestamp" })
-    .notNull()
-    .default(sql`(unixepoch())`),
-}, (table) => [
-  index("idx_rate_limits_user_provider").on(table.userId, table.provider),
-  index("idx_rate_limits_status").on(table.status),
-]);
+export const rateLimits = sqliteTable(
+  "rate_limits",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id")
+      .notNull()
+      .references(() => users.id),
+    provider: text("provider").notNull().default("github"),
+    limit: integer("limit").notNull(),
+    remaining: integer("remaining").notNull(),
+    used: integer("used").notNull(),
+    reset: integer("reset", { mode: "timestamp" }).notNull(),
+    retryAfter: integer("retry_after"), // seconds to wait
+    status: text("status").notNull().default("ok"),
+    lastChecked: integer("last_checked", { mode: "timestamp" }).notNull(),
+    createdAt: integer("created_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+    updatedAt: integer("updated_at", { mode: "timestamp" })
+      .notNull()
+      .default(sql`(unixepoch())`),
+  },
+  (table) => [
+    index("idx_rate_limits_user_provider").on(table.userId, table.provider),
+    index("idx_rate_limits_status").on(table.status),
+  ],
+);
 
 // Export type definitions
 export type User = z.infer<typeof userSchema>;

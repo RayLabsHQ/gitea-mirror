@@ -3,6 +3,7 @@ import { type Config as ConfigType } from "@/lib/db/schema";
 export type GiteaOrgVisibility = "public" | "private" | "limited";
 export type MirrorStrategy = "preserve" | "single-org" | "flat-user" | "mixed";
 export type StarredReposMode = "dedicated-org" | "preserve-owner";
+export type ForcePushAction = "allow" | "backup-branch" | "block";
 
 export interface GiteaConfig {
   url: string;
@@ -22,6 +23,7 @@ export interface GiteaConfig {
   backupRetentionCount?: number;
   backupDirectory?: string;
   blockSyncOnBackupFailure?: boolean;
+  forcePushAction?: ForcePushAction;
 }
 
 export interface ScheduleConfig {
@@ -58,8 +60,8 @@ export interface GitHubConfig {
 
 export interface MirrorOptions {
   mirrorReleases: boolean;
-  releaseLimit?: number;  // Limit number of releases to mirror (default: 10)
-  mirrorLFS: boolean;  // Mirror Git LFS objects
+  releaseLimit?: number; // Limit number of releases to mirror (default: 10)
+  mirrorLFS: boolean; // Mirror Git LFS objects
   mirrorMetadata: boolean;
   metadataComponents: {
     issues: boolean;
