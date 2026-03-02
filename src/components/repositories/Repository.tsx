@@ -694,6 +694,80 @@ export default function Repository() {
     }
   };
 
+  const handleApproveSyncAction = async ({ repoId }: { repoId: string }) => {
+    try {
+      if (!user || !user.id) return;
+      setLoadingRepoIds((prev) => new Set(prev).add(repoId));
+
+      const response = await apiRequest<{
+        success: boolean;
+        message?: string;
+        error?: string;
+        repositories: Repository[];
+      }>("/job/approve-sync", {
+        method: "POST",
+        data: { repositoryIds: [repoId], action: "approve" },
+      });
+
+      if (response.success) {
+        toast.success("Sync approved — backup + sync started");
+        setRepositories((prevRepos) =>
+          prevRepos.map((repo) => {
+            const updated = response.repositories.find((r) => r.id === repo.id);
+            return updated ? updated : repo;
+          }),
+        );
+      } else {
+        showErrorToast(response.error || "Error approving sync", toast);
+      }
+    } catch (error) {
+      showErrorToast(error, toast);
+    } finally {
+      setLoadingRepoIds((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(repoId);
+        return newSet;
+      });
+    }
+  };
+
+  const handleDismissSyncAction = async ({ repoId }: { repoId: string }) => {
+    try {
+      if (!user || !user.id) return;
+      setLoadingRepoIds((prev) => new Set(prev).add(repoId));
+
+      const response = await apiRequest<{
+        success: boolean;
+        message?: string;
+        error?: string;
+        repositories: Repository[];
+      }>("/job/approve-sync", {
+        method: "POST",
+        data: { repositoryIds: [repoId], action: "dismiss" },
+      });
+
+      if (response.success) {
+        toast.success("Force-push alert dismissed");
+        setRepositories((prevRepos) =>
+          prevRepos.map((repo) => {
+            const updated = response.repositories.find((r) => r.id === repo.id);
+            return updated ? updated : repo;
+          }),
+        );
+      } else {
+        showErrorToast(response.error || "Error dismissing alert", toast);
+      }
+    } catch (error) {
+      showErrorToast(error, toast);
+    } finally {
+      setLoadingRepoIds((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(repoId);
+        return newSet;
+      });
+    }
+  };
+
   const handleAddRepository = async ({
     repo,
     owner,
@@ -1409,6 +1483,8 @@ export default function Repository() {
             await fetchRepositories(false);
           }}
           onDelete={handleRequestDeleteRepository}
+          onApproveSync={handleApproveSyncAction}
+          onDismissSync={handleDismissSyncAction}
         />
       )}
 

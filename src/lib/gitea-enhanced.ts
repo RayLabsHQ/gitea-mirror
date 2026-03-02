@@ -19,7 +19,12 @@ import {
   createPreSyncBundleBackup,
   shouldCreatePreSyncBackup,
   shouldBlockSyncOnBackupFailure,
+  resolveBackupStrategy,
+  shouldBackupForStrategy,
+  shouldBlockSyncForStrategy,
+  strategyNeedsDetection,
 } from "./repo-backup";
+import { detectForcePush } from "./utils/force-push-detection";
 import {
   parseRepositoryMetadataState,
   serializeRepositoryMetadataState,
@@ -255,9 +260,12 @@ export async function getOrCreateGiteaOrgEnhanced({
 export async function syncGiteaRepoEnhanced({
   config,
   repository,
+  skipForcePushDetection,
 }: {
   config: Partial<Config>;
   repository: Repository;
+  /** When true, skip force-push detection and blocking (used by approve-sync). */
+  skipForcePushDetection?: boolean;
 }, deps?: SyncDependencies): Promise<any> {
   try {
     if (!config.userId || !config.giteaConfig?.url || !config.giteaConfig?.token) {
@@ -318,58 +326,138 @@ export async function syncGiteaRepoEnhanced({
       throw new Error(`Repository ${repository.name} is not a mirror. Cannot sync.`);
     }
 
-    if (shouldCreatePreSyncBackup(config)) {
-      const cloneUrl =
-        repoInfo.clone_url ||
-        `${config.giteaConfig.url.replace(/\/$/, "")}/${repoOwner}/${repository.name}.git`;
+    // ---- Smart backup strategy with force-push detection ----
+    const backupStrategy = resolveBackupStrategy(config);
+    let forcePushDetected = false;
 
-      try {
-        const backupResult = await createPreSyncBundleBackup({
-          config,
-          owner: repoOwner,
-          repoName: repository.name,
-          cloneUrl,
-        });
+    if (backupStrategy !== "disabled") {
+      // Run force-push detection if the strategy requires it
+      // (skip when called from approve-sync to avoid re-blocking)
+      if (strategyNeedsDetection(backupStrategy) && !skipForcePushDetection) {
+        try {
+          const decryptedGithubToken = decryptedConfig.githubConfig?.token;
+          if (decryptedGithubToken) {
+            const fpOctokit = new Octokit({ auth: decryptedGithubToken });
+            const detectionResult = await detectForcePush({
+              giteaUrl: config.giteaConfig.url,
+              giteaToken: decryptedConfig.giteaConfig.token,
+              giteaOwner: repoOwner,
+              giteaRepo: repository.name,
+              octokit: fpOctokit,
+              githubOwner: repository.owner,
+              githubRepo: repository.name,
+            });
 
-        await createMirrorJob({
-          userId: config.userId,
-          repositoryId: repository.id,
-          repositoryName: repository.name,
-          message: `Snapshot created for ${repository.name}`,
-          details: `Pre-sync snapshot created at ${backupResult.bundlePath}.`,
-          status: "syncing",
-        });
-      } catch (backupError) {
-        const errorMessage =
-          backupError instanceof Error ? backupError.message : String(backupError);
+            forcePushDetected = detectionResult.detected;
 
-        await createMirrorJob({
-          userId: config.userId,
-          repositoryId: repository.id,
-          repositoryName: repository.name,
-          message: `Snapshot failed for ${repository.name}`,
-          details: `Pre-sync snapshot failed: ${errorMessage}`,
-          status: "failed",
-        });
-
-        if (shouldBlockSyncOnBackupFailure(config)) {
-          await db
-            .update(repositories)
-            .set({
-              status: repoStatusEnum.parse("failed"),
-              updatedAt: new Date(),
-              errorMessage: `Snapshot failed; sync blocked to protect history. ${errorMessage}`,
-            })
-            .where(eq(repositories.id, repository.id!));
-
-          throw new Error(
-            `Snapshot failed; sync blocked to protect history. ${errorMessage}`
+            if (detectionResult.skipped) {
+              console.log(
+                `[Sync] Force-push detection skipped for ${repository.name}: ${detectionResult.skipReason}`,
+              );
+            } else if (forcePushDetected) {
+              const branchNames = detectionResult.affectedBranches
+                .map((b) => `${b.name} (${b.reason})`)
+                .join(", ");
+              console.warn(
+                `[Sync] Force-push detected on ${repository.name}: ${branchNames}`,
+              );
+            }
+          } else {
+            console.log(
+              `[Sync] Skipping force-push detection for ${repository.name}: no GitHub token`,
+            );
+          }
+        } catch (detectionError) {
+          // Fail-open: detection errors should never block sync
+          console.warn(
+            `[Sync] Force-push detection failed for ${repository.name}, proceeding with sync: ${
+              detectionError instanceof Error ? detectionError.message : String(detectionError)
+            }`,
           );
         }
+      }
 
-        console.warn(
-          `[Sync] Snapshot failed for ${repository.name}, continuing because blockSyncOnBackupFailure=false: ${errorMessage}`
-        );
+      // Check if sync should be blocked (block-on-force-push mode)
+      if (shouldBlockSyncForStrategy(backupStrategy, forcePushDetected)) {
+        const branchInfo = `Force-push detected; sync blocked for manual approval.`;
+
+        await db
+          .update(repositories)
+          .set({
+            status: "pending-approval",
+            updatedAt: new Date(),
+            errorMessage: branchInfo,
+          })
+          .where(eq(repositories.id, repository.id!));
+
+        await createMirrorJob({
+          userId: config.userId,
+          repositoryId: repository.id,
+          repositoryName: repository.name,
+          message: `Sync blocked for ${repository.name}: force-push detected`,
+          details: branchInfo,
+          status: "pending-approval",
+        });
+
+        console.warn(`[Sync] Sync blocked for ${repository.name}: pending manual approval`);
+        return { blocked: true, reason: branchInfo };
+      }
+
+      // Create backup if strategy says so
+      if (shouldBackupForStrategy(backupStrategy, forcePushDetected)) {
+        const cloneUrl =
+          repoInfo.clone_url ||
+          `${config.giteaConfig.url.replace(/\/$/, "")}/${repoOwner}/${repository.name}.git`;
+
+        try {
+          const backupResult = await createPreSyncBundleBackup({
+            config,
+            owner: repoOwner,
+            repoName: repository.name,
+            cloneUrl,
+            force: true, // Strategy already decided to backup; skip legacy gate
+          });
+
+          await createMirrorJob({
+            userId: config.userId,
+            repositoryId: repository.id,
+            repositoryName: repository.name,
+            message: `Snapshot created for ${repository.name}`,
+            details: `Pre-sync snapshot created at ${backupResult.bundlePath}.`,
+            status: "syncing",
+          });
+        } catch (backupError) {
+          const errorMessage =
+            backupError instanceof Error ? backupError.message : String(backupError);
+
+          await createMirrorJob({
+            userId: config.userId,
+            repositoryId: repository.id,
+            repositoryName: repository.name,
+            message: `Snapshot failed for ${repository.name}`,
+            details: `Pre-sync snapshot failed: ${errorMessage}`,
+            status: "failed",
+          });
+
+          if (shouldBlockSyncOnBackupFailure(config)) {
+            await db
+              .update(repositories)
+              .set({
+                status: repoStatusEnum.parse("failed"),
+                updatedAt: new Date(),
+                errorMessage: `Snapshot failed; sync blocked to protect history. ${errorMessage}`,
+              })
+              .where(eq(repositories.id, repository.id!));
+
+            throw new Error(
+              `Snapshot failed; sync blocked to protect history. ${errorMessage}`,
+            );
+          }
+
+          console.warn(
+            `[Sync] Snapshot failed for ${repository.name}, continuing because blockSyncOnBackupFailure=false: ${errorMessage}`,
+          );
+        }
       }
     }
 

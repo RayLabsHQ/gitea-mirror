@@ -280,11 +280,29 @@ async function runScheduledSync(config: any): Promise<void> {
       });
     }
     
+    // Log pending-approval repos that are excluded from sync
+    try {
+      const pendingApprovalRepos = await db
+        .select({ id: repositories.id })
+        .from(repositories)
+        .where(
+          and(
+            eq(repositories.userId, userId),
+            eq(repositories.status, 'pending-approval')
+          )
+        );
+      if (pendingApprovalRepos.length > 0) {
+        console.log(`[Scheduler] ${pendingApprovalRepos.length} repositories pending approval (force-push detected) for user ${userId} — skipping sync for those`);
+      }
+    } catch {
+      // Non-critical logging, ignore errors
+    }
+
     if (reposToSync.length === 0) {
       console.log(`[Scheduler] No repositories to sync for user ${userId}`);
       return;
     }
-    
+
     console.log(`[Scheduler] Syncing ${reposToSync.length} repositories for user ${userId}`);
     
     // Process repositories in batches

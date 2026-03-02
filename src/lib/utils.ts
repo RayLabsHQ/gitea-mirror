@@ -280,6 +280,8 @@ export const getStatusColor = (status: string): string => {
       return "bg-orange-500"; // Deleting
     case "deleted":
       return "bg-gray-600"; // Deleted
+    case "pending-approval":
+      return "bg-amber-500"; // Needs manual approval
     default:
       return "bg-gray-400"; // Unknown/neutral
   }

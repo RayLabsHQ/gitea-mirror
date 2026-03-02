@@ -33,6 +33,13 @@ export const githubConfigSchema = z.object({
   starredDuplicateStrategy: z.enum(["suffix", "prefix", "owner-org"]).default("suffix").optional(),
 });
 
+export const backupStrategyEnum = z.enum([
+  "disabled",
+  "always",
+  "on-force-push",
+  "block-on-force-push",
+]);
+
 export const giteaConfigSchema = z.object({
   url: z.url(),
   externalUrl: z.url().optional(),
@@ -65,7 +72,8 @@ export const giteaConfigSchema = z.object({
   mirrorPullRequests: z.boolean().default(false),
   mirrorLabels: z.boolean().default(false),
   mirrorMilestones: z.boolean().default(false),
-  backupBeforeSync: z.boolean().default(true),
+  backupStrategy: backupStrategyEnum.default("on-force-push"),
+  backupBeforeSync: z.boolean().default(true), // Deprecated: kept for backward compat, use backupStrategy
   backupRetentionCount: z.number().int().min(1).default(20),
   backupDirectory: z.string().optional(),
   blockSyncOnBackupFailure: z.boolean().default(true),
@@ -165,6 +173,7 @@ export const repositorySchema = z.object({
       "syncing",
       "synced",
       "archived",
+      "pending-approval", // Blocked by force-push detection, needs manual approval
     ])
     .default("imported"),
   lastMirrored: z.coerce.date().optional().nullable(),
@@ -196,6 +205,7 @@ export const mirrorJobSchema = z.object({
       "syncing",
       "synced",
       "archived",
+      "pending-approval",
     ])
     .default("imported"),
   message: z.string(),

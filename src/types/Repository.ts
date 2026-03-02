@@ -13,6 +13,7 @@ export const repoStatusEnum = z.enum([
   "syncing",
   "synced",
   "archived",
+  "pending-approval", // Blocked by force-push detection, needs manual approval
 ]);
 
 export type RepoStatus = z.infer<typeof repoStatusEnum>;

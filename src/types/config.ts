@@ -3,6 +3,7 @@ import { type Config as ConfigType } from "@/lib/db/schema";
 export type GiteaOrgVisibility = "public" | "private" | "limited";
 export type MirrorStrategy = "preserve" | "single-org" | "flat-user" | "mixed";
 export type StarredReposMode = "dedicated-org" | "preserve-owner";
+export type BackupStrategy = "disabled" | "always" | "on-force-push" | "block-on-force-push";
 
 export interface GiteaConfig {
   url: string;
@@ -18,7 +19,8 @@ export interface GiteaConfig {
   personalReposOrg?: string; // Override destination for personal repos
   issueConcurrency?: number;
   pullRequestConcurrency?: number;
-  backupBeforeSync?: boolean;
+  backupStrategy?: BackupStrategy;
+  backupBeforeSync?: boolean; // Deprecated: kept for backward compat, use backupStrategy
   backupRetentionCount?: number;
   backupDirectory?: string;
   blockSyncOnBackupFailure?: boolean;

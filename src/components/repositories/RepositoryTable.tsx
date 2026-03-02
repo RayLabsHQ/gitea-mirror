@@ -1,7 +1,7 @@
 import { useMemo, useRef } from "react";
 import Fuse from "fuse.js";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { FlipHorizontal, GitFork, RefreshCw, RotateCcw, Star, Lock, Ban, Check, ChevronDown, Trash2 } from "lucide-react";
+import { FlipHorizontal, GitFork, RefreshCw, RotateCcw, Star, Lock, Ban, Check, ChevronDown, Trash2, X } from "lucide-react";
 import { SiGithub, SiGitea } from "react-icons/si";
 import type { Repository } from "@/lib/db/schema";
 import { Button } from "@/components/ui/button";
@@ -42,6 +42,8 @@ interface RepositoryTableProps {
   onSelectionChange: (selectedIds: Set<string>) => void;
   onRefresh?: () => Promise<void>;
   onDelete?: (repoId: string) => void;
+  onApproveSync?: ({ repoId }: { repoId: string }) => Promise<void>;
+  onDismissSync?: ({ repoId }: { repoId: string }) => Promise<void>;
 }
 
 export default function RepositoryTable({
@@ -59,6 +61,8 @@ export default function RepositoryTable({
   onSelectionChange,
   onRefresh,
   onDelete,
+  onApproveSync,
+  onDismissSync,
 }: RepositoryTableProps) {
   const tableParentRef = useRef<HTMLDivElement>(null);
   const { giteaConfig } = useGiteaConfig();
@@ -239,6 +243,7 @@ export default function RepositoryTable({
                       repo.status === 'failed' ? 'bg-red-500/10 text-red-600 hover:bg-red-500/20 dark:text-red-400' :
                       repo.status === 'ignored' ? 'bg-gray-500/10 text-gray-600 hover:bg-gray-500/20 dark:text-gray-400' :
                       repo.status === 'skipped' ? 'bg-orange-500/10 text-orange-600 hover:bg-orange-500/20 dark:text-orange-400' :
+                      repo.status === 'pending-approval' ? 'bg-amber-500/10 text-amber-600 hover:bg-amber-500/20 dark:text-amber-400' :
                       'bg-muted hover:bg-muted/80'}`}
                   variant="secondary"
                 >
@@ -316,7 +321,40 @@ export default function RepositoryTable({
                   )}
                 </Button>
               )}
-              
+              {repo.status === "pending-approval" && (
+                <div className="flex gap-2 w-full">
+                  <Button
+                    size="default"
+                    variant="default"
+                    onClick={() => repo.id && onApproveSync?.({ repoId: repo.id })}
+                    disabled={isLoading}
+                    className="flex-1 h-10"
+                  >
+                    {isLoading ? (
+                      <>
+                        <Check className="h-4 w-4 mr-2 animate-spin" />
+                        Approving...
+                      </>
+                    ) : (
+                      <>
+                        <Check className="h-4 w-4 mr-2" />
+                        Approve Sync
+                      </>
+                    )}
+                  </Button>
+                  <Button
+                    size="default"
+                    variant="outline"
+                    onClick={() => repo.id && onDismissSync?.({ repoId: repo.id })}
+                    disabled={isLoading}
+                    className="flex-1 h-10"
+                  >
+                    <X className="h-4 w-4 mr-2" />
+                    Dismiss
+                  </Button>
+                </div>
+              )}
+
               {/* Ignore/Include button */}
               {repo.status === "ignored" ? (
                 <Button
@@ -663,6 +701,7 @@ export default function RepositoryTable({
                                 repo.status === 'failed' ? 'bg-red-500/10 text-red-600 hover:bg-red-500/20 dark:text-red-400' :
                                 repo.status === 'ignored' ? 'bg-gray-500/10 text-gray-600 hover:bg-gray-500/20 dark:text-gray-400' :
                                 repo.status === 'skipped' ? 'bg-orange-500/10 text-orange-600 hover:bg-orange-500/20 dark:text-orange-400' :
+                                repo.status === 'pending-approval' ? 'bg-amber-500/10 text-amber-600 hover:bg-amber-500/20 dark:text-amber-400' :
                                 'bg-muted hover:bg-muted/80'}`}
                             variant="secondary"
                           >
@@ -680,6 +719,8 @@ export default function RepositoryTable({
                           onRetry={() => onRetry({ repoId: repo.id ?? "" })}
                           onSkip={(skip) => onSkip({ repoId: repo.id ?? "", skip })}
                           onDelete={onDelete && repo.id ? () => onDelete(repo.id as string) : undefined}
+                          onApproveSync={onApproveSync ? () => onApproveSync({ repoId: repo.id ?? "" }) : undefined}
+                          onDismissSync={onDismissSync ? () => onDismissSync({ repoId: repo.id ?? "" }) : undefined}
                         />
                       </div>
                       {/* Links */}
@@ -791,6 +832,8 @@ function RepoActionButton({
   onRetry,
   onSkip,
   onDelete,
+  onApproveSync,
+  onDismissSync,
 }: {
   repo: { id: string; status: string };
   isLoading: boolean;
@@ -799,7 +842,36 @@ function RepoActionButton({
   onRetry: () => void;
   onSkip: (skip: boolean) => void;
   onDelete?: () => void;
+  onApproveSync?: () => void;
+  onDismissSync?: () => void;
 }) {
+  // For pending-approval repos, show approve/dismiss actions
+  if (repo.status === "pending-approval") {
+    return (
+      <div className="flex gap-1">
+        <Button
+          variant="default"
+          size="sm"
+          disabled={isLoading}
+          onClick={onApproveSync}
+          className="min-w-[70px]"
+        >
+          <Check className="h-4 w-4 mr-1" />
+          Approve
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={isLoading}
+          onClick={onDismissSync}
+        >
+          <X className="h-4 w-4 mr-1" />
+          Dismiss
+        </Button>
+      </div>
+    );
+  }
+
   // For ignored repos, show an "Include" action
   if (repo.status === "ignored") {
     return (

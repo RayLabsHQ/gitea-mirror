@@ -93,7 +93,8 @@ export async function createDefaultConfig({ userId, envOverrides = {} }: Default
       forkStrategy: "reference",
       issueConcurrency: 3,
       pullRequestConcurrency: 5,
-      backupBeforeSync: true,
+      backupStrategy: "on-force-push",
+      backupBeforeSync: true, // Deprecated: kept for backward compat
       backupRetentionCount: 20,
       backupDirectory: "data/repo-backups",
       blockSyncOnBackupFailure: true,

@@ -1,7 +1,7 @@
 import { mkdir, mkdtemp, readdir, rm, stat } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import type { Config } from "@/types/config";
+import type { Config, BackupStrategy } from "@/types/config";
 import { decryptConfigTokens } from "./utils/config-encryption";
 
 const TRUE_VALUES = new Set(["1", "true", "yes", "on"]);
@@ -101,6 +101,92 @@ export function shouldBlockSyncOnBackupFailure(config: Partial<Config>): boolean
   return configSetting === undefined ? true : Boolean(configSetting);
 }
 
+// ---- Backup strategy resolver ----
+
+const VALID_STRATEGIES = new Set<BackupStrategy>([
+  "disabled",
+  "always",
+  "on-force-push",
+  "block-on-force-push",
+]);
+
+/**
+ * Resolve the effective backup strategy from config, falling back through:
+ *   1. `backupStrategy` field (new)
+ *   2. `backupBeforeSync` boolean (deprecated, backward compat)
+ *   3. `PRE_SYNC_BACKUP_STRATEGY` env var
+ *   4. `PRE_SYNC_BACKUP_ENABLED` env var (legacy)
+ *   5. Default: `"on-force-push"`
+ */
+export function resolveBackupStrategy(config: Partial<Config>): BackupStrategy {
+  // 1. Explicit backupStrategy field
+  const explicit = config.giteaConfig?.backupStrategy;
+  if (explicit && VALID_STRATEGIES.has(explicit as BackupStrategy)) {
+    return explicit as BackupStrategy;
+  }
+
+  // 2. Legacy backupBeforeSync boolean → map to strategy
+  const legacy = config.giteaConfig?.backupBeforeSync;
+  if (legacy !== undefined) {
+    return legacy ? "always" : "disabled";
+  }
+
+  // 3. Env var (new)
+  const envStrategy = process.env.PRE_SYNC_BACKUP_STRATEGY?.trim().toLowerCase();
+  if (envStrategy && VALID_STRATEGIES.has(envStrategy as BackupStrategy)) {
+    return envStrategy as BackupStrategy;
+  }
+
+  // 4. Env var (legacy)
+  const envEnabled = process.env.PRE_SYNC_BACKUP_ENABLED;
+  if (envEnabled !== undefined) {
+    return parseBoolean(envEnabled, true) ? "always" : "disabled";
+  }
+
+  // 5. Default
+  return "on-force-push";
+}
+
+/**
+ * Determine whether a backup should be created for the given strategy and
+ * force-push detection result.
+ */
+export function shouldBackupForStrategy(
+  strategy: BackupStrategy,
+  forcePushDetected: boolean,
+): boolean {
+  switch (strategy) {
+    case "disabled":
+      return false;
+    case "always":
+      return true;
+    case "on-force-push":
+    case "block-on-force-push":
+      return forcePushDetected;
+    default:
+      return false;
+  }
+}
+
+/**
+ * Determine whether sync should be blocked (requires manual approval).
+ * Only `block-on-force-push` with an actual detection blocks sync.
+ */
+export function shouldBlockSyncForStrategy(
+  strategy: BackupStrategy,
+  forcePushDetected: boolean,
+): boolean {
+  return strategy === "block-on-force-push" && forcePushDetected;
+}
+
+/**
+ * Returns true when the strategy requires running force-push detection
+ * before deciding on backup / block behavior.
+ */
+export function strategyNeedsDetection(strategy: BackupStrategy): boolean {
+  return strategy === "on-force-push" || strategy === "block-on-force-push";
+}
+
 export function resolveBackupPaths({
   config,
   owner,
@@ -136,13 +222,17 @@ export async function createPreSyncBundleBackup({
   owner,
   repoName,
   cloneUrl,
+  force,
 }: {
   config: Partial<Config>;
   owner: string;
   repoName: string;
   cloneUrl: string;
+  /** When true, skip the legacy shouldCreatePreSyncBackup check.
+   *  Used by the strategy-driven path which has already decided to backup. */
+  force?: boolean;
 }): Promise<{ bundlePath: string }> {
-  if (!shouldCreatePreSyncBackup(config)) {
+  if (!force && !shouldCreatePreSyncBackup(config)) {
     throw new Error("Pre-sync backup is disabled.");
   }
 
