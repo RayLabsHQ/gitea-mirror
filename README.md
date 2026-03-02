@@ -40,6 +40,7 @@ First user signup becomes admin. Configure GitHub and Gitea through the web inte
 - 🔄 **Auto-discovery** - Automatically import new GitHub repositories (v3.4.0+)
 - 🧹 **Repository cleanup** - Auto-remove repos deleted from GitHub (v3.4.0+)
 - 🎯 **Proper mirror intervals** - Respects configured sync intervals (v3.4.0+)
+- 🛡️ **[Force-push protection](docs/FORCE_PUSH_PROTECTION.md)** - Smart detection with backup-on-demand or block-and-approve modes (Beta)
 - 🗑️ Automatic database cleanup with configurable retention
 - 🐳 Dockerized with multi-arch support (AMD64/ARM64)
 
@@ -499,6 +500,7 @@ GNU Affero General Public License v3.0 (AGPL-3.0) - see [LICENSE](LICENSE) file 
 
 - 📖 [Documentation](https://github.com/RayLabsHQ/gitea-mirror/tree/main/docs)
 - 🔐 [Environment Variables](docs/ENVIRONMENT_VARIABLES.md)
+- 🛡️ [Force-Push Protection](docs/FORCE_PUSH_PROTECTION.md)
 - 🐛 [Report Issues](https://github.com/RayLabsHQ/gitea-mirror/issues)
 - 💬 [Discussions](https://github.com/RayLabsHQ/gitea-mirror/discussions)
 - 🔧 [Proxmox VE Script](https://community-scripts.github.io/ProxmoxVE/scripts?id=gitea-mirror)

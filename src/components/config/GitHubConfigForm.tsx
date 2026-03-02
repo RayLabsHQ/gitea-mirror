@@ -11,6 +11,7 @@ import type { GitHubConfig, MirrorOptions, AdvancedOptions, GiteaConfig, BackupS
 import { Input } from "../ui/input";
 import { toast } from "sonner";
 import { Info, ShieldAlert } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { GitHubMirrorSettings } from "./GitHubMirrorSettings";
 import { Separator } from "../ui/separator";
 import {
@@ -217,6 +218,7 @@ export function GitHubConfigForm({
               <h3 className="text-sm font-medium flex items-center gap-2">
                 <ShieldAlert className="h-4 w-4 text-primary" />
                 Destructive Update Protection
+                <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-normal text-muted-foreground">Beta</Badge>
               </h3>
               <p className="text-xs text-muted-foreground">
                 Choose how to handle force-pushes or rewritten upstream history on GitHub.
