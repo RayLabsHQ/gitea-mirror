@@ -218,7 +218,7 @@ export function GitHubConfigForm({
               <h3 className="text-sm font-medium flex items-center gap-2">
                 <ShieldAlert className="h-4 w-4 text-primary" />
                 Destructive Update Protection
-                <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-normal text-muted-foreground">Beta</Badge>
+                <Badge variant="secondary" className="ml-2 text-[10px] px-1.5 py-0">BETA</Badge>
               </h3>
               <p className="text-xs text-muted-foreground">
                 Choose how to handle force-pushes or rewritten upstream history on GitHub.
