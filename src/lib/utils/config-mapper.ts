@@ -100,7 +100,7 @@ export function mapUiToDbConfig(
     mirrorPullRequests: mirrorOptions.mirrorMetadata && mirrorOptions.metadataComponents.pullRequests,
     mirrorLabels: mirrorOptions.mirrorMetadata && mirrorOptions.metadataComponents.labels,
     mirrorMilestones: mirrorOptions.mirrorMetadata && mirrorOptions.metadataComponents.milestones,
-    backupStrategy: giteaConfig.backupStrategy || "on-force-push",
+    backupStrategy: giteaConfig.backupStrategy,
     backupBeforeSync: giteaConfig.backupBeforeSync ?? true,
     backupRetentionCount: giteaConfig.backupRetentionCount ?? 20,
     backupDirectory: giteaConfig.backupDirectory?.trim() || undefined,
