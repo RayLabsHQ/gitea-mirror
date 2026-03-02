@@ -302,7 +302,7 @@ test.describe("E2E: Force-push simulation", () => {
     // Ensure backup is disabled for this test
     await saveConfig(request, giteaToken, appCookies, {
       giteaConfig: {
-        backupBeforeSync: false,
+        backupStrategy: "disabled",
         blockSyncOnBackupFailure: false,
       },
     });
@@ -560,16 +560,16 @@ test.describe("E2E: Force-push simulation", () => {
 
     const giteaToken = giteaApi.getTokenValue();
 
-    // Enable backup
+    // Enable backup with "always" strategy
     await saveConfig(request, giteaToken, appCookies, {
       giteaConfig: {
-        backupBeforeSync: true,
+        backupStrategy: "always",
         blockSyncOnBackupFailure: false, // don't block — we want to see both backup + sync happen
         backupRetentionCount: 5,
         backupDirectory: "data/repo-backups",
       },
     });
-    console.log("[ForcePush] Backup enabled for protected sync test");
+    console.log("[ForcePush] Backup enabled (strategy=always) for protected sync test");
 
     // Force-push again
     mutateSourceRepo(MY_PROJECT_BARE, "my-project-rewrite2", (workDir) => {
@@ -744,7 +744,7 @@ test.describe("E2E: Force-push simulation", () => {
     expect(
       backupJobs.length,
       "At least one backup/snapshot activity should exist for my-project " +
-        "when backupBeforeSync is enabled",
+        "when backupStrategy is 'always'",
     ).toBeGreaterThan(0);
 
     // Check whether any backups actually succeeded

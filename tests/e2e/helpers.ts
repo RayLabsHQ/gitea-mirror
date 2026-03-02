@@ -520,7 +520,7 @@ export async function saveConfig(
     starredReposOrg: "github-stars",
     preserveOrgStructure: false,
     mirrorStrategy: "single-org",
-    backupBeforeSync: false,
+    backupStrategy: "disabled",
     blockSyncOnBackupFailure: false,
   };
 

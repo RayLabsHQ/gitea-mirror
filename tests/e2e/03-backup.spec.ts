@@ -6,13 +6,13 @@
  * by the 02-mirror-workflow suite.
  *
  * What is tested:
- *   B1. Enable backupBeforeSync in config
+ *   B1. Enable backupStrategy: "always" in config
  *   B2. Confirm mirrored repos exist in Gitea (precondition)
  *   B3. Trigger a re-sync with backup enabled — verify the backup code path
  *       runs (snapshot activity entries appear in the activity log)
  *   B4. Inspect activity log for snapshot-related entries
  *   B5. Enable blockSyncOnBackupFailure and verify the flag is persisted
- *   B6. Disable backup and verify config resets cleanly
+ *   B6. Disable backup (backupStrategy: "disabled") and verify config resets cleanly
  */
 
 import { test, expect } from "@playwright/test";
@@ -54,10 +54,10 @@ test.describe("E2E: Backup configuration", () => {
     const giteaToken = giteaApi.getTokenValue();
     expect(giteaToken, "Gitea token required").toBeTruthy();
 
-    // Save config with backup enabled
+    // Save config with backup strategy set to "always"
     await saveConfig(request, giteaToken, appCookies, {
       giteaConfig: {
-        backupBeforeSync: true,
+        backupStrategy: "always",
         blockSyncOnBackupFailure: false,
         backupRetentionCount: 5,
         backupDirectory: "data/repo-backups",
@@ -75,7 +75,7 @@ test.describe("E2E: Backup configuration", () => {
       const configData = await configResp.json();
       const giteaCfg = configData.giteaConfig ?? configData.gitea ?? {};
       console.log(
-        `[Backup] Config saved: backupBeforeSync=${giteaCfg.backupBeforeSync}, blockOnFailure=${giteaCfg.blockSyncOnBackupFailure}`,
+        `[Backup] Config saved: backupStrategy=${giteaCfg.backupStrategy}, blockOnFailure=${giteaCfg.blockSyncOnBackupFailure}`,
       );
     }
   });
@@ -202,7 +202,7 @@ test.describe("E2E: Backup configuration", () => {
       expect(
         backupJobs.length,
         "Expected at least one backup/snapshot activity entry when " +
-          "backupBeforeSync is enabled and repos exist in Gitea",
+          "backupStrategy is 'always' and repos exist in Gitea",
       ).toBeGreaterThan(0);
 
       // Check for any failed backups
@@ -247,7 +247,7 @@ test.describe("E2E: Backup configuration", () => {
     // Update config to block sync on backup failure
     await saveConfig(request, giteaToken, appCookies, {
       giteaConfig: {
-        backupBeforeSync: true,
+        backupStrategy: "always",
         blockSyncOnBackupFailure: true,
         backupRetentionCount: 5,
         backupDirectory: "data/repo-backups",
@@ -284,7 +284,7 @@ test.describe("E2E: Backup configuration", () => {
     // Disable backup
     await saveConfig(request, giteaToken, appCookies, {
       giteaConfig: {
-        backupBeforeSync: false,
+        backupStrategy: "disabled",
         blockSyncOnBackupFailure: false,
       },
     });
@@ -297,7 +297,7 @@ test.describe("E2E: Backup configuration", () => {
       const configData = await configResp.json();
       const giteaCfg = configData.giteaConfig ?? configData.gitea ?? {};
       console.log(
-        `[Backup] After disable: backupBeforeSync=${giteaCfg.backupBeforeSync}`,
+        `[Backup] After disable: backupStrategy=${giteaCfg.backupStrategy}`,
       );
     }
     console.log("[Backup] Backup configuration test complete");
