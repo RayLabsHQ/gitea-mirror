@@ -359,7 +359,7 @@ export function GiteaConfigForm({
                 ? "No force-push or branch-deletion detection. Upstream rewrites and deletions are synced without any protection beyond the optional snapshot below."
                 : config.forcePushAction === "block"
                   ? 'When upstream history is rewritten or branches are deleted, the sync is blocked and the repository is marked as "pending approval". You must manually approve or dismiss from the dashboard.'
-                  : "When upstream history is rewritten or branches are deleted, lightweight backup branches are created inside Gitea before the mirror sync proceeds. Very storage-efficient — only adds a ref, no data duplication. Also protects against upstream branch deletions."}
+                  : "When upstream history is rewritten or branches are deleted, lightweight backup branches are created before the mirror sync proceeds. For regular repos, branches are created directly. For mirror repos (read-only), a fork is created in a 'force-push-backup' organization and branches are saved there. Very storage-efficient due to Gitea's copy-on-write forks."}
             </p>
           </div>
 

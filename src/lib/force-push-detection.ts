@@ -24,6 +24,44 @@ import { createMirrorJob } from "@/lib/helpers";
 import { db, repositories } from "@/lib/db";
 import { eq } from "drizzle-orm";
 import { repoStatusEnum } from "@/types/Repository";
+import { createForkBasedBackup } from "@/lib/fork-backup";
+
+// ─── Mirror detection ────────────────────────────────────────────────────────
+
+interface GiteaRepoInfo {
+  id: number;
+  name: string;
+  full_name: string;
+  mirror: boolean;
+  mirror_interval?: string;
+  clone_url: string;
+}
+
+/**
+ * Check if a repository is a mirror in Gitea.
+ * Mirror repositories are read-only and don't allow branch creation via API.
+ */
+async function isMirrorRepository({
+  giteaUrl,
+  token,
+  owner,
+  repo,
+}: {
+  giteaUrl: string;
+  token: string;
+  owner: string;
+  repo: string;
+}): Promise<boolean> {
+  try {
+    const url = `${giteaUrl}/api/v1/repos/${owner}/${repo}`;
+    const resp = await httpGet<GiteaRepoInfo>(url, { Authorization: `token ${token}` });
+    return resp.data?.mirror === true;
+  } catch (err) {
+    console.warn(`[ForcePush] Could not determine if ${owner}/${repo} is a mirror: ${err}`);
+    // Assume it's a mirror if we can't determine (safer default)
+    return true;
+  }
+}
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -267,16 +305,35 @@ function buildTimestamp(): string {
   return new Date().toISOString().replace(/[:.]/g, "-");
 }
 
+export interface CreateBackupBranchesParams {
+  giteaUrl: string;
+  token: string;
+  owner: string;
+  repo: string;
+  /** Branches to back up, with the SHA that should be preserved. */
+  branches: Array<{ branch: string; sha: string }>;
+  /** Optional config for fork-based backup (required when repo is a mirror) */
+  config?: Partial<Config>;
+}
+
+export interface CreateBackupBranchesResult extends BackupBranchResult {
+  isMirror: boolean;
+  forkUrl?: string;
+  usedForkBackup?: boolean;
+}
+
 /**
- * Creates lightweight backup branches in the Gitea repository for every
- * branch that is about to be overwritten or deleted.
+ * Creates lightweight backup branches for every branch that is about to be
+ * overwritten or deleted.
  *
- * The naming convention is `_<branch>_backup_<ISO-timestamp>`, e.g.
- * `_main_backup_2026-02-25T18-34-22-123Z`.
+ * For regular repositories: creates branches directly in the repo.
  *
- * This is extremely space-efficient because the backup is just a new ref
- * pointing at the *existing* commit objects inside the Gitea repo – no data
- * is duplicated.
+ * For mirror repositories (which are read-only): forks the repo to a
+ * "force-push-backup" organization and creates backup branches in the fork.
+ * Gitea uses copy-on-write for forks, so this is still space-efficient.
+ *
+ * The naming convention is `_backup_<branch>_<ISO-timestamp>`, e.g.
+ * `_backup_main_2026-02-25T18-34-22-123Z`.
  */
 export async function createBackupBranches({
   giteaUrl,
@@ -284,18 +341,56 @@ export async function createBackupBranches({
   owner,
   repo,
   branches,
-}: {
-  giteaUrl: string;
-  token: string;
-  owner: string;
-  repo: string;
-  /** Branches to back up, with the SHA that should be preserved. */
-  branches: Array<{ branch: string; sha: string }>;
-}): Promise<BackupBranchResult> {
+  config,
+}: CreateBackupBranchesParams): Promise<CreateBackupBranchesResult> {
   const ts = buildTimestamp();
   const created: BackupBranchResult["created"] = [];
   const failed: BackupBranchResult["failed"] = [];
 
+  // Check if the repository is a mirror - mirrors are read-only in Gitea
+  const isMirror = await isMirrorRepository({ giteaUrl, token, owner, repo });
+
+  if (isMirror) {
+    console.log(`[ForcePush] Repository ${owner}/${repo} is a mirror - using fork-based backup`);
+
+    if (!config) {
+      // No config provided, cannot use fork backup
+      for (const { branch } of branches) {
+        const backupBranch = `_${branch}_backup_${ts}`;
+        failed.push({
+          branch,
+          error: "Mirror repositories are read-only - config required for fork-based backup"
+        });
+      }
+      return { created, failed, isMirror: true, usedForkBackup: false };
+    }
+
+    // Use fork-based backup for mirrors
+    const forkResult = await createForkBasedBackup({
+      config,
+      sourceOwner: owner,
+      sourceRepo: repo,
+      branches,
+    });
+
+    // Map fork backup results to our return format
+    for (const item of forkResult.created) {
+      created.push({ branch: item.branch, backupBranch: item.backupBranch });
+    }
+    for (const item of forkResult.failed) {
+      failed.push({ branch: item.branch, error: item.error });
+    }
+
+    return {
+      created,
+      failed,
+      isMirror: true,
+      forkUrl: forkResult.forkUrl,
+      usedForkBackup: true,
+    };
+  }
+
+  // For non-mirror repos, create branches directly
   for (const { branch, sha } of branches) {
     const backupBranch = `_${branch}_backup_${ts}`;
     const url = `${giteaUrl}/api/v1/repos/${owner}/${repo}/branches`;
@@ -312,15 +407,11 @@ export async function createBackupBranches({
         { Authorization: `token ${token}` },
       );
       created.push({ branch, backupBranch });
-      console.log(`[ForcePush] ✓ Created backup branch ${backupBranch} via branch API`);
+      console.log(`[ForcePush] Created backup branch ${backupBranch}`);
     } catch (err) {
       const errMsg = err instanceof Error ? err.message : String(err);
       console.log(`[ForcePush] Branch API failed for ${backupBranch}: ${errMsg}, trying git refs API...`);
 
-      // If the branch create fails (e.g. branch already exists or source
-      // branch name doesn't work), try with the SHA directly using the
-      // git refs API.  This is especially important for deleted branches
-      // where old_branch_name may no longer be valid.
       try {
         const refUrl = `${giteaUrl}/api/v1/repos/${owner}/${repo}/git/refs`;
         await httpPost(
@@ -329,17 +420,16 @@ export async function createBackupBranches({
           { Authorization: `token ${token}` },
         );
         created.push({ branch, backupBranch });
-        console.log(`[ForcePush] ✓ Created backup branch ${backupBranch} via git refs API`);
+        console.log(`[ForcePush] Created backup branch ${backupBranch} via git refs API`);
       } catch (innerErr) {
-        const msg =
-          innerErr instanceof Error ? innerErr.message : String(innerErr);
-        console.error(`[ForcePush] ✗ Failed to create backup branch ${backupBranch}: ${msg}`);
+        const msg = innerErr instanceof Error ? innerErr.message : String(innerErr);
+        console.error(`[ForcePush] Failed to create backup branch ${backupBranch}: ${msg}`);
         failed.push({ branch, error: msg });
       }
     }
   }
 
-  return { created, failed };
+  return { created, failed, isMirror: false, usedForkBackup: false };
 }
 
 // ─── High-level integration ──────────────────────────────────────────────────
@@ -503,7 +593,17 @@ export async function handleForcePushProtection({
       owner: giteaOwner,
       repo: repository.name,
       branches: branchesToBackup,
+      config, // Pass config for fork-based backup when repo is a mirror
     });
+
+    // Handle fork-based backup for mirrors
+    if (backupResult.isMirror && backupResult.usedForkBackup) {
+      if (backupResult.forkUrl) {
+        console.log(
+          `[ForcePush] Used fork-based backup for mirror ${repository.name}. Fork URL: ${backupResult.forkUrl}`
+        );
+      }
+    }
 
     // Log the backup results
     console.log(`[ForcePush] Backup branch creation results for ${repository.name}: ${backupResult.created.length} created, ${backupResult.failed.length} failed`);
@@ -511,9 +611,10 @@ export async function handleForcePushProtection({
       console.error(`[ForcePush] FAILED backup branches: ${backupResult.failed.map(f => `${f.branch}: ${f.error}`).join("; ")}`);
     }
     for (const { branch, backupBranch } of backupResult.created) {
-      console.log(
-        `[ForcePush] Created backup branch ${backupBranch} for ${branch} in ${giteaOwner}/${repository.name}`,
-      );
+      const location = backupResult.usedForkBackup
+        ? `in fork ${backupResult.forkUrl}`
+        : `in ${giteaOwner}/${repository.name}`;
+      console.log(`[ForcePush] Created backup branch ${backupBranch} for ${branch} ${location}`);
     }
     for (const { branch, error } of backupResult.failed) {
       console.error(
@@ -522,6 +623,10 @@ export async function handleForcePushProtection({
     }
 
     // Record activity
+    const forkInfo = backupResult.usedForkBackup && backupResult.forkUrl
+      ? ` Fork location: ${backupResult.forkUrl}`
+      : "";
+
     await createMirrorJob({
       userId: config.userId!,
       repositoryId: repository.id,
@@ -533,6 +638,7 @@ export async function handleForcePushProtection({
         backupResult.failed.length > 0
           ? `Failed to create ${backupResult.failed.length} backup branch(es): ${backupResult.failed.map((f) => `${f.branch}: ${f.error}`).join("; ")}`
           : "",
+        forkInfo,
       ]
         .filter(Boolean)
         .join(" "),

@@ -287,6 +287,21 @@ describe("getForcePushAction", () => {
     ).toBe("backup-branch");
   });
 
+  test('defaults to "backup-branch" when giteaConfig exists but forcePushAction is absent', () => {
+    expect(
+      getForcePushAction({
+        giteaConfig: {
+          url: "https://gitea.example.com",
+          token: "tok",
+          organization: "org",
+          visibility: "public",
+          starredReposOrg: "starred",
+          preserveOrgStructure: false,
+        },
+      } as any),
+    ).toBe("backup-branch");
+  });
+
   test('returns "backup-branch" when explicitly configured', () => {
     expect(
       getForcePushAction({
