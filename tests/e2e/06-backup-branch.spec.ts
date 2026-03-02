@@ -1,25 +1,22 @@
 /**
  * 06 – Backup-branch protection E2E tests.
  *
- * Tests the NEW force-push protection feature that creates lightweight
- * backup branches inside Gitea when destructive changes (force-pushes
- * or branch deletions) are detected upstream.
+ * Tests the force-push protection feature that creates lightweight backup
+ * branches when destructive changes (force-pushes or branch deletions)
+ * are detected upstream.
  *
  * This file exercises all three `forcePushAction` modes:
- *   • `backup-branch` – creates `_<branch>_backup_<timestamp>` refs in Gitea
+ *   • `backup-branch` – creates `_backup_<branch>_<timestamp>` refs
  *   • `block`         – sets repo to `pending-approval`, requires manual action
  *   • `allow`         – no detection, legacy behavior
  *
- * It also tests branch-deletion detection and the approve/dismiss API.
+ * For regular repos: backup branches are created directly in the repo.
+ * For mirror repos (read-only): a fork is created in a "force-push-backup"
+ * organization and backup branches are stored there.
  *
  * Prerequisites:
  *   - 02-mirror-workflow.spec.ts must have run (my-project is mirrored)
  *   - 04-force-push.spec.ts should have run and restored the source repo
- *
- * The test manipulates both the source bare git repo (to simulate actual
- * force-pushes that Gitea will pick up) AND the fake GitHub server's branch
- * data (so the force-push detection code sees the correct SHAs when it
- * compares GitHub vs Gitea branches).
  */
 
 import { execSync } from "node:child_process";
@@ -48,6 +45,7 @@ import {
 const E2E_DIR = resolve(dirname(fileURLToPath(import.meta.url)));
 const GIT_REPOS_DIR = join(E2E_DIR, "git-repos");
 const MY_PROJECT_BARE = join(GIT_REPOS_DIR, "e2e-test-user", "my-project.git");
+const BACKUP_ORG = "force-push-backup";
 
 // ─── Git helpers ─────────────────────────────────────────────────────────────
 
@@ -336,7 +334,7 @@ test.describe("E2E: Backup-branch protection", () => {
     expect(syncStatus).toBeLessThan(500);
   });
 
-  test("BB2: Verify backup branch was created in Gitea", async () => {
+  test("BB2: Verify backup branch was created (in fork for mirrors)", async () => {
     // Wait for Gitea to pick up the force-pushed content
     await waitFor(
       async () => {
@@ -355,34 +353,49 @@ test.describe("E2E: Backup-branch protection", () => {
       },
     );
 
-    // List all branches — look for backup branches matching the pattern
-    const branches = await giteaApi.listBranches(
-      GITEA_MIRROR_ORG,
-      "my-project",
-    );
+    // For mirror repos, backup branches are in a fork (force-push-backup org)
+    // First check if the fork exists
+    let backupOrg = GITEA_MIRROR_ORG;
+    let backupRepoName = "my-project";
+    let usedFork = false;
+
+    try {
+      const forkRepo = await giteaApi.getRepo(BACKUP_ORG, "my-project");
+      if (forkRepo) {
+        console.log(`[BackupBranch] Found fork at ${BACKUP_ORG}/my-project`);
+        backupOrg = BACKUP_ORG;
+        usedFork = true;
+      }
+    } catch {
+      console.log("[BackupBranch] No fork found, checking original repo");
+    }
+
+    // List all branches in the backup location
+    const branches = await giteaApi.listBranches(backupOrg, backupRepoName);
     const branchNames = branches.map((b: any) => b.name);
     console.log(
-      `[BackupBranch] All branches after BB1: ${branchNames.join(", ")}`,
+      `[BackupBranch] All branches in ${backupOrg}/${backupRepoName}: ${branchNames.join(", ")}`,
     );
 
-    // Backup branches follow the pattern: _main_backup_<timestamp>
+    // Backup branches follow the pattern: _backup_main_<timestamp>
     const backupBranches = branchNames.filter((n: string) =>
-      /^_main_backup_/.test(n),
+      /^_backup_main_/.test(n),
     );
     console.log(
       `[BackupBranch] Backup branches found: ${backupBranches.length}`,
     );
 
+    // Should have exactly 1 backup branch for the force-push
     expect(
       backupBranches.length,
-      "At least one backup branch should have been created for main",
-    ).toBeGreaterThanOrEqual(1);
+      "Exactly one backup branch should have been created for main",
+    ).toBe(1);
 
     // The backup branch should point to the OLD (baseline) SHA
-    const latestBackup = backupBranches[backupBranches.length - 1];
+    const latestBackup = backupBranches[0];
     const backupBranch = await giteaApi.getBranch(
-      GITEA_MIRROR_ORG,
-      "my-project",
+      backupOrg,
+      backupRepoName,
       latestBackup,
     );
     expect(backupBranch, `Backup branch ${latestBackup} should exist`).toBeTruthy();
@@ -410,8 +423,8 @@ test.describe("E2E: Backup-branch protection", () => {
 
     // Verify the backup branch still has the OLD content (pre-force-push)
     const backupReadme = await giteaApi.getFileContent(
-      GITEA_MIRROR_ORG,
-      "my-project",
+      backupOrg,
+      backupRepoName,
       "README.md",
       latestBackup,
     );
@@ -424,9 +437,15 @@ test.describe("E2E: Backup-branch protection", () => {
       "Backup branch README should NOT contain force-push text",
     ).not.toContain("BACKUP-BRANCH TEST");
 
-    console.log(
-      "[BackupBranch] ✓ Backup branch preserves old state — protection works!",
-    );
+    if (usedFork) {
+      console.log(
+        "[BackupBranch] ✓ Backup branch created in fork — mirror protection works!",
+      );
+    } else {
+      console.log(
+        "[BackupBranch] ✓ Backup branch created in repo — protection works!",
+      );
+    }
   });
 
   test("BB3: Verify backup activity was logged", async ({ request }) => {
@@ -469,10 +488,21 @@ test.describe("E2E: Backup-branch protection", () => {
       );
     }
 
+    // Should have exactly 1 backup activity for the force-push
     expect(
       backupActivities.length,
-      "At least one backup-branch activity should be logged",
-    ).toBeGreaterThan(0);
+      "Exactly one backup-branch activity should be logged",
+    ).toBe(1);
+
+    // If fork was used, the activity should mention it
+    const hasForkInfo = backupActivities.some((a: any) =>
+      a.details?.toLowerCase().includes("fork") ||
+      a.details?.includes("force-push-backup")
+    );
+
+    if (hasForkInfo) {
+      console.log("[BackupBranch] ✓ Activity log mentions fork location");
+    }
   });
 
   // ════════════════════════════════════════════════════════════════════════════
@@ -647,34 +677,46 @@ test.describe("E2E: Backup-branch protection", () => {
     await giteaApi.triggerMirrorSync(GITEA_MIRROR_ORG, "my-project");
     await new Promise((r) => setTimeout(r, 15_000));
 
+    // For mirror repos, check the fork location for backup branches
+    let backupOrg = GITEA_MIRROR_ORG;
+    let backupRepoName = "my-project";
+
+    try {
+      const forkRepo = await giteaApi.getRepo(BACKUP_ORG, "my-project");
+      if (forkRepo) {
+        console.log(`[BackupBranch] Checking fork at ${BACKUP_ORG}/my-project for deletion backups`);
+        backupOrg = BACKUP_ORG;
+      }
+    } catch {
+      // No fork, check original
+    }
+
     // List all branches
-    const branches = await giteaApi.listBranches(
-      GITEA_MIRROR_ORG,
-      "my-project",
-    );
+    const branches = await giteaApi.listBranches(backupOrg, backupRepoName);
     const branchNames = branches.map((b: any) => b.name);
     console.log(
-      `[BackupBranch] All branches after BB5: ${branchNames.join(", ")}`,
+      `[BackupBranch] All branches in ${backupOrg}/${backupRepoName}: ${branchNames.join(", ")}`,
     );
 
-    // Look for backup of the deleted branch
+    // Look for backup of the deleted branch (pattern: _backup_feature-to-delete_<timestamp>)
     const deletionBackups = branchNames.filter((n: string) =>
-      /^_feature-to-delete_backup_/.test(n),
+      /^_backup_feature-to-delete_/.test(n),
     );
     console.log(
       `[BackupBranch] Deletion backup branches: ${deletionBackups.length}`,
     );
 
+    // Should have exactly 1 backup branch for the deleted branch
     expect(
       deletionBackups.length,
-      "At least one backup branch should exist for the deleted feature-to-delete branch",
-    ).toBeGreaterThanOrEqual(1);
+      "Exactly one backup branch should exist for the deleted feature-to-delete branch",
+    ).toBe(1);
 
     // Verify the backup branch has the content from the deleted branch
-    const latestBackup = deletionBackups[deletionBackups.length - 1];
+    const latestBackup = deletionBackups[0];
     const backupContent = await giteaApi.getFileContent(
-      GITEA_MIRROR_ORG,
-      "my-project",
+      backupOrg,
+      backupRepoName,
       "feature-to-delete.txt",
       latestBackup,
     );
@@ -1117,14 +1159,31 @@ test.describe("E2E: Backup-branch protection", () => {
 
     // Count how many NEW backup branches were created — there should be NONE
     // from this specific sync (allow mode doesn't create backups)
-    const branches = await giteaApi.listBranches(
-      GITEA_MIRROR_ORG,
-      "my-project",
-    );
-    const branchNames = branches.map((b: any) => b.name);
-    console.log(
-      `[BackupBranch] All branches after allow-mode sync: ${branchNames.join(", ")}`,
-    );
+    // Check both the mirror repo and the fork (if it exists)
+    const checkLocations = [
+      { org: GITEA_MIRROR_ORG, repo: "my-project" },
+    ];
+
+    try {
+      const forkRepo = await giteaApi.getRepo(BACKUP_ORG, "my-project");
+      if (forkRepo) {
+        checkLocations.push({ org: BACKUP_ORG, repo: "my-project" });
+      }
+    } catch {
+      // No fork exists
+    }
+
+    let totalNewBackups = 0;
+    for (const loc of checkLocations) {
+      const branches = await giteaApi.listBranches(loc.org, loc.repo);
+      const backupBranches = branches.filter((b: any) =>
+        /^_backup_/.test(b.name)
+      );
+      console.log(
+        `[BackupBranch] Backup branches in ${loc.org}/${loc.repo}: ${backupBranches.length}`,
+      );
+      // We expect the same number of backups as before (no new ones created in allow mode)
+    }
 
     console.log("[BackupBranch] ✓ Allow mode — sync proceeded, no detection");
   });
