@@ -97,9 +97,41 @@ export async function getOrCreateBackupOrg({
     console.log(`[ForkBackup] Created backup organization ${orgName} with ID: ${createResponse.data.id}`);
     return { id: createResponse.data.id, name: orgName };
   } catch (error) {
+    // Handle "already exists" error - the org might exist but was not found earlier
+    if (error instanceof HttpError) {
+      const errorLower = (error.response || "").toLowerCase();
+      if (error.status === 422 &&
+          (errorLower.includes("already exists") || errorLower.includes("user already exists"))) {
+        console.log(`[ForkBackup] Organization ${orgName} already exists (concurrent creation)`);
+        // Try to get the org again
+        try {
+          const orgResponse = await httpGet<{ id: number; username: string }>(
+            `${giteaUrl}/api/v1/orgs/${orgName}`,
+            { Authorization: `token ${token}` },
+          );
+          return { id: orgResponse.data.id, name: orgName };
+        } catch {
+          // Fall through to throw original error
+        }
+      }
+    }
     const errorMessage = error instanceof Error ? error.message : String(error);
     throw new Error(`Failed to create backup organization ${orgName}: ${errorMessage}`);
   }
+}
+      }
+    }
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to create backup organization ${orgName}: ${errorMessage}`);
+  }
+}
+
+/**
+ * Build unique fork name to avoid collisions when multiple owners have repos with same name.
+ * Pattern: {originalOwner}_{repoName}
+ */
+function buildForkName(sourceOwner: string, sourceRepo: string): string {
+  return `${sourceOwner}_${sourceRepo}`;
 }
 
 /**
@@ -118,9 +150,12 @@ async function getExistingFork({
   repoName: string;
   originalOwner: string;
 }): Promise<GiteaRepoInfo | null> {
+  // Use unique fork name to avoid collisions
+  const forkName = buildForkName(originalOwner, repoName);
+
   try {
     const response = await httpGet<GiteaRepoInfo>(
-      `${giteaUrl}/api/v1/repos/${backupOrg}/${repoName}`,
+      `${giteaUrl}/api/v1/repos/${backupOrg}/${forkName}`,
       { Authorization: `token ${token}` },
     );
 
@@ -129,7 +164,7 @@ async function getExistingFork({
     if (repoInfo && !repoInfo.mirror) {
       // Check if it's a fork by looking at the parent (if available) or just assume it's ours
       // Gitea API doesn't always expose parent info, so we'll use naming convention
-      console.log(`[ForkBackup] Found existing fork: ${backupOrg}/${repoName}`);
+      console.log(`[ForkBackup] Found existing fork: ${backupOrg}/${forkName}`);
       return repoInfo;
     }
     return null;
@@ -161,6 +196,9 @@ export async function forkToBackupOrg({
   sourceRepo: string;
   backupOrg: string;
 }): Promise<ForkResult> {
+  // Use unique fork name to avoid collisions: {owner}_{repo}
+  const forkName = buildForkName(sourceOwner, sourceRepo);
+
   // Check if fork already exists
   const existingFork = await getExistingFork({
     giteaUrl,
@@ -171,24 +209,24 @@ export async function forkToBackupOrg({
   });
 
   if (existingFork) {
-    console.log(`[ForkBackup] Fork already exists: ${backupOrg}/${sourceRepo}`);
+    console.log(`[ForkBackup] Fork already exists: ${backupOrg}/${forkName}`);
     return {
       success: true,
       forkOwner: backupOrg,
-      forkRepo: sourceRepo,
+      forkRepo: forkName,
       forkUrl: existingFork.html_url,
       alreadyExisted: true,
     };
   }
 
-  // Create the fork
-  console.log(`[ForkBackup] Forking ${sourceOwner}/${sourceRepo} to ${backupOrg}...`);
+  // Create the fork with unique name
+  console.log(`[ForkBackup] Forking ${sourceOwner}/${sourceRepo} to ${backupOrg}/${forkName}...`);
   try {
     const forkResponse = await httpPost<GiteaRepoInfo>(
       `${giteaUrl}/api/v1/repos/${sourceOwner}/${sourceRepo}/forks`,
       {
         organization: backupOrg,
-        name: sourceRepo,
+        name: forkName,
       },
       { Authorization: `token ${token}` },
     );
@@ -199,7 +237,7 @@ export async function forkToBackupOrg({
     return {
       success: true,
       forkOwner: backupOrg,
-      forkRepo: sourceRepo,
+      forkRepo: forkName,
       forkUrl: forkInfo.html_url,
       alreadyExisted: false,
     };
@@ -213,7 +251,7 @@ export async function forkToBackupOrg({
         return {
           success: false,
           forkOwner: backupOrg,
-          forkRepo: sourceRepo,
+          forkRepo: forkName,
           forkUrl: "",
           alreadyExisted: false,
           error: `Permission denied: ${errorMessage}. Ensure the Gitea token has permission to fork repositories.`,
@@ -223,7 +261,7 @@ export async function forkToBackupOrg({
         return {
           success: false,
           forkOwner: backupOrg,
-          forkRepo: sourceRepo,
+          forkRepo: forkName,
           forkUrl: "",
           alreadyExisted: false,
           error: `Source repository not found: ${sourceOwner}/${sourceRepo}`,
@@ -234,7 +272,7 @@ export async function forkToBackupOrg({
     return {
       success: false,
       forkOwner: backupOrg,
-      forkRepo: sourceRepo,
+      forkRepo: forkName,
       forkUrl: "",
       alreadyExisted: false,
       error: errorMessage,
