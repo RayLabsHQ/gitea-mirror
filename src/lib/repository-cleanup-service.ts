@@ -79,6 +79,13 @@ async function identifyOrphanedRepositories(config: any): Promise<any[]> {
         return false;
       }
 
+      // If starred repos are not being fetched from GitHub, we can't determine
+      // if a starred repo is orphaned - skip it to prevent data loss
+      if (repo.isStarred && !config.githubConfig?.includeStarred) {
+        console.log(`[Repository Cleanup] Skipping starred repo ${repo.fullName} - starred repos not being fetched from GitHub`);
+        return false;
+      }
+
       const githubRepo = githubReposByFullName.get(repo.fullName);
       if (!githubRepo) {
         return true;

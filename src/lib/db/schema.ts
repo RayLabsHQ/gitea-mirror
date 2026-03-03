@@ -29,6 +29,7 @@ export const githubConfigSchema = z.object({
   mirrorStrategy: z.enum(["preserve", "single-org", "flat-user", "mixed"]).default("preserve"),
   defaultOrg: z.string().optional(),
   starredCodeOnly: z.boolean().default(false),
+  autoMirrorStarred: z.boolean().default(false),
   skipStarredIssues: z.boolean().optional(), // Deprecated: kept for backward compatibility, use starredCodeOnly instead
   starredDuplicateStrategy: z.enum(["suffix", "prefix", "owner-org"]).default("suffix").optional(),
 });

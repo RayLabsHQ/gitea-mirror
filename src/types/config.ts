@@ -75,6 +75,7 @@ export interface MirrorOptions {
 export interface AdvancedOptions {
   skipForks: boolean;
   starredCodeOnly: boolean;
+  autoMirrorStarred?: boolean;
 }
 
 export interface SaveConfigApiRequest {

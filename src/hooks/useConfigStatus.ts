@@ -9,6 +9,8 @@ interface ConfigStatus {
   isFullyConfigured: boolean;
   isLoading: boolean;
   error: string | null;
+  autoMirrorStarred: boolean;
+  githubOwner: string;
 }
 
 // Cache to prevent duplicate API calls across components
@@ -33,6 +35,8 @@ export function useConfigStatus(): ConfigStatus {
     isFullyConfigured: false,
     isLoading: true,
     error: null,
+    autoMirrorStarred: false,
+    githubOwner: '',
   });
 
   // Track if this hook has already checked config to prevent multiple calls
@@ -46,6 +50,8 @@ export function useConfigStatus(): ConfigStatus {
         isFullyConfigured: false,
         isLoading: false,
         error: 'No user found',
+        autoMirrorStarred: false,
+        githubOwner: '',
       });
       return;
     }
@@ -78,6 +84,8 @@ export function useConfigStatus(): ConfigStatus {
         isFullyConfigured,
         isLoading: false,
         error: null,
+        autoMirrorStarred: configResponse?.advancedOptions?.autoMirrorStarred ?? false,
+        githubOwner: configResponse?.githubConfig?.username ?? '',
       });
       return;
     }
@@ -119,6 +127,8 @@ export function useConfigStatus(): ConfigStatus {
         isFullyConfigured,
         isLoading: false,
         error: null,
+        autoMirrorStarred: configResponse?.advancedOptions?.autoMirrorStarred ?? false,
+        githubOwner: configResponse?.githubConfig?.username ?? '',
       });
 
       hasCheckedRef.current = true;
@@ -129,6 +139,8 @@ export function useConfigStatus(): ConfigStatus {
         isFullyConfigured: false,
         isLoading: false,
         error: error instanceof Error ? error.message : 'Failed to check configuration',
+        autoMirrorStarred: false,
+        githubOwner: '',
       });
       hasCheckedRef.current = true;
     }

@@ -56,6 +56,7 @@ export function mapUiToDbConfig(
     
     // Advanced options
     starredCodeOnly: advancedOptions.starredCodeOnly,
+    autoMirrorStarred: advancedOptions.autoMirrorStarred ?? false,
   };
 
   // Map Gitea config to match database schema
@@ -172,6 +173,7 @@ export function mapDbToUiConfig(dbConfig: any): {
     skipForks: !(dbConfig.githubConfig?.includeForks ?? true), // Invert includeForks to get skipForks
     // Support both old (skipStarredIssues) and new (starredCodeOnly) field names for backward compatibility
     starredCodeOnly: dbConfig.githubConfig?.starredCodeOnly ?? (dbConfig.githubConfig as any)?.skipStarredIssues ?? false,
+    autoMirrorStarred: dbConfig.githubConfig?.autoMirrorStarred ?? false,
   };
 
   return {

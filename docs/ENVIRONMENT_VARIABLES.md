@@ -78,6 +78,7 @@ Settings for connecting to and configuring GitHub repository sources.
 | Variable | Description | Default | Options |
 |----------|-------------|---------|---------|
 | `SKIP_STARRED_ISSUES` | Enable lightweight mode for starred repos (skip issues) | `false` | `true`, `false` |
+| `AUTO_MIRROR_STARRED` | Automatically mirror starred repos during scheduled syncs and "Mirror All". When `false`, starred repos are imported for browsing but must be mirrored individually. | `false` | `true`, `false` |
 
 ## Gitea Configuration
 

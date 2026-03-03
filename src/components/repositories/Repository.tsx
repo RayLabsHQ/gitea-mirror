@@ -56,7 +56,7 @@ export default function Repository() {
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const { user } = useAuth();
   const { registerRefreshCallback, isLiveEnabled } = useLiveRefresh();
-  const { isGitHubConfigured, isFullyConfigured } = useConfigStatus();
+  const { isGitHubConfigured, isFullyConfigured, autoMirrorStarred, githubOwner } = useConfigStatus();
   const { navigationKey } = useNavigation();
   const { filter, setFilter } = useFilterParams({
     searchTerm: "",
@@ -233,10 +233,12 @@ export default function Repository() {
       // Filter out repositories that are already mirroring, mirrored, or ignored
       const eligibleRepos = repositories.filter(
         (repo) =>
-          repo.status !== "mirroring" && 
-          repo.status !== "mirrored" && 
+          repo.status !== "mirroring" &&
+          repo.status !== "mirrored" &&
           repo.status !== "ignored" && // Skip ignored repositories
-          repo.id
+          repo.id &&
+          // Skip starred repos from other owners when autoMirrorStarred is disabled
+          !(repo.isStarred && !autoMirrorStarred && repo.owner !== githubOwner)
       );
 
       if (eligibleRepos.length === 0) {
@@ -292,7 +294,7 @@ export default function Repository() {
     
     const selectedRepos = repositories.filter(repo => repo.id && selectedRepoIds.has(repo.id));
     const eligibleRepos = selectedRepos.filter(
-      repo => repo.status === "imported" || repo.status === "failed"
+      repo => repo.status === "imported" || repo.status === "failed" || repo.status === "pending-approval"
     );
 
     if (eligibleRepos.length === 0) {
@@ -301,7 +303,7 @@ export default function Repository() {
     }
 
     const repoIds = eligibleRepos.map(repo => repo.id as string);
-    
+
     setLoadingRepoIds(prev => {
       const newSet = new Set(prev);
       repoIds.forEach(id => newSet.add(id));
@@ -937,7 +939,7 @@ export default function Repository() {
     const actions = [];
     
     // Check if any selected repos can be mirrored
-    if (selectedRepos.some(repo => repo.status === "imported" || repo.status === "failed")) {
+    if (selectedRepos.some(repo => repo.status === "imported" || repo.status === "failed" || repo.status === "pending-approval")) {
       actions.push('mirror');
     }
     
@@ -975,7 +977,7 @@ export default function Repository() {
     const selectedRepos = repositories.filter(repo => repo.id && selectedRepoIds.has(repo.id));
     
     return {
-      mirror: selectedRepos.filter(repo => repo.status === "imported" || repo.status === "failed").length,
+      mirror: selectedRepos.filter(repo => repo.status === "imported" || repo.status === "failed" || repo.status === "pending-approval").length,
       sync: selectedRepos.filter(repo => repo.status === "mirrored" || repo.status === "synced").length,
       rerunMetadata: selectedRepos.filter(repo => ["mirrored", "synced", "archived"].includes(repo.status)).length,
       retry: selectedRepos.filter(repo => repo.status === "failed").length,

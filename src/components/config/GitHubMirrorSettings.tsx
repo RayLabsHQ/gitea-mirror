@@ -287,6 +287,31 @@ export function GitHubMirrorSettings({
             </div>
           </div>
 
+          {/* Auto-mirror starred repos toggle */}
+          {githubConfig.mirrorStarred && (
+            <div className="mt-4">
+              <div className="flex items-start space-x-3">
+                <Checkbox
+                  id="auto-mirror-starred"
+                  checked={advancedOptions.autoMirrorStarred ?? false}
+                  onCheckedChange={(checked) => handleAdvancedChange('autoMirrorStarred', !!checked)}
+                />
+                <div className="space-y-0.5 flex-1">
+                  <Label
+                    htmlFor="auto-mirror-starred"
+                    className="text-sm font-normal cursor-pointer flex items-center gap-2"
+                  >
+                    <Star className="h-3.5 w-3.5" />
+                    Auto-mirror new starred repositories
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    When disabled, starred repos are imported for browsing but not automatically mirrored. You can still mirror individual repos manually.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Duplicate name handling for starred repos */}
           {githubConfig.mirrorStarred && (
             <div className="mt-4 space-y-2">

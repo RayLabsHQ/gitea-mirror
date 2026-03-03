@@ -83,6 +83,7 @@ export function ConfigTabs() {
     advancedOptions: {
       skipForks: false,
       starredCodeOnly: false,
+      autoMirrorStarred: false,
     },
   });
   const { user } = useAuth();
