@@ -13,6 +13,7 @@ import type { Repository } from '@/lib/db/schema';
 import { repoStatusEnum, repositoryVisibilityEnum } from '@/types/Repository';
 import { mergeGitReposPreferStarred, normalizeGitRepoToInsert, calcBatchSizeForInsert } from '@/lib/repo-utils';
 import { isMirrorableGitHubRepo } from '@/lib/repo-eligibility';
+import { createMirrorJob } from '@/lib/helpers';
 
 let schedulerInterval: NodeJS.Timeout | null = null;
 let isSchedulerRunning = false;
@@ -128,6 +129,19 @@ async function runScheduledSync(config: any): Promise<void> {
               .onConflictDoNothing({ target: [repositories.userId, repositories.normalizedFullName] });
           }
           console.log(`[Scheduler] Successfully imported ${newRepos.length} new repositories for user ${userId}`);
+
+          // Log activity for each newly imported repo
+          for (const repo of newRepos) {
+            const sourceLabel = repo.isStarred ? 'starred' : 'owned';
+            await createMirrorJob({
+              userId,
+              repositoryName: repo.fullName,
+              message: `Auto-imported ${sourceLabel} repository: ${repo.fullName}`,
+              details: `Repository ${repo.fullName} was discovered and imported during scheduled sync.`,
+              status: 'imported',
+              skipDuplicateEvent: true,
+            });
+          }
         } else {
           console.log(`[Scheduler] No new repositories found for user ${userId}`);
         }
@@ -497,6 +511,19 @@ async function performInitialAutoStart(): Promise<void> {
               .onConflictDoNothing({ target: [repositories.userId, repositories.normalizedFullName] });
           }
           console.log(`[Scheduler] Successfully imported ${reposToImport.length} repositories`);
+
+          // Log activity for each newly imported repo
+          for (const repo of reposToImport) {
+            const sourceLabel = repo.isStarred ? 'starred' : 'owned';
+            await createMirrorJob({
+              userId: config.userId,
+              repositoryName: repo.fullName,
+              message: `Auto-imported ${sourceLabel} repository: ${repo.fullName}`,
+              details: `Repository ${repo.fullName} was discovered and imported during auto-start.`,
+              status: 'imported',
+              skipDuplicateEvent: true,
+            });
+          }
         } else {
           console.log(`[Scheduler] No new repositories to import for user ${config.userId}`);
         }
@@ -504,7 +531,7 @@ async function performInitialAutoStart(): Promise<void> {
         if (skippedDisabledCount > 0) {
           console.log(`[Scheduler] Skipped ${skippedDisabledCount} disabled GitHub repositories for user ${config.userId}`);
         }
-        
+
         // Check if we already have mirrored repositories (indicating this isn't first run)
         const mirroredRepos = await db
           .select()
