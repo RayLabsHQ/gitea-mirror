@@ -77,12 +77,33 @@ jobs:
         id: tag_version
         run: |
           if [[ $GITHUB_REF == refs/tags/v* ]]; then
-            echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
-            echo "Using version tag: ${GITHUB_REF#refs/tags/}"
+            TAG_VERSION="${GITHUB_REF#refs/tags/}"
+            if [[ ! "$TAG_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+              echo "::error::Release tag '${TAG_VERSION}' is invalid. Expected semver tag format like v1.2.3 or v1.2.3-rc.1"
+              exit 1
+            fi
+            APP_VERSION="${TAG_VERSION#v}"
+            echo "VERSION=${TAG_VERSION}" >> $GITHUB_OUTPUT
+            echo "APP_VERSION=${APP_VERSION}" >> $GITHUB_OUTPUT
+            echo "Using version tag: ${TAG_VERSION}"
           else
             echo "VERSION=latest" >> $GITHUB_OUTPUT
+            echo "APP_VERSION=dev" >> $GITHUB_OUTPUT
             echo "No version tag, using 'latest'"
           fi
+
+      # Keep version files aligned automatically for tag-based releases
+      - name: Sync app version from release tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          VERSION="${{ steps.tag_version.outputs.APP_VERSION }}"
+          echo "Syncing package.json version to ${VERSION}"
+
+          jq --arg version "${VERSION}" '.version = $version' package.json > package.json.tmp
+          mv package.json.tmp package.json
+
+          echo "Version sync diff (package.json):"
+          git --no-pager diff -- package.json
 
       # Extract metadata for Docker
       - name: Extract Docker metadata

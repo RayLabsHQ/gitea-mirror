@@ -310,26 +310,24 @@ bunx tsc --noEmit
 
 ## Release Process
 
-1. **Update version**:
-```bash
-npm version patch  # or minor/major
-```
+1. **Choose release version** (`X.Y.Z`) and update `CHANGELOG.md`
 
-2. **Update CHANGELOG.md**
-
-3. **Build and test**:
+2. **Build and test**:
 ```bash
 bun run build
 bun test
 ```
 
-4. **Create release**:
+3. **Create release tag** (semver format required):
 ```bash
 git tag vX.Y.Z
 git push origin vX.Y.Z
 ```
 
-5. **Create GitHub release**
+4. **Create GitHub release**
+
+5. **CI version sync (automatic)**:
+- On `v*` tags, release CI updates `package.json` version in the build context from the tag (`vX.Y.Z` -> `X.Y.Z`), so Docker release images always report the correct app version.
 
 ## Contributing
 

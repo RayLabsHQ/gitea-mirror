@@ -43,6 +43,8 @@ This workflow builds Docker images on pushes and pull requests, and pushes to Gi
 - Skips registry push for fork PRs (avoids package write permission failures)
 - Uses build caching to speed up builds
 - Creates multiple tags for each image (latest, semver, sha)
+- Auto-syncs `package.json` version from `v*` tags during release builds
+- Validates release tags use semver format before building
 
 ### Docker Security Scan (`docker-scan.yml`)
 
