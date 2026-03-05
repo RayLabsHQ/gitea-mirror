@@ -45,6 +45,7 @@ This workflow builds Docker images on pushes and pull requests, and pushes to Gi
 - Creates multiple tags for each image (latest, semver, sha)
 - Auto-syncs `package.json` version from `v*` tags during release builds
 - Validates release tags use semver format before building
+- After tag builds succeed, writes the same version back to `main/package.json`
 
 ### Docker Security Scan (`docker-scan.yml`)
 

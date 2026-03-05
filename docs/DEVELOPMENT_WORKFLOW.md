@@ -328,6 +328,7 @@ git push origin vX.Y.Z
 
 5. **CI version sync (automatic)**:
 - On `v*` tags, release CI updates `package.json` version in the build context from the tag (`vX.Y.Z` -> `X.Y.Z`), so Docker release images always report the correct app version.
+- After the release build succeeds, CI commits the same `package.json` version back to `main` automatically.
 
 ## Contributing
 
