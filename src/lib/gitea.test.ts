@@ -72,10 +72,21 @@ mock.module("./gitea", () => {
     const mirrorStrategy =
       config?.githubConfig?.mirrorStrategy ||
       (config?.giteaConfig?.preserveOrgStructure ? "preserve" : "flat-user");
+    const configuredGitHubOwner =
+      (config?.githubConfig?.owner || config?.githubConfig?.username || "")
+        .trim()
+        .toLowerCase();
+    const repoOwner = repository?.owner?.trim().toLowerCase();
 
     switch (mirrorStrategy) {
       case "preserve":
-        return repository?.organization || config?.giteaConfig?.defaultOwner || "giteauser";
+        if (repository?.organization) {
+          return repository.organization;
+        }
+        if (configuredGitHubOwner && repoOwner && repoOwner !== configuredGitHubOwner) {
+          return repository.owner;
+        }
+        return config?.giteaConfig?.defaultOwner || "giteauser";
       case "single-org":
         return config?.giteaConfig?.organization || config?.giteaConfig?.defaultOwner || "giteauser";
       case "mixed":
@@ -99,7 +110,7 @@ mock.module("./gitea", () => {
       return mockDbSelectResult[0].destinationOrg;
     }
 
-    return config?.giteaConfig?.defaultOwner || "giteauser";
+    return mockGetGiteaRepoOwner({ config, repository });
   });
   return {
     isRepoPresentInGitea: mockIsRepoPresentInGitea,
@@ -376,6 +387,7 @@ describe("Gitea Repository Mirroring", () => {
 describe("getGiteaRepoOwner - Organization Override Tests", () => {
   const baseConfig: Partial<Config> = {
     githubConfig: {
+      owner: "testuser",
       username: "testuser",
       token: "token",
       preserveOrgStructure: false,
@@ -484,6 +496,18 @@ describe("getGiteaRepoOwner - Organization Override Tests", () => {
     expect(result).toBe("giteauser");
   });
 
+  test("preserve strategy: personal repos owned by another user keep source owner namespace", () => {
+    const repo = {
+      ...baseRepo,
+      owner: "nice-user",
+      fullName: "nice-user/test-repo",
+      organization: undefined,
+      isForked: true,
+    };
+    const result = getGiteaRepoOwner({ config: baseConfig, repository: repo });
+    expect(result).toBe("nice-user");
+  });
+
   test("preserve strategy: org repos go to same org name", () => {
     const repo = { ...baseRepo, organization: "myorg" };
     const result = getGiteaRepoOwner({ config: baseConfig, repository: repo });
@@ -588,5 +612,27 @@ describe("getGiteaRepoOwner - Organization Override Tests", () => {
     });
 
     expect(result).toBe("FOO");
+  });
+
+  test("getGiteaRepoOwnerAsync preserves external personal owner for preserve strategy", async () => {
+    const configWithUser: Partial<Config> = {
+      ...baseConfig,
+      userId: "user-id",
+    };
+
+    const repo = {
+      ...baseRepo,
+      owner: "nice-user",
+      fullName: "nice-user/test-repo",
+      organization: undefined,
+      isForked: true,
+    };
+
+    const result = await getGiteaRepoOwnerAsync({
+      config: configWithUser,
+      repository: repo,
+    });
+
+    expect(result).toBe("nice-user");
   });
 });

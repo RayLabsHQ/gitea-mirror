@@ -138,14 +138,35 @@ export const getGiteaRepoOwner = ({
   // Get the mirror strategy - use preserveOrgStructure for backward compatibility
   const mirrorStrategy = config.githubConfig.mirrorStrategy || 
     (config.giteaConfig.preserveOrgStructure ? "preserve" : "flat-user");
+  const configuredGitHubOwner =
+    (
+      config.githubConfig.owner ||
+      (config.githubConfig as typeof config.githubConfig & { username?: string }).username ||
+      ""
+    )
+      .trim()
+      .toLowerCase();
 
   switch (mirrorStrategy) {
     case "preserve":
-      // Keep GitHub structure - org repos go to same org, personal repos to user (or override)
+      // Keep GitHub structure:
+      // - org repos stay in the same org
+      // - personal repos owned by other users keep their source owner namespace
+      // - personal repos owned by the configured account go to defaultOwner
       if (repository.organization) {
         return repository.organization;
       }
-      // Use personal repos override if configured, otherwise use username
+
+      const normalizedRepoOwner = repository.owner.trim().toLowerCase();
+      if (
+        normalizedRepoOwner &&
+        configuredGitHubOwner &&
+        normalizedRepoOwner !== configuredGitHubOwner
+      ) {
+        return repository.owner;
+      }
+
+      // Personal repos from the configured GitHub account go to the configured default owner
       return config.giteaConfig.defaultOwner;
 
     case "single-org":
@@ -376,6 +397,23 @@ export const mirrorGithubRepoToGitea = async ({
 
     // Get the correct owner based on the strategy (with organization overrides)
     let repoOwner = await getGiteaRepoOwnerAsync({ config, repository });
+    const mirrorStrategy = config.githubConfig.mirrorStrategy ||
+      (config.giteaConfig.preserveOrgStructure ? "preserve" : "flat-user");
+    const configuredGitHubOwner = (
+      config.githubConfig.owner ||
+      (config.githubConfig as typeof config.githubConfig & { username?: string }).username ||
+      ""
+    )
+      .trim()
+      .toLowerCase();
+    const normalizedRepoOwner = repository.owner.trim().toLowerCase();
+    const isExternalPersonalRepoInPreserveMode =
+      mirrorStrategy === "preserve" &&
+      !repository.organization &&
+      !repository.isStarred &&
+      normalizedRepoOwner !== "" &&
+      configuredGitHubOwner !== "" &&
+      normalizedRepoOwner !== configuredGitHubOwner;
 
     // Determine the actual repository name to use (handle duplicates for starred repos)
     let targetRepoName = repository.name;
@@ -520,6 +558,13 @@ export const mirrorGithubRepoToGitea = async ({
             (orgError.message.includes('Permission denied') ||
              orgError.message.includes('Authentication failed') ||
              orgError.message.includes('does not have permission'))) {
+          if (isExternalPersonalRepoInPreserveMode) {
+            throw new Error(
+              `Cannot create/access namespace "${repoOwner}" for ${repository.fullName}. ` +
+              `Refusing fallback to "${config.giteaConfig.defaultOwner}" in preserve mode to avoid cross-owner overwrite.`
+            );
+          }
+
           console.warn(`[Fallback] Organization creation/access failed. Attempting to mirror to user account instead.`);
 
           // Update the repository owner to use the user account
