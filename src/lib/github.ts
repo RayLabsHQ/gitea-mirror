@@ -369,7 +369,7 @@ export async function getGithubOrganizations({
 }: {
   octokit: Octokit;
   config: Partial<Config>;
-}): Promise<GitOrg[]> {
+}): Promise<{ organizations: GitOrg[]; failedOrgs: { name: string; avatarUrl: string; reason: string }[] }> {
   try {
     const { data: orgs } = await octokit.orgs.listForAuthenticatedUser({
       per_page: 100,
@@ -392,30 +392,47 @@ export async function getGithubOrganizations({
       return true;
     });
 
-    const organizations = await Promise.all(
+    const failedOrgs: { name: string; avatarUrl: string; reason: string }[] = [];
+    const results = await Promise.all(
       filteredOrgs.map(async (org) => {
-        const [{ data: orgDetails }, { data: membership }] = await Promise.all([
-          octokit.orgs.get({ org: org.login }),
-          octokit.orgs.getMembershipForAuthenticatedUser({ org: org.login }),
-        ]);
+        try {
+          const [{ data: orgDetails }, { data: membership }] = await Promise.all([
+            octokit.orgs.get({ org: org.login }),
+            octokit.orgs.getMembershipForAuthenticatedUser({ org: org.login }),
+          ]);
 
-        const totalRepos =
-          orgDetails.public_repos + (orgDetails.total_private_repos ?? 0);
+          const totalRepos =
+            orgDetails.public_repos + (orgDetails.total_private_repos ?? 0);
 
-        return {
-          name: org.login,
-          avatarUrl: org.avatar_url,
-          membershipRole: membership.role as MembershipRole,
-          isIncluded: false,
-          status: "imported" as RepoStatus,
-          repositoryCount: totalRepos,
-          createdAt: new Date(),
-          updatedAt: new Date(),
-        };
+          return {
+            name: org.login,
+            avatarUrl: org.avatar_url,
+            membershipRole: membership.role as MembershipRole,
+            isIncluded: false,
+            status: "imported" as RepoStatus,
+            repositoryCount: totalRepos,
+            createdAt: new Date(),
+            updatedAt: new Date(),
+          };
+        } catch (error: any) {
+          // Capture organizations that return 403 (SAML enforcement, insufficient token scope, etc.)
+          if (error?.status === 403) {
+            const reason = error?.message || "access denied";
+            console.warn(
+              `Failed to import organization ${org.login} - ${reason}`,
+            );
+            failedOrgs.push({ name: org.login, avatarUrl: org.avatar_url, reason });
+            return null;
+          }
+          throw error;
+        }
       }),
     );
 
-    return organizations;
+    return {
+      organizations: results.filter((org): org is NonNullable<typeof org> => org !== null),
+      failedOrgs,
+    };
   } catch (error) {
     throw new Error(
       `Error fetching organizations: ${

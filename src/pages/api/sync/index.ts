@@ -1,6 +1,6 @@
 import type { APIRoute } from "astro";
 import { db, organizations, repositories, configs } from "@/lib/db";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { createMirrorJob } from "@/lib/helpers";
 import {
@@ -47,13 +47,14 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const octokit = createGitHubClient(decryptedToken, userId, githubUsername);
 
     // Fetch GitHub data in parallel
-    const [basicAndForkedRepos, starredRepos, gitOrgs] = await Promise.all([
+    const [basicAndForkedRepos, starredRepos, orgResult] = await Promise.all([
       getGithubRepositories({ octokit, config }),
       config.githubConfig?.includeStarred
         ? getGithubStarredRepositories({ octokit, config })
         : Promise.resolve([]),
       getGithubOrganizations({ octokit, config }),
     ]);
+    const { organizations: gitOrgs, failedOrgs } = orgResult;
 
     // Merge and de-duplicate by fullName, preferring starred variant when duplicated
     const allGithubRepos = mergeGitReposPreferStarred(basicAndForkedRepos, starredRepos);
@@ -108,8 +109,27 @@ export const POST: APIRoute = async ({ request, locals }) => {
       updatedAt: new Date(),
     }));
 
+    // Prepare failed org records for DB insertion
+    const failedOrgRecords = failedOrgs.map((org) => ({
+      id: uuidv4(),
+      userId,
+      configId: config.id,
+      name: org.name,
+      normalizedName: org.name.toLowerCase(),
+      avatarUrl: org.avatarUrl,
+      membershipRole: "member" as const,
+      isIncluded: false,
+      status: "failed" as const,
+      errorMessage: org.reason,
+      repositoryCount: 0,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    }));
+
     let insertedRepos: typeof newRepos = [];
     let insertedOrgs: typeof newOrgs = [];
+    let insertedFailedOrgs: typeof failedOrgRecords = [];
+    let recoveredOrgCount = 0;
 
     // Transaction to insert only new items
     await db.transaction(async (tx) => {
@@ -119,18 +139,62 @@ export const POST: APIRoute = async ({ request, locals }) => {
           .from(repositories)
           .where(eq(repositories.userId, userId)),
         tx
-          .select({ normalizedName: organizations.normalizedName })
+          .select({ normalizedName: organizations.normalizedName, status: organizations.status })
           .from(organizations)
           .where(eq(organizations.userId, userId)),
       ]);
 
       const existingRepoNames = new Set(existingRepos.map((r) => r.normalizedFullName));
-      const existingOrgNames = new Set(existingOrgs.map((o) => o.normalizedName));
+      const existingOrgMap = new Map(existingOrgs.map((o) => [o.normalizedName, o.status]));
 
       insertedRepos = newRepos.filter(
         (r) => !existingRepoNames.has(r.normalizedFullName)
       );
-      insertedOrgs = newOrgs.filter((o) => !existingOrgNames.has(o.normalizedName));
+      insertedOrgs = newOrgs.filter((o) => !existingOrgMap.has(o.normalizedName));
+
+      // Update previously failed orgs that now succeeded
+      const recoveredOrgs = newOrgs.filter(
+        (o) => existingOrgMap.get(o.normalizedName) === "failed"
+      );
+      for (const org of recoveredOrgs) {
+        await tx
+          .update(organizations)
+          .set({
+            status: "imported",
+            errorMessage: null,
+            repositoryCount: org.repositoryCount,
+            avatarUrl: org.avatarUrl,
+            membershipRole: org.membershipRole,
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(organizations.userId, userId),
+              eq(organizations.normalizedName, org.normalizedName),
+            )
+          );
+      }
+      recoveredOrgCount = recoveredOrgs.length;
+
+      // Insert or update failed orgs (only update orgs already in "failed" state — don't overwrite good state)
+      insertedFailedOrgs = failedOrgRecords.filter((o) => !existingOrgMap.has(o.normalizedName));
+      const stillFailedOrgs = failedOrgRecords.filter(
+        (o) => existingOrgMap.get(o.normalizedName) === "failed"
+      );
+      for (const org of stillFailedOrgs) {
+        await tx
+          .update(organizations)
+          .set({
+            errorMessage: org.errorMessage,
+            updatedAt: new Date(),
+          })
+          .where(
+            and(
+              eq(organizations.userId, userId),
+              eq(organizations.normalizedName, org.normalizedName),
+            )
+          );
+      }
 
       // Batch insert repositories to avoid SQLite parameter limit (dynamic by column count)
       const sample = newRepos[0];
@@ -148,9 +212,10 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
       // Batch insert organizations (they have fewer fields, so we can use larger batches)
       const ORG_BATCH_SIZE = 100;
-      if (insertedOrgs.length > 0) {
-        for (let i = 0; i < insertedOrgs.length; i += ORG_BATCH_SIZE) {
-          const batch = insertedOrgs.slice(i, i + ORG_BATCH_SIZE);
+      const allNewOrgs = [...insertedOrgs, ...insertedFailedOrgs];
+      if (allNewOrgs.length > 0) {
+        for (let i = 0; i < allNewOrgs.length; i += ORG_BATCH_SIZE) {
+          const batch = allNewOrgs.slice(i, i + ORG_BATCH_SIZE);
           await tx.insert(organizations).values(batch);
         }
       }
@@ -189,6 +254,8 @@ export const POST: APIRoute = async ({ request, locals }) => {
         newRepositories: insertedRepos.length,
         newOrganizations: insertedOrgs.length,
         skippedDisabledRepositories: allGithubRepos.length - mirrorableGithubRepos.length,
+        failedOrgs: failedOrgs.map((o) => o.name),
+        recoveredOrgs: recoveredOrgCount,
       },
     });
   } catch (error) {

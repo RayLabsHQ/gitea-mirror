@@ -124,19 +124,31 @@ export function ConfigTabs() {
     if (!user?.id) return;
     setIsSyncing(true);
     try {
-      const result = await apiRequest<{ success: boolean; message?: string }>(
+      const result = await apiRequest<{ success: boolean; message?: string; failedOrgs?: string[]; recoveredOrgs?: number }>(
         `/sync?userId=${user.id}`,
         { method: 'POST' },
       );
-      result.success
-        ? toast.success(
-            'GitHub data imported successfully! Head to the Repositories page to start mirroring.',
-          )
-        : toast.error(
-            `Failed to import GitHub data: ${
-              result.message || 'Unknown error'
-            }`,
+      if (result.success) {
+        toast.success(
+          'GitHub data imported successfully! Head to the Repositories page to start mirroring.',
+        );
+        if (result.failedOrgs && result.failedOrgs.length > 0) {
+          toast.warning(
+            `${result.failedOrgs.length} org${result.failedOrgs.length > 1 ? 's' : ''} failed to import (${result.failedOrgs.join(', ')}). Check the Organizations tab for details.`,
           );
+        }
+        if (result.recoveredOrgs && result.recoveredOrgs > 0) {
+          toast.success(
+            `${result.recoveredOrgs} previously failed org${result.recoveredOrgs > 1 ? 's' : ''} recovered successfully.`,
+          );
+        }
+      } else {
+        toast.error(
+          `Failed to import GitHub data: ${
+            result.message || 'Unknown error'
+          }`,
+        );
+      }
     } catch (error) {
       toast.error(
         `Error importing GitHub data: ${

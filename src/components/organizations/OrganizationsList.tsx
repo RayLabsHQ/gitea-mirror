@@ -248,6 +248,11 @@ export function OrganizationList({
                 </div>
               </div>
 
+              {/* Error message for failed orgs */}
+              {org.status === "failed" && org.errorMessage && (
+                <p className="text-xs text-destructive line-clamp-2">{org.errorMessage}</p>
+              )}
+
               {/* Destination override section */}
               <div>
                 <MirrorDestinationEditor
@@ -304,6 +309,13 @@ export function OrganizationList({
                 />
               </div>
 
+              {/* Error message for failed orgs */}
+              {org.status === "failed" && org.errorMessage && (
+                <div className="mb-4 p-3 rounded-md bg-destructive/10 border border-destructive/20">
+                  <p className="text-sm text-destructive">{org.errorMessage}</p>
+                </div>
+              )}
+
               {/* Repository statistics */}
               <div className="mb-4">
                 <div className="flex items-center gap-4 text-sm">
@@ -313,7 +325,7 @@ export function OrganizationList({
                       {org.repositoryCount === 1 ? "repository" : "repositories"}
                     </span>
                   </div>
-                  
+
                   {/* Repository breakdown - only show non-zero counts */}
                   {(() => {
                     const counts = [];
@@ -326,7 +338,7 @@ export function OrganizationList({
                     if (org.forkRepositoryCount && org.forkRepositoryCount > 0) {
                       counts.push(`${org.forkRepositoryCount} ${org.forkRepositoryCount === 1 ? 'fork' : 'forks'}`);
                     }
-                    
+
                     return counts.length > 0 ? (
                       <div className="flex items-center gap-3 text-xs text-muted-foreground">
                         {counts.map((count, index) => (
@@ -415,7 +427,7 @@ export function OrganizationList({
                     )}
                   </>
                 )}
-                
+
                 {/* Dropdown menu for additional actions */}
                 {org.status !== "mirroring" && (
                   <DropdownMenu>
@@ -426,7 +438,7 @@ export function OrganizationList({
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                       {org.status !== "ignored" && (
-                        <DropdownMenuItem 
+                        <DropdownMenuItem
                           onClick={() => org.id && onIgnore && onIgnore({ orgId: org.id, ignore: true })}
                         >
                           <Ban className="h-4 w-4 mr-2" />
@@ -449,7 +461,7 @@ export function OrganizationList({
                   </DropdownMenu>
                 )}
               </div>
-              
+
               <div className="flex items-center gap-2 justify-center">
                 {(() => {
                   const giteaUrl = getGiteaOrgUrl(org);
