@@ -25,6 +25,10 @@ jobs:
   check:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    env:
+      NIX_CONFIG: |
+        accept-flake-config = true
+        access-tokens = github.com=${{ secrets.GITHUB_TOKEN }}
 
     steps:
       - uses: actions/checkout@v4
@@ -36,11 +40,11 @@ jobs:
         uses: DeterminateSystems/magic-nix-cache-action@main
 
       - name: Check flake
-        run: nix flake check
+        run: nix flake check --accept-flake-config
 
       - name: Show flake info
-        run: nix flake show
+        run: nix flake show --accept-flake-config
 
       - name: Build package
         if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
-        run: nix build --print-build-logs
+        run: nix build --print-build-logs --accept-flake-config
