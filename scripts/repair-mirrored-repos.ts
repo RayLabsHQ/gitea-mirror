@@ -15,33 +15,40 @@ import { repoStatusEnum } from "@/types/Repository";
 const isDryRun = process.argv.includes("--dry-run");
 const specificRepo = process.argv.find(arg => arg.startsWith("--repo-name="))?.split("=")[1];
 const isStartupMode = process.argv.includes("--startup");
+const requestTimeoutMs = parsePositiveInteger(process.env.GITEA_REPAIR_REQUEST_TIMEOUT_MS, 15000);
+const progressInterval = parsePositiveInteger(process.env.GITEA_REPAIR_PROGRESS_INTERVAL, 100);
 
-async function checkRepoInGitea(config: any, owner: string, repoName: string): Promise<boolean> {
-  try {
-    if (!config.giteaConfig?.url || !config.giteaConfig?.token) {
-      return false;
-    }
+type GiteaLookupResult = {
+  exists: boolean;
+  details: any | null;
+  timedOut: boolean;
+  error: string | null;
+};
 
-    const response = await fetch(
-      `${config.giteaConfig.url}/api/v1/repos/${owner}/${repoName}`,
-      {
-        headers: {
-          Authorization: `token ${config.giteaConfig.token}`,
-        },
-      }
-    );
-
-    return response.ok;
-  } catch (error) {
-    console.error(`Error checking repo ${owner}/${repoName} in Gitea:`, error);
-    return false;
+function parsePositiveInteger(value: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(value ?? "", 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return fallback;
   }
+  return parsed;
 }
 
-async function getRepoDetailsFromGitea(config: any, owner: string, repoName: string): Promise<any> {
+function isTimeoutError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  return error.name === "TimeoutError" || error.name === "AbortError";
+}
+
+async function getRepoDetailsFromGitea(config: any, owner: string, repoName: string): Promise<GiteaLookupResult> {
   try {
     if (!config.giteaConfig?.url || !config.giteaConfig?.token) {
-      return null;
+      return {
+        exists: false,
+        details: null,
+        timedOut: false,
+        error: "Missing Gitea URL or token in config",
+      };
     }
 
     const response = await fetch(
@@ -50,16 +57,41 @@ async function getRepoDetailsFromGitea(config: any, owner: string, repoName: str
         headers: {
           Authorization: `token ${config.giteaConfig.token}`,
         },
+        signal: AbortSignal.timeout(requestTimeoutMs),
       }
     );
 
     if (response.ok) {
-      return await response.json();
+      return {
+        exists: true,
+        details: await response.json(),
+        timedOut: false,
+        error: null,
+      };
     }
-    return null;
+
+    if (response.status === 404) {
+      return {
+        exists: false,
+        details: null,
+        timedOut: false,
+        error: null,
+      };
+    }
+
+    return {
+      exists: false,
+      details: null,
+      timedOut: false,
+      error: `Gitea API returned HTTP ${response.status}`,
+    };
   } catch (error) {
-    console.error(`Error getting repo details for ${owner}/${repoName}:`, error);
-    return null;
+    return {
+      exists: false,
+      details: null,
+      timedOut: isTimeoutError(error),
+      error: error instanceof Error ? error.message : String(error),
+    };
   }
 }
 
@@ -99,6 +131,8 @@ async function repairMirroredRepositories() {
       .from(repositories)
       .where(whereConditions);
 
+    const totalRepos = repos.length;
+
     if (repos.length === 0) {
       if (!isStartupMode) {
         console.log("✅ No repositories found that need repair");
@@ -109,13 +143,25 @@ async function repairMirroredRepositories() {
     if (!isStartupMode) {
       console.log(`📋 Found ${repos.length} repositories to check:`);
       console.log("");
+    } else {
+      console.log(`Checking ${totalRepos} repositories for status inconsistencies...`);
+      console.log(`Request timeout: ${requestTimeoutMs}ms | Progress interval: every ${progressInterval} repositories`);
     }
 
+    const startedAt = Date.now();
+    const configCache = new Map<string, any>();
+    let checkedCount = 0;
     let repairedCount = 0;
     let skippedCount = 0;
     let errorCount = 0;
+    let timeoutCount = 0;
+    let giteaErrorCount = 0;
+    let giteaErrorSamples = 0;
+    let startupSkipWarningCount = 0;
 
     for (const repo of repos) {
+      checkedCount++;
+
       if (!isStartupMode) {
         console.log(`🔍 Checking repository: ${repo.name}`);
         console.log(`   Current status: ${repo.status}`);
@@ -124,13 +170,29 @@ async function repairMirroredRepositories() {
 
       try {
         // Get user configuration
-        const config = await db
-          .select()
-          .from(configs)
-          .where(eq(configs.id, repo.configId))
-          .limit(1);
+        const configKey = String(repo.configId);
+        let userConfig = configCache.get(configKey);
 
-        if (config.length === 0) {
+        if (!userConfig) {
+          const config = await db
+            .select()
+            .from(configs)
+            .where(eq(configs.id, repo.configId))
+            .limit(1);
+
+          if (config.length === 0) {
+            if (!isStartupMode) {
+              console.log(`   ❌ No configuration found for repository`);
+            }
+            errorCount++;
+            continue;
+          }
+
+          userConfig = config[0];
+          configCache.set(configKey, userConfig);
+        }
+
+        if (!userConfig) {
           if (!isStartupMode) {
             console.log(`   ❌ No configuration found for repository`);
           }
@@ -138,7 +200,6 @@ async function repairMirroredRepositories() {
           continue;
         }
 
-        const userConfig = config[0];
         const giteaUsername = userConfig.giteaConfig?.defaultOwner;
 
         if (!giteaUsername) {
@@ -153,25 +214,59 @@ async function repairMirroredRepositories() {
         let existsInGitea = false;
         let actualOwner = giteaUsername;
         let giteaRepoDetails = null;
+        let repoRequestTimedOut = false;
+        let repoRequestErrored = false;
 
         // First check user location
-        existsInGitea = await checkRepoInGitea(userConfig, giteaUsername, repo.name);
-        if (existsInGitea) {
-          giteaRepoDetails = await getRepoDetailsFromGitea(userConfig, giteaUsername, repo.name);
+        const userLookup = await getRepoDetailsFromGitea(userConfig, giteaUsername, repo.name);
+        existsInGitea = userLookup.exists;
+        giteaRepoDetails = userLookup.details;
+
+        if (userLookup.timedOut) {
+          timeoutCount++;
+          repoRequestTimedOut = true;
+        } else if (userLookup.error) {
+          giteaErrorCount++;
+          repoRequestErrored = true;
+          if (!isStartupMode || giteaErrorSamples < 3) {
+            console.log(`   ⚠️  Gitea lookup issue for ${giteaUsername}/${repo.name}: ${userLookup.error}`);
+            giteaErrorSamples++;
+          }
         }
 
         // If not found in user location and repo has organization, check organization
         if (!existsInGitea && repo.organization) {
-          existsInGitea = await checkRepoInGitea(userConfig, repo.organization, repo.name);
+          const orgLookup = await getRepoDetailsFromGitea(userConfig, repo.organization, repo.name);
+          existsInGitea = orgLookup.exists;
           if (existsInGitea) {
             actualOwner = repo.organization;
-            giteaRepoDetails = await getRepoDetailsFromGitea(userConfig, repo.organization, repo.name);
+            giteaRepoDetails = orgLookup.details;
+          }
+
+          if (orgLookup.timedOut) {
+            timeoutCount++;
+            repoRequestTimedOut = true;
+          } else if (orgLookup.error) {
+            giteaErrorCount++;
+            repoRequestErrored = true;
+            if (!isStartupMode || giteaErrorSamples < 3) {
+              console.log(`   ⚠️  Gitea lookup issue for ${repo.organization}/${repo.name}: ${orgLookup.error}`);
+              giteaErrorSamples++;
+            }
           }
         }
 
         if (!existsInGitea) {
           if (!isStartupMode) {
             console.log(`   ⏭️  Repository not found in Gitea - skipping`);
+          } else if (repoRequestTimedOut || repoRequestErrored) {
+            if (startupSkipWarningCount < 3) {
+              console.log(`   ⚠️  Skipping ${repo.name}; Gitea was slow/unreachable during lookup`);
+              startupSkipWarningCount++;
+              if (startupSkipWarningCount === 3) {
+                console.log(`   ℹ️  Additional slow/unreachable lookup warnings suppressed; progress logs will continue`);
+              }
+            }
           }
           skippedCount++;
           continue;
@@ -241,22 +336,43 @@ async function repairMirroredRepositories() {
 
       if (!isStartupMode) {
         console.log("");
+      } else if (checkedCount % progressInterval === 0 || checkedCount === totalRepos) {
+        const elapsedSeconds = Math.floor((Date.now() - startedAt) / 1000);
+        console.log(
+          `Repair progress: ${checkedCount}/${totalRepos} checked | repaired=${repairedCount}, skipped=${skippedCount}, errors=${errorCount}, timeouts=${timeoutCount} | elapsed=${elapsedSeconds}s`
+        );
       }
     }
 
     if (isStartupMode) {
-      // In startup mode, only log if there were repairs or errors
+      const elapsedSeconds = Math.floor((Date.now() - startedAt) / 1000);
+      console.log(
+        `Repository repair summary: checked=${checkedCount}, repaired=${repairedCount}, skipped=${skippedCount}, errors=${errorCount}, timeouts=${timeoutCount}, elapsed=${elapsedSeconds}s`
+      );
       if (repairedCount > 0) {
         console.log(`Repaired ${repairedCount} repository status inconsistencies`);
       }
       if (errorCount > 0) {
         console.log(`Warning: ${errorCount} repositories had errors during repair`);
       }
+      if (timeoutCount > 0) {
+        console.log(
+          `Warning: ${timeoutCount} Gitea API requests timed out. Increase GITEA_REPAIR_REQUEST_TIMEOUT_MS if your Gitea instance is under heavy load.`
+        );
+      }
+      if (giteaErrorCount > 0) {
+        console.log(`Warning: ${giteaErrorCount} Gitea API requests failed with non-timeout errors.`);
+      }
     } else {
       console.log("📊 Repair Summary:");
+      console.log(`   Checked: ${checkedCount}`);
       console.log(`   Repaired: ${repairedCount}`);
       console.log(`   Skipped: ${skippedCount}`);
       console.log(`   Errors: ${errorCount}`);
+      console.log(`   Timeouts: ${timeoutCount}`);
+      if (giteaErrorCount > 0) {
+        console.log(`   Gitea API Errors: ${giteaErrorCount}`);
+      }
 
       if (isDryRun && repairedCount > 0) {
         console.log("");
