@@ -374,6 +374,151 @@ export const checkRepoLocation = async ({
   return { present: false, actualOwner: expectedOwner };
 };
 
+const sanitizeTopicForGitea = (topic: string): string =>
+  topic
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+/, "")
+    .replace(/-+$/, "");
+
+const normalizeTopicsForGitea = (
+  topics: string[],
+  topicPrefix?: string
+): string[] => {
+  const normalizedPrefix = topicPrefix ? sanitizeTopicForGitea(topicPrefix) : "";
+  const transformedTopics = topics
+    .map((topic) => sanitizeTopicForGitea(topic))
+    .filter((topic) => topic.length > 0)
+    .map((topic) => (normalizedPrefix ? `${normalizedPrefix}-${topic}` : topic));
+
+  return [...new Set(transformedTopics)];
+};
+
+const getSourceRepositoryCoordinates = (repository: Repository) => {
+  const delimiterIndex = repository.fullName.indexOf("/");
+  if (
+    delimiterIndex > 0 &&
+    delimiterIndex < repository.fullName.length - 1
+  ) {
+    return {
+      owner: repository.fullName.slice(0, delimiterIndex),
+      repo: repository.fullName.slice(delimiterIndex + 1),
+    };
+  }
+
+  return {
+    owner: repository.owner,
+    repo: repository.name,
+  };
+};
+
+const fetchGitHubTopics = async ({
+  octokit,
+  repository,
+}: {
+  octokit: Octokit;
+  repository: Repository;
+}): Promise<string[]> => {
+  const { owner, repo } = getSourceRepositoryCoordinates(repository);
+
+  try {
+    const response = await octokit.request("GET /repos/{owner}/{repo}/topics", {
+      owner,
+      repo,
+      headers: {
+        Accept: "application/vnd.github+json",
+      },
+    });
+
+    const names = (response.data as { names?: unknown }).names;
+    if (!Array.isArray(names)) {
+      return [];
+    }
+
+    return names.filter((topic): topic is string => typeof topic === "string");
+  } catch (error) {
+    console.warn(
+      `[Metadata] Failed to fetch topics from GitHub for ${repository.fullName}: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+    return [];
+  }
+};
+
+const syncRepositoryMetadataToGitea = async ({
+  config,
+  octokit,
+  repository,
+  giteaOwner,
+  giteaRepoName,
+  giteaToken,
+}: {
+  config: Partial<Config>;
+  octokit: Octokit;
+  repository: Repository;
+  giteaOwner: string;
+  giteaRepoName: string;
+  giteaToken: string;
+}): Promise<void> => {
+  const giteaBaseUrl = config.giteaConfig?.url;
+  if (!giteaBaseUrl) {
+    return;
+  }
+
+  const repoApiUrl = `${giteaBaseUrl}/api/v1/repos/${giteaOwner}/${giteaRepoName}`;
+  const authHeaders = {
+    Authorization: `token ${giteaToken}`,
+  };
+  const description = repository.description?.trim() || "";
+
+  try {
+    await httpPatch(
+      repoApiUrl,
+      { description },
+      authHeaders
+    );
+    console.log(
+      `[Metadata] Synced description for ${repository.fullName} to ${giteaOwner}/${giteaRepoName}`
+    );
+  } catch (error) {
+    console.warn(
+      `[Metadata] Failed to sync description for ${repository.fullName} to ${giteaOwner}/${giteaRepoName}: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+  }
+
+  if (config.giteaConfig?.addTopics === false) {
+    return;
+  }
+
+  const sourceTopics = await fetchGitHubTopics({ octokit, repository });
+  const topics = normalizeTopicsForGitea(
+    sourceTopics,
+    config.giteaConfig?.topicPrefix
+  );
+
+  try {
+    await httpPut(
+      `${repoApiUrl}/topics`,
+      { topics },
+      authHeaders
+    );
+    console.log(
+      `[Metadata] Synced ${topics.length} topic(s) for ${repository.fullName} to ${giteaOwner}/${giteaRepoName}`
+    );
+  } catch (error) {
+    console.warn(
+      `[Metadata] Failed to sync topics for ${repository.fullName} to ${giteaOwner}/${giteaRepoName}: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+  }
+};
+
 export const mirrorGithubRepoToGitea = async ({
   octokit,
   repository,
@@ -468,6 +613,15 @@ export const mirrorGithubRepoToGitea = async ({
       console.log(
         `Repository ${targetRepoName} already exists in Gitea under ${repoOwner}. Updating database status.`
       );
+
+      await syncRepositoryMetadataToGitea({
+        config,
+        octokit,
+        repository,
+        giteaOwner: repoOwner,
+        giteaRepoName: targetRepoName,
+        giteaToken: decryptedConfig.giteaConfig.token,
+      });
 
       // Update database to reflect that the repository is already mirrored
       await db
@@ -647,6 +801,15 @@ export const mirrorGithubRepoToGitea = async ({
         Authorization: `token ${decryptedConfig.giteaConfig.token}`,
       }
     );
+
+    await syncRepositoryMetadataToGitea({
+      config,
+      octokit,
+      repository,
+      giteaOwner: repoOwner,
+      giteaRepoName: targetRepoName,
+      giteaToken: decryptedConfig.giteaConfig.token,
+    });
 
     const metadataState = parseRepositoryMetadataState(repository.metadata);
     let metadataUpdated = false;
@@ -1098,6 +1261,15 @@ export async function mirrorGitHubRepoToGiteaOrg({
         `Repository ${targetRepoName} already exists in Gitea organization ${orgName}. Updating database status.`
       );
 
+      await syncRepositoryMetadataToGitea({
+        config,
+        octokit,
+        repository,
+        giteaOwner: orgName,
+        giteaRepoName: targetRepoName,
+        giteaToken: decryptedConfig.giteaConfig.token,
+      });
+
       // Update database to reflect that the repository is already mirrored
       await db
         .update(repositories)
@@ -1182,6 +1354,7 @@ export async function mirrorGitHubRepoToGiteaOrg({
       wiki: shouldMirrorWiki || false,
       lfs: config.giteaConfig?.lfs || false,
       private: repository.isPrivate,
+      description: repository.description?.trim() || "",
     };
 
     // Add authentication for private repositories
@@ -1203,6 +1376,15 @@ export async function mirrorGitHubRepoToGiteaOrg({
         Authorization: `token ${decryptedConfig.giteaConfig.token}`,
       }
     );
+
+    await syncRepositoryMetadataToGitea({
+      config,
+      octokit,
+      repository,
+      giteaOwner: orgName,
+      giteaRepoName: targetRepoName,
+      giteaToken: decryptedConfig.giteaConfig.token,
+    });
 
     const metadataState = parseRepositoryMetadataState(repository.metadata);
     let metadataUpdated = false;
