@@ -420,7 +420,7 @@ const fetchGitHubTopics = async ({
 }: {
   octokit: Octokit;
   repository: Repository;
-}): Promise<string[]> => {
+}): Promise<string[] | null> => {
   const { owner, repo } = getSourceRepositoryCoordinates(repository);
 
   try {
@@ -434,7 +434,10 @@ const fetchGitHubTopics = async ({
 
     const names = (response.data as { names?: unknown }).names;
     if (!Array.isArray(names)) {
-      return [];
+      console.warn(
+        `[Metadata] Unexpected topics payload for ${repository.fullName}; skipping topic sync.`
+      );
+      return null;
     }
 
     return names.filter((topic): topic is string => typeof topic === "string");
@@ -444,7 +447,7 @@ const fetchGitHubTopics = async ({
         error instanceof Error ? error.message : String(error)
       }`
     );
-    return [];
+    return null;
   }
 };
 
@@ -496,6 +499,13 @@ const syncRepositoryMetadataToGitea = async ({
   }
 
   const sourceTopics = await fetchGitHubTopics({ octokit, repository });
+  if (sourceTopics === null) {
+    console.warn(
+      `[Metadata] Skipping topic sync for ${repository.fullName} because GitHub topics could not be fetched.`
+    );
+    return;
+  }
+
   const topics = normalizeTopicsForGitea(
     sourceTopics,
     config.giteaConfig?.topicPrefix
@@ -610,45 +620,66 @@ export const mirrorGithubRepoToGitea = async ({
     });
 
     if (isExisting) {
-      console.log(
-        `Repository ${targetRepoName} already exists in Gitea under ${repoOwner}. Updating database status.`
-      );
-
-      await syncRepositoryMetadataToGitea({
+      const { getGiteaRepoInfo, handleExistingNonMirrorRepo } = await import("./gitea-enhanced");
+      const existingRepoInfo = await getGiteaRepoInfo({
         config,
-        octokit,
-        repository,
-        giteaOwner: repoOwner,
-        giteaRepoName: targetRepoName,
-        giteaToken: decryptedConfig.giteaConfig.token,
+        owner: repoOwner,
+        repoName: targetRepoName,
       });
 
-      // Update database to reflect that the repository is already mirrored
-      await db
-        .update(repositories)
-        .set({
-          status: repoStatusEnum.parse("mirrored"),
-          updatedAt: new Date(),
-          lastMirrored: new Date(),
-          errorMessage: null,
-          mirroredLocation: `${repoOwner}/${targetRepoName}`,
-        })
-        .where(eq(repositories.id, repository.id!));
+      if (existingRepoInfo && !existingRepoInfo.mirror) {
+        console.log(`Repository ${targetRepoName} exists but is not a mirror. Handling...`);
+        await handleExistingNonMirrorRepo({
+          config,
+          repository,
+          repoInfo: existingRepoInfo,
+          strategy: "delete", // Can be configured: "skip", "delete", or "rename"
+        });
+      } else if (existingRepoInfo?.mirror) {
+        console.log(
+          `Repository ${targetRepoName} already exists in Gitea under ${repoOwner}. Updating database status.`
+        );
 
-      // Append log for "mirrored" status
-      await createMirrorJob({
-        userId: config.userId,
-        repositoryId: repository.id,
-        repositoryName: repository.name,
-        message: `Repository ${repository.name} already exists in Gitea`,
-        details: `Repository ${repository.name} was found to already exist in Gitea under ${repoOwner} and database status was updated.`,
-        status: "mirrored",
-      });
+        await syncRepositoryMetadataToGitea({
+          config,
+          octokit,
+          repository,
+          giteaOwner: repoOwner,
+          giteaRepoName: targetRepoName,
+          giteaToken: decryptedConfig.giteaConfig.token,
+        });
 
-      console.log(
-        `Repository ${repository.name} database status updated to mirrored`
-      );
-      return;
+        // Update database to reflect that the repository is already mirrored
+        await db
+          .update(repositories)
+          .set({
+            status: repoStatusEnum.parse("mirrored"),
+            updatedAt: new Date(),
+            lastMirrored: new Date(),
+            errorMessage: null,
+            mirroredLocation: `${repoOwner}/${targetRepoName}`,
+          })
+          .where(eq(repositories.id, repository.id!));
+
+        // Append log for "mirrored" status
+        await createMirrorJob({
+          userId: config.userId,
+          repositoryId: repository.id,
+          repositoryName: repository.name,
+          message: `Repository ${repository.name} already exists in Gitea`,
+          details: `Repository ${repository.name} was found to already exist in Gitea under ${repoOwner} and database status was updated.`,
+          status: "mirrored",
+        });
+
+        console.log(
+          `Repository ${repository.name} database status updated to mirrored`
+        );
+        return;
+      } else {
+        console.warn(
+          `[Mirror] Repository ${repoOwner}/${targetRepoName} exists but mirror status could not be verified. Continuing with mirror creation flow.`
+        );
+      }
     }
 
     console.log(`Mirroring repository ${repository.name}`);
@@ -1257,45 +1288,66 @@ export async function mirrorGitHubRepoToGiteaOrg({
     });
 
     if (isExisting) {
-      console.log(
-        `Repository ${targetRepoName} already exists in Gitea organization ${orgName}. Updating database status.`
-      );
-
-      await syncRepositoryMetadataToGitea({
+      const { getGiteaRepoInfo, handleExistingNonMirrorRepo } = await import("./gitea-enhanced");
+      const existingRepoInfo = await getGiteaRepoInfo({
         config,
-        octokit,
-        repository,
-        giteaOwner: orgName,
-        giteaRepoName: targetRepoName,
-        giteaToken: decryptedConfig.giteaConfig.token,
+        owner: orgName,
+        repoName: targetRepoName,
       });
 
-      // Update database to reflect that the repository is already mirrored
-      await db
-        .update(repositories)
-        .set({
-          status: repoStatusEnum.parse("mirrored"),
-          updatedAt: new Date(),
-          lastMirrored: new Date(),
-          errorMessage: null,
-          mirroredLocation: `${orgName}/${targetRepoName}`,
-        })
-        .where(eq(repositories.id, repository.id!));
+      if (existingRepoInfo && !existingRepoInfo.mirror) {
+        console.log(`Repository ${targetRepoName} exists but is not a mirror. Handling...`);
+        await handleExistingNonMirrorRepo({
+          config,
+          repository,
+          repoInfo: existingRepoInfo,
+          strategy: "delete", // Can be configured: "skip", "delete", or "rename"
+        });
+      } else if (existingRepoInfo?.mirror) {
+        console.log(
+          `Repository ${targetRepoName} already exists in Gitea organization ${orgName}. Updating database status.`
+        );
 
-      // Create a mirror job log entry
-      await createMirrorJob({
-        userId: config.userId,
-        repositoryId: repository.id,
-        repositoryName: repository.name,
-        message: `Repository ${targetRepoName} already exists in Gitea organization ${orgName}`,
-        details: `Repository ${targetRepoName} was found to already exist in Gitea organization ${orgName} and database status was updated.`,
-        status: "mirrored",
-      });
+        await syncRepositoryMetadataToGitea({
+          config,
+          octokit,
+          repository,
+          giteaOwner: orgName,
+          giteaRepoName: targetRepoName,
+          giteaToken: decryptedConfig.giteaConfig.token,
+        });
 
-      console.log(
-        `Repository ${targetRepoName} database status updated to mirrored in organization ${orgName}`
-      );
-      return;
+        // Update database to reflect that the repository is already mirrored
+        await db
+          .update(repositories)
+          .set({
+            status: repoStatusEnum.parse("mirrored"),
+            updatedAt: new Date(),
+            lastMirrored: new Date(),
+            errorMessage: null,
+            mirroredLocation: `${orgName}/${targetRepoName}`,
+          })
+          .where(eq(repositories.id, repository.id!));
+
+        // Create a mirror job log entry
+        await createMirrorJob({
+          userId: config.userId,
+          repositoryId: repository.id,
+          repositoryName: repository.name,
+          message: `Repository ${targetRepoName} already exists in Gitea organization ${orgName}`,
+          details: `Repository ${targetRepoName} was found to already exist in Gitea organization ${orgName} and database status was updated.`,
+          status: "mirrored",
+        });
+
+        console.log(
+          `Repository ${targetRepoName} database status updated to mirrored in organization ${orgName}`
+        );
+        return;
+      } else {
+        console.warn(
+          `[Mirror] Repository ${orgName}/${targetRepoName} exists but mirror status could not be verified. Continuing with mirror creation flow.`
+        );
+      }
     }
 
     console.log(
