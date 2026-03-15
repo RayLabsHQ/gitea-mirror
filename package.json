@@ -34,6 +34,7 @@
     "start": "bun dist/server/entry.mjs",
     "start:fresh": "bun run cleanup-db && bun run manage-db init && bun dist/server/entry.mjs",
     "test": "bun test",
+    "test:migrations": "bun scripts/validate-migrations.ts",
     "test:watch": "bun test --watch",
     "test:coverage": "bun test --coverage",
     "test:e2e": "bash tests/e2e/run-e2e.sh",

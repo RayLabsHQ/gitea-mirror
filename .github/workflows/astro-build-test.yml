@@ -48,6 +48,12 @@ jobs:
 
       - name: Run tests
         run: bun test --coverage
+      
+      - name: Check Drizzle migrations
+        run: bun run db:check
+
+      - name: Validate migrations (SQLite lint + upgrade path)
+        run: bun test:migrations
 
       - name: Build Astro project
         run: bunx --bun astro build
