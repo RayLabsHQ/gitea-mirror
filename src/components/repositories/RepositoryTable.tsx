@@ -1,11 +1,19 @@
 import { useMemo, useRef } from "react";
-import Fuse from "fuse.js";
+import {
+  getCoreRowModel,
+  getFilteredRowModel,
+  getSortedRowModel,
+  useReactTable,
+  type ColumnDef,
+  type ColumnFiltersState,
+  type SortingState,
+} from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { FlipHorizontal, GitFork, RefreshCw, RotateCcw, Star, Lock, Ban, Check, ChevronDown, Trash2, X } from "lucide-react";
 import { SiGithub, SiGitea } from "react-icons/si";
 import type { Repository } from "@/lib/db/schema";
 import { Button } from "@/components/ui/button";
-import { formatDate, formatLastSyncTime, getStatusColor } from "@/lib/utils";
+import { formatLastSyncTime } from "@/lib/utils";
 import type { FilterParams } from "@/types/filter";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useGiteaConfig } from "@/hooks/useGiteaConfig";
@@ -44,6 +52,30 @@ interface RepositoryTableProps {
   onDelete?: (repoId: string) => void;
   onApproveSync?: ({ repoId }: { repoId: string }) => Promise<void>;
   onDismissSync?: ({ repoId }: { repoId: string }) => Promise<void>;
+}
+
+function getTimestamp(value: Date | string | null | undefined): number {
+  if (!value) return 0;
+  const timestamp = new Date(value).getTime();
+  return Number.isNaN(timestamp) ? 0 : timestamp;
+}
+
+function getTableSorting(sortOrder: string | undefined): SortingState {
+  switch (sortOrder ?? "imported-desc") {
+    case "imported-asc":
+      return [{ id: "importedAt", desc: false }];
+    case "updated-desc":
+      return [{ id: "updatedAt", desc: true }];
+    case "updated-asc":
+      return [{ id: "updatedAt", desc: false }];
+    case "name-asc":
+      return [{ id: "fullName", desc: false }];
+    case "name-desc":
+      return [{ id: "fullName", desc: true }];
+    case "imported-desc":
+    default:
+      return [{ id: "importedAt", desc: true }];
+  }
 }
 
 export default function RepositoryTable({
@@ -120,40 +152,89 @@ export default function RepositoryTable({
     return `${baseUrl}/${repoPath}`;
   };
 
-  const hasAnyFilter = Object.values(filter).some(
-    (val) => val?.toString().trim() !== ""
-  );
+  const hasAnyFilter = [
+    filter.searchTerm,
+    filter.status,
+    filter.owner,
+    filter.organization,
+  ].some((val) => val?.toString().trim() !== "");
 
-  const filteredRepositories = useMemo(() => {
-    let result = repositories;
+  const columnFilters = useMemo<ColumnFiltersState>(() => {
+    const next: ColumnFiltersState = [];
 
     if (filter.status) {
-      result = result.filter((repo) => repo.status === filter.status);
+      next.push({ id: "status", value: filter.status });
     }
 
     if (filter.owner) {
-      result = result.filter((repo) => repo.owner === filter.owner);
+      next.push({ id: "owner", value: filter.owner });
     }
 
     if (filter.organization) {
-      result = result.filter(
-        (repo) => repo.organization === filter.organization
-      );
+      next.push({ id: "organization", value: filter.organization });
     }
 
-    if (filter.searchTerm) {
-      const fuse = new Fuse(result, {
-        keys: ["name", "fullName", "owner", "organization"],
-        threshold: 0.3,
-      });
-      result = fuse.search(filter.searchTerm).map((res) => res.item);
-    }
+    return next;
+  }, [filter.status, filter.owner, filter.organization]);
 
-    return result;
-  }, [repositories, filter]);
+  const sorting = useMemo(() => getTableSorting(filter.sort), [filter.sort]);
+
+  const columns = useMemo<ColumnDef<Repository>[]>(
+    () => [
+      {
+        id: "fullName",
+        accessorFn: (row) => row.fullName,
+      },
+      {
+        id: "owner",
+        accessorFn: (row) => row.owner,
+        filterFn: "equalsString",
+      },
+      {
+        id: "organization",
+        accessorFn: (row) => row.organization ?? "",
+        filterFn: "equalsString",
+      },
+      {
+        id: "status",
+        accessorFn: (row) => row.status,
+        filterFn: "equalsString",
+      },
+      {
+        id: "importedAt",
+        accessorFn: (row) => getTimestamp(row.importedAt),
+        enableGlobalFilter: false,
+        enableColumnFilter: false,
+      },
+      {
+        id: "updatedAt",
+        accessorFn: (row) => getTimestamp(row.updatedAt),
+        enableGlobalFilter: false,
+        enableColumnFilter: false,
+      },
+    ],
+    []
+  );
+
+  const table = useReactTable({
+    data: repositories,
+    columns,
+    state: {
+      globalFilter: filter.searchTerm ?? "",
+      columnFilters,
+      sorting,
+    },
+    getCoreRowModel: getCoreRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+  });
+
+  const visibleRepositories = table
+    .getRowModel()
+    .rows.map((row) => row.original);
 
   const rowVirtualizer = useVirtualizer({
-    count: filteredRepositories.length,
+    count: visibleRepositories.length,
     getScrollElement: () => tableParentRef.current,
     estimateSize: () => 65,
     overscan: 5,
@@ -162,7 +243,11 @@ export default function RepositoryTable({
   // Selection handlers
   const handleSelectAll = (checked: boolean) => {
     if (checked) {
-      const allIds = new Set(filteredRepositories.map(repo => repo.id).filter((id): id is string => !!id));
+      const allIds = new Set(
+        visibleRepositories
+          .map((repo) => repo.id)
+          .filter((id): id is string => !!id)
+      );
       onSelectionChange(allIds);
     } else {
       onSelectionChange(new Set());
@@ -179,8 +264,9 @@ export default function RepositoryTable({
     onSelectionChange(newSelection);
   };
 
-  const isAllSelected = filteredRepositories.length > 0 && 
-    filteredRepositories.every(repo => repo.id && selectedRepoIds.has(repo.id));
+  const isAllSelected =
+    visibleRepositories.length > 0 &&
+    visibleRepositories.every((repo) => repo.id && selectedRepoIds.has(repo.id));
   const isPartiallySelected = selectedRepoIds.size > 0 && !isAllSelected;
 
   // Mobile card layout for repository
@@ -235,7 +321,7 @@ export default function RepositoryTable({
 
               {/* Status & Last Mirrored */}
               <div className="flex items-center justify-between">
-                <Badge 
+                <Badge
                   className={`capitalize
                     ${repo.status === 'imported' ? 'bg-yellow-500/10 text-yellow-600 hover:bg-yellow-500/20 dark:text-yellow-400' :
                       repo.status === 'mirrored' || repo.status === 'synced' ? 'bg-green-500/10 text-green-600 hover:bg-green-500/20 dark:text-green-400' :
@@ -250,7 +336,7 @@ export default function RepositoryTable({
                   {repo.status}
                 </Badge>
                 <span className="text-xs text-muted-foreground">
-                  {formatLastSyncTime(repo.lastMirrored)}
+                  {formatLastSyncTime(repo.lastMirrored ?? null)}
                 </span>
               </div>
             </div>
@@ -379,7 +465,7 @@ export default function RepositoryTable({
                   Ignore Repository
                 </Button>
               )}
-              
+
               {/* External links */}
               <div className="flex gap-2">
                 <Button variant="outline" size="default" className="flex-1 h-10 min-w-0" asChild>
@@ -510,7 +596,7 @@ export default function RepositoryTable({
       {hasAnyFilter && (
         <div className="mb-4 flex items-center gap-2">
           <span className="text-sm text-muted-foreground">
-            Showing {filteredRepositories.length} of {repositories.length} repositories
+            Showing {visibleRepositories.length} of {repositories.length} repositories
           </span>
           <Button
             variant="ghost"
@@ -521,6 +607,7 @@ export default function RepositoryTable({
                 status: "",
                 organization: "",
                 owner: "",
+                sort: filter.sort || "imported-desc",
               })
             }
           >
@@ -529,7 +616,7 @@ export default function RepositoryTable({
         </div>
       )}
 
-      {filteredRepositories.length === 0 ? (
+      {visibleRepositories.length === 0 ? (
         <div className="text-center py-8">
           <p className="text-muted-foreground">
             {hasAnyFilter
@@ -550,12 +637,12 @@ export default function RepositoryTable({
                 className="h-5 w-5"
               />
               <span className="text-sm font-medium">
-                Select All ({filteredRepositories.length})
+                Select All ({visibleRepositories.length})
               </span>
             </div>
 
             {/* Repository cards */}
-            {filteredRepositories.map((repo) => (
+            {visibleRepositories.map((repo) => (
               <RepositoryCard key={repo.id} repo={repo} />
             ))}
           </div>
@@ -601,13 +688,14 @@ export default function RepositoryTable({
                   position: "relative",
                 }}
               >
-                {rowVirtualizer.getVirtualItems().map((virtualRow, index) => {
-                  const repo = filteredRepositories[virtualRow.index];
+                {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                  const repo = visibleRepositories[virtualRow.index];
+                  if (!repo) return null;
                   const isLoading = loadingRepoIds.has(repo.id ?? "");
 
                   return (
                     <div
-                      key={index}
+                      key={virtualRow.key}
                       ref={rowVirtualizer.measureElement}
                       style={{
                         position: "absolute",
@@ -670,7 +758,7 @@ export default function RepositoryTable({
                       {/* Last Mirrored */}
                       <div className="h-full p-3 flex items-center flex-[1]">
                         <p className="text-sm">
-                          {formatLastSyncTime(repo.lastMirrored)}
+                          {formatLastSyncTime(repo.lastMirrored ?? null)}
                         </p>
                       </div>
 
@@ -680,7 +768,7 @@ export default function RepositoryTable({
                           <TooltipProvider>
                             <Tooltip>
                               <TooltipTrigger asChild>
-                                <Badge 
+                                <Badge
                                   variant="destructive"
                                   className="cursor-help capitalize"
                                 >
@@ -693,7 +781,7 @@ export default function RepositoryTable({
                             </Tooltip>
                           </TooltipProvider>
                         ) : (
-                          <Badge 
+                          <Badge
                             className={`capitalize
                               ${repo.status === 'imported' ? 'bg-yellow-500/10 text-yellow-600 hover:bg-yellow-500/20 dark:text-yellow-400' :
                                 repo.status === 'mirrored' || repo.status === 'synced' ? 'bg-green-500/10 text-green-600 hover:bg-green-500/20 dark:text-green-400' :
@@ -784,7 +872,7 @@ export default function RepositoryTable({
                 <div className={`h-1.5 w-1.5 rounded-full ${isLiveActive ? 'bg-emerald-500' : 'bg-primary'}`} />
                 <span className="text-sm font-medium text-foreground">
                   {hasAnyFilter
-                    ? `Showing ${filteredRepositories.length} of ${repositories.length} repositories`
+                    ? `Showing ${visibleRepositories.length} of ${repositories.length} repositories`
                     : `${repositories.length} ${repositories.length === 1 ? 'repository' : 'repositories'} total`}
                 </span>
               </div>

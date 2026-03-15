@@ -28,6 +28,7 @@ function sampleRepo(overrides: Partial<GitRepo> = {}): GitRepo {
     status: 'imported',
     lastMirrored: undefined,
     errorMessage: undefined,
+    importedAt: new Date(),
     createdAt: new Date(),
     updatedAt: new Date(),
   };

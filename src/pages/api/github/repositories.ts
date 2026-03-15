@@ -49,7 +49,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
       .select()
       .from(repositories)
       .where(and(...conditions))
-      .orderBy(sql`name COLLATE NOCASE`);
+      .orderBy(sql`${repositories.importedAt} DESC`, sql`name COLLATE NOCASE`);
 
     const response: RepositoryApiResponse = {
       success: true,

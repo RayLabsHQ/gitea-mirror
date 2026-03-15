@@ -7,6 +7,7 @@ const FILTER_KEYS: (keyof FilterParams)[] = [
   "membershipRole",
   "owner",
   "organization",
+  "sort",
   "type",
   "name",
 ];

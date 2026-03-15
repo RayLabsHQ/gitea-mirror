@@ -64,6 +64,13 @@
       "when": 1761802056073,
       "tag": "0008_serious_thena",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1773542995732,
+      "tag": "0009_nervous_tyger_tiger",
+      "breakpoints": true
     }
   ]
 }

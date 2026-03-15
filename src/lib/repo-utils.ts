@@ -56,6 +56,7 @@ export function normalizeGitRepoToInsert(
     status: 'imported',
     lastMirrored: repo.lastMirrored ?? null,
     errorMessage: repo.errorMessage ?? null,
+    importedAt: repo.importedAt || new Date(),
     createdAt: repo.createdAt || new Date(),
     updatedAt: repo.updatedAt || new Date(),
   };

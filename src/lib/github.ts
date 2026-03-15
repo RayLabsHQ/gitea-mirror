@@ -287,6 +287,7 @@ export async function getGithubRepositories({
       lastMirrored: undefined,
       errorMessage: undefined,
 
+      importedAt: new Date(),
       createdAt: repo.created_at ? new Date(repo.created_at) : new Date(),
       updatedAt: repo.updated_at ? new Date(repo.updated_at) : new Date(),
     }));
@@ -348,6 +349,7 @@ export async function getGithubStarredRepositories({
       lastMirrored: undefined,
       errorMessage: undefined,
 
+      importedAt: new Date(),
       createdAt: repo.created_at ? new Date(repo.created_at) : new Date(),
       updatedAt: repo.updated_at ? new Date(repo.updated_at) : new Date(),
     }));
@@ -492,6 +494,7 @@ export async function getGithubOrganizationRepositories({
       lastMirrored: undefined,
       errorMessage: undefined,
 
+      importedAt: new Date(),
       createdAt: repo.created_at ? new Date(repo.created_at) : new Date(),
       updatedAt: repo.updated_at ? new Date(repo.updated_at) : new Date(),
     }));

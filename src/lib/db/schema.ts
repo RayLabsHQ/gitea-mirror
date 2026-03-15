@@ -181,6 +181,7 @@ export const repositorySchema = z.object({
   errorMessage: z.string().optional().nullable(),
   destinationOrg: z.string().optional().nullable(),
   metadata: z.string().optional().nullable(), // JSON string for metadata sync state
+  importedAt: z.coerce.date(),
   createdAt: z.coerce.date(),
   updatedAt: z.coerce.date(),
 });
@@ -395,6 +396,9 @@ export const repositories = sqliteTable("repositories", {
   destinationOrg: text("destination_org"),
 
   metadata: text("metadata"), // JSON string storing metadata sync state (issues, PRs, releases, etc.)
+  importedAt: integer("imported_at", { mode: "timestamp" })
+    .notNull()
+    .default(sql`(unixepoch())`),
 
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
@@ -410,6 +414,7 @@ export const repositories = sqliteTable("repositories", {
   index("idx_repositories_organization").on(table.organization),
   index("idx_repositories_is_fork").on(table.isForked),
   index("idx_repositories_is_starred").on(table.isStarred),
+  index("idx_repositories_user_imported_at").on(table.userId, table.importedAt),
   uniqueIndex("uniq_repositories_user_full_name").on(table.userId, table.fullName),
   uniqueIndex("uniq_repositories_user_normalized_full_name").on(table.userId, table.normalizedFullName),
 ]);
