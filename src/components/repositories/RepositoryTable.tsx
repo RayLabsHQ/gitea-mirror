@@ -6,6 +6,7 @@ import { SiGithub, SiGitea } from "react-icons/si";
 import type { Repository } from "@/lib/db/schema";
 import { Button } from "@/components/ui/button";
 import { formatDate, formatLastSyncTime, getStatusColor } from "@/lib/utils";
+import { sortRepositories } from "@/lib/repository-sorting";
 import type { FilterParams } from "@/types/filter";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useGiteaConfig } from "@/hooks/useGiteaConfig";
@@ -120,9 +121,12 @@ export default function RepositoryTable({
     return `${baseUrl}/${repoPath}`;
   };
 
-  const hasAnyFilter = Object.values(filter).some(
-    (val) => val?.toString().trim() !== ""
-  );
+  const hasAnyFilter = [
+    filter.searchTerm,
+    filter.status,
+    filter.owner,
+    filter.organization,
+  ].some((val) => val?.toString().trim() !== "");
 
   const filteredRepositories = useMemo(() => {
     let result = repositories;
@@ -149,7 +153,7 @@ export default function RepositoryTable({
       result = fuse.search(filter.searchTerm).map((res) => res.item);
     }
 
-    return result;
+    return sortRepositories(result, filter.sort);
   }, [repositories, filter]);
 
   const rowVirtualizer = useVirtualizer({
@@ -250,7 +254,7 @@ export default function RepositoryTable({
                   {repo.status}
                 </Badge>
                 <span className="text-xs text-muted-foreground">
-                  {formatLastSyncTime(repo.lastMirrored)}
+                  {formatLastSyncTime(repo.lastMirrored ?? null)}
                 </span>
               </div>
             </div>
@@ -521,6 +525,7 @@ export default function RepositoryTable({
                 status: "",
                 organization: "",
                 owner: "",
+                sort: filter.sort || "imported-desc",
               })
             }
           >
@@ -670,7 +675,7 @@ export default function RepositoryTable({
                       {/* Last Mirrored */}
                       <div className="h-full p-3 flex items-center flex-[1]">
                         <p className="text-sm">
-                          {formatLastSyncTime(repo.lastMirrored)}
+                          {formatLastSyncTime(repo.lastMirrored ?? null)}
                         </p>
                       </div>
 

@@ -155,6 +155,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       errorMessage: null,
       mirroredLocation: "",
       destinationOrg: null,
+      importedAt: new Date(),
       createdAt: repoData.created_at
         ? new Date(repoData.created_at)
         : new Date(),

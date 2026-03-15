@@ -90,6 +90,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       status: repo.status,
       lastMirrored: repo.lastMirrored ?? null,
       errorMessage: repo.errorMessage ?? null,
+      importedAt: repo.importedAt,
       createdAt: repo.createdAt,
       updatedAt: repo.updatedAt,
     }));

@@ -75,6 +75,7 @@ export interface GitRepo {
   lastMirrored?: Date;
   errorMessage?: string;
 
+  importedAt: Date;
   createdAt: Date;
   updatedAt: Date;
 }

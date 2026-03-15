@@ -51,6 +51,15 @@ import { useLiveRefresh } from "@/hooks/useLiveRefresh";
 import { useConfigStatus } from "@/hooks/useConfigStatus";
 import { useNavigation } from "@/components/layout/MainLayout";
 
+const REPOSITORY_SORT_OPTIONS = [
+  { value: "imported-desc", label: "Recently Imported" },
+  { value: "imported-asc", label: "Oldest Imported" },
+  { value: "updated-desc", label: "Recently Updated" },
+  { value: "updated-asc", label: "Oldest Updated" },
+  { value: "name-asc", label: "Name (A-Z)" },
+  { value: "name-desc", label: "Name (Z-A)" },
+] as const;
+
 export default function Repository() {
   const [repositories, setRepositories] = useState<Repository[]>([]);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
@@ -63,6 +72,7 @@ export default function Repository() {
     status: "",
     organization: "",
     owner: "",
+    sort: "imported-desc",
   });
   const [isDialogOpen, setIsDialogOpen] = useState<boolean>(false);
   const [selectedRepoIds, setSelectedRepoIds] = useState<Set<string>>(new Set());
@@ -999,6 +1009,7 @@ export default function Repository() {
       status: "",
       organization: "",
       owner: "",
+      sort: filter.sort || "imported-desc",
     });
   };
 
@@ -1139,6 +1150,33 @@ export default function Repository() {
                     </SelectContent>
                   </Select>
                 </div>
+
+                {/* Sort Filter */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium flex items-center gap-2">
+                    <span className="text-muted-foreground">Sort</span>
+                  </label>
+                  <Select
+                    value={filter.sort || "imported-desc"}
+                    onValueChange={(value) =>
+                      setFilter((prev) => ({
+                        ...prev,
+                        sort: value,
+                      }))
+                    }
+                  >
+                    <SelectTrigger className="w-full h-10">
+                      <SelectValue placeholder="Sort repositories" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {REPOSITORY_SORT_OPTIONS.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
               
               <DrawerFooter className="gap-2 px-4 pt-2 pb-4 border-t">
@@ -1236,6 +1274,27 @@ export default function Repository() {
                         ? "All statuses"
                         : status.charAt(0).toUpperCase() + status.slice(1)}
                     </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select
+              value={filter.sort || "imported-desc"}
+              onValueChange={(value) =>
+                setFilter((prev) => ({
+                  ...prev,
+                  sort: value,
+                }))
+              }
+            >
+              <SelectTrigger className="w-[190px] h-10">
+                <SelectValue placeholder="Sort repositories" />
+              </SelectTrigger>
+              <SelectContent>
+                {REPOSITORY_SORT_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
                   </SelectItem>
                 ))}
               </SelectContent>
