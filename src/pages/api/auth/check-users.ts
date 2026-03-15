@@ -7,17 +7,10 @@ export const GET: APIRoute = async () => {
     const userCountResult = await db
       .select({ count: sql<number>`count(*)` })
       .from(users);
-    
-    const userCount = userCountResult[0].count;
 
-    if (userCount === 0) {
-      return new Response(JSON.stringify({ error: "No users found" }), {
-        status: 404,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
+    const hasUsers = userCountResult[0].count > 0;
 
-    return new Response(JSON.stringify({ userCount }), {
+    return new Response(JSON.stringify({ hasUsers }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });

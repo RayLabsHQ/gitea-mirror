@@ -19,8 +19,23 @@ export const ENV = {
   },
 
   // Better Auth secret for authentication
-  BETTER_AUTH_SECRET:
-    process.env.BETTER_AUTH_SECRET || "your-secret-key-change-this-in-production",
+  get BETTER_AUTH_SECRET(): string {
+    const secret = process.env.BETTER_AUTH_SECRET;
+    const knownInsecureDefaults = [
+      "your-secret-key-change-this-in-production",
+      "dev-only-insecure-secret-do-not-use-in-production",
+    ];
+    if (!secret || knownInsecureDefaults.includes(secret)) {
+      if (process.env.NODE_ENV === "production") {
+        console.error(
+          "\x1b[31m[SECURITY WARNING]\x1b[0m BETTER_AUTH_SECRET is missing or using an insecure default. " +
+          "Set a strong secret: openssl rand -base64 32"
+        );
+      }
+      return secret || "dev-only-insecure-secret-do-not-use-in-production";
+    }
+    return secret;
+  },
 
   // Server host and port
   HOST: process.env.HOST || "localhost",

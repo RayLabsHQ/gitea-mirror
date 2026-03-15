@@ -160,10 +160,23 @@ export function generateSecureToken(length: number = 32): string {
 }
 
 /**
- * Hashes a value using SHA-256 (for non-reversible values like API keys for comparison)
+ * Hashes a value using SHA-256 with a random salt (for non-reversible values like API keys)
  * @param value The value to hash
- * @returns Hex encoded hash
+ * @returns Salt and hash in format "salt:hash"
  */
 export function hashValue(value: string): string {
-  return crypto.createHash('sha256').update(value).digest('hex');
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.createHash('sha256').update(salt + value).digest('hex');
+  return `${salt}:${hash}`;
+}
+
+/**
+ * Verifies a value against a salted hash produced by hashValue()
+ * Uses constant-time comparison to prevent timing attacks
+ */
+export function verifyHash(value: string, saltedHash: string): boolean {
+  const [salt, expectedHash] = saltedHash.split(':');
+  if (!salt || !expectedHash) return false;
+  const actualHash = crypto.createHash('sha256').update(salt + value).digest('hex');
+  return crypto.timingSafeEqual(Buffer.from(actualHash, 'hex'), Buffer.from(expectedHash, 'hex'));
 }

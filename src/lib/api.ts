@@ -91,35 +91,17 @@ export const giteaApi = {
 
 // Health API
 export interface HealthResponse {
-  status: "ok" | "error";
+  status: "ok" | "error" | "degraded";
   timestamp: string;
   version: string;
   latestVersion: string;
   updateAvailable: boolean;
   database: {
     connected: boolean;
-    message: string;
   };
-  system: {
-    uptime: {
-      startTime: string;
-      uptimeMs: number;
-      formatted: string;
-    };
-    memory: {
-      rss: string;
-      heapTotal: string;
-      heapUsed: string;
-      external: string;
-      systemTotal: string;
-      systemFree: string;
-    };
-    os: {
-      platform: string;
-      version: string;
-      arch: string;
-    };
-    env: string;
+  recovery?: {
+    status: string;
+    jobsNeedingRecovery: number;
   };
   error?: string;
 }

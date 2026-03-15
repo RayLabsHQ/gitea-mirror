@@ -1,13 +1,8 @@
 import type { APIRoute } from "astro";
 import { jsonResponse, createSecureErrorResponse } from "@/lib/utils";
 import { db } from "@/lib/db";
-import { ENV } from "@/lib/config";
 import { getRecoveryStatus, hasJobsNeedingRecovery } from "@/lib/recovery";
-import os from "os";
 import { httpGet } from "@/lib/http-client";
-
-// Track when the server started
-const serverStartTime = new Date();
 
 // Cache for the latest version to avoid frequent GitHub API calls
 interface VersionCache {
@@ -22,18 +17,6 @@ export const GET: APIRoute = async () => {
   try {
     // Check database connection by running a simple query
     const dbStatus = await checkDatabaseConnection();
-
-    // Get system information
-    const systemInfo = {
-      uptime: getUptime(),
-      memory: getMemoryUsage(),
-      os: {
-        platform: os.platform(),
-        version: os.version(),
-        arch: os.arch(),
-      },
-      env: ENV.NODE_ENV,
-    };
 
     // Get current and latest versions
     const currentVersion = process.env.npm_package_version || "unknown";
@@ -50,7 +33,7 @@ export const GET: APIRoute = async () => {
       overallStatus = "degraded";
     }
 
-    // Build response
+    // Build response (no OS/memory details to avoid information disclosure)
     const healthData = {
       status: overallStatus,
       timestamp: new Date().toISOString(),
@@ -59,9 +42,11 @@ export const GET: APIRoute = async () => {
       updateAvailable: latestVersion !== "unknown" &&
                        currentVersion !== "unknown" &&
                        compareVersions(currentVersion, latestVersion) < 0,
-      database: dbStatus,
-      recovery: recoveryStatus,
-      system: systemInfo,
+      database: { connected: dbStatus.connected },
+      recovery: {
+        status: recoveryStatus.status,
+        jobsNeedingRecovery: recoveryStatus.jobsNeedingRecovery,
+      },
     };
 
     return jsonResponse({
@@ -123,55 +108,6 @@ async function getRecoverySystemStatus() {
       message: error instanceof Error ? error.message : 'Recovery status check failed',
     };
   }
-}
-
-/**
- * Get server uptime information
- */
-function getUptime() {
-  const now = new Date();
-  const uptimeMs = now.getTime() - serverStartTime.getTime();
-
-  // Convert to human-readable format
-  const seconds = Math.floor(uptimeMs / 1000);
-  const minutes = Math.floor(seconds / 60);
-  const hours = Math.floor(minutes / 60);
-  const days = Math.floor(hours / 24);
-
-  return {
-    startTime: serverStartTime.toISOString(),
-    uptimeMs,
-    formatted: `${days}d ${hours % 24}h ${minutes % 60}m ${seconds % 60}s`,
-  };
-}
-
-/**
- * Get memory usage information
- */
-function getMemoryUsage() {
-  const memoryUsage = process.memoryUsage();
-
-  return {
-    rss: formatBytes(memoryUsage.rss),
-    heapTotal: formatBytes(memoryUsage.heapTotal),
-    heapUsed: formatBytes(memoryUsage.heapUsed),
-    external: formatBytes(memoryUsage.external),
-    systemTotal: formatBytes(os.totalmem()),
-    systemFree: formatBytes(os.freemem()),
-  };
-}
-
-/**
- * Format bytes to human-readable format
- */
-function formatBytes(bytes: number): string {
-  if (bytes === 0) return '0 Bytes';
-
-  const k = 1024;
-  const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
 /**

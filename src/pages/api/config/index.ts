@@ -38,6 +38,24 @@ export const POST: APIRoute = async ({ request, locals }) => {
       );
     }
 
+    // Validate Gitea URL format and protocol
+    if (giteaConfig.url) {
+      try {
+        const giteaUrl = new URL(giteaConfig.url);
+        if (!['http:', 'https:'].includes(giteaUrl.protocol)) {
+          return new Response(
+            JSON.stringify({ success: false, message: "Gitea URL must use http or https protocol." }),
+            { status: 400, headers: { "Content-Type": "application/json" } }
+          );
+        }
+      } catch {
+        return new Response(
+          JSON.stringify({ success: false, message: "Invalid Gitea URL format." }),
+          { status: 400, headers: { "Content-Type": "application/json" } }
+        );
+      }
+    }
+
     // Fetch existing config
     const existingConfigResult = await db
       .select()

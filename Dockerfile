@@ -29,14 +29,33 @@ RUN bun install --production --omit=peer --frozen-lockfile
 FROM oven/bun:1.3.10-debian AS runner
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
-  git git-lfs wget sqlite3 openssl ca-certificates \
-  && git lfs install \
-  && rm -rf /var/lib/apt/lists/*
+  git wget sqlite3 openssl ca-certificates \
+  && rm -rf /var/lib/apt/lists/* \
+  && GIT_LFS_VERSION="3.7.1" \
+  && ARCH="$(dpkg --print-architecture)" \
+  && case "${ARCH}" in \
+       amd64) LFS_ARCH="amd64" ;; \
+       arm64) LFS_ARCH="arm64" ;; \
+       *) echo "Unsupported architecture: ${ARCH}" && exit 1 ;; \
+     esac \
+  && wget -qO /tmp/git-lfs.tar.gz "https://github.com/git-lfs/git-lfs/releases/download/v${GIT_LFS_VERSION}/git-lfs-linux-${LFS_ARCH}-v${GIT_LFS_VERSION}.tar.gz" \
+  && tar -xzf /tmp/git-lfs.tar.gz -C /tmp \
+  && install -m 755 /tmp/git-lfs-${GIT_LFS_VERSION}/git-lfs /usr/local/bin/git-lfs \
+  && rm -rf /tmp/git-lfs* \
+  && git lfs install
 COPY --from=pruner /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/docker-entrypoint.sh ./docker-entrypoint.sh
 COPY --from=builder /app/drizzle ./drizzle
+
+# Remove build-only packages that are not needed at runtime
+# (esbuild, vite, rollup, tailwind, svgo — all only used during `astro build`)
+RUN rm -rf node_modules/esbuild node_modules/@esbuild \
+  node_modules/rollup node_modules/@rollup \
+  node_modules/vite node_modules/svgo \
+  node_modules/@tailwindcss/vite \
+  node_modules/tailwindcss
 
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
