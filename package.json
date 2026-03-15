@@ -73,6 +73,7 @@
     "@radix-ui/react-tabs": "^1.1.13",
     "@radix-ui/react-tooltip": "^1.2.8",
     "@tailwindcss/vite": "^4.2.1",
+    "@tanstack/react-table": "^8.21.3",
     "@tanstack/react-virtual": "^3.13.19",
     "@types/canvas-confetti": "^1.9.0",
     "@types/react": "^19.2.14",
