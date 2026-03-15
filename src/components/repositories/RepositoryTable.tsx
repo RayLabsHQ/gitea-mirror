@@ -1,19 +1,11 @@
-import { useMemo, useRef, useState } from "react";
-import {
-  getCoreRowModel,
-  getFilteredRowModel,
-  getSortedRowModel,
-  useReactTable,
-  type ColumnDef,
-  type ColumnFiltersState,
-  type SortingState,
-} from "@tanstack/react-table";
+import { useMemo, useRef } from "react";
+import Fuse from "fuse.js";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { FlipHorizontal, GitFork, RefreshCw, RotateCcw, Star, Lock, Ban, Check, ChevronDown, Trash2, X } from "lucide-react";
 import { SiGithub, SiGitea } from "react-icons/si";
 import type { Repository } from "@/lib/db/schema";
 import { Button } from "@/components/ui/button";
-import { formatLastSyncTime } from "@/lib/utils";
+import { formatDate, formatLastSyncTime, getStatusColor } from "@/lib/utils";
 import type { FilterParams } from "@/types/filter";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useGiteaConfig } from "@/hooks/useGiteaConfig";
@@ -74,7 +66,6 @@ export default function RepositoryTable({
 }: RepositoryTableProps) {
   const tableParentRef = useRef<HTMLDivElement>(null);
   const { giteaConfig } = useGiteaConfig();
-  const [sorting, setSorting] = useState<SortingState>([]);
 
   const handleUpdateDestination = async (repoId: string, newDestination: string | null) => {
     // Call API to update repository destination
@@ -129,90 +120,40 @@ export default function RepositoryTable({
     return `${baseUrl}/${repoPath}`;
   };
 
-  const hasAnyFilter = [filter.searchTerm, filter.status, filter.organization, filter.owner].some(
+  const hasAnyFilter = Object.values(filter).some(
     (val) => val?.toString().trim() !== ""
   );
 
-  const columnFilters = useMemo<ColumnFiltersState>(() => {
-    const next: ColumnFiltersState = [];
+  const filteredRepositories = useMemo(() => {
+    let result = repositories;
+
     if (filter.status) {
-      next.push({ id: "status", value: filter.status });
+      result = result.filter((repo) => repo.status === filter.status);
     }
+
     if (filter.owner) {
-      next.push({ id: "owner", value: filter.owner });
+      result = result.filter((repo) => repo.owner === filter.owner);
     }
+
     if (filter.organization) {
-      next.push({ id: "organization", value: filter.organization });
+      result = result.filter(
+        (repo) => repo.organization === filter.organization
+      );
     }
-    return next;
-  }, [filter.status, filter.owner, filter.organization]);
 
-  const columns = useMemo<ColumnDef<Repository>[]>(
-    () => [
-      {
-        id: "fullName",
-        accessorFn: (row) => row.fullName,
-      },
-      {
-        id: "owner",
-        accessorFn: (row) => row.owner,
-        filterFn: "equalsString",
-      },
-      {
-        id: "organization",
-        accessorFn: (row) => row.organization ?? "",
-        filterFn: "equalsString",
-      },
-      {
-        id: "status",
-        accessorFn: (row) => row.status,
-        filterFn: "equalsString",
-      },
-      {
-        id: "lastMirrored",
-        accessorFn: (row) =>
-          row.lastMirrored ? new Date(row.lastMirrored).getTime() : 0,
-        enableGlobalFilter: false,
-        enableColumnFilter: false,
-      },
-    ],
-    []
-  );
+    if (filter.searchTerm) {
+      const fuse = new Fuse(result, {
+        keys: ["name", "fullName", "owner", "organization"],
+        threshold: 0.3,
+      });
+      result = fuse.search(filter.searchTerm).map((res) => res.item);
+    }
 
-  const table = useReactTable({
-    data: repositories,
-    columns,
-    state: {
-      globalFilter: filter.searchTerm ?? "",
-      columnFilters,
-      sorting,
-    },
-    onSortingChange: setSorting,
-    getCoreRowModel: getCoreRowModel(),
-    getFilteredRowModel: getFilteredRowModel(),
-    getSortedRowModel: getSortedRowModel(),
-  });
-
-  const visibleRepositories = table
-    .getRowModel()
-    .rows.map((row) => row.original);
-
-  const getSortDirection = (columnId: string) =>
-    table.getColumn(columnId)?.getIsSorted() ?? false;
-
-  const getSortLabel = (columnId: string) => {
-    const direction = getSortDirection(columnId);
-    if (direction === "asc") return " ↑";
-    if (direction === "desc") return " ↓";
-    return "";
-  };
-
-  const toggleSort = (columnId: string) => {
-    table.getColumn(columnId)?.toggleSorting();
-  };
+    return result;
+  }, [repositories, filter]);
 
   const rowVirtualizer = useVirtualizer({
-    count: visibleRepositories.length,
+    count: filteredRepositories.length,
     getScrollElement: () => tableParentRef.current,
     estimateSize: () => 65,
     overscan: 5,
@@ -221,11 +162,7 @@ export default function RepositoryTable({
   // Selection handlers
   const handleSelectAll = (checked: boolean) => {
     if (checked) {
-      const allIds = new Set(
-        visibleRepositories
-          .map((repo) => repo.id)
-          .filter((id): id is string => !!id)
-      );
+      const allIds = new Set(filteredRepositories.map(repo => repo.id).filter((id): id is string => !!id));
       onSelectionChange(allIds);
     } else {
       onSelectionChange(new Set());
@@ -242,9 +179,8 @@ export default function RepositoryTable({
     onSelectionChange(newSelection);
   };
 
-  const isAllSelected =
-    visibleRepositories.length > 0 &&
-    visibleRepositories.every((repo) => repo.id && selectedRepoIds.has(repo.id));
+  const isAllSelected = filteredRepositories.length > 0 && 
+    filteredRepositories.every(repo => repo.id && selectedRepoIds.has(repo.id));
   const isPartiallySelected = selectedRepoIds.size > 0 && !isAllSelected;
 
   // Mobile card layout for repository
@@ -574,7 +510,7 @@ export default function RepositoryTable({
       {hasAnyFilter && (
         <div className="mb-4 flex items-center gap-2">
           <span className="text-sm text-muted-foreground">
-            Showing {visibleRepositories.length} of {repositories.length} repositories
+            Showing {filteredRepositories.length} of {repositories.length} repositories
           </span>
           <Button
             variant="ghost"
@@ -593,7 +529,7 @@ export default function RepositoryTable({
         </div>
       )}
 
-      {visibleRepositories.length === 0 ? (
+      {filteredRepositories.length === 0 ? (
         <div className="text-center py-8">
           <p className="text-muted-foreground">
             {hasAnyFilter
@@ -614,12 +550,12 @@ export default function RepositoryTable({
                 className="h-5 w-5"
               />
               <span className="text-sm font-medium">
-                Select All ({visibleRepositories.length})
+                Select All ({filteredRepositories.length})
               </span>
             </div>
 
             {/* Repository cards */}
-            {visibleRepositories.map((repo) => (
+            {filteredRepositories.map((repo) => (
               <RepositoryCard key={repo.id} repo={repo} />
             ))}
           </div>
@@ -636,55 +572,16 @@ export default function RepositoryTable({
                 />
               </div>
               <div className="h-full py-3 text-sm font-medium flex-[2.3]">
-                <button
-                  type="button"
-                  className="hover:text-foreground text-left"
-                  onClick={() => toggleSort("fullName")}
-                  title="Sort by repository"
-                >
-                  Repository{getSortLabel("fullName")}
-                </button>
+                Repository
+              </div>
+              <div className="h-full p-3 text-sm font-medium flex-[1]">Owner</div>
+              <div className="h-full p-3 text-sm font-medium flex-[1]">
+                Organization
               </div>
               <div className="h-full p-3 text-sm font-medium flex-[1]">
-                <button
-                  type="button"
-                  className="hover:text-foreground text-left"
-                  onClick={() => toggleSort("owner")}
-                  title="Sort by owner"
-                >
-                  Owner{getSortLabel("owner")}
-                </button>
+                Last Mirrored
               </div>
-              <div className="h-full p-3 text-sm font-medium flex-[1]">
-                <button
-                  type="button"
-                  className="hover:text-foreground text-left"
-                  onClick={() => toggleSort("organization")}
-                  title="Sort by organization"
-                >
-                  Organization{getSortLabel("organization")}
-                </button>
-              </div>
-              <div className="h-full p-3 text-sm font-medium flex-[1]">
-                <button
-                  type="button"
-                  className="hover:text-foreground text-left"
-                  onClick={() => toggleSort("lastMirrored")}
-                  title="Sort by last mirrored"
-                >
-                  Last Mirrored{getSortLabel("lastMirrored")}
-                </button>
-              </div>
-              <div className="h-full p-3 text-sm font-medium flex-[1]">
-                <button
-                  type="button"
-                  className="hover:text-foreground text-left"
-                  onClick={() => toggleSort("status")}
-                  title="Sort by status"
-                >
-                  Status{getSortLabel("status")}
-                </button>
-              </div>
+              <div className="h-full p-3 text-sm font-medium flex-[1]">Status</div>
               <div className="h-full p-3 text-sm font-medium flex-[1]">
                 Actions
               </div>
@@ -704,14 +601,13 @@ export default function RepositoryTable({
                   position: "relative",
                 }}
               >
-                {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-                  const repo = visibleRepositories[virtualRow.index];
-                  if (!repo) return null;
+                {rowVirtualizer.getVirtualItems().map((virtualRow, index) => {
+                  const repo = filteredRepositories[virtualRow.index];
                   const isLoading = loadingRepoIds.has(repo.id ?? "");
 
                   return (
                     <div
-                      key={virtualRow.key}
+                      key={index}
                       ref={rowVirtualizer.measureElement}
                       style={{
                         position: "absolute",
@@ -888,7 +784,7 @@ export default function RepositoryTable({
                 <div className={`h-1.5 w-1.5 rounded-full ${isLiveActive ? 'bg-emerald-500' : 'bg-primary'}`} />
                 <span className="text-sm font-medium text-foreground">
                   {hasAnyFilter
-                    ? `Showing ${visibleRepositories.length} of ${repositories.length} repositories`
+                    ? `Showing ${filteredRepositories.length} of ${repositories.length} repositories`
                     : `${repositories.length} ${repositories.length === 1 ? 'repository' : 'repositories'} total`}
                 </span>
               </div>
