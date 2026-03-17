@@ -4,6 +4,7 @@ import { GitFork } from "lucide-react";
 import { SiGithub, SiGitea } from "react-icons/si";
 import type { Repository } from "@/lib/db/schema";
 import { getStatusColor } from "@/lib/utils";
+import { buildGiteaWebUrl } from "@/lib/gitea-url";
 import { useGiteaConfig } from "@/hooks/useGiteaConfig";
 
 interface RepositoryListProps {
@@ -15,11 +16,6 @@ export function RepositoryList({ repositories }: RepositoryListProps) {
 
   // Helper function to construct Gitea repository URL
   const getGiteaRepoUrl = (repository: Repository): string | null => {
-    const rawBaseUrl = giteaConfig?.externalUrl || giteaConfig?.url;
-    if (!rawBaseUrl) {
-      return null;
-    }
-
     // Only provide Gitea links for repositories that have been or are being mirrored
     const validStatuses = ['mirroring', 'mirrored', 'syncing', 'synced'];
     if (!validStatuses.includes(repository.status)) {
@@ -38,12 +34,7 @@ export function RepositoryList({ repositories }: RepositoryListProps) {
       repoPath = `${owner}/${repository.name}`;
     }
 
-    // Ensure the base URL doesn't have a trailing slash
-    const baseUrl = rawBaseUrl.endsWith("/")
-      ? rawBaseUrl.slice(0, -1)
-      : rawBaseUrl;
-
-    return `${baseUrl}/${repoPath}`;
+    return buildGiteaWebUrl(giteaConfig, repoPath);
   };
 
   return (

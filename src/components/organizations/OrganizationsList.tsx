@@ -9,6 +9,7 @@ import type { FilterParams } from "@/types/filter";
 import Fuse from "fuse.js";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import { buildGiteaWebUrl } from "@/lib/gitea-url";
 import { MirrorDestinationEditor } from "./MirrorDestinationEditor";
 import { useGiteaConfig } from "@/hooks/useGiteaConfig";
 import {
@@ -67,11 +68,6 @@ export function OrganizationList({
 
   // Helper function to construct Gitea organization URL
   const getGiteaOrgUrl = (organization: Organization): string | null => {
-    const rawBaseUrl = giteaConfig?.externalUrl || giteaConfig?.url;
-    if (!rawBaseUrl) {
-      return null;
-    }
-
     // Only provide Gitea links for organizations that have been mirrored
     const validStatuses = ['mirroring', 'mirrored'];
     if (!validStatuses.includes(organization.status || '')) {
@@ -84,12 +80,7 @@ export function OrganizationList({
       return null;
     }
 
-    // Ensure the base URL doesn't have a trailing slash
-    const baseUrl = rawBaseUrl.endsWith("/")
-      ? rawBaseUrl.slice(0, -1)
-      : rawBaseUrl;
-
-    return `${baseUrl}/${orgName}`;
+    return buildGiteaWebUrl(giteaConfig, orgName);
   };
 
   const handleUpdateDestination = async (orgId: string, newDestination: string | null) => {

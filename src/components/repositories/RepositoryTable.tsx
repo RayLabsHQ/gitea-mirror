@@ -14,6 +14,7 @@ import { SiGithub, SiGitea } from "react-icons/si";
 import type { Repository } from "@/lib/db/schema";
 import { Button } from "@/components/ui/button";
 import { formatLastSyncTime } from "@/lib/utils";
+import { buildGiteaWebUrl } from "@/lib/gitea-url";
 import type { FilterParams } from "@/types/filter";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useGiteaConfig } from "@/hooks/useGiteaConfig";
@@ -124,10 +125,6 @@ export default function RepositoryTable({
 
   // Helper function to construct Gitea repository URL
   const getGiteaRepoUrl = (repository: Repository): string | null => {
-    if (!giteaConfig?.url) {
-      return null;
-    }
-
     // Only provide Gitea links for repositories that have been or are being mirrored
     const validStatuses = ['mirroring', 'mirrored', 'syncing', 'synced', 'archived'];
     if (!validStatuses.includes(repository.status)) {
@@ -144,12 +141,7 @@ export default function RepositoryTable({
       repoPath = `${owner}/${repository.name}`;
     }
 
-    // Ensure the base URL doesn't have a trailing slash
-    const baseUrl = giteaConfig.url.endsWith('/')
-      ? giteaConfig.url.slice(0, -1)
-      : giteaConfig.url;
-
-    return `${baseUrl}/${repoPath}`;
+    return buildGiteaWebUrl(giteaConfig, repoPath);
   };
 
   const hasAnyFilter = [
