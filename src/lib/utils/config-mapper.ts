@@ -147,7 +147,9 @@ export function mapDbToUiConfig(dbConfig: any): {
     personalReposOrg: undefined, // Not stored in current schema
     issueConcurrency: dbConfig.giteaConfig?.issueConcurrency ?? 3,
     pullRequestConcurrency: dbConfig.giteaConfig?.pullRequestConcurrency ?? 5,
-    backupStrategy: dbConfig.giteaConfig?.backupStrategy || "on-force-push",
+    backupStrategy: dbConfig.giteaConfig?.backupStrategy ||
+      // Respect legacy backupBeforeSync: false → "disabled" mapping on round-trip
+      (dbConfig.giteaConfig?.backupBeforeSync === false ? "disabled" : "on-force-push"),
     backupBeforeSync: dbConfig.giteaConfig?.backupBeforeSync ?? true,
     backupRetentionCount: dbConfig.giteaConfig?.backupRetentionCount ?? 5,
     backupRetentionDays: dbConfig.giteaConfig?.backupRetentionDays ?? 30,
