@@ -10,7 +10,7 @@ import type { Organization, Repository } from "./db/schema";
 import { httpPost, httpGet, httpDelete, httpPut, httpPatch } from "./http-client";
 import { createMirrorJob } from "./helpers";
 import { db, organizations, repositories } from "./db";
-import { eq, and } from "drizzle-orm";
+import { eq, and, ne } from "drizzle-orm";
 import { decryptConfigTokens } from "./utils/config-encryption";
 import { formatDateShort } from "./utils";
 import {
@@ -586,6 +586,7 @@ export const mirrorGithubRepoToGitea = async ({
         orgName: repoOwner,
         baseName: repository.name,
         githubOwner,
+        fullName: repository.fullName,
         strategy: config.githubConfig.starredDuplicateStrategy,
       });
 
@@ -1075,11 +1076,15 @@ export const mirrorGithubRepoToGitea = async ({
       }`
     );
 
-    // Mark repos as "failed" in DB
+    // Mark repos as "failed" in DB and clear mirroredLocation so it doesn't
+    // falsely claim a location that was never successfully created.
+    // This is critical for starred repos with duplicate names: without clearing,
+    // a failed mirror leaves mirroredLocation pointing to another repo's mirror.
     await db
       .update(repositories)
       .set({
         status: repoStatusEnum.parse("failed"),
+        mirroredLocation: "",
         updatedAt: new Date(),
         errorMessage: error instanceof Error ? error.message : "Unknown error",
       })
@@ -1133,29 +1138,92 @@ export async function getOrCreateGiteaOrg({
 }
 
 /**
- * Generate a unique repository name for starred repos with duplicate names
+ * Check if a candidate mirroredLocation is already claimed by another repository
+ * in the local database. This prevents race conditions during concurrent batch
+ * mirroring where two repos could both claim the same name before either
+ * finishes creating in Gitea.
+ */
+async function isMirroredLocationClaimedInDb({
+  userId,
+  candidateLocation,
+  excludeFullName,
+}: {
+  userId: string;
+  candidateLocation: string;
+  excludeFullName: string;
+}): Promise<boolean> {
+  try {
+    const existing = await db
+      .select({ id: repositories.id })
+      .from(repositories)
+      .where(
+        and(
+          eq(repositories.userId, userId),
+          eq(repositories.mirroredLocation, candidateLocation),
+          ne(repositories.fullName, excludeFullName)
+        )
+      )
+      .limit(1);
+
+    return existing.length > 0;
+  } catch (error) {
+    console.error(
+      `Error checking DB for mirroredLocation "${candidateLocation}":`,
+      error
+    );
+    // On error, assume not claimed to avoid blocking mirrors
+    return false;
+  }
+}
+
+/**
+ * Generate a unique repository name for starred repos with duplicate names.
+ * Checks both the Gitea instance (HTTP) and the local DB (mirroredLocation)
+ * to prevent race conditions during concurrent batch mirroring.
  */
 async function generateUniqueRepoName({
   config,
   orgName,
   baseName,
   githubOwner,
+  fullName,
   strategy,
 }: {
   config: Partial<Config>;
   orgName: string;
   baseName: string;
   githubOwner: string;
+  fullName: string;
   strategy?: string;
 }): Promise<string> {
   const duplicateStrategy = strategy || "suffix";
+  const userId = config.userId || "";
+
+  // Helper: check both Gitea and local DB for a candidate name
+  const isNameTaken = async (candidateName: string): Promise<boolean> => {
+    const existsInGitea = await isRepoPresentInGitea({
+      config,
+      owner: orgName,
+      repoName: candidateName,
+    });
+    if (existsInGitea) return true;
+
+    // Also check local DB to catch concurrent batch operations
+    // where another repo claimed this location but hasn't created it in Gitea yet
+    if (userId) {
+      const claimedInDb = await isMirroredLocationClaimedInDb({
+        userId,
+        candidateLocation: `${orgName}/${candidateName}`,
+        excludeFullName: fullName,
+      });
+      if (claimedInDb) return true;
+    }
+
+    return false;
+  };
 
   // First check if base name is available
-  const baseExists = await isRepoPresentInGitea({
-    config,
-    owner: orgName,
-    repoName: baseName,
-  });
+  const baseExists = await isNameTaken(baseName);
 
   if (!baseExists) {
     return baseName;
@@ -1187,11 +1255,7 @@ async function generateUniqueRepoName({
         break;
     }
 
-    const exists = await isRepoPresentInGitea({
-      config,
-      owner: orgName,
-      repoName: candidateName,
-    });
+    const exists = await isNameTaken(candidateName);
 
     if (!exists) {
       console.log(`Found unique name for duplicate starred repo: ${candidateName}`);
@@ -1254,6 +1318,7 @@ export async function mirrorGitHubRepoToGiteaOrg({
         orgName,
         baseName: repository.name,
         githubOwner,
+        fullName: repository.fullName,
         strategy: config.githubConfig.starredDuplicateStrategy,
       });
 
@@ -1676,11 +1741,15 @@ export async function mirrorGitHubRepoToGiteaOrg({
         error instanceof Error ? error.message : String(error)
       }`
     );
-    // Mark repos as "failed" in DB
+    // Mark repos as "failed" in DB and clear mirroredLocation so it doesn't
+    // falsely claim a location that was never successfully created.
+    // This is critical for starred repos with duplicate names: without clearing,
+    // a failed mirror leaves mirroredLocation pointing to another repo's mirror.
     await db
       .update(repositories)
       .set({
         status: repoStatusEnum.parse("failed"),
+        mirroredLocation: "",
         updatedAt: new Date(),
         errorMessage: error instanceof Error ? error.message : "Unknown error",
       })
