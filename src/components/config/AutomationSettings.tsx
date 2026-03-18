@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
@@ -30,6 +30,10 @@ import {
 } from "@/components/ui/tooltip";
 import type { ScheduleConfig, DatabaseCleanupConfig } from "@/types/config";
 import { formatDate } from "@/lib/utils";
+import {
+  buildClockCronExpression,
+  getNextCronOccurrence,
+} from "@/lib/utils/schedule-utils";
 
 interface AutomationSettingsProps {
   scheduleConfig: ScheduleConfig;
@@ -89,6 +93,23 @@ export function AutomationSettings({
     typeof Intl !== "undefined"
       ? Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
       : "UTC";
+
+  // Use saved timezone, but treat "UTC" as unset for users who never chose it
+  const effectiveTimezone = scheduleConfig.timezone || browserTimezone;
+
+  const nextScheduledRun = useMemo(() => {
+    if (!scheduleConfig.enabled) return null;
+    const startTime = scheduleConfig.startTime || "22:00";
+    const frequencyHours = scheduleConfig.clockFrequencyHours || 24;
+    const cronExpression = buildClockCronExpression(startTime, frequencyHours);
+    if (!cronExpression) return null;
+    try {
+      return getNextCronOccurrence(cronExpression, new Date(), effectiveTimezone);
+    } catch {
+      return null;
+    }
+  }, [scheduleConfig.enabled, scheduleConfig.startTime, scheduleConfig.clockFrequencyHours, effectiveTimezone]);
+
   // Update nextRun for cleanup when settings change
   useEffect(() => {
     if (cleanupConfig.enabled && !cleanupConfig.nextRun) {
@@ -150,7 +171,10 @@ export function AutomationSettings({
                     onScheduleChange({
                       ...scheduleConfig,
                       enabled: !!checked,
-                      timezone: scheduleConfig.timezone || browserTimezone,
+                      timezone: checked ? browserTimezone : scheduleConfig.timezone,
+                      startTime: scheduleConfig.startTime || "22:00",
+                      clockFrequencyHours: scheduleConfig.clockFrequencyHours || 24,
+                      scheduleMode: "clock",
                     })
                   }
                 />
@@ -175,7 +199,7 @@ export function AutomationSettings({
                     </p>
                     <span className="inline-flex items-center gap-1.5 rounded-full border border-border/70 px-2.5 py-0.5 text-[11px] text-muted-foreground">
                       <Globe className="h-3 w-3" />
-                      {browserTimezone}
+                      {effectiveTimezone}
                     </span>
                   </div>
 
@@ -195,7 +219,7 @@ export function AutomationSettings({
                             scheduleMode: "clock",
                             clockFrequencyHours: parseInt(value, 10),
                             startTime: scheduleConfig.startTime || "22:00",
-                            timezone: scheduleConfig.timezone || browserTimezone,
+                            timezone: effectiveTimezone,
                           })
                         }
                       >
@@ -237,7 +261,7 @@ export function AutomationSettings({
                               startTime: event.target.value,
                               clockFrequencyHours:
                                 scheduleConfig.clockFrequencyHours || 24,
-                              timezone: scheduleConfig.timezone || browserTimezone,
+                              timezone: effectiveTimezone,
                             })
                           }
                           className="appearance-none pl-9 dark:bg-input/30 [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none"
@@ -265,7 +289,9 @@ export function AutomationSettings({
                     <span className="font-medium text-primary">
                       {scheduleConfig.nextRun
                         ? formatDate(scheduleConfig.nextRun)
-                        : "Calculating..."}
+                        : nextScheduledRun
+                          ? formatDate(nextScheduledRun)
+                          : "Calculating..."}
                     </span>
                   </span>
                 ) : (
