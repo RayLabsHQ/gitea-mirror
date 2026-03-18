@@ -720,7 +720,7 @@ export async function syncGiteaRepoEnhanced({
         repositoryId: repository.id,
         repositoryName: repository.name,
         message: `Sync requested for repository: ${repository.name}`,
-        details: `Mirror sync was requested for ${repository.name}. Gitea/Forgejo performs the actual pull asynchronously; check remote logs for pull errors.`,
+        details: `Mirror sync was requested for ${repository.name}.`,
         status: "synced",
       });
 
