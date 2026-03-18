@@ -6,6 +6,72 @@ import { db, users } from "./db";
 import * as schema from "./db/schema";
 import { eq } from "drizzle-orm";
 
+/**
+ * Resolves the list of trusted origins for Better Auth CSRF validation.
+ * Exported for testing. Called per-request with the incoming Request,
+ * or at startup with no request (static origins only).
+ */
+export async function resolveTrustedOrigins(request?: Request): Promise<string[]> {
+  const origins: string[] = [
+    "http://localhost:4321",
+    "http://localhost:8080", // Keycloak
+  ];
+
+  // Add the primary URL from BETTER_AUTH_URL
+  const primaryUrl = process.env.BETTER_AUTH_URL;
+  if (primaryUrl && typeof primaryUrl === 'string' && primaryUrl.trim() !== '') {
+    try {
+      const validatedUrl = new URL(primaryUrl.trim());
+      origins.push(validatedUrl.origin);
+    } catch {
+      // Skip if invalid
+    }
+  }
+
+  // Add additional trusted origins from environment
+  if (process.env.BETTER_AUTH_TRUSTED_ORIGINS) {
+    const additionalOrigins = process.env.BETTER_AUTH_TRUSTED_ORIGINS
+      .split(',')
+      .map(o => o.trim())
+      .filter(o => o !== '');
+
+    for (const origin of additionalOrigins) {
+      try {
+        const validatedUrl = new URL(origin);
+        origins.push(validatedUrl.origin);
+      } catch {
+        console.warn(`Invalid trusted origin: ${origin}, skipping`);
+      }
+    }
+  }
+
+  // Auto-detect origin from the incoming request's Host header when running
+  // behind a reverse proxy. Helps with Better Auth's per-request CSRF check.
+  if (request?.headers) {
+    // Take first value only — headers can be comma-separated in chained proxy setups
+    const rawHost = request.headers.get("x-forwarded-host") || request.headers.get("host");
+    const host = rawHost?.split(",")[0].trim();
+    if (host) {
+      const rawProto = request.headers.get("x-forwarded-proto") || "http";
+      const proto = rawProto.split(",")[0].trim().toLowerCase();
+      if (proto === "http" || proto === "https") {
+        try {
+          const detected = new URL(`${proto}://${host}`);
+          origins.push(detected.origin);
+        } catch {
+          // Malformed header, ignore
+        }
+      }
+    }
+  }
+
+  const uniqueOrigins = [...new Set(origins.filter(Boolean))];
+  if (!request) {
+    console.info("Trusted origins (static):", uniqueOrigins);
+  }
+  return uniqueOrigins;
+}
+
 export const auth = betterAuth({
   // Database configuration
   database: drizzleAdapter(db, {
@@ -47,74 +113,7 @@ export const auth = betterAuth({
   // Uses the function form so that the origin can be auto-detected from
   // the incoming request's Host / X-Forwarded-* headers, which makes the
   // app work behind a reverse proxy without manual env var configuration.
-  trustedOrigins: async (request?: Request) => {
-    const origins: string[] = [
-      "http://localhost:4321",
-      "http://localhost:8080", // Keycloak
-    ];
-
-    // Add the primary URL from BETTER_AUTH_URL
-    const primaryUrl = process.env.BETTER_AUTH_URL;
-    if (primaryUrl && typeof primaryUrl === 'string' && primaryUrl.trim() !== '') {
-      try {
-        const validatedUrl = new URL(primaryUrl.trim());
-        origins.push(validatedUrl.origin);
-      } catch {
-        // Skip if invalid
-      }
-    }
-
-    // Add additional trusted origins from environment
-    // This is where users can specify multiple access URLs
-    if (process.env.BETTER_AUTH_TRUSTED_ORIGINS) {
-      const additionalOrigins = process.env.BETTER_AUTH_TRUSTED_ORIGINS
-        .split(',')
-        .map(o => o.trim())
-        .filter(o => o !== '');
-
-      // Validate each additional origin
-      for (const origin of additionalOrigins) {
-        try {
-          const validatedUrl = new URL(origin);
-          origins.push(validatedUrl.origin);
-        } catch {
-          console.warn(`Invalid trusted origin: ${origin}, skipping`);
-        }
-      }
-    }
-
-    // Auto-detect origin from the incoming request's Host header when running
-    // behind a reverse proxy. This helps with Better Auth's per-request CSRF
-    // origin validation. Note: callback/redirect URL validation uses the static
-    // trustedOrigins computed at startup, so BETTER_AUTH_TRUSTED_ORIGINS should
-    // still be set for full reverse proxy compatibility.
-    if (request?.headers) {
-      // Take first value only — x-forwarded-host can be comma-separated in chained proxy setups
-      const rawHost = request.headers.get("x-forwarded-host") || request.headers.get("host");
-      const host = rawHost?.split(",")[0].trim();
-      if (host) {
-        // Handle multi-value x-forwarded-proto (e.g. "https, http" from proxy chains)
-        const rawProto = request.headers.get("x-forwarded-proto") || "http";
-        const proto = rawProto.split(",")[0].trim().toLowerCase();
-        if (proto === "http" || proto === "https") {
-          try {
-            const detected = new URL(`${proto}://${host}`);
-            origins.push(detected.origin);
-          } catch {
-            // Malformed header, ignore
-          }
-        }
-      }
-    }
-
-    // Remove duplicates and empty strings, then return
-    const uniqueOrigins = [...new Set(origins.filter(Boolean))];
-    if (!request) {
-      // Log static origins at startup for debugging proxy issues
-      console.info("Trusted origins (static):", uniqueOrigins);
-    }
-    return uniqueOrigins;
-  },
+  trustedOrigins: (request?: Request) => resolveTrustedOrigins(request),
 
   // Authentication methods
   emailAndPassword: {
