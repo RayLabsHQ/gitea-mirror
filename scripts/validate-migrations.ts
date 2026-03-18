@@ -149,8 +149,6 @@ function seedPre0010Database(db: any) {
 }
 
 function verify0010Migration(db: any) {
-  // Verify the unique partial index exists by checking that two repos
-  // with the same non-empty mirroredLocation would conflict
   const indexes = db.prepare(
     "SELECT name FROM sqlite_master WHERE type='index' AND name='uniq_repositories_user_mirrored_location'"
   ).all();
@@ -166,6 +164,30 @@ function verify0010Migration(db: any) {
   }
 }
 
+function seedPre0011Database(db: any) {
+  seedPre0009Database(db);
+  runMigration(db, migrations.find((m) => m.entry.tag === "0009_nervous_tyger_tiger")!);
+  runMigration(db, migrations.find((m) => m.entry.tag === "0010_mirrored_location_index")!);
+}
+
+function verify0011Migration(db: any) {
+  const configColumns = db.query("PRAGMA table_info(configs)").all() as TableInfoRow[];
+  const notificationConfigColumn = configColumns.find((column: any) => column.name === "notification_config");
+
+  assert(notificationConfigColumn, "Expected configs.notification_config column to exist after migration");
+  assert(notificationConfigColumn.notnull === 1, "Expected configs.notification_config to be NOT NULL");
+  assert(
+    notificationConfigColumn.dflt_value !== null,
+    "Expected configs.notification_config to have a default value",
+  );
+
+  const existingConfig = db.query("SELECT notification_config FROM configs WHERE id = 'c1'").get() as { notification_config: string } | null;
+  assert(existingConfig, "Expected existing config row to still exist");
+  const parsed = JSON.parse(existingConfig.notification_config);
+  assert(parsed.enabled === false, "Expected default notification_config.enabled to be false");
+  assert(parsed.provider === "ntfy", "Expected default notification_config.provider to be 'ntfy'");
+}
+
 const latestUpgradeFixtures: Record<string, UpgradeFixture> = {
   "0009_nervous_tyger_tiger": {
     seed: seedPre0009Database,
@@ -174,6 +196,10 @@ const latestUpgradeFixtures: Record<string, UpgradeFixture> = {
   "0010_mirrored_location_index": {
     seed: seedPre0010Database,
     verify: verify0010Migration,
+  },
+  "0011_notification_config": {
+    seed: seedPre0011Database,
+    verify: verify0011Migration,
   },
 };
 

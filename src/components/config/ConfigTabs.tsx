@@ -3,6 +3,7 @@ import { GitHubConfigForm } from './GitHubConfigForm';
 import { GiteaConfigForm } from './GiteaConfigForm';
 import { AutomationSettings } from './AutomationSettings';
 import { SSOSettings } from './SSOSettings';
+import { NotificationSettings } from './NotificationSettings';
 import type {
   ConfigApiResponse,
   GiteaConfig,
@@ -13,6 +14,7 @@ import type {
   DatabaseCleanupConfig,
   MirrorOptions,
   AdvancedOptions,
+  NotificationConfig,
 } from '@/types/config';
 import { Button } from '../ui/button';
 import { useAuth } from '@/hooks/useAuth';
@@ -30,6 +32,7 @@ type ConfigState = {
   cleanupConfig: DatabaseCleanupConfig;
   mirrorOptions: MirrorOptions;
   advancedOptions: AdvancedOptions;
+  notificationConfig: NotificationConfig;
 };
 
 export function ConfigTabs() {
@@ -86,6 +89,13 @@ export function ConfigTabs() {
       starredCodeOnly: false,
       autoMirrorStarred: false,
     },
+    notificationConfig: {
+      enabled: false,
+      provider: "ntfy",
+      notifyOnSyncError: true,
+      notifyOnSyncSuccess: false,
+      notifyOnNewRepo: false,
+    },
   });
   const { user } = useAuth();
   const [isLoading, setIsLoading] = useState(true);
@@ -95,10 +105,12 @@ export function ConfigTabs() {
   const [isAutoSavingCleanup, setIsAutoSavingCleanup] = useState<boolean>(false);
   const [isAutoSavingGitHub, setIsAutoSavingGitHub] = useState<boolean>(false);
   const [isAutoSavingGitea, setIsAutoSavingGitea] = useState<boolean>(false);
+  const [isAutoSavingNotification, setIsAutoSavingNotification] = useState<boolean>(false);
   const autoSaveScheduleTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const autoSaveCleanupTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const autoSaveGitHubTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const autoSaveGiteaTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const autoSaveNotificationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const isConfigFormValid = (): boolean => {
     const { githubConfig, giteaConfig } = config;
@@ -460,6 +472,55 @@ export function ConfigTabs() {
     }
   }, [user?.id, config.githubConfig, config.giteaConfig, config.scheduleConfig, config.cleanupConfig, config.mirrorOptions]);
 
+  // Auto-save function for notification config changes
+  const autoSaveNotificationConfig = useCallback(async (notifConfig: NotificationConfig) => {
+    if (!user?.id) return;
+
+    // Clear any existing timeout
+    if (autoSaveNotificationTimeoutRef.current) {
+      clearTimeout(autoSaveNotificationTimeoutRef.current);
+    }
+
+    // Debounce the auto-save to prevent excessive API calls
+    autoSaveNotificationTimeoutRef.current = setTimeout(async () => {
+      setIsAutoSavingNotification(true);
+
+      const reqPayload = {
+        userId: user.id!,
+        githubConfig: config.githubConfig,
+        giteaConfig: config.giteaConfig,
+        scheduleConfig: config.scheduleConfig,
+        cleanupConfig: config.cleanupConfig,
+        mirrorOptions: config.mirrorOptions,
+        advancedOptions: config.advancedOptions,
+        notificationConfig: notifConfig,
+      };
+
+      try {
+        const response = await fetch('/api/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(reqPayload),
+        });
+        const result: SaveConfigApiResponse = await response.json();
+
+        if (result.success) {
+          // Silent success - no toast for auto-save
+          invalidateConfigCache();
+        } else {
+          showErrorToast(
+            `Auto-save failed: ${result.message || 'Unknown error'}`,
+            toast
+          );
+        }
+      } catch (error) {
+        showErrorToast(error, toast);
+      } finally {
+        setIsAutoSavingNotification(false);
+      }
+    }, 500); // 500ms debounce
+  }, [user?.id, config.githubConfig, config.giteaConfig, config.scheduleConfig, config.cleanupConfig, config.mirrorOptions, config.advancedOptions]);
+
   // Cleanup timeouts on unmount
   useEffect(() => {
     return () => {
@@ -474,6 +535,9 @@ export function ConfigTabs() {
       }
       if (autoSaveGiteaTimeoutRef.current) {
         clearTimeout(autoSaveGiteaTimeoutRef.current);
+      }
+      if (autoSaveNotificationTimeoutRef.current) {
+        clearTimeout(autoSaveNotificationTimeoutRef.current);
       }
     };
   }, []);
@@ -506,6 +570,8 @@ export function ConfigTabs() {
             },
             advancedOptions:
               response.advancedOptions || config.advancedOptions,
+            notificationConfig:
+              (response as any).notificationConfig || config.notificationConfig,
           });
 
         }
@@ -635,9 +701,10 @@ export function ConfigTabs() {
 
       {/* Content section - Tabs layout */}
       <Tabs defaultValue="connections" className="space-y-4">
-        <TabsList className="grid w-full grid-cols-3">
+        <TabsList className="grid w-full grid-cols-4">
           <TabsTrigger value="connections">Connections</TabsTrigger>
           <TabsTrigger value="automation">Automation</TabsTrigger>
+          <TabsTrigger value="notifications">Notifications</TabsTrigger>
           <TabsTrigger value="sso">Authentication</TabsTrigger>
         </TabsList>
 
@@ -722,6 +789,17 @@ export function ConfigTabs() {
             }}
             isAutoSavingSchedule={isAutoSavingSchedule}
             isAutoSavingCleanup={isAutoSavingCleanup}
+          />
+        </TabsContent>
+
+        <TabsContent value="notifications" className="space-y-4">
+          <NotificationSettings
+            notificationConfig={config.notificationConfig}
+            onNotificationChange={(newConfig) => {
+              setConfig(prev => ({ ...prev, notificationConfig: newConfig }));
+              autoSaveNotificationConfig(newConfig);
+            }}
+            isAutoSaving={isAutoSavingNotification}
           />
         </TabsContent>
 

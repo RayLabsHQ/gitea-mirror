@@ -89,6 +89,15 @@ export async function createMirrorJob({
       });
     }
 
+    // Trigger notification for terminal statuses (never blocks the mirror flow)
+    if (!skipDuplicateEvent && (status === "failed" || status === "mirrored" || status === "synced")) {
+      import("./notification-service").then(({ triggerJobNotification }) => {
+        triggerJobNotification({ userId, status, repositoryName, organizationName, message, details }).catch(err => {
+          console.error("[NotificationService] Background notification failed:", err);
+        });
+      }).catch(() => {});
+    }
+
     return jobId;
   } catch (error) {
     console.error("Error creating mirror job:", error);

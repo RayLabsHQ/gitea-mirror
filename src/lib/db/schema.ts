@@ -122,6 +122,31 @@ export const cleanupConfigSchema = z.object({
   nextRun: z.coerce.date().optional(),
 });
 
+export const ntfyConfigSchema = z.object({
+  url: z.string().default("https://ntfy.sh"),
+  topic: z.string().default(""),
+  token: z.string().optional(),
+  priority: z.enum(["min", "low", "default", "high", "urgent"]).default("default"),
+});
+
+export const appriseConfigSchema = z.object({
+  url: z.string().default(""),
+  token: z.string().default(""),
+  tag: z.string().optional(),
+});
+
+export const notificationConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  provider: z.enum(["ntfy", "apprise"]).default("ntfy"),
+  notifyOnSyncError: z.boolean().default(true),
+  notifyOnSyncSuccess: z.boolean().default(false),
+  notifyOnNewRepo: z.boolean().default(false),
+  ntfy: ntfyConfigSchema.optional(),
+  apprise: appriseConfigSchema.optional(),
+});
+
+export type NotificationConfig = z.infer<typeof notificationConfigSchema>;
+
 export const configSchema = z.object({
   id: z.string(),
   userId: z.string(),
@@ -336,6 +361,11 @@ export const configs = sqliteTable("configs", {
   cleanupConfig: text("cleanup_config", { mode: "json" })
     .$type<z.infer<typeof cleanupConfigSchema>>()
     .notNull(),
+
+  notificationConfig: text("notification_config", { mode: "json" })
+    .$type<z.infer<typeof notificationConfigSchema>>()
+    .notNull()
+    .default(sql`'{"enabled":false,"provider":"ntfy","notifyOnSyncError":true,"notifyOnSyncSuccess":false,"notifyOnNewRepo":false}'`),
 
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()

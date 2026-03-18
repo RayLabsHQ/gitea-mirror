@@ -115,17 +115,42 @@ export const POST: APIRoute = async ({ request, locals }) => {
     );
     const processedCleanupConfig = mapUiCleanupToDb(cleanupConfig);
 
+    // Process notification config if provided
+    const notificationConfig = body.notificationConfig;
+    let processedNotificationConfig: any = undefined;
+    if (notificationConfig) {
+      processedNotificationConfig = { ...notificationConfig };
+      // Encrypt ntfy token if present
+      if (processedNotificationConfig.ntfy?.token) {
+        processedNotificationConfig.ntfy = {
+          ...processedNotificationConfig.ntfy,
+          token: encrypt(processedNotificationConfig.ntfy.token),
+        };
+      }
+      // Encrypt apprise token if present
+      if (processedNotificationConfig.apprise?.token) {
+        processedNotificationConfig.apprise = {
+          ...processedNotificationConfig.apprise,
+          token: encrypt(processedNotificationConfig.apprise.token),
+        };
+      }
+    }
+
     if (existingConfig) {
       // Update path
+      const updateFields: Record<string, any> = {
+        githubConfig: mappedGithubConfig,
+        giteaConfig: mappedGiteaConfig,
+        scheduleConfig: processedScheduleConfig,
+        cleanupConfig: processedCleanupConfig,
+        updatedAt: new Date(),
+      };
+      if (processedNotificationConfig) {
+        updateFields.notificationConfig = processedNotificationConfig;
+      }
       await db
         .update(configs)
-        .set({
-          githubConfig: mappedGithubConfig,
-          giteaConfig: mappedGiteaConfig,
-          scheduleConfig: processedScheduleConfig,
-          cleanupConfig: processedCleanupConfig,
-          updatedAt: new Date(),
-        })
+        .set(updateFields)
         .where(eq(configs.id, existingConfig.id));
 
       return new Response(
@@ -163,7 +188,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     // Create new config
     const configId = uuidv4();
-    await db.insert(configs).values({
+    const insertValues: Record<string, any> = {
       id: configId,
       userId,
       name: "Default Configuration",
@@ -176,7 +201,11 @@ export const POST: APIRoute = async ({ request, locals }) => {
       cleanupConfig: processedCleanupConfig,
       createdAt: new Date(),
       updatedAt: new Date(),
-    });
+    };
+    if (processedNotificationConfig) {
+      insertValues.notificationConfig = processedNotificationConfig;
+    }
+    await db.insert(configs).values(insertValues);
 
     return new Response(
       JSON.stringify({
@@ -258,13 +287,29 @@ export const GET: APIRoute = async ({ request, locals }) => {
         githubConfig,
         giteaConfig
       };
-      
+
       const uiConfig = mapDbToUiConfig(decryptedConfig);
-      
+
       // Map schedule and cleanup configs to UI format
       const uiScheduleConfig = mapDbScheduleToUi(dbConfig.scheduleConfig);
       const uiCleanupConfig = mapDbCleanupToUi(dbConfig.cleanupConfig);
-      
+
+      // Decrypt notification config tokens
+      let notificationConfig = dbConfig.notificationConfig;
+      if (notificationConfig) {
+        notificationConfig = { ...notificationConfig };
+        if (notificationConfig.ntfy?.token) {
+          try {
+            notificationConfig.ntfy = { ...notificationConfig.ntfy, token: decrypt(notificationConfig.ntfy.token) };
+          } catch { /* leave as-is */ }
+        }
+        if (notificationConfig.apprise?.token) {
+          try {
+            notificationConfig.apprise = { ...notificationConfig.apprise, token: decrypt(notificationConfig.apprise.token) };
+          } catch { /* leave as-is */ }
+        }
+      }
+
       return new Response(JSON.stringify({
         ...dbConfig,
         ...uiConfig,
@@ -278,6 +323,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
           lastRun: dbConfig.cleanupConfig.lastRun,
           nextRun: dbConfig.cleanupConfig.nextRun,
         },
+        notificationConfig,
       }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
@@ -288,7 +334,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
       const uiConfig = mapDbToUiConfig(dbConfig);
       const uiScheduleConfig = mapDbScheduleToUi(dbConfig.scheduleConfig);
       const uiCleanupConfig = mapDbCleanupToUi(dbConfig.cleanupConfig);
-      
+
       return new Response(JSON.stringify({
         ...dbConfig,
         ...uiConfig,
@@ -302,6 +348,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
           lastRun: dbConfig.cleanupConfig.lastRun,
           nextRun: dbConfig.cleanupConfig.nextRun,
         },
+        notificationConfig: dbConfig.notificationConfig,
       }), {
         status: 200,
         headers: { "Content-Type": "application/json" },

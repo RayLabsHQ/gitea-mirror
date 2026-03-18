@@ -78,6 +78,13 @@
       "when": 1774054800000,
       "tag": "0010_mirrored_location_index",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1774058400000,
+      "tag": "0011_notification_config",
+      "breakpoints": true
     }
   ]
 }

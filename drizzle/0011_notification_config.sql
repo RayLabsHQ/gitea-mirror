@@ -1,0 +1,1 @@
+ALTER TABLE `configs` ADD `notification_config` text DEFAULT '{"enabled":false,"provider":"ntfy","notifyOnSyncError":true,"notifyOnSyncSuccess":false,"notifyOnNewRepo":false}' NOT NULL;

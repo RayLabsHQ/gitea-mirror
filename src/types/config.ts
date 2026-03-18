@@ -85,6 +85,7 @@ export interface SaveConfigApiRequest {
   giteaConfig: GiteaConfig;
   scheduleConfig: ScheduleConfig;
   cleanupConfig: DatabaseCleanupConfig;
+  notificationConfig?: NotificationConfig;
   mirrorOptions?: MirrorOptions;
   advancedOptions?: AdvancedOptions;
 }
@@ -92,6 +93,29 @@ export interface SaveConfigApiRequest {
 export interface SaveConfigApiResponse {
   success: boolean;
   message: string;
+}
+
+export interface NtfyConfig {
+  url: string;
+  topic: string;
+  token?: string;
+  priority: "min" | "low" | "default" | "high" | "urgent";
+}
+
+export interface AppriseConfig {
+  url: string;
+  token: string;
+  tag?: string;
+}
+
+export interface NotificationConfig {
+  enabled: boolean;
+  provider: "ntfy" | "apprise";
+  notifyOnSyncError: boolean;
+  notifyOnSyncSuccess: boolean;
+  notifyOnNewRepo: boolean;
+  ntfy?: NtfyConfig;
+  apprise?: AppriseConfig;
 }
 
 export interface Config extends ConfigType {}
@@ -109,6 +133,7 @@ export interface ConfigApiResponse {
   giteaConfig: GiteaConfig;
   scheduleConfig: ScheduleConfig;
   cleanupConfig: DatabaseCleanupConfig;
+  notificationConfig?: NotificationConfig;
   mirrorOptions?: MirrorOptions;
   advancedOptions?: AdvancedOptions;
   include: string[];
