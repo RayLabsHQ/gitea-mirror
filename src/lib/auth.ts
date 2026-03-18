@@ -43,13 +43,16 @@ export const auth = betterAuth({
   })(),
   basePath: "/api/auth", // Specify the base path for auth endpoints
   
-  // Trusted origins - this is how we support multiple access URLs
-  trustedOrigins: (() => {
+  // Trusted origins - this is how we support multiple access URLs.
+  // Uses the function form so that the origin can be auto-detected from
+  // the incoming request's Host / X-Forwarded-* headers, which makes the
+  // app work behind a reverse proxy without manual env var configuration.
+  trustedOrigins: async (request?: Request) => {
     const origins: string[] = [
       "http://localhost:4321",
       "http://localhost:8080", // Keycloak
     ];
-    
+
     // Add the primary URL from BETTER_AUTH_URL
     const primaryUrl = process.env.BETTER_AUTH_URL;
     if (primaryUrl && typeof primaryUrl === 'string' && primaryUrl.trim() !== '') {
@@ -60,7 +63,7 @@ export const auth = betterAuth({
         // Skip if invalid
       }
     }
-    
+
     // Add additional trusted origins from environment
     // This is where users can specify multiple access URLs
     if (process.env.BETTER_AUTH_TRUSTED_ORIGINS) {
@@ -68,7 +71,7 @@ export const auth = betterAuth({
         .split(',')
         .map(o => o.trim())
         .filter(o => o !== '');
-      
+
       // Validate each additional origin
       for (const origin of additionalOrigins) {
         try {
@@ -79,12 +82,29 @@ export const auth = betterAuth({
         }
       }
     }
-    
+
+    // Auto-detect origin from the incoming request's Host header.
+    // This lets the app work behind a reverse proxy (e.g. Nginx/Caddy)
+    // without requiring BETTER_AUTH_TRUSTED_ORIGINS to be set explicitly.
+    // Only the request's own Host is added, which is safe — an attacker
+    // cannot forge the Host header through a properly-configured proxy.
+    if (request?.headers) {
+      const host = request.headers.get("x-forwarded-host") || request.headers.get("host");
+      if (host) {
+        const proto = request.headers.get("x-forwarded-proto") || "http";
+        try {
+          const detected = new URL(`${proto}://${host}`);
+          origins.push(detected.origin);
+        } catch {
+          // Malformed header, ignore
+        }
+      }
+    }
+
     // Remove duplicates and empty strings, then return
     const uniqueOrigins = [...new Set(origins.filter(Boolean))];
-    console.info('Trusted origins:', uniqueOrigins);
     return uniqueOrigins;
-  })(),
+  },
 
   // Authentication methods
   emailAndPassword: {

@@ -18,6 +18,10 @@ services:
       - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}  # Min 32 chars, required for sessions
       - BETTER_AUTH_URL=${BETTER_AUTH_URL:-http://localhost:4321}
       - BETTER_AUTH_TRUSTED_ORIGINS=${BETTER_AUTH_TRUSTED_ORIGINS:-http://localhost:4321}
+      # REVERSE PROXY: If accessing via a reverse proxy, set all three to your external URL:
+      #   BETTER_AUTH_URL=https://gitea-mirror.example.com
+      #   PUBLIC_BETTER_AUTH_URL=https://gitea-mirror.example.com
+      #   BETTER_AUTH_TRUSTED_ORIGINS=https://gitea-mirror.example.com
       
       # === CORE SETTINGS ===
       # These are technically required but have working defaults

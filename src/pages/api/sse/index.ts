@@ -95,6 +95,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache",
       Connection: "keep-alive",
+      "X-Accel-Buffering": "no", // Prevent Nginx from buffering SSE stream
     },
   });
 };

@@ -32,6 +32,13 @@ services:
       - PORT=4321
       - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:-your-secret-key-change-this-in-production}
       - BETTER_AUTH_URL=${BETTER_AUTH_URL:-http://localhost:4321}
+      # REVERSE PROXY: If you access Gitea Mirror through a reverse proxy (e.g. Nginx, Caddy, Traefik),
+      # you MUST set these three variables to your external URL. Example:
+      #   BETTER_AUTH_URL=https://gitea-mirror.example.com
+      #   PUBLIC_BETTER_AUTH_URL=https://gitea-mirror.example.com
+      #   BETTER_AUTH_TRUSTED_ORIGINS=https://gitea-mirror.example.com
+      - PUBLIC_BETTER_AUTH_URL=${PUBLIC_BETTER_AUTH_URL:-http://localhost:4321}
+      - BETTER_AUTH_TRUSTED_ORIGINS=${BETTER_AUTH_TRUSTED_ORIGINS:-}
       # Optional: ENCRYPTION_SECRET will be auto-generated if not provided
       # - ENCRYPTION_SECRET=${ENCRYPTION_SECRET:-}
       # GitHub/Gitea Mirror Config

@@ -202,13 +202,55 @@ import MainLayout from '../../layouts/main.astro';
       <!-- Reverse Proxy Configuration -->
       <section class="mb-12">
         <h2 class="text-2xl font-bold mb-6">Reverse Proxy Configuration</h2>
-        
+
         <p class="text-muted-foreground mb-6">
           For production deployments, it's recommended to use a reverse proxy like Nginx or Caddy.
         </p>
 
+        <div class="bg-red-500/10 border border-red-500/20 rounded-lg p-4 mb-6">
+          <div class="flex gap-3">
+            <div class="text-red-600 dark:text-red-500">
+              <svg class="w-5 h-5 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.072 16.5c-.77.833.192 2.5 1.732 2.5z"/>
+              </svg>
+            </div>
+            <div>
+              <p class="font-semibold text-red-600 dark:text-red-500 mb-1">Required Environment Variables for Reverse Proxy</p>
+              <p class="text-sm mb-3">
+                When running Gitea Mirror behind a reverse proxy, you <strong>must</strong> set these environment variables to your external URL.
+                Without them, sign-in will fail with "invalid origin" errors and pages may appear blank.
+              </p>
+              <div class="bg-muted/30 rounded p-3">
+                <pre class="text-sm"><code>{`# All three MUST be set to your external URL:
+BETTER_AUTH_URL=https://gitea-mirror.example.com
+PUBLIC_BETTER_AUTH_URL=https://gitea-mirror.example.com
+BETTER_AUTH_TRUSTED_ORIGINS=https://gitea-mirror.example.com`}</code></pre>
+              </div>
+              <ul class="mt-3 space-y-1 text-sm">
+                <li><code class="bg-red-500/10 px-1 rounded">BETTER_AUTH_URL</code> — Server-side auth base URL for callbacks and redirects</li>
+                <li><code class="bg-red-500/10 px-1 rounded">PUBLIC_BETTER_AUTH_URL</code> — Client-side (browser) URL for auth API calls</li>
+                <li><code class="bg-red-500/10 px-1 rounded">BETTER_AUTH_TRUSTED_ORIGINS</code> — Comma-separated origins allowed to make auth requests</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+
+        <h3 class="text-xl font-semibold mb-4">Docker Compose Example</h3>
+
+        <div class="bg-muted/30 rounded-lg p-4 mb-6">
+          <pre class="text-sm overflow-x-auto"><code>{`services:
+  gitea-mirror:
+    image: ghcr.io/raylabshq/gitea-mirror:latest
+    environment:
+      - BETTER_AUTH_SECRET=your-secret-key-min-32-chars
+      - BETTER_AUTH_URL=https://gitea-mirror.example.com
+      - PUBLIC_BETTER_AUTH_URL=https://gitea-mirror.example.com
+      - BETTER_AUTH_TRUSTED_ORIGINS=https://gitea-mirror.example.com
+      # ... other settings ...`}</code></pre>
+        </div>
+
         <h3 class="text-xl font-semibold mb-4">Nginx Example</h3>
-        
+
         <div class="bg-muted/30 rounded-lg p-4 mb-6">
           <pre class="text-sm overflow-x-auto"><code>{`server {
     listen 80;
@@ -242,13 +284,16 @@ server {
         proxy_set_header Connection '';
         proxy_set_header Cache-Control 'no-cache';
         proxy_set_header X-Accel-Buffering 'no';
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
         proxy_read_timeout 86400;
     }
 }`}</code></pre>
         </div>
 
         <h3 class="text-xl font-semibold mb-4">Caddy Example</h3>
-        
+
         <div class="bg-muted/30 rounded-lg p-4">
           <pre class="text-sm"><code>{`gitea-mirror.example.com {
     reverse_proxy localhost:4321
