@@ -83,26 +83,34 @@ export const auth = betterAuth({
       }
     }
 
-    // Auto-detect origin from the incoming request's Host header.
-    // This lets the app work behind a reverse proxy (e.g. Nginx/Caddy)
-    // without requiring BETTER_AUTH_TRUSTED_ORIGINS to be set explicitly.
-    // Only the request's own Host is added, which is safe — an attacker
-    // cannot forge the Host header through a properly-configured proxy.
+    // Auto-detect origin from the incoming request's Host header when running
+    // behind a reverse proxy. This helps with Better Auth's per-request CSRF
+    // origin validation. Note: callback/redirect URL validation uses the static
+    // trustedOrigins computed at startup, so BETTER_AUTH_TRUSTED_ORIGINS should
+    // still be set for full reverse proxy compatibility.
     if (request?.headers) {
       const host = request.headers.get("x-forwarded-host") || request.headers.get("host");
       if (host) {
-        const proto = request.headers.get("x-forwarded-proto") || "http";
-        try {
-          const detected = new URL(`${proto}://${host}`);
-          origins.push(detected.origin);
-        } catch {
-          // Malformed header, ignore
+        // Handle multi-value x-forwarded-proto (e.g. "https, http" from proxy chains)
+        const rawProto = request.headers.get("x-forwarded-proto") || "http";
+        const proto = rawProto.split(",")[0].trim().toLowerCase();
+        if (proto === "http" || proto === "https") {
+          try {
+            const detected = new URL(`${proto}://${host}`);
+            origins.push(detected.origin);
+          } catch {
+            // Malformed header, ignore
+          }
         }
       }
     }
 
     // Remove duplicates and empty strings, then return
     const uniqueOrigins = [...new Set(origins.filter(Boolean))];
+    if (!request) {
+      // Log static origins at startup for debugging proxy issues
+      console.info("Trusted origins (static):", uniqueOrigins);
+    }
     return uniqueOrigins;
   },
 
