@@ -301,12 +301,17 @@ export const GET: APIRoute = async ({ request, locals }) => {
         if (notificationConfig.ntfy?.token) {
           try {
             notificationConfig.ntfy = { ...notificationConfig.ntfy, token: decrypt(notificationConfig.ntfy.token) };
-          } catch { /* leave as-is */ }
+          } catch {
+            // Clear token on decryption failure to prevent double-encryption on next save
+            notificationConfig.ntfy = { ...notificationConfig.ntfy, token: "" };
+          }
         }
         if (notificationConfig.apprise?.token) {
           try {
             notificationConfig.apprise = { ...notificationConfig.apprise, token: decrypt(notificationConfig.apprise.token) };
-          } catch { /* leave as-is */ }
+          } catch {
+            notificationConfig.apprise = { ...notificationConfig.apprise, token: "" };
+          }
         }
       }
 

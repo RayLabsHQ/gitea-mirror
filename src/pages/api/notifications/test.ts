@@ -1,6 +1,7 @@
 import type { APIRoute } from "astro";
 import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 import { testNotification } from "@/lib/notification-service";
+import { notificationConfigSchema } from "@/lib/db/schema";
 import { createSecureErrorResponse } from "@/lib/utils";
 
 export const POST: APIRoute = async ({ request, locals }) => {
@@ -18,7 +19,15 @@ export const POST: APIRoute = async ({ request, locals }) => {
       );
     }
 
-    const result = await testNotification(notificationConfig);
+    const parsed = notificationConfigSchema.safeParse(notificationConfig);
+    if (!parsed.success) {
+      return new Response(
+        JSON.stringify({ success: false, error: `Invalid config: ${parsed.error.message}` }),
+        { status: 400, headers: { "Content-Type": "application/json" } },
+      );
+    }
+
+    const result = await testNotification(parsed.data);
 
     return new Response(
       JSON.stringify(result),

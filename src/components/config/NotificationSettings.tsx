@@ -348,8 +348,8 @@ export function NotificationSettings({
 
               <div className="flex items-center justify-between">
                 <div className="space-y-0.5">
-                  <Label htmlFor="notify-new-repo" className="text-sm font-normal cursor-pointer">
-                    New repository discovered
+                  <Label htmlFor="notify-new-repo" className="text-sm font-normal cursor-pointer text-muted-foreground">
+                    New repository discovered (coming soon)
                   </Label>
                   <p className="text-xs text-muted-foreground">
                     Notify when a new GitHub repository is auto-imported
@@ -358,6 +358,7 @@ export function NotificationSettings({
                 <Switch
                   id="notify-new-repo"
                   checked={notificationConfig.notifyOnNewRepo}
+                  disabled
                   onCheckedChange={(checked) =>
                     onNotificationChange({ ...notificationConfig, notifyOnNewRepo: checked })
                   }
