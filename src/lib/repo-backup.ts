@@ -65,13 +65,17 @@ async function runGit(args: string[], tokenToMask: string): Promise<void> {
   }
 }
 
-async function enforceRetention(repoBackupDir: string, keepCount: number): Promise<void> {
+async function enforceRetention(
+  repoBackupDir: string,
+  keepCount: number,
+  retentionDays: number = 0,
+): Promise<void> {
   const entries = await readdir(repoBackupDir);
   const bundleFiles = entries
     .filter((name) => name.endsWith(".bundle"))
     .map((name) => path.join(repoBackupDir, name));
 
-  if (bundleFiles.length <= keepCount) return;
+  if (bundleFiles.length === 0) return;
 
   const filesWithMtime = await Promise.all(
     bundleFiles.map(async (filePath) => ({
@@ -81,9 +85,33 @@ async function enforceRetention(repoBackupDir: string, keepCount: number): Promi
   );
 
   filesWithMtime.sort((a, b) => b.mtimeMs - a.mtimeMs);
-  const toDelete = filesWithMtime.slice(keepCount);
 
-  await Promise.all(toDelete.map((entry) => rm(entry.filePath, { force: true })));
+  const toDelete = new Set<string>();
+
+  // Count-based retention: keep only the N most recent
+  if (filesWithMtime.length > keepCount) {
+    for (const entry of filesWithMtime.slice(keepCount)) {
+      toDelete.add(entry.filePath);
+    }
+  }
+
+  // Time-based retention: delete bundles older than retentionDays
+  if (retentionDays > 0) {
+    const cutoffMs = Date.now() - retentionDays * 86_400_000;
+    for (const entry of filesWithMtime) {
+      if (entry.mtimeMs < cutoffMs) {
+        toDelete.add(entry.filePath);
+      }
+    }
+    // Always keep at least 1 bundle even if it's old
+    if (toDelete.size === filesWithMtime.length && filesWithMtime.length > 0) {
+      toDelete.delete(filesWithMtime[0].filePath);
+    }
+  }
+
+  if (toDelete.size > 0) {
+    await Promise.all([...toDelete].map((fp) => rm(fp, { force: true })));
+  }
 }
 
 export function isPreSyncBackupEnabled(): boolean {
@@ -126,9 +154,12 @@ export function resolveBackupStrategy(config: Partial<Config>): BackupStrategy {
   }
 
   // 2. Legacy backupBeforeSync boolean → map to strategy
+  //    Note: backupBeforeSync: true now maps to "on-force-push" (not "always")
+  //    because mappers default backupBeforeSync to true, causing every legacy config
+  //    to silently resolve to "always" and create full git bundles on every sync.
   const legacy = config.giteaConfig?.backupBeforeSync;
   if (legacy !== undefined) {
-    return legacy ? "always" : "disabled";
+    return legacy ? "on-force-push" : "disabled";
   }
 
   // 3. Env var (new)
@@ -251,7 +282,13 @@ export async function createPreSyncBundleBackup({
     1,
     Number.isFinite(config.giteaConfig?.backupRetentionCount)
       ? Number(config.giteaConfig?.backupRetentionCount)
-      : parsePositiveInt(process.env.PRE_SYNC_BACKUP_KEEP_COUNT, 20)
+      : parsePositiveInt(process.env.PRE_SYNC_BACKUP_KEEP_COUNT, 5)
+  );
+  const retentionDays = Math.max(
+    0,
+    Number.isFinite(config.giteaConfig?.backupRetentionDays)
+      ? Number(config.giteaConfig?.backupRetentionDays)
+      : parsePositiveInt(process.env.PRE_SYNC_BACKUP_RETENTION_DAYS, 30)
   );
 
   await mkdir(repoBackupDir, { recursive: true });
@@ -268,7 +305,7 @@ export async function createPreSyncBundleBackup({
     await runGit(["clone", "--mirror", authCloneUrl, mirrorClonePath], giteaToken);
     await runGit(["-C", mirrorClonePath, "bundle", "create", bundlePath, "--all"], giteaToken);
 
-    await enforceRetention(repoBackupDir, retention);
+    await enforceRetention(repoBackupDir, retention, retentionDays);
     return { bundlePath };
   } finally {
     await rm(tmpDir, { recursive: true, force: true });

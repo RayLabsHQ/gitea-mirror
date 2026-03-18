@@ -78,7 +78,11 @@ These appear when any non-disabled strategy is selected:
 
 ### Snapshot Retention Count
 
-How many backup snapshots to keep per repository. Oldest snapshots are deleted when this limit is exceeded. Default: **20**.
+How many backup snapshots to keep per repository. Oldest snapshots are deleted when this limit is exceeded. Default: **5**.
+
+### Snapshot Retention Days
+
+Maximum age (in days) for backup snapshots. Bundles older than this are deleted during retention enforcement, though at least one bundle is always kept. Set to `0` to disable time-based retention. Default: **30**.
 
 ### Snapshot Directory
 
@@ -96,7 +100,7 @@ The old `backupBeforeSync` boolean is still recognized:
 
 | Old Setting | New Equivalent |
 |---|---|
-| `backupBeforeSync: true` | `backupStrategy: "always"` |
+| `backupBeforeSync: true` | `backupStrategy: "on-force-push"` |
 | `backupBeforeSync: false` | `backupStrategy: "disabled"` |
 | Neither set | `backupStrategy: "on-force-push"` (new default) |
 

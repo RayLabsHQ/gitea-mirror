@@ -101,9 +101,10 @@ export function mapUiToDbConfig(
     mirrorPullRequests: mirrorOptions.mirrorMetadata && mirrorOptions.metadataComponents.pullRequests,
     mirrorLabels: mirrorOptions.mirrorMetadata && mirrorOptions.metadataComponents.labels,
     mirrorMilestones: mirrorOptions.mirrorMetadata && mirrorOptions.metadataComponents.milestones,
-    backupStrategy: giteaConfig.backupStrategy,
+    backupStrategy: giteaConfig.backupStrategy || "on-force-push",
     backupBeforeSync: giteaConfig.backupBeforeSync ?? true,
-    backupRetentionCount: giteaConfig.backupRetentionCount ?? 20,
+    backupRetentionCount: giteaConfig.backupRetentionCount ?? 5,
+    backupRetentionDays: giteaConfig.backupRetentionDays ?? 30,
     backupDirectory: giteaConfig.backupDirectory?.trim() || undefined,
     blockSyncOnBackupFailure: giteaConfig.blockSyncOnBackupFailure ?? true,
   };
@@ -146,9 +147,10 @@ export function mapDbToUiConfig(dbConfig: any): {
     personalReposOrg: undefined, // Not stored in current schema
     issueConcurrency: dbConfig.giteaConfig?.issueConcurrency ?? 3,
     pullRequestConcurrency: dbConfig.giteaConfig?.pullRequestConcurrency ?? 5,
-    backupStrategy: dbConfig.giteaConfig?.backupStrategy || undefined,
+    backupStrategy: dbConfig.giteaConfig?.backupStrategy || "on-force-push",
     backupBeforeSync: dbConfig.giteaConfig?.backupBeforeSync ?? true,
-    backupRetentionCount: dbConfig.giteaConfig?.backupRetentionCount ?? 20,
+    backupRetentionCount: dbConfig.giteaConfig?.backupRetentionCount ?? 5,
+    backupRetentionDays: dbConfig.giteaConfig?.backupRetentionDays ?? 30,
     backupDirectory: dbConfig.giteaConfig?.backupDirectory || "data/repo-backups",
     blockSyncOnBackupFailure: dbConfig.giteaConfig?.blockSyncOnBackupFailure ?? true,
   };

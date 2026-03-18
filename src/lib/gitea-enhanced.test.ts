@@ -575,7 +575,7 @@ describe("Enhanced Gitea Operations", () => {
           token: "encrypted-token",
           defaultOwner: "testuser",
           mirrorReleases: false,
-          backupBeforeSync: true,
+          backupStrategy: "always",
           blockSyncOnBackupFailure: true,
         },
       };

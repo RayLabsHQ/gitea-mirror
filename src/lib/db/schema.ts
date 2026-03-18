@@ -75,7 +75,8 @@ export const giteaConfigSchema = z.object({
   mirrorMilestones: z.boolean().default(false),
   backupStrategy: backupStrategyEnum.default("on-force-push"),
   backupBeforeSync: z.boolean().default(true), // Deprecated: kept for backward compat, use backupStrategy
-  backupRetentionCount: z.number().int().min(1).default(20),
+  backupRetentionCount: z.number().int().min(1).default(5),
+  backupRetentionDays: z.number().int().min(0).default(30),
   backupDirectory: z.string().optional(),
   blockSyncOnBackupFailure: z.boolean().default(true),
 });

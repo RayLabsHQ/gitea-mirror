@@ -162,8 +162,8 @@ describe("resolveBackupStrategy", () => {
     expect(resolveBackupStrategy(makeConfig({ backupStrategy: "block-on-force-push" }))).toBe("block-on-force-push");
   });
 
-  test("maps backupBeforeSync: true → 'always' (backward compat)", () => {
-    expect(resolveBackupStrategy(makeConfig({ backupBeforeSync: true }))).toBe("always");
+  test("maps backupBeforeSync: true → 'on-force-push' (backward compat, prevents silent always-backup)", () => {
+    expect(resolveBackupStrategy(makeConfig({ backupBeforeSync: true }))).toBe("on-force-push");
   });
 
   test("maps backupBeforeSync: false → 'disabled' (backward compat)", () => {

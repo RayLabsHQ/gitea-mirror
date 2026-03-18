@@ -234,7 +234,7 @@ export function GitHubConfigForm({
                   {
                     value: "always",
                     label: "Always Backup",
-                    desc: "Snapshot before every sync",
+                    desc: "Snapshot before every sync (high disk usage)",
                   },
                   {
                     value: "on-force-push",
@@ -282,11 +282,11 @@ export function GitHubConfigForm({
                         name="backupRetentionCount"
                         type="number"
                         min={1}
-                        value={giteaConfig.backupRetentionCount ?? 20}
+                        value={giteaConfig.backupRetentionCount ?? 5}
                         onChange={(e) => {
                           const newConfig = {
                             ...giteaConfig,
-                            backupRetentionCount: Math.max(1, Number.parseInt(e.target.value, 10) || 20),
+                            backupRetentionCount: Math.max(1, Number.parseInt(e.target.value, 10) || 5),
                           };
                           setGiteaConfig(newConfig);
                           if (onGiteaAutoSave) onGiteaAutoSave(newConfig);

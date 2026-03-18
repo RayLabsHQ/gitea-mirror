@@ -22,6 +22,7 @@ export interface GiteaConfig {
   backupStrategy?: BackupStrategy;
   backupBeforeSync?: boolean; // Deprecated: kept for backward compat, use backupStrategy
   backupRetentionCount?: number;
+  backupRetentionDays?: number;
   backupDirectory?: string;
   blockSyncOnBackupFailure?: boolean;
 }

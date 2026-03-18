@@ -95,7 +95,8 @@ export async function createDefaultConfig({ userId, envOverrides = {} }: Default
       pullRequestConcurrency: 5,
       backupStrategy: "on-force-push",
       backupBeforeSync: true, // Deprecated: kept for backward compat
-      backupRetentionCount: 20,
+      backupRetentionCount: 5,
+      backupRetentionDays: 30,
       backupDirectory: "data/repo-backups",
       blockSyncOnBackupFailure: true,
     },
