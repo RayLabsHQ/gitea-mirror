@@ -71,6 +71,13 @@
       "when": 1773542995732,
       "tag": "0009_nervous_tyger_tiger",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1774054800000,
+      "tag": "0010_mirrored_location_index",
+      "breakpoints": true
     }
   ]
 }

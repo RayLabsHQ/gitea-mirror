@@ -418,6 +418,7 @@ export const repositories = sqliteTable("repositories", {
   index("idx_repositories_user_imported_at").on(table.userId, table.importedAt),
   uniqueIndex("uniq_repositories_user_full_name").on(table.userId, table.fullName),
   uniqueIndex("uniq_repositories_user_normalized_full_name").on(table.userId, table.normalizedFullName),
+  index("idx_repositories_mirrored_location").on(table.userId, table.mirroredLocation),
 ]);
 
 export const mirrorJobs = sqliteTable("mirror_jobs", {

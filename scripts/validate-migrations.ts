@@ -143,10 +143,37 @@ function verify0009Migration(db: Database) {
   assert(importedAtIndex?.name === "idx_repositories_user_imported_at", "Expected repositories imported_at index to exist after migration");
 }
 
+function seedPre0010Database(db: any) {
+  // Seed a repo row to verify index creation doesn't break existing data
+  seedPre0009Database(db);
+}
+
+function verify0010Migration(db: any) {
+  // Verify the unique partial index exists by checking that two repos
+  // with the same non-empty mirroredLocation would conflict
+  const indexes = db.prepare(
+    "SELECT name FROM sqlite_master WHERE type='index' AND name='uniq_repositories_user_mirrored_location'"
+  ).all();
+  if (indexes.length === 0) {
+    throw new Error("Missing unique partial index uniq_repositories_user_mirrored_location");
+  }
+
+  const lookupIdx = db.prepare(
+    "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_repositories_mirrored_location'"
+  ).all();
+  if (lookupIdx.length === 0) {
+    throw new Error("Missing lookup index idx_repositories_mirrored_location");
+  }
+}
+
 const latestUpgradeFixtures: Record<string, UpgradeFixture> = {
   "0009_nervous_tyger_tiger": {
     seed: seedPre0009Database,
     verify: verify0009Migration,
+  },
+  "0010_mirrored_location_index": {
+    seed: seedPre0010Database,
+    verify: verify0010Migration,
   },
 };
 
