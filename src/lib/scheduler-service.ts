@@ -8,32 +8,70 @@ import { db, configs, repositories } from '@/lib/db';
 import { eq, and, or } from 'drizzle-orm';
 import { syncGiteaRepo, mirrorGithubRepoToGitea } from '@/lib/gitea';
 import { getDecryptedGitHubToken } from '@/lib/utils/config-encryption';
-import { parseInterval, formatDuration } from '@/lib/utils/duration-parser';
+import { formatDuration } from '@/lib/utils/duration-parser';
 import type { Repository } from '@/lib/db/schema';
 import { repoStatusEnum, repositoryVisibilityEnum } from '@/types/Repository';
 import { mergeGitReposPreferStarred, normalizeGitRepoToInsert, calcBatchSizeForInsert } from '@/lib/repo-utils';
 import { isMirrorableGitHubRepo } from '@/lib/repo-eligibility';
 import { createMirrorJob } from '@/lib/helpers';
+import { getNextScheduledRun, isCronExpression, normalizeTimezone } from '@/lib/utils/schedule-utils';
 
 let schedulerInterval: NodeJS.Timeout | null = null;
 let isSchedulerRunning = false;
 let hasPerformedAutoStart = false; // Track if we've already done auto-start
 
-/**
- * Parse schedule interval with enhanced support for duration strings, cron, and numbers
- * Supports formats like: "8h", "30m", "24h", "0 0/2 * * *", or plain numbers (seconds)
- */
-function parseScheduleInterval(interval: string | number): number {
+function resolveScheduleSettings(config: any): { source: string | number; timezone: string } {
+  const scheduleConfig = config.scheduleConfig || {};
+  const source = scheduleConfig.interval ||
+    config.giteaConfig?.mirrorInterval ||
+    '1h';
+  const timezone = normalizeTimezone(scheduleConfig.timezone || 'UTC');
+
+  return { source, timezone };
+}
+
+function calculateNextRun(config: any, currentTime: Date): Date {
+  const { source, timezone } = resolveScheduleSettings(config);
+
   try {
-    const milliseconds = parseInterval(interval);
-    console.log(`[Scheduler] Parsed interval "${interval}" as ${formatDuration(milliseconds)}`);
-    return milliseconds;
+    return getNextScheduledRun(source, currentTime, timezone);
   } catch (error) {
-    console.error(`[Scheduler] Failed to parse interval "${interval}": ${error instanceof Error ? error.message : 'Unknown error'}`);
-    const defaultInterval = 60 * 60 * 1000; // 1 hour
-    console.log(`[Scheduler] Using default interval: ${formatDuration(defaultInterval)}`);
-    return defaultInterval;
+    console.error(
+      `[Scheduler] Failed to calculate next run from source "${String(source)}" (timezone=${timezone}): ${
+        error instanceof Error ? error.message : 'Unknown error'
+      }`
+    );
+    const fallbackMs = 60 * 60 * 1000; // 1 hour
+    return new Date(currentTime.getTime() + fallbackMs);
   }
+}
+
+function logNextRun(userId: string, source: string | number, timezone: string, currentTime: Date, nextRun: Date): void {
+  const deltaMs = Math.max(0, nextRun.getTime() - currentTime.getTime());
+  const scheduleKind = isCronExpression(source) ? 'cron' : 'interval';
+  console.log(
+    `[Scheduler] Next sync for user ${userId} scheduled for: ${nextRun.toISOString()} ` +
+    `(in ${formatDuration(deltaMs)}) using ${scheduleKind} "${String(source)}" [timezone=${timezone}]`
+  );
+}
+
+async function persistScheduleRunState(config: any, currentTime: Date, forceEnabled = false): Promise<Date> {
+  const scheduleConfig = config.scheduleConfig || {};
+  const { source, timezone } = resolveScheduleSettings(config);
+  const nextRun = calculateNextRun(config, currentTime);
+
+  await db.update(configs).set({
+    scheduleConfig: {
+      ...scheduleConfig,
+      ...(forceEnabled ? { enabled: true } : {}),
+      lastRun: currentTime,
+      nextRun,
+    },
+    updatedAt: currentTime,
+  }).where(eq(configs.id, config.id));
+
+  logNextRun(config.userId, source, timezone, currentTime, nextRun);
+  return nextRun;
 }
 
 /**
@@ -53,29 +91,9 @@ async function runScheduledSync(config: any): Promise<void> {
     // Update lastRun timestamp
     const currentTime = new Date();
     const scheduleConfig = config.scheduleConfig || {};
-    
-    // Priority order: scheduleConfig.interval > giteaConfig.mirrorInterval > default
-    const intervalSource = scheduleConfig.interval || 
-                          config.giteaConfig?.mirrorInterval || 
-                          '1h'; // Default to 1 hour instead of 3600 seconds
-    
-    console.log(`[Scheduler] Using interval source for user ${userId}: ${intervalSource}`);
-    const interval = parseScheduleInterval(intervalSource);
-    
-    // Note: The interval timing is calculated from the LAST RUN time, not from container startup
-    // This means if GITEA_MIRROR_INTERVAL=8h, the next sync will be 8 hours from the last completed sync
-    const nextRun = new Date(currentTime.getTime() + interval);
-    
-    console.log(`[Scheduler] Next sync for user ${userId} scheduled for: ${nextRun.toISOString()} (in ${formatDuration(interval)})`);
-    
-    await db.update(configs).set({
-      scheduleConfig: {
-        ...scheduleConfig,
-        lastRun: currentTime,
-        nextRun: nextRun,
-      },
-      updatedAt: currentTime,
-    }).where(eq(configs.id, config.id));
+    const { source, timezone } = resolveScheduleSettings(config);
+    console.log(`[Scheduler] Using schedule source for user ${userId}: ${String(source)} (timezone=${timezone})`);
+    await persistScheduleRunState(config, currentTime);
     
     // Auto-discovery: Check for new GitHub repositories
     if (scheduleConfig.autoImport !== false) {
@@ -553,22 +571,7 @@ async function performInitialAutoStart(): Promise<void> {
           
           // Still update the schedule config to indicate scheduling is active
           const currentTime = new Date();
-          const intervalSource = config.scheduleConfig?.interval || 
-                                config.giteaConfig?.mirrorInterval || 
-                                '8h';
-          const interval = parseScheduleInterval(intervalSource);
-          const nextRun = new Date(currentTime.getTime() + interval);
-          
-          await db.update(configs).set({
-            scheduleConfig: {
-              ...config.scheduleConfig,
-              enabled: true,
-              lastRun: currentTime,
-              nextRun: nextRun,
-            },
-            updatedAt: currentTime,
-          }).where(eq(configs.id, config.id));
-          
+          const nextRun = await persistScheduleRunState(config, currentTime, true);
           console.log(`[Scheduler] Scheduling enabled for user ${config.userId}, next sync at ${nextRun.toISOString()}`);
           continue;
         }
@@ -580,21 +583,7 @@ async function performInitialAutoStart(): Promise<void> {
 
           // Still update schedule config timestamps
           const currentTime2 = new Date();
-          const intervalSource2 = config.scheduleConfig?.interval ||
-                                config.giteaConfig?.mirrorInterval ||
-                                '8h';
-          const interval2 = parseScheduleInterval(intervalSource2);
-          const nextRun2 = new Date(currentTime2.getTime() + interval2);
-
-          await db.update(configs).set({
-            scheduleConfig: {
-              ...config.scheduleConfig,
-              enabled: true,
-              lastRun: currentTime2,
-              nextRun: nextRun2,
-            },
-            updatedAt: currentTime2,
-          }).where(eq(configs.id, config.id));
+          const nextRun2 = await persistScheduleRunState(config, currentTime2, true);
 
           console.log(`[Scheduler] Scheduling enabled for user ${config.userId}, next sync at ${nextRun2.toISOString()}`);
           continue;
@@ -681,21 +670,7 @@ async function performInitialAutoStart(): Promise<void> {
         
         // Update the schedule config to indicate we've run
         const currentTime = new Date();
-        const intervalSource = config.scheduleConfig?.interval || 
-                              config.giteaConfig?.mirrorInterval || 
-                              '8h';
-        const interval = parseScheduleInterval(intervalSource);
-        const nextRun = new Date(currentTime.getTime() + interval);
-        
-        await db.update(configs).set({
-          scheduleConfig: {
-            ...config.scheduleConfig,
-            enabled: true, // Ensure scheduling is enabled
-            lastRun: currentTime,
-            nextRun: nextRun,
-          },
-          updatedAt: currentTime,
-        }).where(eq(configs.id, config.id));
+        const nextRun = await persistScheduleRunState(config, currentTime, true);
         
         console.log(`[Scheduler] Auto-start completed for user ${config.userId}, next sync at ${nextRun.toISOString()}`);
         
@@ -772,6 +747,25 @@ async function schedulerLoop(): Promise<void> {
     
     for (const config of validConfigs) {
       const scheduleConfig = config.scheduleConfig || {};
+      const { source, timezone } = resolveScheduleSettings(config);
+
+      // For clock-based schedules, initialize nextRun instead of running immediately.
+      if (!scheduleConfig.nextRun && isCronExpression(source)) {
+        const initializedNextRun = calculateNextRun(config, currentTime);
+        await db.update(configs).set({
+          scheduleConfig: {
+            ...scheduleConfig,
+            nextRun: initializedNextRun,
+          },
+          updatedAt: currentTime,
+        }).where(eq(configs.id, config.id));
+
+        console.log(
+          `[Scheduler] Initialized next run for user ${config.userId}: ${initializedNextRun.toISOString()} ` +
+          `from cron "${source}" [timezone=${timezone}]`
+        );
+        continue;
+      }
       
       // Check if it's time to run based on nextRun
       if (scheduleConfig.nextRun && new Date(scheduleConfig.nextRun) > currentTime) {

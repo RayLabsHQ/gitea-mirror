@@ -2,6 +2,7 @@ import { db, configs } from "@/lib/db";
 import { eq } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { encrypt } from "@/lib/utils/encryption";
+import { getNextScheduledRun, normalizeTimezone } from "@/lib/utils/schedule-utils";
 
 export interface DefaultConfigOptions {
   userId: string;
@@ -13,7 +14,7 @@ export interface DefaultConfigOptions {
     giteaToken?: string;
     giteaUsername?: string;
     scheduleEnabled?: boolean;
-    scheduleInterval?: number;
+    scheduleInterval?: number | string;
     cleanupEnabled?: boolean;
     cleanupRetentionDays?: number;
   };
@@ -47,8 +48,17 @@ export async function createDefaultConfig({ userId, envOverrides = {} }: Default
   // Schedule config from env - default to ENABLED
   const scheduleEnabled = envOverrides.scheduleEnabled ?? 
     (process.env.SCHEDULE_ENABLED === "false" ? false : true); // Default: ENABLED
-  const scheduleInterval = envOverrides.scheduleInterval ?? 
-    (process.env.SCHEDULE_INTERVAL ? parseInt(process.env.SCHEDULE_INTERVAL, 10) : 86400); // Default: daily
+  const scheduleInterval = envOverrides.scheduleInterval ??
+    (process.env.SCHEDULE_INTERVAL || 86400); // Default: daily
+  const scheduleTimezone = normalizeTimezone(process.env.SCHEDULE_TIMEZONE || "UTC");
+  let scheduleNextRun: Date | null = null;
+  if (scheduleEnabled) {
+    try {
+      scheduleNextRun = getNextScheduledRun(scheduleInterval, new Date(), scheduleTimezone);
+    } catch {
+      scheduleNextRun = new Date(Date.now() + 86400 * 1000);
+    }
+  }
   
   // Cleanup config from env - default to ENABLED
   const cleanupEnabled = envOverrides.cleanupEnabled ?? 
@@ -104,11 +114,12 @@ export async function createDefaultConfig({ userId, envOverrides = {} }: Default
     exclude: [],
     scheduleConfig: {
       enabled: scheduleEnabled,
-      interval: scheduleInterval,
+      interval: String(scheduleInterval),
+      timezone: scheduleTimezone,
       concurrent: false,
       batchSize: 5, // Reduced from 10 to be more conservative with GitHub API limits
       lastRun: null,
-      nextRun: scheduleEnabled ? new Date(Date.now() + scheduleInterval * 1000) : null,
+      nextRun: scheduleNextRun,
     },
     cleanupConfig: {
       enabled: cleanupEnabled,

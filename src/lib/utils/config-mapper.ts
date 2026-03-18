@@ -12,6 +12,7 @@ import type {
 import { z } from "zod";
 import { githubConfigSchema, giteaConfigSchema, scheduleConfigSchema, cleanupConfigSchema } from "@/lib/db/schema";
 import { parseInterval } from "@/lib/utils/duration-parser";
+import { buildClockCronExpression, normalizeTimezone, parseClockCronExpression } from "@/lib/utils/schedule-utils";
 
 // Use the actual database schema types
 type DbGitHubConfig = z.infer<typeof githubConfigSchema>;
@@ -197,15 +198,42 @@ export function mapUiScheduleToDb(uiSchedule: any, existing?: DbScheduleConfig):
     ? { ...(existing as unknown as DbScheduleConfig) }
     : (scheduleConfigSchema.parse({}) as unknown as DbScheduleConfig);
 
-  // Store interval as seconds string to avoid lossy cron conversion
-  const intervalSeconds = typeof uiSchedule.interval === 'number' && uiSchedule.interval > 0
-    ? String(uiSchedule.interval)
-    : (typeof base.interval === 'string' ? base.interval : String(86400));
+  const baseInterval = typeof base.interval === "string"
+    ? base.interval
+    : String(base.interval ?? 86400);
+
+  const timezone = normalizeTimezone(
+    typeof uiSchedule.timezone === "string"
+      ? uiSchedule.timezone
+      : base.timezone || "UTC"
+  );
+
+  let intervalExpression = baseInterval;
+
+  if (uiSchedule.scheduleMode === "clock") {
+    const cronExpression = buildClockCronExpression(
+      uiSchedule.startTime || "22:00",
+      Number(uiSchedule.clockFrequencyHours || 24)
+    );
+    if (cronExpression) {
+      intervalExpression = cronExpression;
+    }
+  } else if (typeof uiSchedule.intervalExpression === "string" && uiSchedule.intervalExpression.trim().length > 0) {
+    intervalExpression = uiSchedule.intervalExpression.trim();
+  } else if (typeof uiSchedule.interval === "number" && Number.isFinite(uiSchedule.interval) && uiSchedule.interval > 0) {
+    intervalExpression = String(Math.floor(uiSchedule.interval));
+  } else if (typeof uiSchedule.interval === "string" && uiSchedule.interval.trim().length > 0) {
+    intervalExpression = uiSchedule.interval.trim();
+  }
+
+  const scheduleChanged = baseInterval !== intervalExpression || normalizeTimezone(base.timezone || "UTC") !== timezone;
 
   return {
     ...base,
     enabled: !!uiSchedule.enabled,
-    interval: intervalSeconds,
+    interval: intervalExpression,
+    timezone,
+    nextRun: scheduleChanged ? undefined : base.nextRun,
   } as DbScheduleConfig;
 }
 
@@ -218,10 +246,20 @@ export function mapDbScheduleToUi(dbSchedule: DbScheduleConfig): any {
     return {
       enabled: false,
       interval: 86400, // Default to daily (24 hours)
+      intervalExpression: "86400",
+      scheduleMode: "interval",
+      clockFrequencyHours: 24,
+      startTime: "22:00",
+      timezone: "UTC",
       lastRun: null,
       nextRun: null,
     };
   }
+
+  const intervalExpression = typeof dbSchedule.interval === "string"
+    ? dbSchedule.interval
+    : String(dbSchedule.interval ?? 86400);
+  const parsedClockSchedule = parseClockCronExpression(intervalExpression);
 
   // Parse interval supporting numbers (seconds), duration strings, and cron
   let intervalSeconds = 86400; // Default to daily (24 hours)
@@ -240,6 +278,11 @@ export function mapDbScheduleToUi(dbSchedule: DbScheduleConfig): any {
   return {
     enabled: dbSchedule.enabled || false,
     interval: intervalSeconds,
+    intervalExpression,
+    scheduleMode: parsedClockSchedule ? "clock" : "interval",
+    clockFrequencyHours: parsedClockSchedule?.frequencyHours ?? 24,
+    startTime: parsedClockSchedule?.startTime ?? "22:00",
+    timezone: normalizeTimezone(dbSchedule.timezone || "UTC"),
     lastRun: dbSchedule.lastRun || null,
     nextRun: dbSchedule.nextRun || null,
   };

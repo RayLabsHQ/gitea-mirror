@@ -4,6 +4,7 @@ export type GiteaOrgVisibility = "public" | "private" | "limited";
 export type MirrorStrategy = "preserve" | "single-org" | "flat-user" | "mixed";
 export type StarredReposMode = "dedicated-org" | "preserve-owner";
 export type BackupStrategy = "disabled" | "always" | "on-force-push" | "block-on-force-push";
+export type ScheduleMode = "interval" | "clock";
 
 export interface GiteaConfig {
   url: string;
@@ -29,7 +30,12 @@ export interface GiteaConfig {
 
 export interface ScheduleConfig {
   enabled: boolean;
-  interval: number;
+  interval: number | string;
+  intervalExpression?: string;
+  scheduleMode?: ScheduleMode;
+  clockFrequencyHours?: number;
+  startTime?: string;
+  timezone?: string;
   lastRun?: Date;
   nextRun?: Date;
 }

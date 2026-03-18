@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -49,6 +50,15 @@ const scheduleIntervals = [
   { label: "Weekly", value: 604800 },
 ];
 
+const clockFrequencies = [
+  { label: "Every hour", value: 1 },
+  { label: "Every 2 hours", value: 2 },
+  { label: "Every 4 hours", value: 4 },
+  { label: "Every 8 hours", value: 8 },
+  { label: "Every 12 hours", value: 12 },
+  { label: "Daily", value: 24 },
+];
+
 const retentionPeriods = [
   { label: "1 day", value: 86400 },
   { label: "3 days", value: 259200 },
@@ -85,6 +95,19 @@ export function AutomationSettings({
   isAutoSavingSchedule,
   isAutoSavingCleanup,
 }: AutomationSettingsProps) {
+  const browserTimezone =
+    typeof Intl !== "undefined"
+      ? Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
+      : "UTC";
+  const selectedInterval =
+    typeof scheduleConfig.interval === "number" && Number.isFinite(scheduleConfig.interval)
+      ? scheduleConfig.interval
+      : Number.parseInt(String(scheduleConfig.interval), 10);
+  const safeInterval = Number.isFinite(selectedInterval) && selectedInterval > 0
+    ? selectedInterval
+    : 3600;
+  const scheduleMode = scheduleConfig.scheduleMode || "interval";
+
   // Update nextRun for cleanup when settings change
   useEffect(() => {
     if (cleanupConfig.enabled && !cleanupConfig.nextRun) {
@@ -143,7 +166,11 @@ export function AutomationSettings({
                   checked={scheduleConfig.enabled}
                   className="mt-1.25"
                   onCheckedChange={(checked) =>
-                    onScheduleChange({ ...scheduleConfig, enabled: !!checked })
+                    onScheduleChange({
+                      ...scheduleConfig,
+                      enabled: !!checked,
+                      timezone: scheduleConfig.timezone || browserTimezone,
+                    })
                   }
                 />
                 <div className="space-y-0.5 flex-1">
@@ -160,68 +187,205 @@ export function AutomationSettings({
               </div>
 
               {scheduleConfig.enabled && (
-                <div className="ml-6 space-y-3">
-                  <div>
-                    <Label htmlFor="mirror-interval" className="text-sm">
-                      Sync frequency
-                    </Label>
-                    <Select
-                      value={scheduleConfig.interval.toString()}
-                      onValueChange={(value) =>
-                        onScheduleChange({
-                          ...scheduleConfig,
-                          interval: parseInt(value, 10),
-                        })
-                      }
+                <div className="ml-6 space-y-4">
+                  <div className="space-y-3 rounded-lg border border-border/70 bg-muted/20 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                        Schedule Builder
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Timezone:{" "}
+                        <code>{scheduleConfig.timezone || browserTimezone}</code>
+                      </p>
+                    </div>
+
+                    <div
+                      className={`grid gap-3 ${
+                        scheduleMode === "clock" ? "sm:grid-cols-3" : "sm:grid-cols-2"
+                      }`}
                     >
-                      <SelectTrigger id="mirror-interval" className="mt-1.5">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {scheduleIntervals.map((option) => (
-                          <SelectItem
-                            key={option.value}
-                            value={option.value.toString()}
-                          >
-                            {option.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                      <div className="space-y-1.5">
+                        <Label
+                          htmlFor="schedule-mode"
+                          className="text-xs font-medium uppercase tracking-wide text-muted-foreground"
+                        >
+                          Scheduling mode
+                        </Label>
+                        <Select
+                          value={scheduleMode}
+                          onValueChange={(value) =>
+                            onScheduleChange({
+                              ...scheduleConfig,
+                              scheduleMode: value as ScheduleConfig["scheduleMode"],
+                              timezone: scheduleConfig.timezone || browserTimezone,
+                              clockFrequencyHours:
+                                value === "clock"
+                                  ? scheduleConfig.clockFrequencyHours || 24
+                                  : scheduleConfig.clockFrequencyHours,
+                              startTime:
+                                value === "clock"
+                                  ? scheduleConfig.startTime || "22:00"
+                                  : scheduleConfig.startTime,
+                            })
+                          }
+                        >
+                          <SelectTrigger id="schedule-mode">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="interval">Relative interval</SelectItem>
+                            <SelectItem value="clock">Start time + frequency</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      {scheduleMode === "interval" ? (
+                        <>
+                          <div className="space-y-1.5">
+                            <Label
+                              htmlFor="mirror-interval"
+                              className="text-xs font-medium uppercase tracking-wide text-muted-foreground"
+                            >
+                              Sync frequency
+                            </Label>
+                            <Select
+                              value={safeInterval.toString()}
+                              onValueChange={(value) =>
+                                onScheduleChange({
+                                  ...scheduleConfig,
+                                  scheduleMode: "interval",
+                                  interval: parseInt(value, 10),
+                                  intervalExpression: value,
+                                  timezone: scheduleConfig.timezone || browserTimezone,
+                                })
+                              }
+                            >
+                              <SelectTrigger id="mirror-interval">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {scheduleIntervals.map((option) => (
+                                  <SelectItem
+                                    key={option.value}
+                                    value={option.value.toString()}
+                                  >
+                                    {option.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          <p className="sm:col-span-2 text-xs text-muted-foreground">
+                            Relative interval schedules the next run based on the
+                            completion time of the previous sync.
+                          </p>
+                        </>
+                      ) : (
+                        <>
+                          <div className="space-y-1.5">
+                            <Label
+                              htmlFor="clock-frequency"
+                              className="text-xs font-medium uppercase tracking-wide text-muted-foreground"
+                            >
+                              Frequency
+                            </Label>
+                            <Select
+                              value={String(scheduleConfig.clockFrequencyHours || 24)}
+                              onValueChange={(value) =>
+                                onScheduleChange({
+                                  ...scheduleConfig,
+                                  scheduleMode: "clock",
+                                  clockFrequencyHours: parseInt(value, 10),
+                                  startTime: scheduleConfig.startTime || "22:00",
+                                  timezone: scheduleConfig.timezone || browserTimezone,
+                                })
+                              }
+                            >
+                              <SelectTrigger id="clock-frequency">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {clockFrequencies.map((option) => (
+                                  <SelectItem
+                                    key={option.value}
+                                    value={option.value.toString()}
+                                  >
+                                    {option.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <Label
+                              htmlFor="clock-start-time"
+                              className="text-xs font-medium uppercase tracking-wide text-muted-foreground"
+                            >
+                              Start time
+                            </Label>
+                            <Input
+                              id="clock-start-time"
+                              type="time"
+                              value={scheduleConfig.startTime || "22:00"}
+                              onChange={(event) =>
+                                onScheduleChange({
+                                  ...scheduleConfig,
+                                  scheduleMode: "clock",
+                                  startTime: event.target.value,
+                                  clockFrequencyHours:
+                                    scheduleConfig.clockFrequencyHours || 24,
+                                  timezone: scheduleConfig.timezone || browserTimezone,
+                                })
+                              }
+                            />
+                          </div>
+
+                          <p className="sm:col-span-3 text-xs text-muted-foreground">
+                            Clock schedules run at the selected start time and repeat
+                            by your chosen frequency.
+                          </p>
+                        </>
+                      )}
+                    </div>
                   </div>
                 </div>
               )}
 
-              <div className="space-y-2 p-3 bg-muted/30 dark:bg-muted/10 rounded-md border border-border/50">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="flex items-center gap-1.5">
-                    <Clock className="h-3.5 w-3.5" />
-                    Last sync
-                  </span>
-                  <span className="font-medium text-muted-foreground">
-                    {scheduleConfig.lastRun
-                      ? formatDate(scheduleConfig.lastRun)
-                      : "Never"}
-                  </span>
-                </div>
-                {scheduleConfig.enabled ? (
-                  scheduleConfig.nextRun && (
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="flex items-center gap-1.5">
+              <div className="rounded-md border border-border/50 bg-muted/20 p-3">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <span className="text-xs text-muted-foreground flex items-center gap-1.5">
+                      <Clock className="h-3.5 w-3.5" />
+                      Last sync
+                    </span>
+                    <p className="text-sm font-medium text-muted-foreground">
+                      {scheduleConfig.lastRun
+                        ? formatDate(scheduleConfig.lastRun)
+                        : "Never"}
+                    </p>
+                  </div>
+
+                  {scheduleConfig.enabled ? (
+                    <div className="space-y-1">
+                      <span className="text-xs text-muted-foreground flex items-center gap-1.5">
                         <Calendar className="h-3.5 w-3.5" />
                         Next sync
                       </span>
-                      <span className="font-medium">
-                        {formatDate(scheduleConfig.nextRun)}
-                      </span>
+                      <p className="text-sm font-medium">
+                        {scheduleConfig.nextRun
+                          ? formatDate(scheduleConfig.nextRun)
+                          : "Calculating..."}
+                      </p>
                     </div>
-                  )
-                ) : (
-                  <div className="text-xs text-muted-foreground">
-                    Enable automatic syncing to schedule periodic repository updates
-                  </div>
-                )}
-          </div>
+                  ) : (
+                    <div className="sm:col-span-2 text-xs text-muted-foreground">
+                      Enable automatic syncing to schedule periodic repository updates.
+                    </div>
+                  )}
+                </div>
+              </div>
         </div>
       </div>
 
