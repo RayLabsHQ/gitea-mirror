@@ -89,7 +89,9 @@ export const auth = betterAuth({
     // trustedOrigins computed at startup, so BETTER_AUTH_TRUSTED_ORIGINS should
     // still be set for full reverse proxy compatibility.
     if (request?.headers) {
-      const host = request.headers.get("x-forwarded-host") || request.headers.get("host");
+      // Take first value only — x-forwarded-host can be comma-separated in chained proxy setups
+      const rawHost = request.headers.get("x-forwarded-host") || request.headers.get("host");
+      const host = rawHost?.split(",")[0].trim();
       if (host) {
         // Handle multi-value x-forwarded-proto (e.g. "https, http" from proxy chains)
         const rawProto = request.headers.get("x-forwarded-proto") || "http";
