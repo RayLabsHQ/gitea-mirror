@@ -3,6 +3,7 @@ import { db, mirrorJobs } from "./db";
 import { eq, and, or, lt, isNull } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { publishEvent } from "./events";
+import { triggerJobNotification } from "./notification-service";
 
 export async function createMirrorJob({
   userId,
@@ -19,6 +20,7 @@ export async function createMirrorJob({
   itemIds,
   inProgress,
   skipDuplicateEvent,
+  skipNotification,
 }: {
   userId: string;
   organizationId?: string;
@@ -34,6 +36,7 @@ export async function createMirrorJob({
   itemIds?: string[];
   inProgress?: boolean;
   skipDuplicateEvent?: boolean; // Option to skip event publishing for internal operations
+  skipNotification?: boolean; // Option to skip push notifications for specific internal operations
 }) {
   const jobId = uuidv4();
   const currentTimestamp = new Date();
@@ -67,7 +70,7 @@ export async function createMirrorJob({
     // Insert the job into the database
     await db.insert(mirrorJobs).values(job);
 
-    // Publish the event using SQLite instead of Redis (unless skipped)
+    // Publish realtime status events unless explicitly skipped
     if (!skipDuplicateEvent) {
       const channel = `mirror-status:${userId}`;
 
@@ -89,13 +92,13 @@ export async function createMirrorJob({
       });
     }
 
-    // Trigger notification for terminal statuses (never blocks the mirror flow)
-    if (!skipDuplicateEvent && (status === "failed" || status === "mirrored" || status === "synced")) {
-      import("./notification-service").then(({ triggerJobNotification }) => {
-        triggerJobNotification({ userId, status, repositoryName, organizationName, message, details }).catch(err => {
-          console.error("[NotificationService] Background notification failed:", err);
-        });
-      }).catch(() => {});
+    // Trigger push notifications for terminal statuses (never blocks the mirror flow).
+    // Keep this independent from skipDuplicateEvent so event-stream suppression does not
+    // silently disable user-facing notifications.
+    if (!skipNotification && (status === "failed" || status === "mirrored" || status === "synced")) {
+      triggerJobNotification({ userId, status, repositoryName, organizationName, message, details }).catch(err => {
+        console.error("[NotificationService] Background notification failed:", err);
+      });
     }
 
     return jobId;

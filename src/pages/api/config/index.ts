@@ -14,6 +14,7 @@ import {
 import { encrypt, decrypt } from "@/lib/utils/encryption";
 import { createDefaultConfig } from "@/lib/utils/config-defaults";
 import { requireAuthenticatedUserId } from "@/lib/auth-guards";
+import { notificationConfigSchema } from "@/lib/db/schema";
 
 export const POST: APIRoute = async ({ request, locals }) => {
   try {
@@ -22,7 +23,15 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const userId = authResult.userId;
 
     const body = await request.json();
-    const { githubConfig, giteaConfig, scheduleConfig, cleanupConfig, mirrorOptions, advancedOptions } = body;
+    const {
+      githubConfig,
+      giteaConfig,
+      scheduleConfig,
+      cleanupConfig,
+      mirrorOptions,
+      advancedOptions,
+      notificationConfig,
+    } = body;
 
     if (!githubConfig || !giteaConfig || !scheduleConfig || !cleanupConfig || !mirrorOptions || !advancedOptions) {
       return new Response(
@@ -36,6 +45,24 @@ export const POST: APIRoute = async ({ request, locals }) => {
           headers: { "Content-Type": "application/json" },
         }
       );
+    }
+
+    let validatedNotificationConfig: any = undefined;
+    if (notificationConfig !== undefined) {
+      const parsed = notificationConfigSchema.safeParse(notificationConfig);
+      if (!parsed.success) {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            message: `Invalid notificationConfig: ${parsed.error.message}`,
+          }),
+          {
+            status: 400,
+            headers: { "Content-Type": "application/json" },
+          }
+        );
+      }
+      validatedNotificationConfig = parsed.data;
     }
 
     // Validate Gitea URL format and protocol
@@ -116,10 +143,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const processedCleanupConfig = mapUiCleanupToDb(cleanupConfig);
 
     // Process notification config if provided
-    const notificationConfig = body.notificationConfig;
     let processedNotificationConfig: any = undefined;
-    if (notificationConfig) {
-      processedNotificationConfig = { ...notificationConfig };
+    if (validatedNotificationConfig) {
+      processedNotificationConfig = { ...validatedNotificationConfig };
       // Encrypt ntfy token if present
       if (processedNotificationConfig.ntfy?.token) {
         processedNotificationConfig.ntfy = {
