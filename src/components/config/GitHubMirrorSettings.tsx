@@ -4,6 +4,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
   Tooltip,
   TooltipContent,
@@ -17,6 +18,7 @@ import {
 } from "@/components/ui/popover";
 import {
   Info,
+  Check,
   GitBranch,
   Star,
   Lock,
@@ -31,7 +33,9 @@ import {
   ChevronDown,
   Funnel,
   HardDrive,
-  FileCode2
+  FileCode2,
+  Plus,
+  X
 } from "lucide-react";
 import type { GitHubConfig, MirrorOptions, AdvancedOptions, DuplicateNameStrategy } from "@/types/config";
 import {
@@ -41,7 +45,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import { cn } from "@/lib/utils";
+import { githubApi } from "@/lib/api";
 
 interface GitHubMirrorSettingsProps {
   githubConfig: GitHubConfig;
@@ -60,8 +73,42 @@ export function GitHubMirrorSettings({
   onMirrorOptionsChange,
   onAdvancedOptionsChange,
 }: GitHubMirrorSettingsProps) {
-  
-  const handleGitHubChange = (field: keyof GitHubConfig, value: boolean | string) => {
+  const [starListsOpen, setStarListsOpen] = React.useState(false);
+  const [starListSearch, setStarListSearch] = React.useState("");
+  const [customStarListName, setCustomStarListName] = React.useState("");
+  const [availableStarLists, setAvailableStarLists] = React.useState<string[]>([]);
+  const [loadingStarLists, setLoadingStarLists] = React.useState(false);
+  const [loadedStarLists, setLoadedStarLists] = React.useState(false);
+  const [attemptedStarListLoad, setAttemptedStarListLoad] = React.useState(false);
+
+  const normalizeStarListNames = React.useCallback((lists: string[] | undefined): string[] => {
+    if (!Array.isArray(lists)) return [];
+
+    const seen = new Set<string>();
+    const normalized: string[] = [];
+    for (const list of lists) {
+      const trimmed = list.trim();
+      if (!trimmed) continue;
+      const key = trimmed.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      normalized.push(trimmed);
+    }
+
+    return normalized;
+  }, []);
+
+  const selectedStarLists = React.useMemo(
+    () => normalizeStarListNames(githubConfig.starredLists),
+    [githubConfig.starredLists, normalizeStarListNames],
+  );
+
+  const allKnownStarLists = React.useMemo(
+    () => normalizeStarListNames([...availableStarLists, ...selectedStarLists]),
+    [availableStarLists, selectedStarLists, normalizeStarListNames],
+  );
+
+  const handleGitHubChange = (field: keyof GitHubConfig, value: boolean | string | string[]) => {
     onGitHubConfigChange({ ...githubConfig, [field]: value });
   };
 
@@ -83,6 +130,59 @@ export function GitHubMirrorSettings({
     onAdvancedOptionsChange({ ...advancedOptions, [field]: value });
   };
 
+  const setSelectedStarLists = React.useCallback((lists: string[]) => {
+    onGitHubConfigChange({
+      ...githubConfig,
+      starredLists: normalizeStarListNames(lists),
+    });
+  }, [githubConfig, normalizeStarListNames, onGitHubConfigChange]);
+
+  const loadStarLists = React.useCallback(async () => {
+    if (
+      loadingStarLists ||
+      loadedStarLists ||
+      attemptedStarListLoad ||
+      !githubConfig.mirrorStarred
+    ) return;
+
+    setAttemptedStarListLoad(true);
+    setLoadingStarLists(true);
+    try {
+      const response = await githubApi.getStarredLists();
+      setAvailableStarLists(normalizeStarListNames(response.lists));
+      setLoadedStarLists(true);
+    } catch {
+      // Keep UX usable with manual custom input even if list fetch fails.
+      // Allow retry on next popover open.
+      setLoadedStarLists(false);
+    } finally {
+      setLoadingStarLists(false);
+    }
+  }, [
+    attemptedStarListLoad,
+    githubConfig.mirrorStarred,
+    loadedStarLists,
+    loadingStarLists,
+    normalizeStarListNames,
+  ]);
+
+  React.useEffect(() => {
+    if (!starListsOpen || !githubConfig.mirrorStarred) return;
+    void loadStarLists();
+  }, [starListsOpen, githubConfig.mirrorStarred, loadStarLists]);
+
+  React.useEffect(() => {
+    if (!githubConfig.mirrorStarred) {
+      setStarListsOpen(false);
+    }
+  }, [githubConfig.mirrorStarred]);
+
+  React.useEffect(() => {
+    if (!starListsOpen) {
+      setAttemptedStarListLoad(false);
+    }
+  }, [starListsOpen]);
+
   // When metadata is disabled, all components should be disabled
   const isMetadataEnabled = mirrorOptions.mirrorMetadata;
   
@@ -97,6 +197,17 @@ export function GitHubMirrorSettings({
   
   const starredContentCount = Object.entries(starredRepoContent).filter(([key, value]) => key !== 'code' && value).length;
   const totalStarredOptions = 4; // releases, issues, PRs, wiki
+
+  const normalizedStarListSearch = starListSearch.trim();
+  const canAddSearchAsStarList = normalizedStarListSearch.length > 0
+    && !allKnownStarLists.some((list) => list.toLowerCase() === normalizedStarListSearch.toLowerCase());
+
+  const addCustomStarList = () => {
+    const trimmed = customStarListName.trim();
+    if (!trimmed) return;
+    setSelectedStarLists([...selectedStarLists, trimmed]);
+    setCustomStarListName("");
+  };
 
   return (
     <div className="space-y-6">
@@ -308,6 +419,143 @@ export function GitHubMirrorSettings({
                     When disabled, starred repos are imported for browsing but not automatically mirrored. You can still mirror individual repos manually.
                   </p>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {/* Star list selection */}
+          {githubConfig.mirrorStarred && (
+            <div className="mt-4 space-y-2">
+              <Label className="text-xs font-medium text-muted-foreground">
+                Star Lists (optional)
+              </Label>
+              <Popover open={starListsOpen} onOpenChange={setStarListsOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={starListsOpen}
+                    className="w-full justify-between h-9 text-xs font-normal"
+                  >
+                    <span className="truncate text-left">
+                      {selectedStarLists.length === 0
+                        ? "All starred repositories"
+                        : `${selectedStarLists.length} list${selectedStarLists.length === 1 ? "" : "s"} selected`}
+                    </span>
+                    <ChevronDown className="ml-2 h-3 w-3 opacity-50 shrink-0" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[360px] p-0" align="start">
+                  <Command>
+                    <CommandInput
+                      value={starListSearch}
+                      onValueChange={setStarListSearch}
+                      placeholder="Search GitHub star lists..."
+                    />
+                    <CommandList>
+                      <CommandEmpty>
+                        {loadingStarLists ? "Loading star lists..." : "No matching lists"}
+                      </CommandEmpty>
+                      <CommandGroup>
+                        {allKnownStarLists.map((list) => {
+                          const isSelected = selectedStarLists.some(
+                            (selected) => selected.toLowerCase() === list.toLowerCase(),
+                          );
+
+                          return (
+                            <CommandItem
+                              key={list}
+                              value={list}
+                              onSelect={() => {
+                                if (isSelected) {
+                                  setSelectedStarLists(
+                                    selectedStarLists.filter(
+                                      (selected) => selected.toLowerCase() !== list.toLowerCase(),
+                                    ),
+                                  );
+                                } else {
+                                  setSelectedStarLists([...selectedStarLists, list]);
+                                }
+                              }}
+                            >
+                              <Check
+                                className={cn(
+                                  "mr-2 h-4 w-4",
+                                  isSelected ? "opacity-100" : "opacity-0",
+                                )}
+                              />
+                              <span className="truncate">{list}</span>
+                            </CommandItem>
+                          );
+                        })}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+
+                  {canAddSearchAsStarList && (
+                    <div className="border-t p-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="w-full justify-start text-xs"
+                        onClick={() => {
+                          setSelectedStarLists([...selectedStarLists, normalizedStarListSearch]);
+                          setStarListSearch("");
+                        }}
+                      >
+                        <Plus className="mr-2 h-3.5 w-3.5" />
+                        Add "{normalizedStarListSearch}"
+                      </Button>
+                    </div>
+                  )}
+                </PopoverContent>
+              </Popover>
+
+              <p className="text-xs text-muted-foreground">
+                Leave empty to mirror all starred repositories. Select one or more lists to limit syncing.
+              </p>
+
+              {selectedStarLists.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {selectedStarLists.map((list) => (
+                    <Badge key={list} variant="secondary" className="gap-1">
+                      <span>{list}</span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSelectedStarLists(
+                            selectedStarLists.filter(
+                              (selected) => selected.toLowerCase() !== list.toLowerCase(),
+                            ),
+                          )
+                        }
+                        className="rounded-sm hover:text-foreground/80"
+                        aria-label={`Remove ${list} list`}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </Badge>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex items-center gap-2">
+                <Input
+                  value={customStarListName}
+                  onChange={(event) => setCustomStarListName(event.target.value)}
+                  placeholder="Add custom list name"
+                  className="h-8 text-xs"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8"
+                  onClick={addCustomStarList}
+                  disabled={!customStarListName.trim()}
+                >
+                  Add
+                </Button>
               </div>
             </div>
           )}

@@ -61,6 +61,7 @@ Settings for connecting to and configuring GitHub repository sources.
 | `INCLUDE_ARCHIVED` | Include archived repositories | `false` | `true`, `false` |
 | `SKIP_FORKS` | Skip forked repositories | `false` | `true`, `false` |
 | `MIRROR_STARRED` | Mirror starred repositories | `false` | `true`, `false` |
+| `MIRROR_STARRED_LISTS` | Optional comma-separated GitHub Star List names to mirror (only used when `MIRROR_STARRED=true`) | - | Comma-separated list names (empty = all starred repos) |
 | `STARRED_REPOS_ORG` | Organization name for starred repos | `starred` | Any string |
 | `STARRED_REPOS_MODE` | How starred repos are mirrored | `dedicated-org` | `dedicated-org`, `preserve-owner` |
 

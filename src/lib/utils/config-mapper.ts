@@ -20,6 +20,17 @@ type DbGiteaConfig = z.infer<typeof giteaConfigSchema>;
 type DbScheduleConfig = z.infer<typeof scheduleConfigSchema>;
 type DbCleanupConfig = z.infer<typeof cleanupConfigSchema>;
 
+function normalizeStarredLists(lists: string[] | undefined): string[] {
+  if (!Array.isArray(lists)) return [];
+  const deduped = new Set<string>();
+  for (const list of lists) {
+    const trimmed = list.trim();
+    if (!trimmed) continue;
+    deduped.add(trimmed);
+  }
+  return [...deduped];
+}
+
 /**
  * Maps UI config structure to database schema structure
  */
@@ -50,6 +61,7 @@ export function mapUiToDbConfig(
     // Starred repos organization
     starredReposOrg: giteaConfig.starredReposOrg,
     starredReposMode: giteaConfig.starredReposMode || "dedicated-org",
+    starredLists: normalizeStarredLists(githubConfig.starredLists),
     
     // Mirror strategy
     mirrorStrategy: giteaConfig.mirrorStrategy || "preserve",
@@ -131,6 +143,7 @@ export function mapDbToUiConfig(dbConfig: any): {
     token: dbConfig.githubConfig?.token || "",
     privateRepositories: dbConfig.githubConfig?.includePrivate || false, // Map includePrivate to privateRepositories
     mirrorStarred: dbConfig.githubConfig?.includeStarred || false, // Map includeStarred to mirrorStarred
+    starredLists: normalizeStarredLists(dbConfig.githubConfig?.starredLists),
   };
 
   // Map from database Gitea config to UI fields

@@ -78,6 +78,10 @@ export const githubApi = {
       method: "POST",
       body: JSON.stringify({ token }),
     }),
+  getStarredLists: () =>
+    apiRequest<{ success: boolean; lists: string[] }>("/github/starred-lists", {
+      method: "GET",
+    }),
 };
 
 // Gitea API

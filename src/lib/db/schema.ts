@@ -26,6 +26,7 @@ export const githubConfigSchema = z.object({
   includeOrganizations: z.array(z.string()).default([]),
   starredReposOrg: z.string().optional(),
   starredReposMode: z.enum(["dedicated-org", "preserve-owner"]).default("dedicated-org"),
+  starredLists: z.array(z.string()).default([]),
   mirrorStrategy: z.enum(["preserve", "single-org", "flat-user", "mixed"]).default("preserve"),
   defaultOrg: z.string().optional(),
   starredCodeOnly: z.boolean().default(false),

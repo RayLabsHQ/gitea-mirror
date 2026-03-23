@@ -300,6 +300,231 @@ export async function getGithubRepositories({
   }
 }
 
+function normalizeStarredListNames(rawLists: unknown): string[] {
+  if (!Array.isArray(rawLists)) return [];
+
+  const deduped = new Set<string>();
+  for (const value of rawLists) {
+    if (typeof value !== "string") continue;
+    const trimmed = value.trim();
+    if (!trimmed) continue;
+    deduped.add(trimmed);
+  }
+
+  return [...deduped];
+}
+
+function toHttpsCloneUrl(repoUrl: string): string {
+  return repoUrl.endsWith(".git") ? repoUrl : `${repoUrl}.git`;
+}
+
+interface GitHubStarListNode {
+  id: string;
+  name: string;
+}
+
+interface GitHubRepositoryListItem {
+  __typename: "Repository";
+  name: string;
+  nameWithOwner: string;
+  url: string;
+  sshUrl: string;
+  isPrivate: boolean;
+  isFork: boolean;
+  isArchived: boolean;
+  isDisabled: boolean;
+  hasIssuesEnabled: boolean;
+  diskUsage: number;
+  description: string | null;
+  defaultBranchRef: { name: string } | null;
+  visibility: "PUBLIC" | "PRIVATE" | "INTERNAL";
+  updatedAt: string;
+  createdAt: string;
+  owner: {
+    __typename: "Organization" | "User" | string;
+    login: string;
+  };
+  primaryLanguage: {
+    name: string;
+  } | null;
+}
+
+async function getGithubStarLists(octokit: Octokit): Promise<GitHubStarListNode[]> {
+  const allLists: GitHubStarListNode[] = [];
+  let cursor: string | null = null;
+
+  do {
+    const result = await octokit.graphql<{
+      viewer: {
+        lists: {
+          nodes: Array<GitHubStarListNode | null> | null;
+          pageInfo: {
+            hasNextPage: boolean;
+            endCursor: string | null;
+          };
+        };
+      };
+    }>(
+      `
+        query($after: String) {
+          viewer {
+            lists(first: 50, after: $after) {
+              nodes {
+                id
+                name
+              }
+              pageInfo {
+                hasNextPage
+                endCursor
+              }
+            }
+          }
+        }
+      `,
+      { after: cursor },
+    );
+
+    const lists = (result.viewer.lists.nodes ?? []).filter(
+      (list): list is GitHubStarListNode =>
+        !!list &&
+        typeof list.id === "string" &&
+        typeof list.name === "string",
+    );
+    allLists.push(...lists);
+
+    if (!result.viewer.lists.pageInfo.hasNextPage) break;
+    cursor = result.viewer.lists.pageInfo.endCursor;
+  } while (cursor);
+
+  return allLists;
+}
+
+async function getGithubRepositoriesForStarList(
+  octokit: Octokit,
+  listId: string,
+): Promise<GitHubRepositoryListItem[]> {
+  const repositories: GitHubRepositoryListItem[] = [];
+  let cursor: string | null = null;
+
+  do {
+    const result = await octokit.graphql<{
+      node: {
+        items: {
+          nodes: Array<GitHubRepositoryListItem | null> | null;
+          pageInfo: {
+            hasNextPage: boolean;
+            endCursor: string | null;
+          };
+        };
+      } | null;
+    }>(
+      `
+        query($listId: ID!, $after: String) {
+          node(id: $listId) {
+            ... on UserList {
+              items(first: 100, after: $after) {
+                nodes {
+                  __typename
+                  ... on Repository {
+                    name
+                    nameWithOwner
+                    url
+                    sshUrl
+                    isPrivate
+                    isFork
+                    isArchived
+                    isDisabled
+                    hasIssuesEnabled
+                    diskUsage
+                    description
+                    defaultBranchRef {
+                      name
+                    }
+                    visibility
+                    updatedAt
+                    createdAt
+                    owner {
+                      __typename
+                      login
+                    }
+                    primaryLanguage {
+                      name
+                    }
+                  }
+                }
+                pageInfo {
+                  hasNextPage
+                  endCursor
+                }
+              }
+            }
+          }
+        }
+      `,
+      { listId, after: cursor },
+    );
+
+    const listNode = result.node;
+    if (!listNode) break;
+
+    const nodes = listNode.items.nodes ?? [];
+    for (const node of nodes) {
+      if (node?.__typename === "Repository") {
+        repositories.push(node);
+      }
+    }
+
+    if (!listNode.items.pageInfo.hasNextPage) break;
+    cursor = listNode.items.pageInfo.endCursor;
+  } while (cursor);
+
+  return repositories;
+}
+
+function mapGraphqlRepoToGitRepo(repo: GitHubRepositoryListItem): GitRepo {
+  const visibility = (repo.visibility ?? "PUBLIC").toLowerCase() as GitRepo["visibility"];
+  const createdAt = repo.createdAt ? new Date(repo.createdAt) : new Date();
+  const updatedAt = repo.updatedAt ? new Date(repo.updatedAt) : new Date();
+
+  return {
+    name: repo.name,
+    fullName: repo.nameWithOwner,
+    url: repo.url,
+    cloneUrl: toHttpsCloneUrl(repo.url),
+
+    owner: repo.owner.login,
+    organization: repo.owner.__typename === "Organization" ? repo.owner.login : undefined,
+    mirroredLocation: "",
+    destinationOrg: null,
+
+    isPrivate: repo.isPrivate,
+    isForked: repo.isFork,
+    forkedFrom: undefined,
+
+    hasIssues: repo.hasIssuesEnabled,
+    isStarred: true,
+    isArchived: repo.isArchived,
+
+    size: repo.diskUsage ?? 0,
+    hasLFS: false,
+    hasSubmodules: false,
+
+    language: repo.primaryLanguage?.name ?? null,
+    description: repo.description,
+    defaultBranch: repo.defaultBranchRef?.name || "main",
+    visibility,
+
+    status: "imported",
+    isDisabled: repo.isDisabled,
+    lastMirrored: undefined,
+    errorMessage: undefined,
+
+    importedAt: new Date(),
+    createdAt,
+    updatedAt,
+  };
+}
+
 export async function getGithubStarredRepositories({
   octokit,
   config,
@@ -308,6 +533,39 @@ export async function getGithubStarredRepositories({
   config: Partial<Config>;
 }): Promise<GitRepo[]> {
   try {
+    const configuredLists = normalizeStarredListNames(
+      config.githubConfig?.starredLists,
+    );
+
+    if (configuredLists.length > 0) {
+      const allLists = await getGithubStarLists(octokit);
+      const configuredNameSet = new Set(
+        configuredLists.map((list) => list.toLowerCase()),
+      );
+
+      const matchedLists = allLists.filter((list) =>
+        configuredNameSet.has(list.name.toLowerCase()),
+      );
+
+      if (matchedLists.length === 0) {
+        throw new Error(
+          `Configured GitHub star lists not found: ${configuredLists.join(", ")}`,
+        );
+      }
+
+      const deduped = new Map<string, GitRepo>();
+      for (const list of matchedLists) {
+        const repos = await getGithubRepositoriesForStarList(octokit, list.id);
+        for (const repo of repos) {
+          const key = repo.nameWithOwner.toLowerCase();
+          if (deduped.has(key)) continue;
+          deduped.set(key, mapGraphqlRepoToGitRepo(repo));
+        }
+      }
+
+      return [...deduped.values()];
+    }
+
     const starredRepos = await octokit.paginate(
       octokit.activity.listReposStarredByAuthenticatedUser,
       {
@@ -360,6 +618,23 @@ export async function getGithubStarredRepositories({
       }`,
     );
   }
+}
+
+export async function getGithubStarredListNames({
+  octokit,
+}: {
+  octokit: Octokit;
+}): Promise<string[]> {
+  const lists = await getGithubStarLists(octokit);
+
+  const deduped = new Set<string>();
+  for (const list of lists) {
+    const trimmed = list.name.trim();
+    if (!trimmed) continue;
+    deduped.add(trimmed);
+  }
+
+  return [...deduped];
 }
 
 /**

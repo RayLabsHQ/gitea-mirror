@@ -42,6 +42,7 @@ export function ConfigTabs() {
       token: '',
       privateRepositories: false,
       mirrorStarred: false,
+      starredLists: [],
     },
     giteaConfig: {
       url: '',
