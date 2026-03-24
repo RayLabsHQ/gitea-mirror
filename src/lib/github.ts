@@ -300,18 +300,26 @@ export async function getGithubRepositories({
   }
 }
 
+function getStarredListMatchKey(rawValue: string): string {
+  const normalized = rawValue.normalize("NFKC").trim().toLowerCase();
+  const tokens = normalized.match(/[\p{L}\p{N}]+/gu);
+  return tokens ? tokens.join("") : "";
+}
+
 function normalizeStarredListNames(rawLists: unknown): string[] {
   if (!Array.isArray(rawLists)) return [];
 
-  const deduped = new Set<string>();
+  const deduped = new Map<string, string>();
   for (const value of rawLists) {
     if (typeof value !== "string") continue;
     const trimmed = value.trim();
     if (!trimmed) continue;
-    deduped.add(trimmed);
+    const matchKey = getStarredListMatchKey(trimmed);
+    if (!matchKey || deduped.has(matchKey)) continue;
+    deduped.set(matchKey, trimmed);
   }
 
-  return [...deduped];
+  return [...deduped.values()];
 }
 
 function toHttpsCloneUrl(repoUrl: string): string {
@@ -539,17 +547,24 @@ export async function getGithubStarredRepositories({
 
     if (configuredLists.length > 0) {
       const allLists = await getGithubStarLists(octokit);
-      const configuredNameSet = new Set(
-        configuredLists.map((list) => list.toLowerCase()),
+      const configuredMatchKeySet = new Set(
+        configuredLists.map((list) => getStarredListMatchKey(list)),
       );
 
       const matchedLists = allLists.filter((list) =>
-        configuredNameSet.has(list.name.toLowerCase()),
+        configuredMatchKeySet.has(getStarredListMatchKey(list.name)),
       );
 
       if (matchedLists.length === 0) {
+        const availableListNames = normalizeStarredListNames(
+          allLists.map((list) => list.name),
+        );
+        const preview = availableListNames.slice(0, 20).join(", ");
+        const availableSuffix = preview
+          ? `. Available lists: ${preview}${availableListNames.length > 20 ? ", ..." : ""}`
+          : "";
         throw new Error(
-          `Configured GitHub star lists not found: ${configuredLists.join(", ")}`,
+          `Configured GitHub star lists not found: ${configuredLists.join(", ")}${availableSuffix}`,
         );
       }
 
@@ -626,15 +641,7 @@ export async function getGithubStarredListNames({
   octokit: Octokit;
 }): Promise<string[]> {
   const lists = await getGithubStarLists(octokit);
-
-  const deduped = new Set<string>();
-  for (const list of lists) {
-    const trimmed = list.name.trim();
-    if (!trimmed) continue;
-    deduped.add(trimmed);
-  }
-
-  return [...deduped];
+  return normalizeStarredListNames(lists.map((list) => list.name));
 }
 
 /**

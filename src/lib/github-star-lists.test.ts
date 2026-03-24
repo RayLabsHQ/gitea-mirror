@@ -161,6 +161,82 @@ describe("GitHub starred lists support", () => {
     expect(paginate).toHaveBeenCalledTimes(0);
   });
 
+  test("matches configured list names even when separators differ", async () => {
+    const paginate = mock(async () => []);
+    const graphql = mock(async (_query: string, variables?: Record<string, unknown>) => {
+      if (!variables || !("listId" in variables)) {
+        return {
+          viewer: {
+            lists: {
+              nodes: [
+                { id: "list-1", name: "UI Frontend" },
+                { id: "list-2", name: "Email | Self - Hosted" },
+                { id: "list-3", name: "PaaS | Hosting | Deploy" },
+              ],
+              pageInfo: { hasNextPage: false, endCursor: null },
+            },
+          },
+        };
+      }
+
+      if (variables.listId === "list-1") {
+        return {
+          node: {
+            items: {
+              nodes: [makeGraphqlListRepo("acme/ui-app")],
+              pageInfo: { hasNextPage: false, endCursor: null },
+            },
+          },
+        };
+      }
+
+      if (variables.listId === "list-2") {
+        return {
+          node: {
+            items: {
+              nodes: [makeGraphqlListRepo("acme/email-app")],
+              pageInfo: { hasNextPage: false, endCursor: null },
+            },
+          },
+        };
+      }
+
+      return {
+        node: {
+          items: {
+            nodes: [makeGraphqlListRepo("acme/paas-app")],
+            pageInfo: { hasNextPage: false, endCursor: null },
+          },
+        },
+      };
+    });
+
+    const octokit = {
+      paginate,
+      graphql,
+      activity: {
+        listReposStarredByAuthenticatedUser: () => {},
+      },
+    } as any;
+
+    const repos = await getGithubStarredRepositories({
+      octokit,
+      config: {
+        githubConfig: {
+          starredLists: ["ui-frontend", "email-self-hosted", "paas-hosting-deploy"],
+        },
+      } as any,
+    });
+
+    expect(repos).toHaveLength(3);
+    expect(repos.map((repo) => repo.fullName).sort()).toEqual([
+      "acme/email-app",
+      "acme/paas-app",
+      "acme/ui-app",
+    ]);
+    expect(paginate).toHaveBeenCalledTimes(0);
+  });
+
   test("throws when configured star list names do not match any GitHub list", async () => {
     const paginate = mock(async () => []);
     const graphql = mock(async (_query: string, variables?: Record<string, unknown>) => {
