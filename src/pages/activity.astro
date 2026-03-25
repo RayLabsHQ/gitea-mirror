@@ -13,7 +13,6 @@ try {
   activityData = jobs.flatMap((job: any) => {
     // Check if log exists before parsing
     if (!job.log) {
-      console.warn(`Job ${job.id} has no log data`);
       return [];
     }
     

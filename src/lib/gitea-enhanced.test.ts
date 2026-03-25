@@ -555,6 +555,63 @@ describe("Enhanced Gitea Operations", () => {
       expect(releaseCall.octokit).toBeDefined();
     });
 
+    test("prefers recorded mirroredLocation when owner resolution changes", async () => {
+      mockGetGiteaRepoOwnerAsync.mockImplementation(() => Promise.resolve("ceph"));
+
+      const config: Partial<Config> = {
+        userId: "user123",
+        githubConfig: {
+          username: "testuser",
+          token: "github-token",
+          privateRepositories: false,
+          mirrorStarred: true,
+        },
+        giteaConfig: {
+          url: "https://gitea.example.com",
+          token: "encrypted-token",
+          defaultOwner: "testuser",
+          mirrorReleases: true,
+        },
+      };
+
+      const repository: Repository = {
+        id: "repo789",
+        name: "test-repo",
+        fullName: "ceph/test-repo",
+        owner: "ceph",
+        cloneUrl: "https://github.com/ceph/test-repo.git",
+        isPrivate: false,
+        isStarred: true,
+        status: repoStatusEnum.parse("mirrored"),
+        visibility: "public",
+        userId: "user123",
+        mirroredLocation: "starred/test-repo",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      const result = await syncGiteaRepoEnhanced(
+        { config, repository },
+        {
+          getGiteaRepoOwnerAsync: mockGetGiteaRepoOwnerAsync,
+          mirrorGitHubReleasesToGitea: mockMirrorGitHubReleasesToGitea,
+          mirrorGitRepoIssuesToGitea: mockMirrorGitRepoIssuesToGitea,
+          mirrorGitRepoPullRequestsToGitea: mockMirrorGitRepoPullRequestsToGitea,
+          mirrorGitRepoLabelsToGitea: mockMirrorGitRepoLabelsToGitea,
+          mirrorGitRepoMilestonesToGitea: mockMirrorGitRepoMilestonesToGitea,
+        }
+      );
+
+      expect(result).toEqual({ success: true });
+
+      const mirrorSyncCalls = mockHttpPost.mock.calls.filter((call) =>
+        String(call[0]).includes("/mirror-sync")
+      );
+      expect(mirrorSyncCalls).toHaveLength(1);
+      expect(String(mirrorSyncCalls[0][0])).toContain("/api/v1/repos/starred/test-repo/mirror-sync");
+      expect(String(mirrorSyncCalls[0][0])).not.toContain("/api/v1/repos/ceph/test-repo/mirror-sync");
+    });
+
     test("blocks sync when pre-sync snapshot fails and blocking is enabled", async () => {
       mockShouldCreatePreSyncBackup = true;
       mockShouldBlockSyncOnBackupFailure = true;

@@ -52,6 +52,41 @@ interface GiteaRepoInfo {
   private: boolean;
 }
 
+interface SyncTargetCandidate {
+  owner: string;
+  repoName: string;
+}
+
+function parseMirroredLocation(location?: string | null): SyncTargetCandidate | null {
+  if (!location) return null;
+
+  const trimmed = location.trim();
+  if (!trimmed) return null;
+
+  const slashIndex = trimmed.indexOf("/");
+  if (slashIndex <= 0 || slashIndex === trimmed.length - 1) return null;
+
+  const owner = trimmed.slice(0, slashIndex).trim();
+  const repoName = trimmed.slice(slashIndex + 1).trim();
+  if (!owner || !repoName) return null;
+
+  return { owner, repoName };
+}
+
+function dedupeSyncTargets(targets: SyncTargetCandidate[]): SyncTargetCandidate[] {
+  const seen = new Set<string>();
+  const deduped: SyncTargetCandidate[] = [];
+
+  for (const target of targets) {
+    const key = `${target.owner}/${target.repoName}`.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(target);
+  }
+
+  return deduped;
+}
+
 /**
  * Check if a repository exists in Gitea and return its details
  */
@@ -285,19 +320,78 @@ export async function syncGiteaRepoEnhanced({
       })
       .where(eq(repositories.id, repository.id!));
 
-    // Get the expected owner
+    // Resolve sync target in a backward-compatible order:
+    // 1) recorded mirroredLocation (actual historical mirror location)
+    // 2) owner derived from current strategy/config
     const dependencies = deps ?? (await import("./gitea"));
-    const repoOwner = await dependencies.getGiteaRepoOwnerAsync({ config, repository });
+    const expectedOwner = await dependencies.getGiteaRepoOwnerAsync({ config, repository });
+    const recordedTarget = parseMirroredLocation(repository.mirroredLocation);
+    const candidateTargets = dedupeSyncTargets([
+      ...(recordedTarget ? [recordedTarget] : []),
+      { owner: expectedOwner, repoName: repository.name },
+    ]);
 
-    // Check if repo exists and get its info
-    const repoInfo = await getGiteaRepoInfo({
-      config,
-      owner: repoOwner,
-      repoName: repository.name,
-    });
+    let repoOwner = expectedOwner;
+    let repoName = repository.name;
+    let repoInfo: GiteaRepoInfo | null = null;
+    let firstNonMirrorTarget: SyncTargetCandidate | null = null;
+
+    for (const target of candidateTargets) {
+      const candidateInfo = await getGiteaRepoInfo({
+        config,
+        owner: target.owner,
+        repoName: target.repoName,
+      });
+
+      if (!candidateInfo) {
+        continue;
+      }
+
+      if (!candidateInfo.mirror) {
+        if (!firstNonMirrorTarget) {
+          firstNonMirrorTarget = target;
+        }
+        continue;
+      }
+
+      repoOwner = target.owner;
+      repoName = target.repoName;
+      repoInfo = candidateInfo;
+      break;
+    }
 
     if (!repoInfo) {
-      throw new Error(`Repository ${repository.name} not found in Gitea at ${repoOwner}/${repository.name}`);
+      if (firstNonMirrorTarget) {
+        console.warn(
+          `[Sync] Repository ${repository.name} exists at ${firstNonMirrorTarget.owner}/${firstNonMirrorTarget.repoName} but is not configured as a mirror`
+        );
+
+        await db
+          .update(repositories)
+          .set({
+            status: repoStatusEnum.parse("failed"),
+            updatedAt: new Date(),
+            errorMessage: "Repository exists in Gitea but is not configured as a mirror. Manual intervention required.",
+          })
+          .where(eq(repositories.id, repository.id!));
+
+        await createMirrorJob({
+          userId: config.userId,
+          repositoryId: repository.id,
+          repositoryName: repository.name,
+          message: `Cannot sync ${repository.name}: Not a mirror repository`,
+          details: `Repository ${repository.name} exists in Gitea but is not configured as a mirror. You may need to delete and recreate it as a mirror, or manually configure it as a mirror in Gitea.`,
+          status: "failed",
+        });
+
+        throw new Error(`Repository ${repository.name} is not a mirror. Cannot sync.`);
+      }
+
+      throw new Error(
+        `Repository ${repository.name} not found in Gitea. Tried locations: ${candidateTargets
+          .map((t) => `${t.owner}/${t.repoName}`)
+          .join(", ")}`
+      );
     }
 
     // Check if it's a mirror repository
@@ -342,7 +436,7 @@ export async function syncGiteaRepoEnhanced({
               giteaUrl: config.giteaConfig.url,
               giteaToken: decryptedConfig.giteaConfig.token,
               giteaOwner: repoOwner,
-              giteaRepo: repository.name,
+              giteaRepo: repoName,
               octokit: fpOctokit,
               githubOwner: repository.owner,
               githubRepo: repository.name,
@@ -407,13 +501,13 @@ export async function syncGiteaRepoEnhanced({
       if (shouldBackupForStrategy(backupStrategy, forcePushDetected)) {
         const cloneUrl =
           repoInfo.clone_url ||
-          `${config.giteaConfig.url.replace(/\/$/, "")}/${repoOwner}/${repository.name}.git`;
+          `${config.giteaConfig.url.replace(/\/$/, "")}/${repoOwner}/${repoName}.git`;
 
         try {
           const backupResult = await createPreSyncBundleBackup({
             config,
             owner: repoOwner,
-            repoName: repository.name,
+            repoName,
             cloneUrl,
             force: true, // Strategy already decided to backup; skip legacy gate
           });
@@ -464,22 +558,22 @@ export async function syncGiteaRepoEnhanced({
     // Update mirror interval if needed
     if (config.giteaConfig?.mirrorInterval) {
       try {
-        console.log(`[Sync] Updating mirror interval for ${repository.name} to ${config.giteaConfig.mirrorInterval}`);
-        const updateUrl = `${config.giteaConfig.url}/api/v1/repos/${repoOwner}/${repository.name}`;
+        console.log(`[Sync] Updating mirror interval for ${repoOwner}/${repoName} to ${config.giteaConfig.mirrorInterval}`);
+        const updateUrl = `${config.giteaConfig.url}/api/v1/repos/${repoOwner}/${repoName}`;
         await httpPatch(updateUrl, {
           mirror_interval: config.giteaConfig.mirrorInterval,
         }, {
           Authorization: `token ${decryptedConfig.giteaConfig.token}`,
         });
-        console.log(`[Sync] Successfully updated mirror interval for ${repository.name}`);
+        console.log(`[Sync] Successfully updated mirror interval for ${repoOwner}/${repoName}`);
       } catch (updateError) {
-        console.warn(`[Sync] Failed to update mirror interval for ${repository.name}:`, updateError);
+        console.warn(`[Sync] Failed to update mirror interval for ${repoOwner}/${repoName}:`, updateError);
         // Continue with sync even if interval update fails
       }
     }
 
     // Perform the sync
-    const apiUrl = `${config.giteaConfig.url}/api/v1/repos/${repoOwner}/${repository.name}/mirror-sync`;
+    const apiUrl = `${config.giteaConfig.url}/api/v1/repos/${repoOwner}/${repoName}/mirror-sync`;
 
     try {
       const response = await httpPost(apiUrl, undefined, {
@@ -536,7 +630,7 @@ export async function syncGiteaRepoEnhanced({
               octokit,
               repository,
               giteaOwner: repoOwner,
-              giteaRepoName: repository.name,
+              giteaRepoName: repoName,
             });
             metadataState.components.releases = true;
             metadataUpdated = true;
@@ -568,7 +662,7 @@ export async function syncGiteaRepoEnhanced({
               octokit,
               repository,
               giteaOwner: repoOwner,
-              giteaRepoName: repository.name,
+              giteaRepoName: repoName,
             });
             metadataState.components.issues = true;
             metadataState.components.labels = true;
@@ -601,7 +695,7 @@ export async function syncGiteaRepoEnhanced({
               octokit,
               repository,
               giteaOwner: repoOwner,
-              giteaRepoName: repository.name,
+              giteaRepoName: repoName,
             });
             metadataState.components.pullRequests = true;
             metadataUpdated = true;
@@ -631,7 +725,7 @@ export async function syncGiteaRepoEnhanced({
               octokit,
               repository,
               giteaOwner: repoOwner,
-              giteaRepoName: repository.name,
+              giteaRepoName: repoName,
             });
             metadataState.components.labels = true;
             metadataUpdated = true;
@@ -670,7 +764,7 @@ export async function syncGiteaRepoEnhanced({
               octokit,
               repository,
               giteaOwner: repoOwner,
-              giteaRepoName: repository.name,
+              giteaRepoName: repoName,
             });
             metadataState.components.milestones = true;
             metadataUpdated = true;
@@ -708,7 +802,7 @@ export async function syncGiteaRepoEnhanced({
           updatedAt: new Date(),
           lastMirrored: new Date(),
           errorMessage: null,
-          mirroredLocation: `${repoOwner}/${repository.name}`,
+          mirroredLocation: `${repoOwner}/${repoName}`,
           metadata: metadataUpdated
             ? serializeRepositoryMetadataState(metadataState)
             : repository.metadata ?? null,
@@ -720,7 +814,7 @@ export async function syncGiteaRepoEnhanced({
         repositoryId: repository.id,
         repositoryName: repository.name,
         message: `Sync requested for repository: ${repository.name}`,
-        details: `Mirror sync was requested for ${repository.name}.`,
+        details: `Mirror sync was requested for ${repoOwner}/${repoName}.`,
         status: "synced",
       });
 
