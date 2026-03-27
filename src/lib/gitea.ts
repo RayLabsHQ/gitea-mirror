@@ -13,6 +13,7 @@ import { db, organizations, repositories } from "./db";
 import { eq, and, ne } from "drizzle-orm";
 import { decryptConfigTokens } from "./utils/config-encryption";
 import { formatDateShort } from "./utils";
+import { buildGithubSourceAuthPayload } from "./utils/mirror-source-auth";
 import {
   parseRepositoryMetadataState,
   serializeRepositoryMetadataState,
@@ -816,14 +817,22 @@ export const mirrorGithubRepoToGitea = async ({
 
     // Add authentication for private repositories
     if (repository.isPrivate) {
-      if (!config.githubConfig.token) {
-        throw new Error(
-          "GitHub token is required to mirror private repositories."
-        );
-      }
-      // Use separate auth fields (required for Forgejo 12+ compatibility)
-      migratePayload.auth_username = "oauth2"; // GitHub tokens work with any username
-      migratePayload.auth_token = decryptedConfig.githubConfig.token;
+      const githubOwner =
+        (
+          config.githubConfig as typeof config.githubConfig & {
+            owner?: string;
+          }
+        ).owner || "";
+
+      Object.assign(
+        migratePayload,
+        buildGithubSourceAuthPayload({
+          token: decryptedConfig.githubConfig.token,
+          githubOwner,
+          githubUsername: config.githubConfig.username,
+          repositoryOwner: repository.owner,
+        })
+      );
     }
 
     // Track whether the Gitea migrate call succeeded so the catch block
@@ -1496,14 +1505,22 @@ export async function mirrorGitHubRepoToGiteaOrg({
 
     // Add authentication for private repositories
     if (repository.isPrivate) {
-      if (!config.githubConfig?.token) {
-        throw new Error(
-          "GitHub token is required to mirror private repositories."
-        );
-      }
-      // Use separate auth fields (required for Forgejo 12+ compatibility)
-      migratePayload.auth_username = "oauth2"; // GitHub tokens work with any username
-      migratePayload.auth_token = decryptedConfig.githubConfig.token;
+      const githubOwner =
+        (
+          config.githubConfig as typeof config.githubConfig & {
+            owner?: string;
+          }
+        )?.owner || "";
+
+      Object.assign(
+        migratePayload,
+        buildGithubSourceAuthPayload({
+          token: decryptedConfig.githubConfig?.token,
+          githubOwner,
+          githubUsername: config.githubConfig?.username,
+          repositoryOwner: repository.owner,
+        })
+      );
     }
 
     let migrateSucceeded = false;
