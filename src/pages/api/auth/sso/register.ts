@@ -6,6 +6,7 @@ import { db, ssoProviders } from "@/lib/db";
 import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { normalizeOidcProviderConfig, OidcConfigError } from "@/lib/sso/oidc-config";
+import { withBase } from "@/lib/base-path";
 
 // POST /api/auth/sso/register - Register a new SSO provider using Better Auth
 export async function POST(context: APIContext) {
@@ -87,7 +88,9 @@ export async function POST(context: APIContext) {
       registrationBody.samlConfig = {
         entryPoint,
         cert,
-        callbackUrl: callbackUrl || `${context.url.origin}/api/auth/sso/saml2/callback/${providerId}`,
+        callbackUrl:
+          callbackUrl ||
+          `${context.url.origin}${withBase(`/api/auth/sso/saml2/callback/${providerId}`)}`,
         audience: audience || context.url.origin,
         wantAssertionsSigned,
         signatureAlgorithm,
