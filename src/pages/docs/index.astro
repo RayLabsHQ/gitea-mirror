@@ -1,6 +1,7 @@
 ---
 import MainLayout from '../../layouts/main.astro';
 import { LuSettings, LuRocket, LuBookOpen, LuShield, LuKey, LuNetwork } from 'react-icons/lu';
+import { withBase } from '@/lib/base-path';
 
 // Define our documentation pages directly
 const docs = [
@@ -69,7 +70,7 @@ const sortedDocs = docs.sort((a, b) => a.order - b.order);
         
         return (
           <a
-            href={doc.href}
+            href={withBase(doc.href)}
             class="group block p-7 border border-border rounded-2xl bg-card hover:bg-muted transition-colors shadow-lg focus:ring-2 focus:ring-ring outline-none"
             tabindex="0"
           >

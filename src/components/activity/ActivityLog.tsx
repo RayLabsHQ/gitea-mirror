@@ -36,6 +36,7 @@ import { toast } from 'sonner';
 import { useLiveRefresh } from '@/hooks/useLiveRefresh';
 import { useConfigStatus } from '@/hooks/useConfigStatus';
 import { useNavigation } from '@/components/layout/MainLayout';
+import { withBase } from '@/lib/base-path';
 import {
   Drawer,
   DrawerClose,
@@ -321,7 +322,7 @@ export function ActivityLog() {
       setIsInitialLoading(true);
       setShowCleanupDialog(false);
 
-      const response = await fetch('/api/activities/cleanup', {
+      const response = await fetch(withBase('/api/activities/cleanup'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: user.id }),

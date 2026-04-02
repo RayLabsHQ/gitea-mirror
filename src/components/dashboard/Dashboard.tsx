@@ -16,6 +16,7 @@ import { useLiveRefresh } from "@/hooks/useLiveRefresh";
 import { usePageVisibility } from "@/hooks/usePageVisibility";
 import { useConfigStatus } from "@/hooks/useConfigStatus";
 import { useNavigation } from "@/components/layout/MainLayout";
+import { withBase } from "@/lib/base-path";
 
 // Helper function to format last sync time
 function formatLastSyncTime(date: Date | null): string {
@@ -110,7 +111,7 @@ export function Dashboard() {
   useEffectForToasts(() => {
     if (!user?.id) return;
 
-    const eventSource = new EventSource(`/api/events?userId=${user.id}`);
+    const eventSource = new EventSource(`${withBase("/api/events")}?userId=${user.id}`);
     
     eventSource.addEventListener("rate-limit", (event) => {
       try {

@@ -9,6 +9,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { stripBasePath, withBase } from "@/lib/base-path";
 
 interface SidebarProps {
   className?: string;
@@ -24,14 +25,14 @@ export function Sidebar({ className, onNavigate, isOpen, isCollapsed = false, on
 
   useEffect(() => {
     // Hydration happens here
-    const path = window.location.pathname;
+    const path = stripBasePath(window.location.pathname);
     setCurrentPath(path);
   }, []);
 
   // Listen for URL changes (browser back/forward)
   useEffect(() => {
     const handlePopState = () => {
-      setCurrentPath(window.location.pathname);
+      setCurrentPath(stripBasePath(window.location.pathname));
     };
 
     window.addEventListener('popstate', handlePopState);
@@ -45,7 +46,7 @@ export function Sidebar({ className, onNavigate, isOpen, isCollapsed = false, on
     if (currentPath === href) return;
 
     // Update URL without page reload
-    window.history.pushState({}, '', href);
+    window.history.pushState({}, '', withBase(href));
     setCurrentPath(href);
 
     // Map href to page name for the parent component
@@ -163,7 +164,7 @@ export function Sidebar({ className, onNavigate, isOpen, isCollapsed = false, on
                   Check out the documentation for help with setup and configuration.
                 </p>
                 <a
-                  href="/docs"
+                  href={withBase("/docs")}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-1.5 text-xs md:text-xs text-primary hover:underline py-2 md:py-0"
@@ -177,7 +178,7 @@ export function Sidebar({ className, onNavigate, isOpen, isCollapsed = false, on
                 <Tooltip delayDuration={0}>
                   <TooltipTrigger asChild>
                     <a
-                      href="/docs"
+                      href={withBase("/docs")}
                       target="_blank"
                       rel="noopener noreferrer"
                       className={cn(

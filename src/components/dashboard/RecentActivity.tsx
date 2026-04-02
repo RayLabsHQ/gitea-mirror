@@ -3,6 +3,7 @@ import type { MirrorJob } from "@/lib/db/schema";
 import { formatDate, getStatusColor } from "@/lib/utils";
 import { Button } from "../ui/button";
 import { Activity, Clock } from "lucide-react";
+import { withBase } from "@/lib/base-path";
 
 interface RecentActivityProps {
   activities: MirrorJob[];
@@ -14,7 +15,7 @@ export function RecentActivity({ activities }: RecentActivityProps) {
       <CardHeader className="flex flex-row items-center justify-between">
         <CardTitle>Recent Activity</CardTitle>
         <Button variant="outline" asChild>
-          <a href="/activity">View All</a>
+          <a href={withBase("/activity")}>View All</a>
         </Button>
       </CardHeader>
       <CardContent>
@@ -27,7 +28,7 @@ export function RecentActivity({ activities }: RecentActivityProps) {
             </p>
             <div className="flex gap-2">
               <Button variant="outline" size="sm" asChild>
-                <a href="/activity">
+                <a href={withBase("/activity")}>
                   <Activity className="h-3.5 w-3.5 mr-1.5" />
                   View History
                 </a>

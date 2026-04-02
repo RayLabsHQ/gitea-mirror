@@ -8,6 +8,7 @@ import {
 } from "react";
 import { authClient, useSession as useBetterAuthSession } from "@/lib/auth-client";
 import type { Session, AuthUser } from "@/lib/auth-client";
+import { withBase } from "@/lib/base-path";
 
 interface AuthContextType {
   user: AuthUser | null;
@@ -46,7 +47,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const result = await authClient.signIn.email({
         email,
         password,
-        callbackURL: "/",
+        callbackURL: withBase("/"),
       });
       
       if (result.error) {
@@ -73,7 +74,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         email,
         password,
         name: username, // Better Auth uses 'name' field for display name
-        callbackURL: "/",
+        callbackURL: withBase("/"),
       });
 
       if (result.error) {
@@ -94,7 +95,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await authClient.signOut({
         fetchOptions: {
           onSuccess: () => {
-            window.location.href = "/login";
+            window.location.href = withBase("/login");
           },
         },
       });

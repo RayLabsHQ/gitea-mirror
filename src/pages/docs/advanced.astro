@@ -1,12 +1,13 @@
 ---
 import MainLayout from '../../layouts/main.astro';
+import { withBase } from '@/lib/base-path';
 ---
 
 <MainLayout title="Advanced Topics - Gitea Mirror">
   <main class="max-w-5xl mx-auto px-4 py-12">
     <div class="sticky top-4 z-10 mb-6">
       <a
-        href="/docs/"
+        href={withBase('/docs/')}
         class="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-card text-foreground hover:bg-muted transition-colors border border-border focus:ring-2 focus:ring-ring outline-none"
       >
         <span aria-hidden="true">&larr;</span> Back to Documentation
@@ -51,6 +52,7 @@ import MainLayout from '../../layouts/main.astro';
                 { var: 'NODE_ENV', desc: 'Application environment', default: 'production' },
                 { var: 'PORT', desc: 'Server port', default: '4321' },
                 { var: 'HOST', desc: 'Server host', default: '0.0.0.0' },
+                { var: 'BASE_URL', desc: 'Application base path ("/" or e.g. "/mirror")', default: '/' },
                 { var: 'BETTER_AUTH_SECRET', desc: 'Authentication secret key', default: 'Auto-generated' },
                 { var: 'BETTER_AUTH_URL', desc: 'Authentication base URL', default: 'http://localhost:4321' },
                 { var: 'NODE_EXTRA_CA_CERTS', desc: 'Path to CA certificate file', default: 'None' },
@@ -226,7 +228,15 @@ BETTER_AUTH_URL=https://gitea-mirror.example.com
 PUBLIC_BETTER_AUTH_URL=https://gitea-mirror.example.com
 BETTER_AUTH_TRUSTED_ORIGINS=https://gitea-mirror.example.com`}</code></pre>
               </div>
+              <div class="bg-muted/30 rounded p-3 mt-3">
+                <pre class="text-sm"><code>{`# If deployed under a path prefix (example: /mirror):
+BASE_URL=/mirror
+BETTER_AUTH_URL=https://git.example.com
+PUBLIC_BETTER_AUTH_URL=https://git.example.com
+BETTER_AUTH_TRUSTED_ORIGINS=https://git.example.com`}</code></pre>
+              </div>
               <ul class="mt-3 space-y-1 text-sm">
+                <li><code class="bg-red-500/10 px-1 rounded">BASE_URL</code> — Application base path for path-prefix deployments (e.g. <code>/mirror</code>)</li>
                 <li><code class="bg-red-500/10 px-1 rounded">BETTER_AUTH_URL</code> — Server-side auth base URL for callbacks and redirects</li>
                 <li><code class="bg-red-500/10 px-1 rounded">PUBLIC_BETTER_AUTH_URL</code> — Client-side (browser) URL for auth API calls</li>
                 <li><code class="bg-red-500/10 px-1 rounded">BETTER_AUTH_TRUSTED_ORIGINS</code> — Comma-separated origins allowed to make auth requests</li>
@@ -243,9 +253,10 @@ BETTER_AUTH_TRUSTED_ORIGINS=https://gitea-mirror.example.com`}</code></pre>
     image: ghcr.io/raylabshq/gitea-mirror:latest
     environment:
       - BETTER_AUTH_SECRET=your-secret-key-min-32-chars
-      - BETTER_AUTH_URL=https://gitea-mirror.example.com
-      - PUBLIC_BETTER_AUTH_URL=https://gitea-mirror.example.com
-      - BETTER_AUTH_TRUSTED_ORIGINS=https://gitea-mirror.example.com
+      - BASE_URL=/mirror
+      - BETTER_AUTH_URL=https://git.example.com
+      - PUBLIC_BETTER_AUTH_URL=https://git.example.com
+      - BETTER_AUTH_TRUSTED_ORIGINS=https://git.example.com
       # ... other settings ...`}</code></pre>
         </div>
 

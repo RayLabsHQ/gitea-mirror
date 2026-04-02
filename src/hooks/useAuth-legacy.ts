@@ -8,6 +8,7 @@ import {
 } from "react";
 import { authApi } from "@/lib/api";
 import type { ExtendedUser } from "@/types/user";
+import { withBase } from "@/lib/base-path";
 
 interface AuthContextType {
   user: ExtendedUser | null;
@@ -61,9 +62,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         // Redirect user based on error
         if (err?.message === "No users found") {
-          window.location.href = "/signup";
+          window.location.href = withBase("/signup");
         } else {
-          window.location.href = "/login";
+          window.location.href = withBase("/login");
         }
         console.error("Auth check failed", err);
       } finally {
@@ -111,7 +112,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     try {
       await authApi.logout();
       setUser(null);
-      window.location.href = "/login";
+      window.location.href = withBase("/login");
     } catch (err) {
       console.error("Logout error:", err);
     } finally {

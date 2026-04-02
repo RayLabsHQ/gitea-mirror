@@ -4,6 +4,7 @@ import App from '@/components/layout/MainLayout';
 import { db, repositories, mirrorJobs, users } from '@/lib/db';
 import { sql } from 'drizzle-orm';
 import ThemeScript from '@/components/theme/ThemeScript.astro';
+import { withBase } from '@/lib/base-path';
 
 // Check if any users exist in the database
 const userCountResult = await db.select({ count: sql<number>`count(*)` }).from(users);
@@ -11,7 +12,7 @@ const userCount = userCountResult[0]?.count || 0;
 
 // Redirect to signup if no users exist
 if (userCount === 0) {
-  return Astro.redirect('/signup');
+  return Astro.redirect(withBase('/signup'));
 }
 
 // Fetch data from the database
@@ -59,7 +60,7 @@ try {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width" />
-    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+    <link rel="icon" type="image/x-icon" href={withBase('/favicon.ico')} />
     <meta name="generator" content={Astro.generator} />
     <title>Dashboard - Gitea Mirror</title>
     <ThemeScript />

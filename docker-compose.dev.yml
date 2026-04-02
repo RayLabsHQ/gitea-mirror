@@ -45,6 +45,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        BASE_URL: ${BASE_URL:-/}
       platforms:
         - linux/amd64
         - linux/arm64
@@ -66,6 +68,7 @@ services:
       - DATABASE_URL=file:data/gitea-mirror.db
       - HOST=0.0.0.0
       - PORT=4321
+      - BASE_URL=${BASE_URL:-/}
       - BETTER_AUTH_SECRET=dev-secret-key
       # GitHub/Gitea Mirror Config
       - GITHUB_USERNAME=${GITHUB_USERNAME:-your-github-username}
@@ -89,7 +92,11 @@ services:
       # Optional: Skip TLS verification (insecure, use only for testing)
       # - GITEA_SKIP_TLS_VERIFY=${GITEA_SKIP_TLS_VERIFY:-false}
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:4321/api/health"]
+      test:
+        [
+          "CMD-SHELL",
+          "BASE=\"${BASE_URL:-/}\"; if [ \"$${BASE}\" = \"/\" ]; then BASE=\"\"; else BASE=\"$${BASE%/}\"; fi; wget --no-verbose --tries=1 --spider \"http://localhost:4321$${BASE}/api/health\"",
+        ]
       interval: 30s
       timeout: 5s
       retries: 3

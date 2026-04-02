@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { useAuth } from "./useAuth";
+import { withBase } from "@/lib/base-path";
 
 interface UseRepoSyncOptions {
   userId?: string;
@@ -51,7 +52,7 @@ export function useRepoSync({
 
     const sync = async () => {
       try {
-        const response = await fetch("/api/job/schedule-sync-repo", {
+        const response = await fetch(withBase("/api/job/schedule-sync-repo"), {
           method: "POST",
           headers: {
             "Content-Type": "application/json",

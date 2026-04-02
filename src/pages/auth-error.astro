@@ -1,6 +1,7 @@
 ---
 import Layout from '@/layouts/main.astro';
 import { Button } from '@/components/ui/button';
+import { withBase } from '@/lib/base-path';
 
 const error = Astro.url.searchParams.get('error');
 const errorDescription = Astro.url.searchParams.get('error_description');
@@ -30,13 +31,13 @@ const errorDescription = Astro.url.searchParams.get('error_description');
         <div class="mt-6 flex gap-2">
           <Button 
             variant="outline" 
-            onClick={() => window.location.href = '/login'}
+            onClick={() => window.location.href = withBase('/login')}
           >
             Back to Login
           </Button>
           <Button 
             variant="outline" 
-            onClick={() => window.location.href = '/'}
+            onClick={() => window.location.href = withBase('/')}
           >
             Go Home
           </Button>

@@ -11,6 +11,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { useAuth } from "@/hooks/useAuth";
 import { useRepoSync } from "@/hooks/useSyncRepo";
 import { useConfigStatus } from "@/hooks/useConfigStatus";
+import { stripBasePath, withBase } from "@/lib/base-path";
 
 // Navigation context to signal when navigation happens
 const NavigationContext = createContext<{ navigationKey: number }>({ navigationKey: 0 });
@@ -71,7 +72,7 @@ function AppWithProviders({ page: initialPage }: AppProps) {
   // Handle browser back/forward navigation
   useEffect(() => {
     const handlePopState = () => {
-      const path = window.location.pathname;
+      const path = stripBasePath(window.location.pathname);
       const pageMap: Record<string, AppProps['page']> = {
         '/': 'dashboard',
         '/repositories': 'repositories',
@@ -125,7 +126,7 @@ function AppWithProviders({ page: initialPage }: AppProps) {
   if (!authLoading && !user) {
     // Use window.location for client-side redirect
     if (typeof window !== 'undefined') {
-      window.location.href = '/login';
+      window.location.href = withBase('/login');
     }
     return null;
   }

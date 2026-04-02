@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Bell, Activity, Send } from "lucide-react";
 import { toast } from "sonner";
 import type { NotificationConfig } from "@/types/config";
+import { withBase } from "@/lib/base-path";
 
 interface NotificationSettingsProps {
   notificationConfig: NotificationConfig;
@@ -31,7 +32,7 @@ export function NotificationSettings({
   const handleTestNotification = async () => {
     setIsTesting(true);
     try {
-      const resp = await fetch("/api/notifications/test", {
+      const resp = await fetch(withBase("/api/notifications/test"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ notificationConfig }),

@@ -1,12 +1,13 @@
 ---
 import MainLayout from '../../layouts/main.astro';
+import { withBase } from '@/lib/base-path';
 ---
 
 <MainLayout title="CA Certificates - Gitea Mirror">
   <main class="max-w-5xl mx-auto px-4 py-12">
     <div class="sticky top-4 z-10 mb-6">
       <a
-        href="/docs/"
+        href={withBase('/docs/')}
         class="inline-flex items-center gap-2 px-3 py-1.5 rounded-md bg-card text-foreground hover:bg-muted transition-colors border border-border focus:ring-2 focus:ring-ring outline-none"
       >
         <span aria-hidden="true">&larr;</span> Back to Documentation

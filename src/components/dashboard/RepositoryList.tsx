@@ -6,6 +6,7 @@ import type { Repository } from "@/lib/db/schema";
 import { getStatusColor } from "@/lib/utils";
 import { buildGiteaWebUrl } from "@/lib/gitea-url";
 import { useGiteaConfig } from "@/hooks/useGiteaConfig";
+import { withBase } from "@/lib/base-path";
 
 interface RepositoryListProps {
   repositories: Repository[];
@@ -42,7 +43,7 @@ export function RepositoryList({ repositories }: RepositoryListProps) {
       <CardHeader className="flex flex-row items-center justify-between">
         <CardTitle>Repositories</CardTitle>
         <Button variant="outline" asChild>
-          <a href="/repositories">View All</a>
+          <a href={withBase("/repositories")}>View All</a>
         </Button>
       </CardHeader>
       <CardContent>
@@ -54,7 +55,7 @@ export function RepositoryList({ repositories }: RepositoryListProps) {
               Configure your GitHub connection to start mirroring repositories.
             </p>
             <Button asChild>
-              <a href="/config">Configure GitHub</a>
+              <a href={withBase("/config")}>Configure GitHub</a>
             </Button>
           </div>
         ) : (

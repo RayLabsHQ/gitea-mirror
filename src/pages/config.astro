@@ -7,13 +7,14 @@ import { db, configs } from '@/lib/db';
 import ThemeScript from '@/components/theme/ThemeScript.astro';
 import { Button } from '@/components/ui/button';
 import type { SaveConfigApiRequest,SaveConfigApiResponse } from '@/types/config';
+import { withBase } from '@/lib/base-path';
 ---
 
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/svg+xml" href={withBase('/favicon.svg')} />
     <meta name="generator" content={Astro.generator} />
     <title>Configuration - Gitea Mirror</title>
     <ThemeScript />

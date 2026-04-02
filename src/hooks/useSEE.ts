@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import type { MirrorJob } from "@/lib/db/schema";
+import { withBase } from "@/lib/base-path";
 
 interface UseSSEOptions {
   userId?: string;
@@ -41,7 +42,7 @@ export const useSSE = ({
     }
 
     // Create new EventSource connection
-    const eventSource = new EventSource(`/api/sse?userId=${userId}`);
+    const eventSource = new EventSource(`${withBase("/api/sse")}?userId=${userId}`);
     eventSourceRef.current = eventSource;
 
     const handleMessage = (event: MessageEvent) => {

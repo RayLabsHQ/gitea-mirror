@@ -24,6 +24,7 @@ import { toast } from 'sonner';
 import { Skeleton } from '@/components/ui/skeleton';
 import { invalidateConfigCache } from '@/hooks/useConfigStatus';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { withBase } from '@/lib/base-path';
 
 type ConfigState = {
   githubConfig: GitHubConfig;
@@ -34,6 +35,8 @@ type ConfigState = {
   advancedOptions: AdvancedOptions;
   notificationConfig: NotificationConfig;
 };
+
+const CONFIG_API_PATH = withBase('/api/config');
 
 export function ConfigTabs() {
   const [config, setConfig] = useState<ConfigState>({
@@ -198,7 +201,7 @@ export function ConfigTabs() {
       };
 
       try {
-        const response = await fetch('/api/config', {
+        const response = await fetch(CONFIG_API_PATH, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(reqPayload),
@@ -264,7 +267,7 @@ export function ConfigTabs() {
       };
 
       try {
-        const response = await fetch('/api/config', {
+        const response = await fetch(CONFIG_API_PATH, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(reqPayload),
@@ -329,7 +332,7 @@ export function ConfigTabs() {
       };
 
       try {
-        const response = await fetch('/api/config', {
+        const response = await fetch(CONFIG_API_PATH, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(reqPayload),
@@ -378,7 +381,7 @@ export function ConfigTabs() {
       };
 
       try {
-        const response = await fetch('/api/config', {
+        const response = await fetch(CONFIG_API_PATH, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(reqPayload),
@@ -418,7 +421,7 @@ export function ConfigTabs() {
     };
 
     try {
-      const response = await fetch('/api/config', {
+      const response = await fetch(CONFIG_API_PATH, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(reqPayload),
@@ -453,7 +456,7 @@ export function ConfigTabs() {
     };
 
     try {
-      const response = await fetch('/api/config', {
+      const response = await fetch(CONFIG_API_PATH, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(reqPayload),
@@ -498,7 +501,7 @@ export function ConfigTabs() {
       };
 
       try {
-        const response = await fetch('/api/config', {
+        const response = await fetch(CONFIG_API_PATH, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(reqPayload),

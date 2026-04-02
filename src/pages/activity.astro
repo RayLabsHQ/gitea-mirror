@@ -3,6 +3,7 @@ import '../styles/global.css';
 import App from '@/components/layout/MainLayout';
 import { db, mirrorJobs } from '@/lib/db';
 import ThemeScript from '@/components/theme/ThemeScript.astro';
+import { withBase } from '@/lib/base-path';
 
 // Fetch activity data from the database
 let activityData = [];
@@ -53,7 +54,7 @@ const handleRefresh = () => {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/svg+xml" href={withBase('/favicon.svg')} />
     <meta name="generator" content={Astro.generator} />
     <title>Activity Log - Gitea Mirror</title>
     <ThemeScript />

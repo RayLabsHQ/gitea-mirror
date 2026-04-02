@@ -14,6 +14,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { withBase } from "@/lib/base-path";
 
 interface HeaderProps {
   currentPage?: "dashboard" | "repositories" | "organizations" | "configuration" | "activity-log";
@@ -101,14 +102,14 @@ export function Header({ currentPage, onNavigate, onMenuClick, onToggleCollapse,
           <button
             onClick={() => {
               if (currentPage !== 'dashboard') {
-                window.history.pushState({}, '', '/');
+                window.history.pushState({}, '', withBase('/'));
                 onNavigate?.('dashboard');
               }
             }}
             className="flex items-center gap-2 py-1 hover:opacity-80 transition-opacity"
           >
             <img
-              src="/logo.png"
+              src={withBase('/logo.png')}
               alt="Gitea Mirror Logo"
               className="h-5 w-6"
             />
@@ -163,7 +164,7 @@ export function Header({ currentPage, onNavigate, onMenuClick, onToggleCollapse,
             </DropdownMenu>
           ) : (
             <Button variant="outline" size="sm" asChild>
-              <a href="/login">Login</a>
+              <a href={withBase('/login')}>Login</a>
             </Button>
           )}
         </div>

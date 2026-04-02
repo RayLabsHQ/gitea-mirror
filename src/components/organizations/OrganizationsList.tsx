@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { buildGiteaWebUrl } from "@/lib/gitea-url";
 import { MirrorDestinationEditor } from "./MirrorDestinationEditor";
 import { useGiteaConfig } from "@/hooks/useGiteaConfig";
+import { withBase } from "@/lib/base-path";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -85,7 +86,7 @@ export function OrganizationList({
 
   const handleUpdateDestination = async (orgId: string, newDestination: string | null) => {
     // Call API to update organization destination
-    const response = await fetch(`/api/organizations/${orgId}`, {
+    const response = await fetch(`${withBase("/api/organizations")}/${orgId}`, {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",
@@ -189,7 +190,7 @@ export function OrganizationList({
                   <div className="flex items-center gap-2 min-w-0">
                     <Building2 className="h-5 w-5 text-muted-foreground flex-shrink-0" />
                     <a 
-                      href={`/repositories?organization=${encodeURIComponent(org.name || '')}`}
+                      href={`${withBase('/repositories')}?organization=${encodeURIComponent(org.name || '')}`}
                       className="font-medium hover:underline cursor-pointer truncate"
                     >
                       {org.name}
@@ -264,7 +265,7 @@ export function OrganizationList({
                   <div className="flex-1">
                     <div className="flex items-center gap-3 mb-1">
                       <a 
-                        href={`/repositories?organization=${encodeURIComponent(org.name || '')}`}
+                        href={`${withBase('/repositories')}?organization=${encodeURIComponent(org.name || '')}`}
                         className="text-xl font-semibold hover:underline cursor-pointer"
                       >
                         {org.name}

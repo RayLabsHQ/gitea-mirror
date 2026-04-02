@@ -28,6 +28,7 @@ import {
 import { InlineDestinationEditor } from "./InlineDestinationEditor";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { withBase } from "@/lib/base-path";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -102,7 +103,7 @@ export default function RepositoryTable({
 
   const handleUpdateDestination = async (repoId: string, newDestination: string | null) => {
     // Call API to update repository destination
-    const response = await fetch(`/api/repositories/${repoId}`, {
+    const response = await fetch(`${withBase("/api/repositories")}/${repoId}`, {
       method: "PATCH",
       headers: {
         "Content-Type": "application/json",

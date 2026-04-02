@@ -3,6 +3,12 @@ import { createAuthClient } from "better-auth/react";
 import { oidcClient } from "better-auth/client/plugins";
 import { ssoClient } from "@better-auth/sso/client";
 import type { Session as BetterAuthSession, User as BetterAuthUser } from "better-auth";
+import { withBase } from "@/lib/base-path";
+
+function normalizeAuthBaseUrl(url: string): string {
+  const validatedUrl = new URL(url.trim());
+  return validatedUrl.origin;
+}
 
 export const authClient = createAuthClient({
   // Use PUBLIC_BETTER_AUTH_URL if set (for multi-origin access), otherwise use current origin
@@ -18,9 +24,8 @@ export const authClient = createAuthClient({
     // Validate and clean the URL if provided
     if (url && typeof url === 'string' && url.trim() !== '') {
       try {
-        // Validate URL format and remove trailing slash
-        const validatedUrl = new URL(url.trim());
-        return validatedUrl.origin; // Use origin to ensure clean URL without path
+        // Validate URL format and preserve optional base path
+        return normalizeAuthBaseUrl(url);
       } catch (e) {
         console.warn(`Invalid PUBLIC_BETTER_AUTH_URL: ${url}, falling back to default`);
       }
@@ -34,7 +39,7 @@ export const authClient = createAuthClient({
     // Default for SSR - always return a valid URL
     return 'http://localhost:4321';
   })(),
-  basePath: '/api/auth', // Explicitly set the base path
+  basePath: withBase('/api/auth'), // Explicitly set the base path
   plugins: [
     oidcClient(),
     ssoClient(),

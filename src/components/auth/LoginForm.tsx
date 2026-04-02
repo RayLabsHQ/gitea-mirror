@@ -12,6 +12,7 @@ import { Separator } from '@/components/ui/separator';
 import { toast, Toaster } from 'sonner';
 import { showErrorToast } from '@/lib/utils';
 import { Loader2, Mail, Globe, Eye, EyeOff } from 'lucide-react';
+import { withBase } from '@/lib/base-path';
 
 
 export function LoginForm() {
@@ -47,7 +48,7 @@ export function LoginForm() {
       toast.success('Login successful!');
       // Small delay before redirecting to see the success message
       setTimeout(() => {
-        window.location.href = '/';
+        window.location.href = withBase('/');
       }, 1000);
     } catch (error) {
       showErrorToast(error, toast);
@@ -64,12 +65,15 @@ export function LoginForm() {
         return;
       }
 
-      const baseURL = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:4321';
+      const callbackURL =
+        typeof window !== 'undefined'
+          ? new URL(withBase('/'), window.location.origin).toString()
+          : `http://localhost:4321${withBase('/')}`;
       await authClient.signIn.sso({
         email: ssoEmail || undefined,
         domain: domain,
         providerId: providerId,
-        callbackURL: `${baseURL}/`,
+        callbackURL,
         scopes: ['openid', 'email', 'profile'], // TODO: This is not being respected by the SSO plugin.
       });
     } catch (error) {
@@ -85,7 +89,7 @@ export function LoginForm() {
         <CardHeader className="text-center">
           <div className="flex justify-center mb-4">
             <img
-              src="/logo.png"
+              src={withBase('/logo.png')}
               alt="Gitea Mirror Logo"
               className="h-8 w-10"
             />

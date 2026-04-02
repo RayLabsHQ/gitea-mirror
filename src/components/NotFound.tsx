@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Home, ArrowLeft, GitBranch, BookOpen, Settings, FileQuestion } from "lucide-react";
+import { withBase } from "@/lib/base-path";
 
 export function NotFound() {
   return (
@@ -21,7 +22,7 @@ export function NotFound() {
           {/* Action Buttons */}
           <div className="flex flex-col gap-3">
             <Button asChild className="w-full">
-              <a href="/">
+              <a href={withBase("/")}>
                 <Home className="mr-2 h-4 w-4" />
                 Go to Dashboard
               </a>
@@ -45,21 +46,21 @@ export function NotFound() {
           {/* Quick Links */}
           <div className="grid grid-cols-3 gap-3">
             <a 
-              href="/repositories" 
+              href={withBase("/repositories")} 
               className="flex flex-col items-center gap-2 p-3 rounded-md hover:bg-muted transition-colors"
             >
               <GitBranch className="h-5 w-5 text-muted-foreground" />
               <span className="text-xs">Repositories</span>
             </a>
             <a 
-              href="/config" 
+              href={withBase("/config")} 
               className="flex flex-col items-center gap-2 p-3 rounded-md hover:bg-muted transition-colors"
             >
               <Settings className="h-5 w-5 text-muted-foreground" />
               <span className="text-xs">Config</span>
             </a>
             <a 
-              href="/docs" 
+              href={withBase("/docs")} 
               className="flex flex-col items-center gap-2 p-3 rounded-md hover:bg-muted transition-colors"
             >
               <BookOpen className="h-5 w-5 text-muted-foreground" />

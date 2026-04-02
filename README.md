@@ -300,7 +300,19 @@ CLEANUP_DRY_RUN=false                 # Set to true to test without changes
 
 ### Reverse Proxy Configuration
 
-If using a reverse proxy (e.g., nginx proxy manager) and experiencing issues with JavaScript files not loading properly, try enabling HTTP/2 support in your proxy configuration. While not required by the application, some proxy configurations may have better compatibility with HTTP/2 enabled. See [issue #43](https://github.com/RayLabsHQ/gitea-mirror/issues/43) for reference.
+If you run behind a reverse proxy on a subpath (for example `https://git.example.com/mirror`), configure:
+
+```bash
+BASE_URL=/mirror
+BETTER_AUTH_URL=https://git.example.com
+PUBLIC_BETTER_AUTH_URL=https://git.example.com
+BETTER_AUTH_TRUSTED_ORIGINS=https://git.example.com
+```
+
+Notes:
+- `BASE_URL` sets the application path prefix.
+- `BETTER_AUTH_TRUSTED_ORIGINS` should contain origins only (no path).
+- When building Docker images, pass `BASE_URL` at build time as well.
 
 ### Mirror Token Rotation (GitHub Token Changed)
 

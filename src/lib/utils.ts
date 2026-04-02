@@ -2,8 +2,9 @@ import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import { httpRequest, HttpError } from "@/lib/http-client";
 import type { RepoStatus } from "@/types/Repository";
+import { withBase } from "@/lib/base-path";
 
-export const API_BASE = "/api";
+export const API_BASE = withBase("/api");
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));

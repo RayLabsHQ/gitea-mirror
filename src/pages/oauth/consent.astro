@@ -3,11 +3,12 @@ import '@/styles/global.css';
 import ConsentPage from '@/components/oauth/ConsentPage';
 import ThemeScript from '@/components/theme/ThemeScript.astro';
 import Providers from '@/components/layout/Providers';
+import { withBase } from '@/lib/base-path';
 
 // Check if user is authenticated
 const sessionCookie = Astro.cookies.get('better-auth-session');
 if (!sessionCookie) {
-  return Astro.redirect('/login');
+  return Astro.redirect(withBase('/login'));
 }
 ---
 
@@ -15,7 +16,7 @@ if (!sessionCookie) {
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/svg+xml" href={withBase('/favicon.svg')} />
     <meta name="generator" content={Astro.generator} />
     <title>Authorize Application - Gitea Mirror</title>
     <ThemeScript />

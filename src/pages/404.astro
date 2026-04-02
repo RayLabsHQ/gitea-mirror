@@ -2,6 +2,7 @@
 import '../styles/global.css';
 import ThemeScript from '@/components/theme/ThemeScript.astro';
 import { NotFound } from '@/components/NotFound';
+import { withBase } from '@/lib/base-path';
 
 const generator = Astro.generator;
 ---
@@ -10,7 +11,7 @@ const generator = Astro.generator;
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width" />
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="icon" type="image/svg+xml" href={withBase('/favicon.svg')} />
     <meta name="generator" content={generator} />
     <title>Page Not Found - Gitea Mirror</title>
     <ThemeScript />

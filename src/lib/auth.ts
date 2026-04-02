@@ -5,6 +5,7 @@ import { sso } from "@better-auth/sso";
 import { db, users } from "./db";
 import * as schema from "./db/schema";
 import { eq } from "drizzle-orm";
+import { withBase } from "./base-path";
 
 /**
  * Resolves the list of trusted origins for Better Auth CSRF validation.
@@ -97,7 +98,7 @@ export const auth = betterAuth({
     try {
       // Validate URL format and ensure it's a proper origin
       const validatedUrl = new URL(url.trim());
-      const cleanUrl = validatedUrl.origin; // Use origin to ensure no trailing paths
+      const cleanUrl = validatedUrl.origin;
       console.info('Using BETTER_AUTH_URL:', cleanUrl);
       return cleanUrl;
     } catch (e) {
@@ -107,7 +108,7 @@ export const auth = betterAuth({
       return defaultUrl;
     }
   })(),
-  basePath: "/api/auth", // Specify the base path for auth endpoints
+  basePath: withBase("/api/auth"), // Specify the base path for auth endpoints
   
   // Trusted origins - this is how we support multiple access URLs.
   // Uses the function form so that the origin can be auto-detected from
@@ -150,8 +151,8 @@ export const auth = betterAuth({
   plugins: [
     // OIDC Provider plugin - allows this app to act as an OIDC provider
     oidcProvider({
-      loginPage: "/login",
-      consentPage: "/oauth/consent",
+      loginPage: withBase("/login"),
+      consentPage: withBase("/oauth/consent"),
       // Allow dynamic client registration for flexibility
       allowDynamicClientRegistration: true,
       // Note: trustedClients would be configured here if Better Auth supports it

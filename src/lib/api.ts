@@ -1,5 +1,7 @@
+import { withBase } from "@/lib/base-path";
+
 // Base API URL
-const API_BASE = "/api";
+const API_BASE = withBase("/api");
 
 // Helper function for API requests
 async function apiRequest<T>(

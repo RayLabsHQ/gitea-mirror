@@ -7,6 +7,7 @@ import { toast, Toaster } from 'sonner';
 import { showErrorToast } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
 import { Eye, EyeOff } from 'lucide-react';
+import { withBase } from '@/lib/base-path';
 
 export function SignupForm() {
   const [isLoading, setIsLoading] = useState(false);
@@ -42,7 +43,7 @@ export function SignupForm() {
       toast.success('Account created successfully! Redirecting to dashboard...');
       // Small delay before redirecting to see the success message
       setTimeout(() => {
-        window.location.href = '/';
+        window.location.href = withBase('/');
       }, 1500);
     } catch (error) {
       showErrorToast(error, toast);
@@ -57,7 +58,7 @@ export function SignupForm() {
         <CardHeader className="text-center">
           <div className="flex justify-center mb-4">
             <img
-              src="/logo.png"
+              src={withBase('/logo.png')}
               alt="Gitea Mirror Logo"
               className="h-8 w-10"
             />

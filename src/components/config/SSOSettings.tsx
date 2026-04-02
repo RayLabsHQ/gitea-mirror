@@ -14,6 +14,7 @@ import { Badge } from '../ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { MultiSelect } from '@/components/ui/multi-select';
+import { withBase } from '@/lib/base-path';
 
 function isTrustedIssuer(issuer: string, allowedHosts: string[]): boolean {
   try {
@@ -100,6 +101,9 @@ export function SSOSettings() {
     digestAlgorithm: 'sha256',
     identifierFormat: 'urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress',
   });
+  const appOrigin = typeof window !== 'undefined' ? window.location.origin : '';
+  const buildAbsoluteAppUrl = (path: string) =>
+    appOrigin ? new URL(withBase(path), appOrigin).toString() : withBase(path);
 
 
 
@@ -179,8 +183,8 @@ export function SSOSettings() {
       } else {
         requestData.entryPoint = providerForm.entryPoint;
         requestData.cert = providerForm.cert;
-        requestData.callbackUrl = providerForm.callbackUrl || `${window.location.origin}/api/auth/sso/saml2/callback/${providerForm.providerId}`;
-        requestData.audience = providerForm.audience || window.location.origin;
+        requestData.callbackUrl = providerForm.callbackUrl || buildAbsoluteAppUrl(`/api/auth/sso/saml2/callback/${providerForm.providerId}`);
+        requestData.audience = providerForm.audience || appOrigin;
         requestData.wantAssertionsSigned = providerForm.wantAssertionsSigned;
         requestData.signatureAlgorithm = providerForm.signatureAlgorithm;
         requestData.digestAlgorithm = providerForm.digestAlgorithm;
@@ -517,7 +521,7 @@ export function SSOSettings() {
                           <AlertCircle className="h-4 w-4" />
                           <AlertDescription>
                             <div className="space-y-2">
-                              <p>Redirect URL: {window.location.origin}/api/auth/sso/callback/{providerForm.providerId || '{provider-id}'}</p>
+                              <p>Redirect URL: {buildAbsoluteAppUrl(`/api/auth/sso/callback/${providerForm.providerId || '{provider-id}'}`)}</p>
                               {isTrustedIssuer(providerForm.issuer, ['google.com']) && (
                                 <p className="text-xs text-muted-foreground">
                                   Note: Google doesn't support the "offline_access" scope. Make sure to exclude it from the selected scopes.
@@ -563,8 +567,8 @@ export function SSOSettings() {
                           <AlertCircle className="h-4 w-4" />
                           <AlertDescription>
                             <div className="space-y-1">
-                              <p>Callback URL: {window.location.origin}/api/auth/sso/saml2/callback/{providerForm.providerId || '{provider-id}'}</p>
-                              <p>SP Metadata: {window.location.origin}/api/auth/sso/saml2/sp/metadata?providerId={providerForm.providerId || '{provider-id}'}</p>
+                              <p>Callback URL: {buildAbsoluteAppUrl(`/api/auth/sso/saml2/callback/${providerForm.providerId || '{provider-id}'}`)}</p>
+                              <p>SP Metadata: {buildAbsoluteAppUrl(`/api/auth/sso/saml2/sp/metadata?providerId=${providerForm.providerId || '{provider-id}'}`)}</p>
                             </div>
                           </AlertDescription>
                         </Alert>

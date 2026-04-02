@@ -33,6 +33,7 @@ Essential application settings required for running Gitea Mirror.
 | `NODE_ENV` | Application environment | `production` | No |
 | `HOST` | Server host binding | `0.0.0.0` | No |
 | `PORT` | Server port | `4321` | No |
+| `BASE_URL` | Application base path. Use `/` for root deployments, or a prefix such as `/mirror` when serving behind a reverse-proxy path prefix. | `/` | No |
 | `DATABASE_URL` | Database connection URL | `sqlite://data/gitea-mirror.db` | No |
 | `BETTER_AUTH_SECRET` | Secret key for session signing (generate with: `openssl rand -base64 32`) | - | Yes |
 | `BETTER_AUTH_URL` | Primary base URL for authentication. This should be the main URL where your application is accessed. | `http://localhost:4321` | No |
@@ -302,6 +303,7 @@ services:
     environment:
       # Core Configuration
       - NODE_ENV=production
+      - BASE_URL=/
       - DATABASE_URL=file:data/gitea-mirror.db
       - BETTER_AUTH_SECRET=your-secure-secret-here
       # Primary access URL:
@@ -369,6 +371,21 @@ This setup allows you to:
 - Each origin requires separate login due to browser cookie isolation
 
 **Important:** When accessing from different origins (IP vs domain), you'll need to log in separately on each origin as cookies cannot be shared across different origins for security reasons.
+
+### Path Prefix Deployments
+
+If you serve Gitea Mirror under a subpath such as `https://git.example.com/mirror`, set:
+
+```bash
+BASE_URL=/mirror
+BETTER_AUTH_URL=https://git.example.com
+PUBLIC_BETTER_AUTH_URL=https://git.example.com
+BETTER_AUTH_TRUSTED_ORIGINS=https://git.example.com
+```
+
+Notes:
+- `BETTER_AUTH_TRUSTED_ORIGINS` must contain origins only (no path).
+- `BASE_URL` is applied at build time, so set it for image builds too.
 
 ### Trusted Origins
 

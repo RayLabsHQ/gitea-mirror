@@ -50,6 +50,7 @@ import AddRepositoryDialog from "./AddRepositoryDialog";
 import { useLiveRefresh } from "@/hooks/useLiveRefresh";
 import { useConfigStatus } from "@/hooks/useConfigStatus";
 import { useNavigation } from "@/components/layout/MainLayout";
+import { withBase } from "@/lib/base-path";
 
 const REPOSITORY_SORT_OPTIONS = [
   { value: "imported-desc", label: "Recently Imported" },
@@ -1518,7 +1519,7 @@ export default function Repository() {
           <Button
             variant="default"
             onClick={() => {
-              window.history.pushState({}, '', '/config');
+              window.history.pushState({}, '', withBase('/config'));
               // We need to trigger a page change event for the navigation system
               window.dispatchEvent(new PopStateEvent('popstate'));
             }}

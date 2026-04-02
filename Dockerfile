@@ -8,6 +8,8 @@ RUN apt-get update && apt-get -y upgrade && apt-get install -y --no-install-reco
 
 # ----------------------------
 FROM base AS builder
+ARG BASE_URL=/
+ENV BASE_URL=${BASE_URL}
 COPY package.json ./
 COPY bun.lock* ./
 RUN bun install --frozen-lockfile
@@ -73,6 +75,7 @@ ENV NODE_ENV=production
 ENV HOST=0.0.0.0
 ENV PORT=4321
 ENV DATABASE_URL=file:data/gitea-mirror.db
+ENV BASE_URL=/
 
 # Create directories and setup permissions
 RUN mkdir -p /app/certs && \
@@ -90,6 +93,6 @@ VOLUME /app/data
 EXPOSE 4321
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:4321/api/health || exit 1
+  CMD sh -c 'BASE="${BASE_URL:-/}"; if [ "$BASE" = "/" ]; then BASE=""; else BASE="${BASE%/}"; fi; wget --no-verbose --tries=1 --spider "http://localhost:4321${BASE}/api/health" || exit 1'
 
 ENTRYPOINT ["./docker-entrypoint.sh"]

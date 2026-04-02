@@ -2,6 +2,7 @@
 import '../styles/global.css';
 import '../styles/docs.css';
 import ThemeScript from '@/components/theme/ThemeScript.astro';
+import { withBase } from '@/lib/base-path';
 
 // Accept title as a prop with a default value
 const { title = 'Gitea Mirror' } = Astro.props;
@@ -11,7 +12,7 @@ const { title = 'Gitea Mirror' } = Astro.props;
 	<head>
 		<meta charset="utf-8" />
 		<meta name="viewport" content="width=device-width" />
-		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+		<link rel="icon" type="image/svg+xml" href={withBase('/favicon.svg')} />
 		<title>{title}</title>
 		<ThemeScript />
 	</head>
