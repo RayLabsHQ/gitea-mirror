@@ -1,7 +1,26 @@
 ---
+import { BASE_PATH_WINDOW_KEY } from '@/lib/base-path';
+
+const normalizeBasePath = (value) => {
+  if (!value || !value.trim()) {
+    return '/';
+  }
+
+  let normalized = value.trim();
+  if (!normalized.startsWith('/')) {
+    normalized = `/${normalized}`;
+  }
+
+  normalized = normalized.replace(/\/+$/, '');
+  return normalized || '/';
+};
+
+const runtimeBasePath = normalizeBasePath(process.env.BASE_URL);
 ---
 
-<script is:inline>
+<script is:inline define:vars={{ BASE_PATH_WINDOW_KEY, runtimeBasePath }}>
+  window[BASE_PATH_WINDOW_KEY] = runtimeBasePath;
+
   const getThemePreference = () => {
     if (typeof localStorage !== 'undefined' && localStorage.getItem('theme')) {
       return localStorage.getItem('theme');

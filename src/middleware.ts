@@ -9,6 +9,13 @@ import { auth } from './lib/auth';
 import { isHeaderAuthEnabled, authenticateWithHeaders } from './lib/auth-header';
 import { initializeConfigFromEnv } from './lib/env-config-loader';
 import { db, users } from './lib/db';
+import { getBasePath } from './lib/base-path';
+
+const ASTRO_INTERNAL_ASSET_PATH_PATTERN = /(["'])\/(_astro\/|_server-islands\/|_image\b)/g;
+
+function prefixAstroInternalAssetPaths(html: string, basePath: string): string {
+  return html.replace(ASTRO_INTERNAL_ASSET_PATH_PATTERN, `$1${basePath}/$2`);
+}
 
 // Flag to track if recovery has been initialized
 let recoveryInitialized = false;
@@ -21,6 +28,8 @@ let envConfigInitialized = false;
 let envConfigCheckCount = 0; // Track attempts to avoid excessive checking
 
 export const onRequest = defineMiddleware(async (context, next) => {
+  const basePath = getBasePath();
+
   // First, try Better Auth session (cookie-based)
   try {
     const session = await auth.api.getSession({
@@ -217,5 +226,29 @@ export const onRequest = defineMiddleware(async (context, next) => {
   }
 
   // Continue with the request
-  return next();
+  const response = await next();
+
+  if (basePath === "/") {
+    return response;
+  }
+
+  const contentType = response.headers.get("content-type") ?? "";
+  if (!contentType.includes("text/html")) {
+    return response;
+  }
+
+  const body = await response.text();
+  const rewrittenBody = prefixAstroInternalAssetPaths(body, basePath);
+  if (rewrittenBody === body) {
+    return response;
+  }
+
+  const headers = new Headers(response.headers);
+  headers.delete("content-length");
+
+  return new Response(rewrittenBody, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
 });

@@ -312,7 +312,7 @@ BETTER_AUTH_TRUSTED_ORIGINS=https://git.example.com
 Notes:
 - `BASE_URL` sets the application path prefix.
 - `BETTER_AUTH_TRUSTED_ORIGINS` should contain origins only (no path).
-- When building Docker images, pass `BASE_URL` at build time as well.
+- `BASE_URL` is runtime configuration, so prebuilt registry images can be reused across different subpaths.
 
 ### Mirror Token Rotation (GitHub Token Changed)
 

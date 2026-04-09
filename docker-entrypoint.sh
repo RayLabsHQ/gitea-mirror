@@ -229,7 +229,13 @@ trap 'shutdown_handler' TERM INT HUP
 
 # Start the application
 echo "Starting Gitea Mirror..."
-bun ./dist/server/entry.mjs &
+if [ -f "./scripts/runtime-server.ts" ]; then
+  bun ./scripts/runtime-server.ts &
+elif [ -f "./dist/scripts/runtime-server.js" ]; then
+  bun ./dist/scripts/runtime-server.js &
+else
+  bun ./dist/server/entry.mjs &
+fi
 APP_PID=$!
 
 # Wait for the application to finish

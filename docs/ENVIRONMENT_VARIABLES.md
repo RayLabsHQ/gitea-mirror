@@ -385,7 +385,7 @@ BETTER_AUTH_TRUSTED_ORIGINS=https://git.example.com
 
 Notes:
 - `BETTER_AUTH_TRUSTED_ORIGINS` must contain origins only (no path).
-- `BASE_URL` is applied at build time, so set it for image builds too.
+- `BASE_URL` is applied at runtime, so prebuilt images can be reused with different path prefixes.
 
 ### Trusted Origins
 

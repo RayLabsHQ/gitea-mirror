@@ -45,8 +45,6 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      args:
-        BASE_URL: ${BASE_URL:-/}
       platforms:
         - linux/amd64
         - linux/arm64

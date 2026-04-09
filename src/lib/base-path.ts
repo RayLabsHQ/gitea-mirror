@@ -1,4 +1,5 @@
 const URL_SCHEME_REGEX = /^[a-zA-Z][a-zA-Z\d+\-.]*:/;
+const BASE_PATH_WINDOW_KEY = "__GITEA_MIRROR_BASE_PATH__";
 
 function normalizeBasePath(basePath: string | null | undefined): string {
   if (!basePath) {
@@ -18,16 +19,33 @@ function normalizeBasePath(basePath: string | null | undefined): string {
   return normalized || "/";
 }
 
-const rawBasePath =
-  (typeof import.meta !== "undefined" && import.meta.env?.BASE_URL) ||
-  process.env.BASE_URL ||
-  "/";
+function resolveRuntimeBasePath(): string {
+  if (typeof process !== "undefined" && typeof process.env?.BASE_URL === "string") {
+    return normalizeBasePath(process.env.BASE_URL);
+  }
 
-export const BASE_PATH = normalizeBasePath(rawBasePath);
+  if (typeof window !== "undefined") {
+    const runtimeBasePath = (window as Window & { [BASE_PATH_WINDOW_KEY]?: string })[BASE_PATH_WINDOW_KEY];
+    if (typeof runtimeBasePath === "string") {
+      return normalizeBasePath(runtimeBasePath);
+    }
+  }
+
+  return "/";
+}
+
+export function getBasePath(): string {
+  return resolveRuntimeBasePath();
+}
+
+export const BASE_PATH = getBasePath();
+export { BASE_PATH_WINDOW_KEY };
 
 export function withBase(path: string): string {
+  const basePath = getBasePath();
+
   if (!path) {
-    return BASE_PATH === "/" ? "/" : `${BASE_PATH}/`;
+    return basePath === "/" ? "/" : `${basePath}/`;
   }
 
   if (URL_SCHEME_REGEX.test(path) || path.startsWith("//")) {
@@ -35,28 +53,30 @@ export function withBase(path: string): string {
   }
 
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
-  if (BASE_PATH === "/") {
+  if (basePath === "/") {
     return normalizedPath;
   }
 
-  return `${BASE_PATH}${normalizedPath}`;
+  return `${basePath}${normalizedPath}`;
 }
 
 export function stripBasePath(pathname: string): string {
+  const basePath = getBasePath();
+
   if (!pathname) {
     return "/";
   }
 
-  if (BASE_PATH === "/") {
+  if (basePath === "/") {
     return pathname;
   }
 
-  if (pathname === BASE_PATH || pathname === `${BASE_PATH}/`) {
+  if (pathname === basePath || pathname === `${basePath}/`) {
     return "/";
   }
 
-  if (pathname.startsWith(`${BASE_PATH}/`)) {
-    return pathname.slice(BASE_PATH.length) || "/";
+  if (pathname.startsWith(`${basePath}/`)) {
+    return pathname.slice(basePath.length) || "/";
   }
 
   return pathname;

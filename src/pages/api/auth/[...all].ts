@@ -1,6 +1,6 @@
 import { auth } from "@/lib/auth";
 import type { APIRoute } from "astro";
-import { withBase } from "@/lib/base-path";
+import { stripBasePath, withBase } from "@/lib/base-path";
 
 export const ALL: APIRoute = async (ctx) => {
   // If you want to use rate limiting, make sure to set the 'x-forwarded-for' header
@@ -10,7 +10,11 @@ export const ALL: APIRoute = async (ctx) => {
   }
   
   try {
-    return await auth.handler(ctx.request);
+    const requestUrl = new URL(ctx.request.url);
+    requestUrl.pathname = withBase(stripBasePath(requestUrl.pathname));
+    const authRequest = new Request(requestUrl, ctx.request);
+
+    return await auth.handler(authRequest);
   } catch (error) {
     console.error("Auth handler error:", error);
     

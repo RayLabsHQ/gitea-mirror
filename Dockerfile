@@ -8,8 +8,6 @@ RUN apt-get update && apt-get -y upgrade && apt-get install -y --no-install-reco
 
 # ----------------------------
 FROM base AS builder
-ARG BASE_URL=/
-ENV BASE_URL=${BASE_URL}
 COPY package.json ./
 COPY bun.lock* ./
 RUN bun install --frozen-lockfile
@@ -18,6 +16,7 @@ COPY . .
 RUN bun run build
 RUN mkdir -p dist/scripts && \
   for script in scripts/*.ts; do \
+  if [ "$(basename "$script")" = "runtime-server.ts" ]; then continue; fi; \
   bun build "$script" --target=bun --outfile=dist/scripts/$(basename "${script%.ts}.js"); \
   done
 
@@ -61,6 +60,7 @@ COPY --from=pruner /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/docker-entrypoint.sh ./docker-entrypoint.sh
+COPY --from=builder /app/scripts/runtime-server.ts ./scripts/runtime-server.ts
 COPY --from=builder /app/drizzle ./drizzle
 
 # Remove build-only packages that are not needed at runtime
