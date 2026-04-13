@@ -556,6 +556,9 @@ export async function syncGiteaRepoEnhanced({
     }
 
     // Update mirror interval if needed
+    // NOTE: Gitea/Forgejo's PATCH /repos/{owner}/{repo} API does not support
+    // updating mirror credentials (mirror_username/mirror_password). Repos that
+    // were originally migrated without credentials must be deleted and re-mirrored.
     if (config.giteaConfig?.mirrorInterval) {
       try {
         console.log(`[Sync] Updating mirror interval for ${repoOwner}/${repoName} to ${config.giteaConfig.mirrorInterval}`);
@@ -603,10 +606,12 @@ export async function syncGiteaRepoEnhanced({
         !!config.giteaConfig?.mirrorReleases && !skipMetadataForStarred;
       const shouldMirrorIssuesThisRun =
         !!config.giteaConfig?.mirrorIssues &&
-        !skipMetadataForStarred;
+        !skipMetadataForStarred &&
+        !metadataState.components.issues;
       const shouldMirrorPullRequests =
         !!config.giteaConfig?.mirrorPullRequests &&
-        !skipMetadataForStarred;
+        !skipMetadataForStarred &&
+        !metadataState.components.pullRequests;
       const shouldMirrorLabels =
         !!config.giteaConfig?.mirrorLabels &&
         !skipMetadataForStarred &&
@@ -680,6 +685,13 @@ export async function syncGiteaRepoEnhanced({
             );
           }
         }
+      } else if (
+        config.giteaConfig?.mirrorIssues &&
+        metadataState.components.issues
+      ) {
+        console.log(
+          `[Sync] Issues already mirrored for ${repository.name}; skipping to avoid duplicates`
+        );
       }
 
       if (shouldMirrorPullRequests) {
@@ -710,6 +722,13 @@ export async function syncGiteaRepoEnhanced({
             );
           }
         }
+      } else if (
+        config.giteaConfig?.mirrorPullRequests &&
+        metadataState.components.pullRequests
+      ) {
+        console.log(
+          `[Sync] Pull requests already mirrored for ${repository.name}; skipping`
+        );
       }
 
       if (shouldMirrorLabels) {

@@ -52,12 +52,12 @@ describe("buildGithubSourceAuthPayload", () => {
     expect(auth.auth_token).toBe("ghp_trimmed");
   });
 
-  test("throws when token is missing", () => {
-    expect(() =>
-      buildGithubSourceAuthPayload({
-        token: "   ",
-        githubUsername: "user",
-      })
-    ).toThrow("GitHub token is required to mirror private repositories.");
+  test("returns empty object when token is missing", () => {
+    const result = buildGithubSourceAuthPayload({
+      token: "   ",
+      githubUsername: "user",
+    });
+
+    expect(result).toEqual({});
   });
 });

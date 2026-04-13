@@ -815,8 +815,10 @@ export const mirrorGithubRepoToGitea = async ({
       service: "git",
     };
 
-    // Add authentication for private repositories
-    if (repository.isPrivate) {
+    // Always send authentication credentials so Gitea/Forgejo stores them
+    // for subsequent mirror fetches. This prevents "terminal prompts disabled"
+    // errors on public repos and raises GitHub API rate limits.
+    {
       const githubOwner =
         (
           config.githubConfig as typeof config.githubConfig & {
@@ -1501,10 +1503,13 @@ export async function mirrorGitHubRepoToGiteaOrg({
       lfs: config.giteaConfig?.lfs || false,
       private: repository.isPrivate,
       description: repository.description?.trim() || "",
+      service: "git",
     };
 
-    // Add authentication for private repositories
-    if (repository.isPrivate) {
+    // Always send authentication credentials so Gitea/Forgejo stores them
+    // for subsequent mirror fetches. This prevents "terminal prompts disabled"
+    // errors on public repos and raises GitHub API rate limits.
+    {
       const githubOwner =
         (
           config.githubConfig as typeof config.githubConfig & {
@@ -2715,7 +2720,7 @@ export async function mirrorGitHubReleasesToGitea({
         if (existingNote !== releaseNote || existingRelease.name !== (release.name || release.tag_name)) {
           console.log(`[Releases] Updating existing release ${release.tag_name} with new changelog/title`);
           
-          await httpPut(
+          await httpPatch(
             `${config.giteaConfig.url}/api/v1/repos/${repoOwner}/${repoName}/releases/${existingRelease.id}`,
             {
               tag_name: release.tag_name,
@@ -2829,6 +2834,71 @@ export async function mirrorGitHubReleasesToGitea({
   }
 
   console.log(`✅ Mirrored/Updated ${mirroredCount} releases to Gitea (${skippedCount} already up-to-date)`);
+
+  // Enforce release retention limit by removing the oldest excess releases from Gitea
+  try {
+    // Paginate to fetch ALL Gitea releases (API max is 100 per page)
+    const allGiteaReleases: Array<{ id: number; tag_name: string; created_at: string }> = [];
+    let cleanupPage = 1;
+    while (true) {
+      const pageResponse = await httpGet(
+        `${config.giteaConfig.url}/api/v1/repos/${repoOwner}/${repoName}/releases?per_page=100&page=${cleanupPage}`,
+        {
+          Authorization: `token ${decryptedConfig.giteaConfig.token}`,
+        }
+      ).catch(() => null);
+
+      if (!pageResponse?.data || !Array.isArray(pageResponse.data) || pageResponse.data.length === 0) {
+        break;
+      }
+
+      allGiteaReleases.push(...pageResponse.data);
+
+      if (pageResponse.data.length < 100) {
+        break;
+      }
+      cleanupPage++;
+    }
+
+    if (allGiteaReleases.length > releaseLimit) {
+      const excessCount = allGiteaReleases.length - releaseLimit;
+
+      // Sort by created_at ascending (oldest first) so we delete the oldest excess
+      const sorted = [...allGiteaReleases].sort(
+        (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+      );
+
+      const toDelete = sorted.slice(0, excessCount);
+
+      console.log(
+        `[Releases] Enforcing retention limit (${releaseLimit}): ${allGiteaReleases.length} releases found, removing ${toDelete.length} oldest excess release(s)`
+      );
+
+      for (const excess of toDelete) {
+        try {
+          await httpDelete(
+            `${config.giteaConfig.url}/api/v1/repos/${repoOwner}/${repoName}/releases/${excess.id}`,
+            {
+              Authorization: `token ${decryptedConfig.giteaConfig.token}`,
+            }
+          );
+          console.log(`[Releases] Deleted excess release: ${excess.tag_name}`);
+        } catch (deleteError) {
+          console.error(
+            `[Releases] Failed to delete excess release ${excess.tag_name}: ${
+              deleteError instanceof Error ? deleteError.message : String(deleteError)
+            }`
+          );
+        }
+      }
+    }
+  } catch (cleanupError) {
+    console.warn(
+      `[Releases] Release retention cleanup failed: ${
+        cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
+      }`
+    );
+  }
 }
 
 export async function mirrorGitRepoPullRequestsToGitea({

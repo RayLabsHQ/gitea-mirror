@@ -11,6 +11,8 @@ export interface GithubSourceAuthPayload {
   auth_token: string;
 }
 
+export type GithubSourceAuthPayloadOrEmpty = GithubSourceAuthPayload | Record<string, never>;
+
 const DEFAULT_GITHUB_AUTH_USERNAME = "x-access-token";
 
 function normalize(value?: string | null): string {
@@ -18,18 +20,19 @@ function normalize(value?: string | null): string {
 }
 
 /**
- * Build source credentials for private GitHub repository mirroring.
+ * Build source credentials for GitHub repository mirroring.
  * GitHub expects username + token-as-password over HTTPS (not the GitLab-style "oauth2" username).
+ * Returns an empty object when no token is available, allowing callers to use it unconditionally.
  */
 export function buildGithubSourceAuthPayload({
   token,
   githubOwner,
   githubUsername,
   repositoryOwner,
-}: BuildGithubSourceAuthPayloadParams): GithubSourceAuthPayload {
+}: BuildGithubSourceAuthPayloadParams): GithubSourceAuthPayloadOrEmpty {
   const normalizedToken = normalize(token);
   if (!normalizedToken) {
-    throw new Error("GitHub token is required to mirror private repositories.");
+    return {};
   }
 
   const authUsername =
