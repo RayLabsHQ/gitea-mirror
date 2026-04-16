@@ -308,6 +308,13 @@ export async function initializeConfigFromEnv(): Promise<void> {
       mirrorPullRequests: envConfig.mirror.mirrorPullRequests ?? existingConfig?.[0]?.giteaConfig?.mirrorPullRequests ?? false,
       mirrorLabels: envConfig.mirror.mirrorLabels ?? existingConfig?.[0]?.giteaConfig?.mirrorLabels ?? false,
       mirrorMilestones: envConfig.mirror.mirrorMilestones ?? existingConfig?.[0]?.giteaConfig?.mirrorMilestones ?? false,
+      // Backup options — preserve existing values so UI-configured settings survive restart
+      backupStrategy: existingConfig?.[0]?.giteaConfig?.backupStrategy ?? 'on-force-push',
+      backupBeforeSync: existingConfig?.[0]?.giteaConfig?.backupBeforeSync ?? true,
+      backupRetentionCount: existingConfig?.[0]?.giteaConfig?.backupRetentionCount ?? 5,
+      backupRetentionDays: existingConfig?.[0]?.giteaConfig?.backupRetentionDays ?? 30,
+      backupDirectory: existingConfig?.[0]?.giteaConfig?.backupDirectory || undefined,
+      blockSyncOnBackupFailure: existingConfig?.[0]?.giteaConfig?.blockSyncOnBackupFailure ?? true,
     };
 
     // Build schedule config with support for interval as string or number
