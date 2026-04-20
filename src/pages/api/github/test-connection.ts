@@ -1,5 +1,5 @@
 import type { APIRoute } from "astro";
-import { Octokit } from "@octokit/rest";
+import { createGitHubClient } from "@/lib/github";
 import { createSecureErrorResponse } from "@/lib/utils";
 
 export const POST: APIRoute = async ({ request }) => {
@@ -22,10 +22,10 @@ export const POST: APIRoute = async ({ request }) => {
       );
     }
 
-    // Create an Octokit instance with the provided token
-    const octokit = new Octokit({
-      auth: token,
-    });
+    // Create an Octokit instance with the provided token.
+    // Uses createGitHubClient so GH_API_URL / GITHUB_API_URL routes the call
+    // to the correct endpoint for GHES / GHEC with data residency.
+    const octokit = createGitHubClient(token);
 
     // Test the connection by fetching the authenticated user
     const { data } = await octokit.users.getAuthenticated();

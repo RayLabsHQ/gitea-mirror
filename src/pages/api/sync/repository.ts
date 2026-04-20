@@ -1,5 +1,5 @@
 import type { APIRoute } from "astro";
-import { Octokit } from "@octokit/rest";
+import { createGitHubClient } from "@/lib/github";
 import { configs, db, repositories } from "@/lib/db";
 import { v4 as uuidv4 } from "uuid";
 import { and, eq } from "drizzle-orm";
@@ -88,7 +88,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     const configId = config.id;
 
-    const octokit = new Octokit(); // No auth for public repos
+    const octokit = createGitHubClient(); // No auth for public repos
 
     const { data: repoData } = await octokit.rest.repos.get({
       owner: trimmedOwner,

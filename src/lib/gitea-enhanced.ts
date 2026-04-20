@@ -9,6 +9,7 @@
 import type { Config } from "@/types/config";
 import type { Repository } from "./db/schema";
 import { Octokit } from "@octokit/rest";
+import { createGitHubClient } from "./github";
 import { createMirrorJob } from "./helpers";
 import { decryptConfigTokens } from "./utils/config-encryption";
 import { httpPost, httpGet, httpPatch, HttpError } from "./http-client";
@@ -431,7 +432,7 @@ export async function syncGiteaRepoEnhanced({
         try {
           const decryptedGithubToken = decryptedConfig.githubConfig?.token;
           if (decryptedGithubToken) {
-            const fpOctokit = new Octokit({ auth: decryptedGithubToken });
+            const fpOctokit = createGitHubClient(decryptedGithubToken);
             const detectionResult = await detectForcePush({
               giteaUrl: config.giteaConfig.url,
               giteaToken: decryptedConfig.giteaConfig.token,
@@ -596,9 +597,7 @@ export async function syncGiteaRepoEnhanced({
         if (!decryptedConfig.githubConfig?.token) {
           return null;
         }
-        metadataOctokit = new Octokit({
-          auth: decryptedConfig.githubConfig.token,
-        });
+        metadataOctokit = createGitHubClient(decryptedConfig.githubConfig.token);
         return metadataOctokit;
       };
 

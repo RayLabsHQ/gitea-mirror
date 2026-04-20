@@ -11,7 +11,7 @@ import { validateGiteaAuth } from "@/lib/gitea-auth-validator";
 import { getConfigsByUserId } from "@/lib/db/queries/configs";
 import { db, users, repositories } from "@/lib/db";
 import { eq } from "drizzle-orm";
-import { Octokit } from "@octokit/rest";
+import { createGitHubClient } from "@/lib/github";
 import type { Repository } from "@/lib/db/schema";
 
 async function testMetadataMirroringAuth() {
@@ -108,10 +108,8 @@ async function testMetadataMirroringAuth() {
         console.log("\n🔄 Test 4: Testing metadata mirroring authentication...");
         
         try {
-          // Create Octokit instance
-          const octokit = new Octokit({
-            auth: config.githubConfig.token,
-          });
+          // Create Octokit instance (honors GH_API_URL for GHES / GHEC data residency)
+          const octokit = createGitHubClient(config.githubConfig.token);
           
           // Test by attempting to fetch labels (lightweight operation)
           const { httpGet } = await import("@/lib/http-client");

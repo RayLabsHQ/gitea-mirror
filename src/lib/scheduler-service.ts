@@ -99,15 +99,14 @@ async function runScheduledSync(config: any): Promise<void> {
     if (scheduleConfig.autoImport !== false) {
       console.log(`[Scheduler] Checking for new GitHub repositories for user ${userId}...`);
       try {
-        const { getGithubRepositories, getGithubStarredRepositories } = await import('@/lib/github');
+        const { getGithubRepositories, getGithubStarredRepositories, createGitHubClient } = await import('@/lib/github');
         const { v4: uuidv4 } = await import('uuid');
         const { getDecryptedGitHubToken } = await import('@/lib/utils/config-encryption');
-        
-        // Create GitHub client
+
+        // Create GitHub client (honors GH_API_URL for GHES / GHEC data residency)
         const decryptedToken = getDecryptedGitHubToken(config);
-        const { Octokit } = await import('@octokit/rest');
-        const octokit = new Octokit({ auth: decryptedToken });
-        
+        const octokit = createGitHubClient(decryptedToken, userId, config.githubConfig?.username);
+
         // Fetch GitHub data
         const [basicAndForkedRepos, starredRepos] = await Promise.all([
           getGithubRepositories({ octokit, config }),
@@ -117,7 +116,7 @@ async function runScheduledSync(config: any): Promise<void> {
         ]);
         const allGithubRepos = mergeGitReposPreferStarred(basicAndForkedRepos, starredRepos);
         const mirrorableGithubRepos = allGithubRepos.filter(isMirrorableGitHubRepo);
-        
+
         // Check for new repositories
         const existingRepos = await db
           .select({ normalizedFullName: repositories.normalizedFullName })
@@ -238,10 +237,10 @@ async function runScheduledSync(config: any): Promise<void> {
         if (reposNeedingMirror.length > 0) {
           console.log(`[Scheduler] Found ${reposNeedingMirror.length} repositories that need initial mirroring`);
 
-          // Prepare Octokit client
+          // Prepare Octokit client (honors GH_API_URL for GHES / GHEC data residency)
           const decryptedToken = getDecryptedGitHubToken(config);
-          const { Octokit } = await import('@octokit/rest');
-          const octokit = new Octokit({ auth: decryptedToken });
+          const { createGitHubClient } = await import('@/lib/github');
+          const octokit = createGitHubClient(decryptedToken, userId, config.githubConfig?.username);
 
           // Process repositories in batches
           const batchSize = scheduleConfig.batchSize || 10;
@@ -482,13 +481,12 @@ async function performInitialAutoStart(): Promise<void> {
       try {
         // Step 1: Import repositories from GitHub
         console.log(`[Scheduler] Step 1: Importing repositories from GitHub for user ${config.userId}...`);
-        const { getGithubRepositories, getGithubStarredRepositories } = await import('@/lib/github');
+        const { getGithubRepositories, getGithubStarredRepositories, createGitHubClient } = await import('@/lib/github');
         const { v4: uuidv4 } = await import('uuid');
-        
-        // Create GitHub client
+
+        // Create GitHub client (honors GH_API_URL for GHES / GHEC data residency)
         const decryptedToken = getDecryptedGitHubToken(config);
-        const { Octokit } = await import('@octokit/rest');
-        const octokit = new Octokit({ auth: decryptedToken });
+        const octokit = createGitHubClient(decryptedToken, config.userId, config.githubConfig?.username);
         
         // Fetch GitHub data
         const [basicAndForkedRepos, starredRepos] = await Promise.all([

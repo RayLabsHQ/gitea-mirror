@@ -28,7 +28,7 @@ const MyOctokit: any = (Octokit as any)?.plugin?.call
  * Creates an authenticated Octokit instance with rate limit tracking and throttling
  */
 export function createGitHubClient(
-  token: string,
+  token?: string,
   userId?: string,
   username?: string,
 ): Octokit {
