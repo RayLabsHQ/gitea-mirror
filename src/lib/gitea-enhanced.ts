@@ -8,7 +8,7 @@
 
 import type { Config } from "@/types/config";
 import type { Repository } from "./db/schema";
-import { Octokit } from "@octokit/rest";
+import type { Octokit } from "@octokit/rest";
 import { createGitHubClient } from "./github";
 import { createMirrorJob } from "./helpers";
 import { decryptConfigTokens } from "./utils/config-encryption";

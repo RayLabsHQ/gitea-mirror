@@ -1,5 +1,5 @@
 import type { APIRoute } from "astro";
-import { createGitHubClient } from "@/lib/github";
+import { Octokit } from "@octokit/rest";
 import { configs, db, repositories } from "@/lib/db";
 import { v4 as uuidv4 } from "uuid";
 import { and, eq } from "drizzle-orm";
@@ -88,7 +88,16 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     const configId = config.id;
 
-    const octokit = createGitHubClient(); // No auth for public repos
+    // Unauthenticated one-shot lookup for public repos.
+    // Uses bare Octokit (not createGitHubClient) to preserve fast-fail on the
+    // 60 req/hr public rate limit — this endpoint is user-facing, we don't
+    // want the throttling plugin to wait multiple retry-after windows.
+    // Still respects GH_API_URL / GITHUB_API_URL for GHES / GHEC data residency.
+    const baseUrl =
+      process.env.GH_API_URL ||
+      process.env.GITHUB_API_URL ||
+      "https://api.github.com";
+    const octokit = new Octokit({ baseUrl });
 
     const { data: repoData } = await octokit.rest.repos.get({
       owner: trimmedOwner,

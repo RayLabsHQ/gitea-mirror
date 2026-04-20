@@ -105,7 +105,7 @@ async function runScheduledSync(config: any): Promise<void> {
 
         // Create GitHub client (honors GH_API_URL for GHES / GHEC data residency)
         const decryptedToken = getDecryptedGitHubToken(config);
-        const octokit = createGitHubClient(decryptedToken, userId, config.githubConfig?.username);
+        const octokit = createGitHubClient(decryptedToken, userId, config.githubConfig?.owner);
 
         // Fetch GitHub data
         const [basicAndForkedRepos, starredRepos] = await Promise.all([
@@ -240,7 +240,7 @@ async function runScheduledSync(config: any): Promise<void> {
           // Prepare Octokit client (honors GH_API_URL for GHES / GHEC data residency)
           const decryptedToken = getDecryptedGitHubToken(config);
           const { createGitHubClient } = await import('@/lib/github');
-          const octokit = createGitHubClient(decryptedToken, userId, config.githubConfig?.username);
+          const octokit = createGitHubClient(decryptedToken, userId, config.githubConfig?.owner);
 
           // Process repositories in batches
           const batchSize = scheduleConfig.batchSize || 10;
@@ -486,7 +486,7 @@ async function performInitialAutoStart(): Promise<void> {
 
         // Create GitHub client (honors GH_API_URL for GHES / GHEC data residency)
         const decryptedToken = getDecryptedGitHubToken(config);
-        const octokit = createGitHubClient(decryptedToken, config.userId, config.githubConfig?.username);
+        const octokit = createGitHubClient(decryptedToken, config.userId, config.githubConfig?.owner);
         
         // Fetch GitHub data
         const [basicAndForkedRepos, starredRepos] = await Promise.all([

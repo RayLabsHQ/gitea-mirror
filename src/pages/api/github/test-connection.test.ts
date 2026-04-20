@@ -1,22 +1,22 @@
 import { describe, test, expect, mock, beforeEach, afterEach } from "bun:test";
 
-// Mock createGitHubClient before importing the route so it intercepts the
-// Octokit construction (github.ts captures the Octokit reference at module
-// init via the throttling plugin, so mocking @octokit/rest directly is too
-// late by the time the route runs).
+// createGitHubClient returns this stub. Tests mutate `getAuthenticatedImpl`
+// to steer the behavior without re-calling mock.module (which is fragile
+// once the route module has already captured a live binding).
+let getAuthenticatedImpl: () => Promise<any> = () =>
+  Promise.resolve({
+    data: {
+      login: "testuser",
+      name: "Test User",
+      avatar_url: "https://example.com/avatar.png",
+    },
+  });
+
 mock.module("@/lib/github", () => {
   return {
     createGitHubClient: mock(() => ({
       users: {
-        getAuthenticated: mock(() =>
-          Promise.resolve({
-            data: {
-              login: "testuser",
-              name: "Test User",
-              avatar_url: "https://example.com/avatar.png",
-            },
-          })
-        ),
+        getAuthenticated: mock(() => getAuthenticatedImpl()),
       },
     })),
   };
@@ -31,6 +31,15 @@ describe("GitHub Test Connection API", () => {
   beforeEach(() => {
     originalConsoleError = console.error;
     console.error = mock(() => {});
+    // Reset to the success stub before each test so tests are independent
+    getAuthenticatedImpl = () =>
+      Promise.resolve({
+        data: {
+          login: "testuser",
+          name: "Test User",
+          avatar_url: "https://example.com/avatar.png",
+        },
+      });
   });
 
   afterEach(() => {
@@ -102,16 +111,8 @@ describe("GitHub Test Connection API", () => {
   });
 
   test("handles authentication errors", async () => {
-    // Re-mock createGitHubClient to throw an auth error
-    mock.module("@/lib/github", () => {
-      return {
-        createGitHubClient: mock(() => ({
-          users: {
-            getAuthenticated: mock(() => Promise.reject(new Error("Bad credentials"))),
-          },
-        })),
-      };
-    });
+    // Swap the stub to throw an auth error for this test only
+    getAuthenticatedImpl = () => Promise.reject(new Error("Bad credentials"));
 
     const request = new Request("http://localhost/api/github/test-connection", {
       method: "POST",
