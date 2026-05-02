@@ -240,9 +240,14 @@ export async function getGithubRepositories({
   config: Partial<Config>;
 }): Promise<GitRepo[]> {
   try {
+    // By default, GitHub's API returns all repositories a user has access to (owner, collaborator, organization_member).
+    // If includeCollaboratorRepos is not enabled, we explicitly set affiliation to 'owner' to prevent importing repositories where the user is only a collaborator.
+    const includeCollaboratorRepos = config.githubConfig?.includeCollaboratorRepos;
+    const affiliation = includeCollaboratorRepos ? "owner,collaborator" : "owner";
+
     const repos = await octokit.paginate(
       octokit.repos.listForAuthenticatedUser,
-      { per_page: 100 },
+      { per_page: 100, affiliation },
     );
 
     const skipForks = config.githubConfig?.skipForks ?? false;
