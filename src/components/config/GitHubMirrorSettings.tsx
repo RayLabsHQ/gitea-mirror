@@ -35,7 +35,8 @@ import {
   HardDrive,
   FileCode2,
   Plus,
-  X
+  X,
+  Users
 } from "lucide-react";
 import type { GitHubConfig, MirrorOptions, AdvancedOptions, DuplicateNameStrategy } from "@/types/config";
 import {
@@ -240,6 +241,26 @@ export function GitHubMirrorSettings({
               </Label>
               <p className="text-xs text-muted-foreground">
                 Mirror your private repositories
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-start space-x-3">
+            <Checkbox
+              id="collaborator-repos"
+              checked={githubConfig.includeCollaboratorRepos}
+              onCheckedChange={(checked) => handleGitHubChange('includeCollaboratorRepos', !!checked)}
+            />
+            <div className="space-y-0.5 flex-1">
+              <Label
+                htmlFor="collaborator-repos"
+                className="text-sm font-normal cursor-pointer flex items-center gap-2"
+              >
+                <Users className="h-3.5 w-3.5" />
+                Include collaborator repositories
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                Mirror repositories where you are a collaborator (but not the owner)
               </p>
             </div>
           </div>
