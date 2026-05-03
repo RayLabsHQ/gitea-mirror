@@ -539,6 +539,11 @@ export const mirrorGithubRepoToGitea = async ({
   repository: Repository;
   config: Partial<Config>;
 }): Promise<any> => {
+  // Declared here (not inside try) so the catch block can read it.
+  // `let` is block-scoped — declaring inside try makes it inaccessible
+  // from catch, which previously caused a ReferenceError that swallowed
+  // the real error and left repos stuck in "mirroring" state.
+  let migrateSucceeded = false;
   try {
     if (!config.userId || !config.githubConfig || !config.giteaConfig) {
       throw new Error("github config and gitea config are required.");
@@ -836,10 +841,6 @@ export const mirrorGithubRepoToGitea = async ({
         })
       );
     }
-
-    // Track whether the Gitea migrate call succeeded so the catch block
-    // knows whether to clear mirroredLocation (only safe before migrate succeeds)
-    let migrateSucceeded = false;
 
     const response = await httpPost(
       apiUrl,
@@ -1321,6 +1322,9 @@ export async function mirrorGitHubRepoToGiteaOrg({
   giteaOrgId: number;
   orgName: string;
 }) {
+  // Declared here (not inside try) so the catch block can read it.
+  // See note in mirrorGithubRepoToGitea for the scoping bug this prevents.
+  let migrateSucceeded = false;
   try {
     if (
       !config.giteaConfig?.url ||
@@ -1527,8 +1531,6 @@ export async function mirrorGitHubRepoToGiteaOrg({
         })
       );
     }
-
-    let migrateSucceeded = false;
 
     const migrateRes = await httpPost(
       apiUrl,
