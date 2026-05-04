@@ -100,6 +100,7 @@ Standard GitHub Enterprise Cloud on `github.com` works with the default — no o
 | `PRIVATE_REPOSITORIES` | Include private repositories | `false` | `true`, `false` |
 | `PUBLIC_REPOSITORIES` | Include public repositories | `true` | `true`, `false` |
 | `INCLUDE_ARCHIVED` | Include archived repositories | `false` | `true`, `false` |
+| `INCLUDE_COLLABORATOR_REPOS` | Include repositories where you are a collaborator (not just owned). Set to `false` to limit imports to repos you own. | `true` | `true`, `false` |
 | `SKIP_FORKS` | Skip forked repositories | `false` | `true`, `false` |
 | `MIRROR_STARRED` | Mirror starred repositories | `false` | `true`, `false` |
 | `MIRROR_STARRED_LISTS` | Optional comma-separated GitHub Star List names to mirror (only used when `MIRROR_STARRED=true`) | - | Comma-separated list names (empty = all starred repos) |

@@ -50,6 +50,7 @@ export function mapUiToDbConfig(
     // Map checkbox fields with proper names
     includeStarred: githubConfig.mirrorStarred,
     includePrivate: githubConfig.privateRepositories,
+    includeCollaboratorRepos: githubConfig.includeCollaboratorRepos ?? true,
     includeForks: !advancedOptions.skipForks, // Note: UI has skipForks, DB has includeForks
     skipForks: advancedOptions.skipForks, // Add skipForks field
     includeArchived: false, // Not in UI yet, default to false
@@ -142,6 +143,7 @@ export function mapDbToUiConfig(dbConfig: any): {
     username: dbConfig.githubConfig?.owner || "", // Map owner to username
     token: dbConfig.githubConfig?.token || "",
     privateRepositories: dbConfig.githubConfig?.includePrivate || false, // Map includePrivate to privateRepositories
+    includeCollaboratorRepos: dbConfig.githubConfig?.includeCollaboratorRepos ?? true,
     mirrorStarred: dbConfig.githubConfig?.includeStarred || false, // Map includeStarred to mirrorStarred
     starredLists: normalizeStarredLists(dbConfig.githubConfig?.starredLists),
   };

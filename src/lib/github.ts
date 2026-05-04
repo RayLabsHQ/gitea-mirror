@@ -235,14 +235,25 @@ export async function getGithubRepoCloneUrl({
 export async function getGithubRepositories({
   octokit,
   config,
+  includeCollaboratorReposOverride,
 }: {
   octokit: Octokit;
   config: Partial<Config>;
+  // Force-include collaborator repos regardless of user setting. Used by the
+  // cleanup service so we never mark a collab repo as orphaned just because
+  // the import filter is currently off.
+  includeCollaboratorReposOverride?: boolean;
 }): Promise<GitRepo[]> {
   try {
+    const includeCollab =
+      includeCollaboratorReposOverride ??
+      config.githubConfig?.includeCollaboratorRepos ??
+      true;
+    const affiliation = includeCollab ? "owner,collaborator" : "owner";
+
     const repos = await octokit.paginate(
       octokit.repos.listForAuthenticatedUser,
-      { per_page: 100 },
+      { per_page: 100, affiliation },
     );
 
     const skipForks = config.githubConfig?.skipForks ?? false;

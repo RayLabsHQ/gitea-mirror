@@ -33,9 +33,12 @@ async function identifyOrphanedRepositories(config: any): Promise<any[]> {
     let githubApiAccessible = true;
     
     try {
-      // Fetch GitHub data
+      // Fetch GitHub data. Always include collaborator repos here regardless
+      // of the user's import filter, otherwise repos previously mirrored as a
+      // collaborator would be flagged as orphaned and archived/deleted as soon
+      // as the user disables the filter.
       const [basicAndForkedRepos, starredRepos] = await Promise.all([
-        getGithubRepositories({ octokit, config }),
+        getGithubRepositories({ octokit, config, includeCollaboratorReposOverride: true }),
         config.githubConfig?.includeStarred
           ? getGithubStarredRepositories({ octokit, config })
           : Promise.resolve([]),

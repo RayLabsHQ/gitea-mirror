@@ -15,6 +15,7 @@ interface EnvConfig {
     type?: 'personal' | 'organization';
     privateRepositories?: boolean;
     publicRepositories?: boolean;
+    includeCollaboratorRepos?: boolean;
     mirrorStarred?: boolean;
     skipForks?: boolean;
     includeArchived?: boolean;
@@ -111,6 +112,11 @@ function parseEnvConfig(): EnvConfig {
       type: process.env.GITHUB_TYPE as 'personal' | 'organization',
       privateRepositories: process.env.PRIVATE_REPOSITORIES === 'true',
       publicRepositories: process.env.PUBLIC_REPOSITORIES === 'true',
+      // Tri-state parse so unset falls through to existingConfig / schema default (true).
+      includeCollaboratorRepos:
+        process.env.INCLUDE_COLLABORATOR_REPOS === 'true' ? true
+        : process.env.INCLUDE_COLLABORATOR_REPOS === 'false' ? false
+        : undefined,
       mirrorStarred: process.env.MIRROR_STARRED === 'true',
       skipForks: process.env.SKIP_FORKS === 'true',
       includeArchived: process.env.INCLUDE_ARCHIVED === 'true',
@@ -270,6 +276,7 @@ export async function initializeConfigFromEnv(): Promise<void> {
       includeArchived: envConfig.github.includeArchived ?? existingConfig?.[0]?.githubConfig?.includeArchived ?? false,
       includePrivate: envConfig.github.privateRepositories ?? existingConfig?.[0]?.githubConfig?.includePrivate ?? false,
       includePublic: envConfig.github.publicRepositories ?? existingConfig?.[0]?.githubConfig?.includePublic ?? true,
+      includeCollaboratorRepos: envConfig.github.includeCollaboratorRepos ?? existingConfig?.[0]?.githubConfig?.includeCollaboratorRepos ?? true,
       includeOrganizations: envConfig.github.mirrorOrganizations ? [] : (existingConfig?.[0]?.githubConfig?.includeOrganizations ?? []),
       starredReposOrg: envConfig.github.starredReposOrg || existingConfig?.[0]?.githubConfig?.starredReposOrg || 'starred',
       starredReposMode: envConfig.github.starredReposMode || existingConfig?.[0]?.githubConfig?.starredReposMode || 'dedicated-org',

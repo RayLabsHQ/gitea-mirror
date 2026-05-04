@@ -23,6 +23,7 @@ export const githubConfigSchema = z.object({
   includeArchived: z.boolean().default(false),
   includePrivate: z.boolean().default(true),
   includePublic: z.boolean().default(true),
+  includeCollaboratorRepos: z.boolean().default(true),
   includeOrganizations: z.array(z.string()).default([]),
   starredReposOrg: z.string().optional(),
   starredReposMode: z.enum(["dedicated-org", "preserve-owner"]).default("dedicated-org"),
