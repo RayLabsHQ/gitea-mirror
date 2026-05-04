@@ -269,6 +269,31 @@ export function AutomationSettings({
                       </div>
                     </div>
                   </div>
+
+                  <div className="flex items-start space-x-3 pt-1">
+                    <Checkbox
+                      id="enable-auto-mirror-new"
+                      checked={scheduleConfig.autoMirror ?? false}
+                      className="mt-1.25"
+                      onCheckedChange={(checked) =>
+                        onScheduleChange({
+                          ...scheduleConfig,
+                          autoMirror: !!checked,
+                        })
+                      }
+                    />
+                    <div className="space-y-0.5 flex-1">
+                      <Label
+                        htmlFor="enable-auto-mirror-new"
+                        className="text-sm font-normal cursor-pointer"
+                      >
+                        Auto-mirror new repositories
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        Automatically mirror newly imported repositories on each scheduled sync. When off, new repos are imported for browsing but require a manual mirror click. (Starred repos have their own toggle in GitHub settings.)
+                      </p>
+                    </div>
+                  </div>
                 </div>
               )}
 

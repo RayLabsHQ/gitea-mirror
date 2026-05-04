@@ -36,6 +36,7 @@ export interface ScheduleConfig {
   clockFrequencyHours?: number;
   startTime?: string;
   timezone?: string;
+  autoMirror?: boolean;
   lastRun?: Date;
   nextRun?: Date;
 }
