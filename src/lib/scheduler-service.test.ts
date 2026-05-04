@@ -58,6 +58,51 @@ describe("Scheduler Service - Ignored Repository Handling", () => {
     expect(shouldMirrorRepository(oldSyncedRepo)).toBe(true);
   });
 
+  test("auto-mirror filter respects autoMirror and autoMirrorStarred independently", () => {
+    // Mirrors the inline filter at scheduler-service.ts L228-233 / L609-614:
+    // a repo is "starred from another owner" iff isStarred && owner !== githubOwner.
+    // Such repos are gated by autoMirrorStarred; everything else is gated by autoMirror.
+    const githubOwner = "Alice".toLowerCase();
+    const filterRepos = (
+      repos: Array<{ name: string; isStarred: boolean; owner: string }>,
+      autoMirror: boolean,
+      autoMirrorStarred: boolean,
+    ) =>
+      repos.filter(repo => {
+        const isStarredFromOther = repo.isStarred && repo.owner.toLowerCase() !== githubOwner;
+        return isStarredFromOther ? autoMirrorStarred : autoMirror;
+      });
+
+    // "ALICE" tests case-insensitive owner match — GitHub usernames are case-insensitive,
+    // so a self-starred repo stored with different casing must still count as owned.
+    const repos = [
+      { name: "owned-repo", isStarred: false, owner: "alice" },
+      { name: "self-starred", isStarred: true, owner: "ALICE" },
+      { name: "starred-from-bob", isStarred: true, owner: "bob" },
+    ];
+
+    // Both off: nothing mirrors
+    expect(filterRepos(repos, false, false).map(r => r.name)).toEqual([]);
+
+    // Only autoMirror: owned + self-starred, not third-party stars
+    expect(filterRepos(repos, true, false).map(r => r.name)).toEqual([
+      "owned-repo",
+      "self-starred",
+    ]);
+
+    // Only autoMirrorStarred: just third-party stars (the bug fix — used to be empty)
+    expect(filterRepos(repos, false, true).map(r => r.name)).toEqual([
+      "starred-from-bob",
+    ]);
+
+    // Both on: everything
+    expect(filterRepos(repos, true, true).map(r => r.name)).toEqual([
+      "owned-repo",
+      "self-starred",
+      "starred-from-bob",
+    ]);
+  });
+
   test("should validate all repository status enum values", () => {
     const validStatuses = [
       "imported",
