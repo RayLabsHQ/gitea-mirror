@@ -898,14 +898,15 @@ export const mirrorGithubRepoToGitea = async ({
       }
     }
 
-    // Determine metadata operations to avoid duplicates
+    // Reconcile metadata on every sync (matches the release path above).
+    // The underlying mirror* functions are idempotent: issues/PRs are
+    // matched via [GH-ISSUE #N] / [GH-PR #N] markers and PATCHed in place,
+    // labels are deduped by name, milestones by title.
     const shouldMirrorIssuesThisRun =
-      !!config.giteaConfig?.mirrorIssues &&
-      !skipMetadataForStarred &&
-      !metadataState.components.issues;
+      !!config.giteaConfig?.mirrorIssues && !skipMetadataForStarred;
 
     console.log(
-      `[Metadata] Issue mirroring check: mirrorIssues=${config.giteaConfig?.mirrorIssues}, alreadyMirrored=${metadataState.components.issues}, isStarred=${repository.isStarred}, starredCodeOnly=${config.githubConfig?.starredCodeOnly}, shouldMirrorIssues=${shouldMirrorIssuesThisRun}`
+      `[Metadata] Issue mirroring check: mirrorIssues=${config.giteaConfig?.mirrorIssues}, isStarred=${repository.isStarred}, starredCodeOnly=${config.githubConfig?.starredCodeOnly}, shouldMirrorIssues=${shouldMirrorIssuesThisRun}`
     );
 
     if (shouldMirrorIssuesThisRun) {
@@ -931,19 +932,13 @@ export const mirrorGithubRepoToGitea = async ({
         );
         // Continue with other metadata operations even if issues fail
       }
-    } else if (config.giteaConfig?.mirrorIssues && metadataState.components.issues) {
-      console.log(
-        `[Metadata] Issues already mirrored for ${repository.name}; skipping to avoid duplicates`
-      );
     }
 
     const shouldMirrorPullRequests =
-      !!config.giteaConfig?.mirrorPullRequests &&
-      !skipMetadataForStarred &&
-      !metadataState.components.pullRequests;
+      !!config.giteaConfig?.mirrorPullRequests && !skipMetadataForStarred;
 
     console.log(
-      `[Metadata] Pull request mirroring check: mirrorPullRequests=${config.giteaConfig?.mirrorPullRequests}, alreadyMirrored=${metadataState.components.pullRequests}, isStarred=${repository.isStarred}, starredCodeOnly=${config.githubConfig?.starredCodeOnly}, shouldMirrorPullRequests=${shouldMirrorPullRequests}`
+      `[Metadata] Pull request mirroring check: mirrorPullRequests=${config.giteaConfig?.mirrorPullRequests}, isStarred=${repository.isStarred}, starredCodeOnly=${config.githubConfig?.starredCodeOnly}, shouldMirrorPullRequests=${shouldMirrorPullRequests}`
     );
 
     if (shouldMirrorPullRequests) {
@@ -968,23 +963,16 @@ export const mirrorGithubRepoToGitea = async ({
         );
         // Continue with other metadata operations even if PRs fail
       }
-    } else if (
-      config.giteaConfig?.mirrorPullRequests &&
-      metadataState.components.pullRequests
-    ) {
-      console.log(
-        `[Metadata] Pull requests already mirrored for ${repository.name}; skipping`
-      );
     }
 
+    // Labels-only path; issues run above already creates/reconciles labels.
     const shouldMirrorLabels =
       !!config.giteaConfig?.mirrorLabels &&
       !skipMetadataForStarred &&
-      !shouldMirrorIssuesThisRun &&
-      !metadataState.components.labels;
+      !shouldMirrorIssuesThisRun;
 
     console.log(
-      `[Metadata] Label mirroring check: mirrorLabels=${config.giteaConfig?.mirrorLabels}, alreadyMirrored=${metadataState.components.labels}, issuesRunning=${shouldMirrorIssuesThisRun}, isStarred=${repository.isStarred}, starredCodeOnly=${config.githubConfig?.starredCodeOnly}, shouldMirrorLabels=${shouldMirrorLabels}`
+      `[Metadata] Label mirroring check: mirrorLabels=${config.giteaConfig?.mirrorLabels}, issuesRunning=${shouldMirrorIssuesThisRun}, isStarred=${repository.isStarred}, starredCodeOnly=${config.githubConfig?.starredCodeOnly}, shouldMirrorLabels=${shouldMirrorLabels}`
     );
 
     if (shouldMirrorLabels) {
@@ -1009,19 +997,13 @@ export const mirrorGithubRepoToGitea = async ({
         );
         // Continue with other metadata operations even if labels fail
       }
-    } else if (config.giteaConfig?.mirrorLabels && metadataState.components.labels) {
-      console.log(
-        `[Metadata] Labels already mirrored for ${repository.name}; skipping`
-      );
     }
 
     const shouldMirrorMilestones =
-      !!config.giteaConfig?.mirrorMilestones &&
-      !skipMetadataForStarred &&
-      !metadataState.components.milestones;
+      !!config.giteaConfig?.mirrorMilestones && !skipMetadataForStarred;
 
     console.log(
-      `[Metadata] Milestone mirroring check: mirrorMilestones=${config.giteaConfig?.mirrorMilestones}, alreadyMirrored=${metadataState.components.milestones}, isStarred=${repository.isStarred}, starredCodeOnly=${config.githubConfig?.starredCodeOnly}, shouldMirrorMilestones=${shouldMirrorMilestones}`
+      `[Metadata] Milestone mirroring check: mirrorMilestones=${config.giteaConfig?.mirrorMilestones}, isStarred=${repository.isStarred}, starredCodeOnly=${config.githubConfig?.starredCodeOnly}, shouldMirrorMilestones=${shouldMirrorMilestones}`
     );
 
     if (shouldMirrorMilestones) {
@@ -1046,13 +1028,6 @@ export const mirrorGithubRepoToGitea = async ({
         );
         // Continue with other metadata operations even if milestones fail
       }
-    } else if (
-      config.giteaConfig?.mirrorMilestones &&
-      metadataState.components.milestones
-    ) {
-      console.log(
-        `[Metadata] Milestones already mirrored for ${repository.name}; skipping`
-      );
     }
 
     if (metadataUpdated) {
@@ -1587,13 +1562,13 @@ export async function mirrorGitHubRepoToGiteaOrg({
       }
     }
 
+    // Reconcile metadata on every sync. See note in mirrorGithubRepoToGitea
+    // above. The underlying mirror* functions are idempotent.
     const shouldMirrorIssuesThisRun =
-      !!config.giteaConfig?.mirrorIssues &&
-      !skipMetadataForStarred &&
-      !metadataState.components.issues;
+      !!config.giteaConfig?.mirrorIssues && !skipMetadataForStarred;
 
     console.log(
-      `[Metadata] Issue mirroring check: mirrorIssues=${config.giteaConfig?.mirrorIssues}, alreadyMirrored=${metadataState.components.issues}, isStarred=${repository.isStarred}, starredCodeOnly=${config.githubConfig?.starredCodeOnly}, shouldMirrorIssues=${shouldMirrorIssuesThisRun}`
+      `[Metadata] Issue mirroring check: mirrorIssues=${config.giteaConfig?.mirrorIssues}, isStarred=${repository.isStarred}, starredCodeOnly=${config.githubConfig?.starredCodeOnly}, shouldMirrorIssues=${shouldMirrorIssuesThisRun}`
     );
 
     if (shouldMirrorIssuesThisRun) {
@@ -1619,22 +1594,13 @@ export async function mirrorGitHubRepoToGiteaOrg({
         );
         // Continue with other metadata operations even if issues fail
       }
-    } else if (
-      config.giteaConfig?.mirrorIssues &&
-      metadataState.components.issues
-    ) {
-      console.log(
-        `[Metadata] Issues already mirrored for ${repository.name}; skipping`
-      );
     }
 
     const shouldMirrorPullRequests =
-      !!config.giteaConfig?.mirrorPullRequests &&
-      !skipMetadataForStarred &&
-      !metadataState.components.pullRequests;
+      !!config.giteaConfig?.mirrorPullRequests && !skipMetadataForStarred;
 
     console.log(
-      `[Metadata] Pull request mirroring check: mirrorPullRequests=${config.giteaConfig?.mirrorPullRequests}, alreadyMirrored=${metadataState.components.pullRequests}, isStarred=${repository.isStarred}, starredCodeOnly=${config.githubConfig?.starredCodeOnly}, shouldMirrorPullRequests=${shouldMirrorPullRequests}`
+      `[Metadata] Pull request mirroring check: mirrorPullRequests=${config.giteaConfig?.mirrorPullRequests}, isStarred=${repository.isStarred}, starredCodeOnly=${config.githubConfig?.starredCodeOnly}, shouldMirrorPullRequests=${shouldMirrorPullRequests}`
     );
 
     if (shouldMirrorPullRequests) {
@@ -1659,23 +1625,16 @@ export async function mirrorGitHubRepoToGiteaOrg({
         );
         // Continue with other metadata operations even if PRs fail
       }
-    } else if (
-      config.giteaConfig?.mirrorPullRequests &&
-      metadataState.components.pullRequests
-    ) {
-      console.log(
-        `[Metadata] Pull requests already mirrored for ${repository.name}; skipping`
-      );
     }
 
+    // Labels-only path; issues run above already creates/reconciles labels.
     const shouldMirrorLabels =
       !!config.giteaConfig?.mirrorLabels &&
       !skipMetadataForStarred &&
-      !shouldMirrorIssuesThisRun &&
-      !metadataState.components.labels;
+      !shouldMirrorIssuesThisRun;
 
     console.log(
-      `[Metadata] Label mirroring check: mirrorLabels=${config.giteaConfig?.mirrorLabels}, alreadyMirrored=${metadataState.components.labels}, issuesRunning=${shouldMirrorIssuesThisRun}, isStarred=${repository.isStarred}, starredCodeOnly=${config.githubConfig?.starredCodeOnly}, shouldMirrorLabels=${shouldMirrorLabels}`
+      `[Metadata] Label mirroring check: mirrorLabels=${config.giteaConfig?.mirrorLabels}, issuesRunning=${shouldMirrorIssuesThisRun}, isStarred=${repository.isStarred}, starredCodeOnly=${config.githubConfig?.starredCodeOnly}, shouldMirrorLabels=${shouldMirrorLabels}`
     );
 
     if (shouldMirrorLabels) {
@@ -1700,22 +1659,13 @@ export async function mirrorGitHubRepoToGiteaOrg({
         );
         // Continue with other metadata operations even if labels fail
       }
-    } else if (
-      config.giteaConfig?.mirrorLabels &&
-      metadataState.components.labels
-    ) {
-      console.log(
-        `[Metadata] Labels already mirrored for ${repository.name}; skipping`
-      );
     }
 
     const shouldMirrorMilestones =
-      !!config.giteaConfig?.mirrorMilestones &&
-      !skipMetadataForStarred &&
-      !metadataState.components.milestones;
+      !!config.giteaConfig?.mirrorMilestones && !skipMetadataForStarred;
 
     console.log(
-      `[Metadata] Milestone mirroring check: mirrorMilestones=${config.giteaConfig?.mirrorMilestones}, alreadyMirrored=${metadataState.components.milestones}, isStarred=${repository.isStarred}, starredCodeOnly=${config.githubConfig?.starredCodeOnly}, shouldMirrorMilestones=${shouldMirrorMilestones}`
+      `[Metadata] Milestone mirroring check: mirrorMilestones=${config.giteaConfig?.mirrorMilestones}, isStarred=${repository.isStarred}, starredCodeOnly=${config.githubConfig?.starredCodeOnly}, shouldMirrorMilestones=${shouldMirrorMilestones}`
     );
 
     if (shouldMirrorMilestones) {
@@ -1740,13 +1690,6 @@ export async function mirrorGitHubRepoToGiteaOrg({
         );
         // Continue with other metadata operations even if milestones fail
       }
-    } else if (
-      config.giteaConfig?.mirrorMilestones &&
-      metadataState.components.milestones
-    ) {
-      console.log(
-        `[Metadata] Milestones already mirrored for ${repository.name}; skipping`
-      );
     }
 
     if (metadataUpdated) {

@@ -601,25 +601,23 @@ export async function syncGiteaRepoEnhanced({
         return metadataOctokit;
       };
 
+      // Reconcile metadata on every sync (matches the release path).
+      // The underlying mirror* functions are idempotent: issues/PRs are
+      // matched via [GH-ISSUE #N] / [GH-PR #N] markers and PATCHed in
+      // place, labels are deduped by name, milestones by title.
       const shouldMirrorReleases =
         !!config.giteaConfig?.mirrorReleases && !skipMetadataForStarred;
       const shouldMirrorIssuesThisRun =
-        !!config.giteaConfig?.mirrorIssues &&
-        !skipMetadataForStarred &&
-        !metadataState.components.issues;
+        !!config.giteaConfig?.mirrorIssues && !skipMetadataForStarred;
       const shouldMirrorPullRequests =
-        !!config.giteaConfig?.mirrorPullRequests &&
-        !skipMetadataForStarred &&
-        !metadataState.components.pullRequests;
+        !!config.giteaConfig?.mirrorPullRequests && !skipMetadataForStarred;
+      // Labels-only path; issues run already creates/reconciles labels.
       const shouldMirrorLabels =
         !!config.giteaConfig?.mirrorLabels &&
         !skipMetadataForStarred &&
-        !shouldMirrorIssuesThisRun &&
-        !metadataState.components.labels;
+        !shouldMirrorIssuesThisRun;
       const shouldMirrorMilestones =
-        !!config.giteaConfig?.mirrorMilestones &&
-        !skipMetadataForStarred &&
-        !metadataState.components.milestones;
+        !!config.giteaConfig?.mirrorMilestones && !skipMetadataForStarred;
 
       if (shouldMirrorReleases) {
         const octokit = ensureOctokit();
@@ -684,13 +682,6 @@ export async function syncGiteaRepoEnhanced({
             );
           }
         }
-      } else if (
-        config.giteaConfig?.mirrorIssues &&
-        metadataState.components.issues
-      ) {
-        console.log(
-          `[Sync] Issues already mirrored for ${repository.name}; skipping to avoid duplicates`
-        );
       }
 
       if (shouldMirrorPullRequests) {
@@ -721,13 +712,6 @@ export async function syncGiteaRepoEnhanced({
             );
           }
         }
-      } else if (
-        config.giteaConfig?.mirrorPullRequests &&
-        metadataState.components.pullRequests
-      ) {
-        console.log(
-          `[Sync] Pull requests already mirrored for ${repository.name}; skipping`
-        );
       }
 
       if (shouldMirrorLabels) {
@@ -760,13 +744,6 @@ export async function syncGiteaRepoEnhanced({
             );
           }
         }
-      } else if (
-        config.giteaConfig?.mirrorLabels &&
-        metadataState.components.labels
-      ) {
-        console.log(
-          `[Sync] Labels already mirrored for ${repository.name}; skipping`
-        );
       }
 
       if (shouldMirrorMilestones) {
@@ -799,13 +776,6 @@ export async function syncGiteaRepoEnhanced({
             );
           }
         }
-      } else if (
-        config.giteaConfig?.mirrorMilestones &&
-        metadataState.components.milestones
-      ) {
-        console.log(
-          `[Sync] Milestones already mirrored for ${repository.name}; skipping`
-        );
       }
 
       if (metadataUpdated) {

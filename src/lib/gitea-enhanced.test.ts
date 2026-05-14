@@ -848,12 +848,15 @@ describe("Enhanced Gitea Operations", () => {
         }
       );
 
-      // All metadata components were previously synced, so none should be called again
+      // Metadata reconciliation now runs on every sync (mirror* functions
+      // are idempotent and PATCH existing entries by marker/name/title).
+      // Releases are still skipped here because the flag is off in this config.
+      // Labels are still skipped because the issues path also handles labels.
       expect(mockMirrorGitHubReleasesToGitea).not.toHaveBeenCalled();
-      expect(mockMirrorGitRepoIssuesToGitea).not.toHaveBeenCalled();
-      expect(mockMirrorGitRepoPullRequestsToGitea).not.toHaveBeenCalled();
+      expect(mockMirrorGitRepoIssuesToGitea).toHaveBeenCalledTimes(1);
+      expect(mockMirrorGitRepoPullRequestsToGitea).toHaveBeenCalledTimes(1);
       expect(mockMirrorGitRepoLabelsToGitea).not.toHaveBeenCalled();
-      expect(mockMirrorGitRepoMilestonesToGitea).not.toHaveBeenCalled();
+      expect(mockMirrorGitRepoMilestonesToGitea).toHaveBeenCalledTimes(1);
     });
   });
 
