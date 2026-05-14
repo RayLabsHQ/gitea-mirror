@@ -249,7 +249,13 @@ export async function getGithubRepositories({
       includeCollaboratorReposOverride ??
       config.githubConfig?.includeCollaboratorRepos ??
       true;
-    const affiliation = includeCollab ? "owner,collaborator" : "owner";
+    // Always include organization_member so repos owned by orgs the user
+    // belongs to are returned. Omitting it caused org repos to be invisible
+    // to the main sync, the scheduler, and the cleanup service (which then
+    // archived them on restart as if they had been deleted on GitHub).
+    const affiliation = includeCollab
+      ? "owner,collaborator,organization_member"
+      : "owner,organization_member";
 
     const repos = await octokit.paginate(
       octokit.repos.listForAuthenticatedUser,
