@@ -83,17 +83,12 @@
   "overrides": {
     "@esbuild-kit/esm-loader": "npm:tsx@^4.21.0",
     "@xmldom/xmldom": "^0.8.13",
-    "defu": "^6.1.7",
     "devalue": "^5.8.1",
     "fast-uri": "^3.1.2",
     "fast-xml-builder": "^1.1.7",
-    "fast-xml-parser": "^5.5.6",
     "kysely": "^0.28.17",
     "lodash": "^4.18.1",
-    "node-forge": "^1.3.3",
     "picomatch": "^4.0.4",
-    "rollup": ">=4.59.0",
-    "svgo": "^4.0.1",
   },
   "packages": {
     "@acemir/cssom": ["@acemir/cssom@0.9.31", "", {}, "sha512-ZnR3GSaH+/vJ0YlHau21FjfLYjMpYVIzTD8M8vIEQvIGxeOXyXdzCI140rrCY862p/C/BbzWsjc1dgnM9mkoTA=="],
