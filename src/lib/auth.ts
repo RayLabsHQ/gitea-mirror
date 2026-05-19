@@ -145,6 +145,12 @@ export const auth = betterAuth({
         input: false, // Don't show in signup form - we'll derive from email
       }
     },
+    changeEmail: {
+      enabled: true,
+      // Email verification isn't wired up (sendResetPassword is a TODO),
+      // so allow direct updates. Safe here because emails stay unverified.
+      updateEmailWithoutVerification: true,
+    },
   },
 
   // Plugins configuration

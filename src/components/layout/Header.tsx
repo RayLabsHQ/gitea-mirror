@@ -2,18 +2,11 @@ import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 
 import { ModeToggle } from "@/components/theme/ModeToggle";
-import { Avatar, AvatarFallback, AvatarImage } from "../ui/avatar";
-import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useLiveRefresh } from "@/hooks/useLiveRefresh";
 import { useConfigStatus } from "@/hooks/useConfigStatus";
-import { Menu, LogOut, PanelRightOpen, PanelRightClose } from "lucide-react";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { PanelRightOpen, PanelRightClose } from "lucide-react";
+import { AccountMenu } from "@/components/auth/AccountMenu";
 import { withBase } from "@/lib/base-path";
 
 interface HeaderProps {
@@ -26,7 +19,7 @@ interface HeaderProps {
 }
 
 export function Header({ currentPage, onNavigate, onMenuClick, onToggleCollapse, isSidebarCollapsed, isSidebarOpen }: HeaderProps) {
-  const { user, logout, isLoading } = useAuth();
+  const { isLoading } = useAuth();
   const { isLiveEnabled, toggleLive } = useLiveRefresh();
   const { isFullyConfigured, isLoading: configLoading } = useConfigStatus();
 
@@ -45,13 +38,6 @@ export function Header({ currentPage, onNavigate, onMenuClick, onToggleCollapse,
         : 'Enable live refresh (requires GitHub and Gitea configuration)';
     }
     return isLiveEnabled ? 'Disable live refresh' : 'Enable live refresh';
-  };
-
-  const handleLogout = async () => {
-    toast.success("Logged out successfully");
-    // Small delay to show the toast before redirecting
-    await new Promise((resolve) => setTimeout(resolve, 500));
-    logout();
   };
 
   // Auth buttons skeleton loader
@@ -141,32 +127,7 @@ export function Header({ currentPage, onNavigate, onMenuClick, onToggleCollapse,
 
           <ModeToggle />
 
-          {isLoading ? (
-            <AuthButtonsSkeleton />
-          ) : user ? (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="lg" className="relative h-10 w-10 rounded-full p-0">
-                  <Avatar className="h-full w-full">
-                    <AvatarImage src={user.image || ""} alt={user.name || user.email} />
-                    <AvatarFallback>
-                      {(user.name || user.email || "U").charAt(0).toUpperCase()}
-                    </AvatarFallback>
-                  </Avatar>
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48">
-                <DropdownMenuItem onClick={handleLogout} className="cursor-pointer">
-                  <LogOut className="h-4 w-4 mr-2" />
-                  Logout
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          ) : (
-            <Button variant="outline" size="sm" asChild>
-              <a href={withBase('/login')}>Login</a>
-            </Button>
-          )}
+          {isLoading ? <AuthButtonsSkeleton /> : <AccountMenu />}
         </div>
       </div>
     </header>
