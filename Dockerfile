@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1.4
 
-FROM oven/bun:1.3.13-debian AS base
+FROM oven/bun:1.3.14-debian@sha256:9dba1a1b43ce28c9d7931bfc4eb00feb63b0114720a0277a8f939ae4dfc9db6f AS base
 WORKDIR /app
 RUN apt-get update && apt-get -y upgrade && apt-get install -y --no-install-recommends \
   python3 make g++ gcc wget sqlite3 openssl ca-certificates \
@@ -49,7 +49,7 @@ RUN git clone --branch "v${GIT_LFS_VERSION}" --depth 1 https://github.com/git-lf
   && install -m 755 /tmp/git-lfs/bin/git-lfs /usr/local/bin/git-lfs
 
 # ----------------------------
-FROM oven/bun:1.3.13-debian AS runner
+FROM oven/bun:1.3.14-debian@sha256:9dba1a1b43ce28c9d7931bfc4eb00feb63b0114720a0277a8f939ae4dfc9db6f AS runner
 WORKDIR /app
 RUN apt-get update && apt-get -y upgrade && apt-get install -y --no-install-recommends \
   git wget sqlite3 openssl ca-certificates \
