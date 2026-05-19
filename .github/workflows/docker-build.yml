@@ -51,13 +51,13 @@ jobs:
           ref: ${{ env.SHA }}
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
         with:
           driver-opts: network=host
 
       - name: Log into registry
         if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -66,7 +66,7 @@ jobs:
       # Login to Docker Hub for Docker Scout (optional - provides better vulnerability data)
       # Add DOCKERHUB_USERNAME and DOCKERHUB_TOKEN secrets to enable this
       - name: Log into Docker Hub
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         continue-on-error: true
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -108,7 +108,7 @@ jobs:
       # Extract metadata for Docker
       - name: Extract Docker metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE }}
           labels: |
@@ -124,7 +124,7 @@ jobs:
       # Build and push Docker image
       - name: Build and push Docker image
         id: build-and-push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -139,7 +139,7 @@ jobs:
       # Load image locally for security scanning (PRs only)
       - name: Load image for scanning
         if: github.event_name == 'pull_request'
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           platforms: linux/amd64
@@ -212,7 +212,7 @@ jobs:
 
       # Docker Scout comprehensive security analysis
       - name: Docker Scout - Vulnerability Analysis & Recommendations
-        uses: docker/scout-action@v1
+        uses: docker/scout-action@bacf462e8d090c09660de30a6ccc718035f961e3 # v1.20.4
         if: github.event_name != 'pull_request'
         with:
           command: cves,recommendations
@@ -226,7 +226,7 @@ jobs:
 
       # Docker Scout for Pull Requests (using local image)
       - name: Docker Scout - Vulnerability Analysis (PR)
-        uses: docker/scout-action@v1
+        uses: docker/scout-action@bacf462e8d090c09660de30a6ccc718035f961e3 # v1.20.4
         if: github.event_name == 'pull_request'
         with:
           command: cves,recommendations
@@ -240,7 +240,7 @@ jobs:
 
       # Compare to latest for PRs and pushes
       - name: Docker Scout - Compare to Latest
-        uses: docker/scout-action@v1
+        uses: docker/scout-action@bacf462e8d090c09660de30a6ccc718035f961e3 # v1.20.4
         if: github.event_name == 'pull_request'
         with:
           command: compare
