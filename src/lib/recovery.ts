@@ -121,8 +121,9 @@ export async function initializeRecovery(options: {
       // Clean up stale jobs first
       await cleanupStaleJobs();
 
-      // Find interrupted jobs
-      const interruptedJobs = await findInterruptedJobs();
+      // Find interrupted jobs (with per-job logging — this is the
+      // active recovery path that will immediately try to resume them)
+      const interruptedJobs = await findInterruptedJobs({ logFound: true });
 
       if (interruptedJobs.length === 0) {
         console.log('No interrupted jobs found.');
