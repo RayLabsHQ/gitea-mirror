@@ -2146,7 +2146,21 @@ export const mirrorGitRepoIssuesToGitea = async ({
     if (!pageIssues.length) break;
 
     existingGiteaIssues.push(...pageIssues);
-    if (pageIssues.length < issuesPerPage) break;
+
+    // Use the Link header (RFC 5988) to decide whether more pages
+    // exist. The old short-page-length heuristic was wrong in both
+    // directions:
+    //   - Gitea caps response size at `[api].MAX_RESPONSE_ITEMS`
+    //     (default 50), typically lower than `issuesPerPage` (100),
+    //     so the very first page already looks "short" and
+    //     pagination terminated after 50 items — every issue past
+    //     that was misclassified as new and duplicated on every sync.
+    //   - For some endpoints Gitea returns the same data on every
+    //     page when the page is past the end, so a naive "break on
+    //     empty" alone can loop forever if the server doesn't return
+    //     []. Link header is the safe signal.
+    const linkHeader = existingIssuesRes.headers.get("link") || "";
+    if (!/\brel="next"/.test(linkHeader)) break;
     issuesPage += 1;
   }
 
@@ -2289,30 +2303,85 @@ export const mirrorGitRepoIssuesToGitea = async ({
           }
         );
       } else {
-        const createdIssue = await httpPost(
-          `${config.giteaConfig!.url}/api/v1/repos/${giteaOwner}/${repoName}/issues`,
-          issuePayload,
-          {
-            Authorization: `token ${decryptedConfig.giteaConfig!.token}`,
-          }
-        );
-        targetIssueNumber = createdIssue.data.number;
+        // Defensive recheck before create: a previous retry attempt may
+        // have already created this issue and then thrown. The common
+        // trigger is Gitea's CreateIssue handler committing the issue
+        // insert in one transaction and then deadlocking on the
+        // addLabel / repository counter update in a second transaction.
+        // The issue row is committed and visible, but the in-memory
+        // giteaIssueByGitHubNumber map (built once at function entry)
+        // doesn't know about it, so without this check processWithRetry
+        // would create a duplicate every time the create returns 5xx
+        // after a partial commit.
+        //
+        // Reproduces deterministically on MySQL (Error 1213 / 40001)
+        // and PostgreSQL (40P01); SQLite escapes because writes
+        // serialize globally.
+        let recheckHit: any = null;
+        try {
+          const recheck = await httpGet(
+            `${config.giteaConfig!.url}/api/v1/repos/${giteaOwner}/${repoName}/issues?state=all&type=issues&q=${encodeURIComponent(`[GH-ISSUE #${issue.number}]`)}`,
+            {
+              Authorization: `token ${decryptedConfig.giteaConfig!.token}`,
+            }
+          );
+          const candidates = Array.isArray(recheck.data) ? recheck.data : [];
+          recheckHit = candidates.find(
+            (c: any) => extractGitHubIssueNumber(c.title) === issue.number
+          ) ?? null;
+        } catch (_recheckErr) {
+          // Best-effort; fall through to create.
+        }
 
-        if (issue.state === "closed" && createdIssue.data.state !== "closed") {
-          try {
-            await httpPatch(
-              `${config.giteaConfig!.url}/api/v1/repos/${giteaOwner}/${repoName}/issues/${targetIssueNumber}`,
-              { state: "closed" },
-              {
-                Authorization: `token ${decryptedConfig.giteaConfig!.token}`,
-              }
-            );
-          } catch (closeError) {
-            console.error(
-              `[Issues] Failed to close issue #${targetIssueNumber}: ${
-                closeError instanceof Error ? closeError.message : String(closeError)
-              }`
-            );
+        if (recheckHit) {
+          giteaIssueByGitHubNumber.set(issue.number, recheckHit);
+          existingIssue = recheckHit;
+          targetIssueNumber = recheckHit.number;
+          console.log(
+            `[Issues] Recovered orphan from prior failed attempt for #${issue.number}; switching to PATCH`
+          );
+          await httpPatch(
+            `${config.giteaConfig!.url}/api/v1/repos/${giteaOwner}/${repoName}/issues/${targetIssueNumber}`,
+            {
+              title: issuePayload.title,
+              body: issuePayload.body,
+              state: issue.state === "closed" ? "closed" : "open",
+              labels: issuePayload.labels,
+            },
+            {
+              Authorization: `token ${decryptedConfig.giteaConfig!.token}`,
+            }
+          );
+        } else {
+          const createdIssue = await httpPost(
+            `${config.giteaConfig!.url}/api/v1/repos/${giteaOwner}/${repoName}/issues`,
+            issuePayload,
+            {
+              Authorization: `token ${decryptedConfig.giteaConfig!.token}`,
+            }
+          );
+          targetIssueNumber = createdIssue.data.number;
+          // Cache the new issue immediately so a subsequent retry of
+          // this callback (e.g. triggered by a later step like comment
+          // sync failing) doesn't lose track of it.
+          giteaIssueByGitHubNumber.set(issue.number, createdIssue.data);
+
+          if (issue.state === "closed" && createdIssue.data.state !== "closed") {
+            try {
+              await httpPatch(
+                `${config.giteaConfig!.url}/api/v1/repos/${giteaOwner}/${repoName}/issues/${targetIssueNumber}`,
+                { state: "closed" },
+                {
+                  Authorization: `token ${decryptedConfig.giteaConfig!.token}`,
+                }
+              );
+            } catch (closeError) {
+              console.error(
+                `[Issues] Failed to close issue #${targetIssueNumber}: ${
+                  closeError instanceof Error ? closeError.message : String(closeError)
+                }`
+              );
+            }
           }
         }
       }
@@ -2355,7 +2424,13 @@ export const mirrorGitRepoIssuesToGitea = async ({
             : [];
           if (!pageComments.length) break;
           existingComments.push(...pageComments);
-          if (pageComments.length < commentsPerPage) break;
+          // Use the Link header to decide whether more pages exist.
+          // See note on the existing-issues pagination above; the
+          // same Gitea behaviors (MAX_RESPONSE_ITEMS cap and
+          // repeated-data on out-of-bound pages) apply here.
+          const commentsLinkHeader =
+            existingCommentsRes.headers.get("link") || "";
+          if (!/\brel="next"/.test(commentsLinkHeader)) break;
           commentsPage += 1;
         }
         const mirroredCommentIds = new Set<number>();
@@ -2983,7 +3058,12 @@ export async function mirrorGitRepoPullRequestsToGitea({
       }
     }
 
-    if (pageIssues.length < prIssuesPerPage) break;
+    // See note on the existing-issues pre-fetch above: rely on Link
+    // header (RFC 5988) rather than short-page heuristic. Gitea caps
+    // page size at MAX_RESPONSE_ITEMS (default 50), and some
+    // endpoints repeat data on out-of-bound pages instead of [].
+    const linkHeader = existingIssuesRes.headers.get("link") || "";
+    if (!/\brel="next"/.test(linkHeader)) break;
     prIssuesPage += 1;
   }
 
@@ -3084,7 +3164,36 @@ export async function mirrorGitRepoPullRequestsToGitea({
           closed: pr.state === "closed" || pr.merged_at !== null,
         };
 
-        const existingPrIssue = existingPrIssuesByNumber.get(pr.number);
+        let existingPrIssue = existingPrIssuesByNumber.get(pr.number);
+        // Defensive recheck (see same pattern in mirrorGitRepoIssuesToGitea):
+        // a previous attempt may have committed the PR-issue row and
+        // then thrown on the addLabel/repository-counter update. The
+        // pre-fetched map doesn't know about it, so without this check
+        // processWithRetry would create a duplicate every retry.
+        if (!existingPrIssue) {
+          try {
+            const recheck = await httpGet(
+              `${config.giteaConfig!.url}/api/v1/repos/${giteaOwner}/${repoName}/issues?state=all&type=issues&q=${encodeURIComponent(`[PR #${pr.number}]`)}`,
+              {
+                Authorization: `token ${decryptedConfig.giteaConfig!.token}`,
+              }
+            );
+            const candidates = Array.isArray(recheck.data) ? recheck.data : [];
+            const hit = candidates.find((c: any) => {
+              const m = String(c.title || "").match(/\[PR #(\d+)\]/i);
+              return m && Number.parseInt(m[1], 10) === pr.number;
+            });
+            if (hit) {
+              existingPrIssue = hit;
+              existingPrIssuesByNumber.set(pr.number, hit);
+              console.log(
+                `[Pull Requests] Recovered orphan from prior failed attempt for PR #${pr.number}; switching to PATCH`
+              );
+            }
+          } catch (_recheckErr) {
+            // Best-effort; fall through to create.
+          }
+        }
         if (existingPrIssue) {
           await httpPatch(
             `${config.giteaConfig!.url}/api/v1/repos/${giteaOwner}/${repoName}/issues/${existingPrIssue.number}`,
@@ -3145,7 +3254,34 @@ export async function mirrorGitRepoPullRequestsToGitea({
         };
         
         try {
-          const existingPrIssue = existingPrIssuesByNumber.get(pr.number);
+          let existingPrIssue = existingPrIssuesByNumber.get(pr.number);
+          // Defensive recheck — same pattern as the enriched create
+          // branch above. Without this, the basic-info fallback would
+          // dup on retry-after-deadlock just like the enriched path.
+          if (!existingPrIssue) {
+            try {
+              const recheck = await httpGet(
+                `${config.giteaConfig!.url}/api/v1/repos/${giteaOwner}/${repoName}/issues?state=all&type=issues&q=${encodeURIComponent(`[PR #${pr.number}]`)}`,
+                {
+                  Authorization: `token ${decryptedConfig.giteaConfig!.token}`,
+                }
+              );
+              const candidates = Array.isArray(recheck.data) ? recheck.data : [];
+              const hit = candidates.find((c: any) => {
+                const m = String(c.title || "").match(/\[PR #(\d+)\]/i);
+                return m && Number.parseInt(m[1], 10) === pr.number;
+              });
+              if (hit) {
+                existingPrIssue = hit;
+                existingPrIssuesByNumber.set(pr.number, hit);
+                console.log(
+                  `[Pull Requests] Recovered orphan from prior failed attempt for PR #${pr.number} (basic fallback); switching to PATCH`
+                );
+              }
+            } catch (_recheckErr) {
+              // Best-effort; fall through to create.
+            }
+          }
           if (existingPrIssue) {
             await httpPatch(
               `${config.giteaConfig!.url}/api/v1/repos/${giteaOwner}/${repoName}/issues/${existingPrIssue.number}`,
