@@ -17,9 +17,16 @@ function prefixAstroInternalAssetPaths(html: string, basePath: string): string {
   return html.replace(ASTRO_INTERNAL_ASSET_PATH_PATTERN, `$1${basePath}/$2`);
 }
 
-// Flag to track if recovery has been initialized
+// Flag to track whether the *startup* recovery pass has run. This
+// only gates the post-startup chain (cleanup service, scheduler,
+// etc.) and the "startup script may not have run" log line — it does
+// NOT gate subsequent recovery attempts, see below.
 let recoveryInitialized = false;
-let recoveryAttempted = false;
+// Throttle for runtime recovery retries (separate from the
+// initializeRecovery() 5-minute throttle inside recovery.ts, which is
+// keyed on `lastRecoveryAttempt`). This prevents one middleware
+// invocation from triggering recovery while another is in flight.
+let recoveryInFlight = false;
 let cleanupServiceStarted = false;
 let schedulerServiceStarted = false;
 let repositoryCleanupServiceStarted = false;
@@ -118,17 +125,30 @@ export const onRequest = defineMiddleware(async (context, next) => {
     }
   }
 
-  // Initialize recovery system only once when the server starts
-  // This is a fallback in case the startup script didn't run
-  if (!recoveryInitialized && !recoveryAttempted) {
-    recoveryAttempted = true;
+  // Run recovery if jobs need it.
+  //
+  // The previous implementation used a once-per-process gate, so
+  // any mid-runtime interruption (a sync that started after boot,
+  // crashed mid-flight, and never got back to the resume path)
+  // would sit at `in_progress=true` forever — the periodic detector
+  // kept finding it, but the resumer never re-fired. This block
+  // now re-evaluates on every request, gated by `recoveryInFlight`
+  // (per-process) plus the 5-minute throttle inside
+  // `initializeRecovery()` (which prevents thrashing if a resume
+  // cycle keeps failing).
+  if (!recoveryInFlight) {
+    recoveryInFlight = true;
 
     try {
       // Check if recovery is actually needed before attempting
       const needsRecovery = await hasJobsNeedingRecovery();
 
       if (needsRecovery) {
-        console.log('⚠️  Middleware detected jobs needing recovery (startup script may not have run)');
+        if (!recoveryInitialized) {
+          console.log('⚠️  Middleware detected jobs needing recovery (startup script may not have run)');
+        } else {
+          console.log('⚠️  Middleware detected jobs needing recovery mid-run (sync interrupted after startup)');
+        }
         console.log('Attempting recovery from middleware...');
 
         // Run recovery with a shorter timeout since this is during request handling
@@ -148,7 +168,9 @@ export const onRequest = defineMiddleware(async (context, next) => {
         } else {
           console.log('⚠️  Middleware recovery completed with some issues');
         }
-      } else {
+      } else if (!recoveryInitialized) {
+        // Only log this on the first request; otherwise we'd spam
+        // it on every request.
         console.log('✅ No recovery needed (startup script likely handled it)');
       }
 
@@ -161,7 +183,9 @@ export const onRequest = defineMiddleware(async (context, next) => {
       const status = getRecoveryStatus();
       console.log('Recovery status:', status);
 
-      recoveryInitialized = true; // Mark as attempted to avoid retries
+      recoveryInitialized = true;
+    } finally {
+      recoveryInFlight = false;
     }
   }
 

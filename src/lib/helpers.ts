@@ -216,9 +216,21 @@ export async function updateMirrorJobProgress({
 }
 
 /**
- * Finds interrupted jobs that need to be resumed with enhanced criteria
+ * Finds interrupted jobs that need to be resumed with enhanced criteria.
+ *
+ * `logFound` defaults to false because this function is polled from
+ * passive callers (`hasJobsNeedingRecovery` from the health endpoint
+ * and middleware checks). Logging on every poll produces log spam at
+ * one-line-per-poll-per-stuck-job for as long as a job stays stuck.
+ *
+ * Callers that intend to act on the result (i.e. immediately resume
+ * the returned jobs) should pass `logFound: true` so the surfacing
+ * still happens in the recovery flow.
  */
-export async function findInterruptedJobs() {
+export async function findInterruptedJobs(
+  options: { logFound?: boolean } = {}
+) {
+  const { logFound = false } = options;
   try {
     // Find jobs that are marked as in-progress but haven't been updated recently
     const cutoffTime = new Date();
@@ -243,8 +255,9 @@ export async function findInterruptedJobs() {
         )
       );
 
-    // Log details about found jobs for debugging
-    if (interruptedJobs.length > 0) {
+    // Log details about found jobs for debugging — opt-in to avoid
+    // spamming the log when called from periodic passive checks.
+    if (logFound && interruptedJobs.length > 0) {
       console.log(`Found ${interruptedJobs.length} interrupted jobs:`);
       interruptedJobs.forEach(job => {
         const lastCheckpoint = job.lastCheckpoint ? new Date(job.lastCheckpoint).toISOString() : 'never';
