@@ -3408,17 +3408,28 @@ export async function mirrorGitRepoLabelsToGitea({
     return;
   }
 
-  // Get existing labels from Gitea
-  const giteaLabelsRes = await httpGet(
-    `${config.giteaConfig.url}/api/v1/repos/${giteaOwner}/${repoName}/labels`,
-    {
-      Authorization: `token ${decryptedConfig.giteaConfig.token}`,
-    }
-  );
-
-  const existingLabels = new Set(
-    giteaLabelsRes.data.map((label: any) => label.name)
-  );
+  // Get existing labels from Gitea. Paginate via Link header (RFC 5988):
+  // Gitea caps response size at `[api].MAX_RESPONSE_ITEMS` (default 50),
+  // so a single unpaginated GET only sees the first 50 labels. Once a
+  // repo crosses that threshold every label past it would be re-POSTed
+  // as a duplicate on every sync.
+  const existingLabels = new Set<string>();
+  const labelsPerPage = 50;
+  let labelsPage = 1;
+  while (true) {
+    const giteaLabelsRes = await httpGet(
+      `${config.giteaConfig.url}/api/v1/repos/${giteaOwner}/${repoName}/labels?page=${labelsPage}&limit=${labelsPerPage}`,
+      {
+        Authorization: `token ${decryptedConfig.giteaConfig.token}`,
+      }
+    );
+    const pageLabels = Array.isArray(giteaLabelsRes.data) ? giteaLabelsRes.data : [];
+    if (!pageLabels.length) break;
+    for (const lbl of pageLabels) existingLabels.add(lbl.name);
+    const linkHeader = giteaLabelsRes.headers.get("link") || "";
+    if (!/\brel="next"/.test(linkHeader)) break;
+    labelsPage += 1;
+  }
 
   let mirroredCount = 0;
   for (const label of labels) {
@@ -3435,6 +3446,9 @@ export async function mirrorGitRepoLabelsToGitea({
             Authorization: `token ${decryptedConfig.giteaConfig.token}`,
           }
         );
+        // Track locally so a duplicate in `labels` (shouldn't happen,
+        // but defensive) doesn't trigger a second POST in the same run.
+        existingLabels.add(label.name);
         mirroredCount++;
       } catch (error) {
         console.error(
@@ -3508,17 +3522,36 @@ export async function mirrorGitRepoMilestonesToGitea({
     return;
   }
 
-  // Get existing milestones from Gitea
-  const giteaMilestonesRes = await httpGet(
-    `${config.giteaConfig.url}/api/v1/repos/${giteaOwner}/${repoName}/milestones`,
-    {
-      Authorization: `token ${decryptedConfig.giteaConfig.token}`,
-    }
-  );
-
-  const existingMilestones = new Set(
-    giteaMilestonesRes.data.map((milestone: any) => milestone.title)
-  );
+  // Get existing milestones from Gitea. Two correctness requirements:
+  //   1. `state=all` — Gitea's /milestones endpoint defaults to OPEN
+  //      only, so without this every CLOSED GitHub milestone is
+  //      misclassified as missing and re-POSTed on every sync. This
+  //      was the root cause of the 11k+ duplicate-closed-milestone
+  //      blowup observed in production.
+  //   2. Pagination via Link header (RFC 5988) — Gitea caps response
+  //      size at `[api].MAX_RESPONSE_ITEMS` (default 50), so any repo
+  //      with more than ~50 milestones in a given state silently
+  //      truncates without it. Same Gitea-side cap that bit the
+  //      issues / PRs pre-fetch in commit b76073b.
+  const existingMilestones = new Set<string>();
+  const milestonesPerPage = 50;
+  let milestonesPage = 1;
+  while (true) {
+    const giteaMilestonesRes = await httpGet(
+      `${config.giteaConfig.url}/api/v1/repos/${giteaOwner}/${repoName}/milestones?state=all&page=${milestonesPage}&limit=${milestonesPerPage}`,
+      {
+        Authorization: `token ${decryptedConfig.giteaConfig.token}`,
+      }
+    );
+    const pageMilestones = Array.isArray(giteaMilestonesRes.data)
+      ? giteaMilestonesRes.data
+      : [];
+    if (!pageMilestones.length) break;
+    for (const ms of pageMilestones) existingMilestones.add(ms.title);
+    const linkHeader = giteaMilestonesRes.headers.get("link") || "";
+    if (!/\brel="next"/.test(linkHeader)) break;
+    milestonesPage += 1;
+  }
 
   let mirroredCount = 0;
   for (const milestone of milestones) {
@@ -3536,6 +3569,9 @@ export async function mirrorGitRepoMilestonesToGitea({
             Authorization: `token ${decryptedConfig.giteaConfig.token}`,
           }
         );
+        // Track locally so a duplicate within `milestones` (shouldn't
+        // happen, but defensive) doesn't trigger a second POST.
+        existingMilestones.add(milestone.title);
         mirroredCount++;
       } catch (error) {
         console.error(
