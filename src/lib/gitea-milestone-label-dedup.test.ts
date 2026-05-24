@@ -118,9 +118,15 @@ describe("milestone dedup on sync", () => {
     ).toBe(true);
   });
 
-  test("existing-milestones GET must paginate via Link header", () => {
+  test("existing-milestones GET must paginate with both Link and X-Total-Count fallback", () => {
     // Even with state=all, a single unpaginated call only ever sees
     // the first 50 milestones (Gitea's MAX_RESPONSE_ITEMS cap).
+    //
+    // Gitea's /milestones endpoint does NOT emit a Link header — only
+    // `X-Total-Count`. A strict Link-only check terminates after page 1
+    // and re-POSTs every milestone past index 50 on every sync (the
+    // 9-milestone leak observed on Subnet-Calculator after the
+    // Link-only version of this fix shipped).
     expect(
       /milestonesPage\s*\+=\s*1/.test(body),
       "expected a page-increment loop for existing milestones"
@@ -128,7 +134,11 @@ describe("milestone dedup on sync", () => {
     expect(
       /\.headers\.get\(\s*["']link["']\s*\)/.test(body) &&
         /rel="next"/.test(body),
-      "the existing-milestones pagination loop must use the Link header (rel=\"next\") to decide whether to fetch the next page"
+      "the milestones pagination loop must check the Link header (rel=\"next\")"
+    ).toBe(true);
+    expect(
+      /\.headers\.get\(\s*["']x-total-count["']\s*\)/.test(body),
+      "the milestones pagination loop must fall back to X-Total-Count when Link header is absent (Gitea /milestones only emits X-Total-Count)"
     ).toBe(true);
   });
 
@@ -161,10 +171,11 @@ describe("label dedup on sync", () => {
     ).toBeTruthy();
   });
 
-  test("existing-labels GET must paginate via Link header", () => {
+  test("existing-labels GET must paginate with both Link and X-Total-Count fallback", () => {
     // Same Gitea MAX_RESPONSE_ITEMS=50 cap as milestones / issues.
-    // No state filter applies to labels, so pagination is the only
-    // correctness concern here.
+    // Gitea's /labels endpoint, like /milestones, does NOT emit a Link
+    // header — only `X-Total-Count`. Strict Link-only check would
+    // silently truncate after page 1.
     expect(
       /labelsPage\s*\+=\s*1/.test(body),
       "expected a page-increment loop for existing labels"
@@ -172,7 +183,11 @@ describe("label dedup on sync", () => {
     expect(
       /\.headers\.get\(\s*["']link["']\s*\)/.test(body) &&
         /rel="next"/.test(body),
-      "the existing-labels pagination loop must use the Link header (rel=\"next\") to decide whether to fetch the next page"
+      "the labels pagination loop must check the Link header (rel=\"next\")"
+    ).toBe(true);
+    expect(
+      /\.headers\.get\(\s*["']x-total-count["']\s*\)/.test(body),
+      "the labels pagination loop must fall back to X-Total-Count when Link header is absent (Gitea /labels only emits X-Total-Count)"
     ).toBe(true);
   });
 

@@ -3408,14 +3408,23 @@ export async function mirrorGitRepoLabelsToGitea({
     return;
   }
 
-  // Get existing labels from Gitea. Paginate via Link header (RFC 5988):
-  // Gitea caps response size at `[api].MAX_RESPONSE_ITEMS` (default 50),
-  // so a single unpaginated GET only sees the first 50 labels. Once a
-  // repo crosses that threshold every label past it would be re-POSTed
-  // as a duplicate on every sync.
+  // Get existing labels from Gitea. Paginate because Gitea caps
+  // response size at `[api].MAX_RESPONSE_ITEMS` (default 50), so a
+  // single unpaginated GET only sees the first 50 labels. Once a repo
+  // crosses that threshold every label past it would be re-POSTed as a
+  // duplicate on every sync.
+  //
+  // Pagination signal: prefer Link header (RFC 5988) when present, but
+  // Gitea's /labels and /milestones endpoints do NOT emit Link headers
+  // — they only emit `X-Total-Count`. Without the fallback, a strict
+  // Link-only check terminated after page 1 and re-POSTed every label
+  // past index 50 on every sync. (Repro found during the milestone
+  // dedup fix: 9 unique milestones leaked past page 1 on a 74-row
+  // /milestones response.)
   const existingLabels = new Set<string>();
   const labelsPerPage = 50;
   let labelsPage = 1;
+  let labelsFetched = 0;
   while (true) {
     const giteaLabelsRes = await httpGet(
       `${config.giteaConfig.url}/api/v1/repos/${giteaOwner}/${repoName}/labels?page=${labelsPage}&limit=${labelsPerPage}`,
@@ -3426,9 +3435,21 @@ export async function mirrorGitRepoLabelsToGitea({
     const pageLabels = Array.isArray(giteaLabelsRes.data) ? giteaLabelsRes.data : [];
     if (!pageLabels.length) break;
     for (const lbl of pageLabels) existingLabels.add(lbl.name);
+    labelsFetched += pageLabels.length;
+
     const linkHeader = giteaLabelsRes.headers.get("link") || "";
-    if (!/\brel="next"/.test(linkHeader)) break;
-    labelsPage += 1;
+    if (/\brel="next"/.test(linkHeader)) {
+      labelsPage += 1;
+      continue;
+    }
+    // No Link header (or no rel=next). Fall back to X-Total-Count.
+    const totalStr = giteaLabelsRes.headers.get("x-total-count");
+    const total = totalStr ? Number.parseInt(totalStr, 10) : NaN;
+    if (Number.isFinite(total) && labelsFetched < total) {
+      labelsPage += 1;
+      continue;
+    }
+    break;
   }
 
   let mirroredCount = 0;
@@ -3533,9 +3554,16 @@ export async function mirrorGitRepoMilestonesToGitea({
   //      with more than ~50 milestones in a given state silently
   //      truncates without it. Same Gitea-side cap that bit the
   //      issues / PRs pre-fetch in commit b76073b.
+  // Pagination signal: prefer Link header (RFC 5988) when present, but
+  // Gitea's /milestones endpoint does NOT emit a Link header — it only
+  // emits `X-Total-Count`. A strict Link-only check terminates after
+  // page 1 and re-POSTs every milestone past index 50 on every sync.
+  // (Repro: post-fix deploy on Subnet-Calculator leaked 9 unique
+  // milestones past page 1 of a 74-row /milestones response.)
   const existingMilestones = new Set<string>();
   const milestonesPerPage = 50;
   let milestonesPage = 1;
+  let milestonesFetched = 0;
   while (true) {
     const giteaMilestonesRes = await httpGet(
       `${config.giteaConfig.url}/api/v1/repos/${giteaOwner}/${repoName}/milestones?state=all&page=${milestonesPage}&limit=${milestonesPerPage}`,
@@ -3548,9 +3576,20 @@ export async function mirrorGitRepoMilestonesToGitea({
       : [];
     if (!pageMilestones.length) break;
     for (const ms of pageMilestones) existingMilestones.add(ms.title);
+    milestonesFetched += pageMilestones.length;
+
     const linkHeader = giteaMilestonesRes.headers.get("link") || "";
-    if (!/\brel="next"/.test(linkHeader)) break;
-    milestonesPage += 1;
+    if (/\brel="next"/.test(linkHeader)) {
+      milestonesPage += 1;
+      continue;
+    }
+    const totalStr = giteaMilestonesRes.headers.get("x-total-count");
+    const total = totalStr ? Number.parseInt(totalStr, 10) : NaN;
+    if (Number.isFinite(total) && milestonesFetched < total) {
+      milestonesPage += 1;
+      continue;
+    }
+    break;
   }
 
   let mirroredCount = 0;
