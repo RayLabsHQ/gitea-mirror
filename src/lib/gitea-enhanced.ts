@@ -468,6 +468,39 @@ export async function syncGiteaRepoEnhanced({
                 `[Sync] Force-push detected on ${repository.name}: ${branchNames}`,
               );
             }
+
+            // Record each detected "deleted" branch into the
+            // acknowledged list. We do this based on detection alone,
+            // BEFORE the backup attempt below, so that:
+            //   - concurrent sync invocations both add the entry
+            //     (the second one whose `createPreSyncBundleBackup`
+            //     short-circuits would otherwise skip the push and
+            //     race its empty in-memory state onto the metadata
+            //     row, undoing the first invocation's write);
+            //   - if the backup later fails the deletion is still
+            //     acknowledged (the branch is genuinely gone from
+            //     GitHub; not re-detecting it next sync is correct
+            //     regardless of whether THIS invocation's backup
+            //     succeeded — prior backups still exist on disk and
+            //     the user can re-trigger one manually if needed).
+            const newAcknowledged = forcePushAffected
+              .filter((b) => b.reason === "deleted")
+              .map((b) => ({ branch: b.name, giteaSha: b.giteaSha }));
+            if (newAcknowledged.length > 0) {
+              const existingKeys = new Set(
+                metadataState.acknowledgedDeletions.map(
+                  (e) => `${e.branch}@${e.giteaSha}`,
+                ),
+              );
+              for (const entry of newAcknowledged) {
+                const key = `${entry.branch}@${entry.giteaSha}`;
+                if (!existingKeys.has(key)) {
+                  metadataState.acknowledgedDeletions.push(entry);
+                  existingKeys.add(key);
+                  metadataUpdated = true;
+                }
+              }
+            }
           } else {
             console.log(
               `[Sync] Skipping force-push detection for ${repository.name}: no GitHub token`,
@@ -537,31 +570,10 @@ export async function syncGiteaRepoEnhanced({
             // orphan row that accumulated on the jobs page forever.
             status: "synced",
           });
-
-          // Record each "deleted" branch we just backed up into the
-          // acknowledged list, so the next sync doesn't re-trip
-          // detection on the same lingering branch. We only acknowledge
-          // "deleted" reasons — "diverged" / "non-fast-forward" leave
-          // the Gitea side intact (Gitea Mirror's pull will reconcile),
-          // so the next sync should naturally not re-detect them.
-          const newAcknowledged = forcePushAffected
-            .filter((b) => b.reason === "deleted")
-            .map((b) => ({ branch: b.name, giteaSha: b.giteaSha }));
-          if (newAcknowledged.length > 0) {
-            const existingKeys = new Set(
-              metadataState.acknowledgedDeletions.map(
-                (e) => `${e.branch}@${e.giteaSha}`,
-              ),
-            );
-            for (const entry of newAcknowledged) {
-              const key = `${entry.branch}@${entry.giteaSha}`;
-              if (!existingKeys.has(key)) {
-                metadataState.acknowledgedDeletions.push(entry);
-                existingKeys.add(key);
-                metadataUpdated = true;
-              }
-            }
-          }
+          // Note: acknowledging the deletion happens earlier (right
+          // after detection) so concurrent sync invocations both
+          // record the entry. Don't move it back here — see the
+          // detection block above for the rationale.
         } catch (backupError) {
           const errorMessage =
             backupError instanceof Error ? backupError.message : String(backupError);
