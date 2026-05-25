@@ -11,6 +11,7 @@
 
 import type { Octokit } from "@octokit/rest";
 import { httpGet, HttpError } from "@/lib/http-client";
+import type { AcknowledgedDeletion } from "@/lib/metadata-state";
 
 // ---- Types ----
 
@@ -172,6 +173,7 @@ export async function detectForcePush({
   octokit,
   githubOwner,
   githubRepo,
+  acknowledgedDeletions,
   _deps,
 }: {
   giteaUrl: string;
@@ -181,6 +183,18 @@ export async function detectForcePush({
   octokit: Octokit;
   githubOwner: string;
   githubRepo: string;
+  /**
+   * Deleted-branch backups we already took. A Gitea branch missing
+   * from GitHub is suppressed from `affectedBranches` when its current
+   * giteaSha matches an entry here. Without this, deleted branches
+   * trip detection every sync because gitea-mirror is one-way:
+   * deletions never propagate to the Gitea mirror, so the "branch in
+   * Gitea, gone from GitHub" condition holds forever and we'd take a
+   * fresh snapshot on every cycle.
+   *
+   * Stored on the repository row via RepositoryMetadataState.
+   */
+  acknowledgedDeletions?: readonly AcknowledgedDeletion[];
   /** @internal — test-only dependency injection */
   _deps?: {
     fetchGiteaBranches: typeof fetchGiteaBranches;
@@ -189,6 +203,9 @@ export async function detectForcePush({
   };
 }): Promise<ForcePushDetectionResult> {
   const deps = _deps ?? { fetchGiteaBranches, fetchGitHubBranches, checkAncestry };
+  const acknowledged = new Set(
+    (acknowledgedDeletions ?? []).map((entry) => `${entry.branch}@${entry.giteaSha}`),
+  );
 
   // 1. Fetch Gitea branches
   let giteaBranches: BranchInfo[];
@@ -237,7 +254,16 @@ export async function detectForcePush({
     const githubSha = githubBranchMap.get(giteaBranch.name);
 
     if (githubSha === undefined) {
-      // Branch was deleted on GitHub
+      // Branch was deleted on GitHub. Suppress if we already took a
+      // snapshot at this exact giteaSha — the deletion is permanent
+      // on the GitHub side but the branch lingers in the Gitea
+      // mirror, so without this check the detector trips every sync.
+      // If the giteaSha later changes (branch restored, then deleted
+      // again with new history), the entry won't match and we'll
+      // back up the new state.
+      if (acknowledged.has(`${giteaBranch.name}@${giteaBranch.sha}`)) {
+        continue;
+      }
       affected.push({
         name: giteaBranch.name,
         reason: "deleted",

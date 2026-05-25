@@ -421,9 +421,18 @@ export async function syncGiteaRepoEnhanced({
       throw new Error(`Repository ${repository.name} is not a mirror. Cannot sync.`);
     }
 
+    // Parse repository metadata state up-front. The force-push
+    // detection below needs the acknowledgedDeletions list to suppress
+    // already-handled deletions, and a successful snapshot needs to
+    // record new entries back into the same state object. The
+    // metadata-mirroring block downstream reuses this same variable.
+    const metadataState = parseRepositoryMetadataState(repository.metadata);
+    let metadataUpdated = false;
+
     // ---- Smart backup strategy with force-push detection ----
     const backupStrategy = resolveBackupStrategy(config);
     let forcePushDetected = false;
+    let forcePushAffected: ReadonlyArray<{ name: string; reason: string; giteaSha: string }> = [];
 
     if (backupStrategy !== "disabled") {
       // Run force-push detection if the strategy requires it
@@ -441,9 +450,11 @@ export async function syncGiteaRepoEnhanced({
               octokit: fpOctokit,
               githubOwner: repository.owner,
               githubRepo: repository.name,
+              acknowledgedDeletions: metadataState.acknowledgedDeletions,
             });
 
             forcePushDetected = detectionResult.detected;
+            forcePushAffected = detectionResult.affectedBranches;
 
             if (detectionResult.skipped) {
               console.log(
@@ -519,8 +530,38 @@ export async function syncGiteaRepoEnhanced({
             repositoryName: repository.name,
             message: `Snapshot created for ${repository.name}`,
             details: `Pre-sync snapshot created at ${backupResult.bundlePath}.`,
-            status: "syncing",
+            // The snapshot is already complete (createPreSyncBundleBackup
+            // returned above). Using "syncing" here left the row in a
+            // non-terminal state and there was no later code path to
+            // advance it, so every force-push-triggered backup leaked an
+            // orphan row that accumulated on the jobs page forever.
+            status: "synced",
           });
+
+          // Record each "deleted" branch we just backed up into the
+          // acknowledged list, so the next sync doesn't re-trip
+          // detection on the same lingering branch. We only acknowledge
+          // "deleted" reasons — "diverged" / "non-fast-forward" leave
+          // the Gitea side intact (Gitea Mirror's pull will reconcile),
+          // so the next sync should naturally not re-detect them.
+          const newAcknowledged = forcePushAffected
+            .filter((b) => b.reason === "deleted")
+            .map((b) => ({ branch: b.name, giteaSha: b.giteaSha }));
+          if (newAcknowledged.length > 0) {
+            const existingKeys = new Set(
+              metadataState.acknowledgedDeletions.map(
+                (e) => `${e.branch}@${e.giteaSha}`,
+              ),
+            );
+            for (const entry of newAcknowledged) {
+              const key = `${entry.branch}@${entry.giteaSha}`;
+              if (!existingKeys.has(key)) {
+                metadataState.acknowledgedDeletions.push(entry);
+                existingKeys.add(key);
+                metadataUpdated = true;
+              }
+            }
+          }
         } catch (backupError) {
           const errorMessage =
             backupError instanceof Error ? backupError.message : String(backupError);
@@ -584,8 +625,9 @@ export async function syncGiteaRepoEnhanced({
         Authorization: `token ${decryptedConfig.giteaConfig.token}`,
       });
 
-      const metadataState = parseRepositoryMetadataState(repository.metadata);
-      let metadataUpdated = false;
+      // metadataState + metadataUpdated are hoisted above the backup
+      // strategy block so force-push detection can read/write the
+      // acknowledged-deletions list. Don't shadow them here.
       const skipMetadataForStarred =
         repository.isStarred && config.githubConfig?.starredCodeOnly;
       let metadataOctokit: Octokit | null = null;

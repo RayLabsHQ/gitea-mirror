@@ -6,9 +6,22 @@ interface MetadataComponentsState {
   milestones: boolean;
 }
 
+/**
+ * One-shot record of a deleted-branch backup we already took, so the
+ * force-push detector knows to skip the same (branch, giteaSha) pair
+ * next sync. Without this, deleted-on-GitHub branches that linger in
+ * the Gitea mirror trip the detector every cycle and create a new
+ * "Snapshot created" job row forever.
+ */
+export interface AcknowledgedDeletion {
+  branch: string;
+  giteaSha: string;
+}
+
 export interface RepositoryMetadataState {
   components: MetadataComponentsState;
   lastSyncedAt?: string;
+  acknowledgedDeletions: AcknowledgedDeletion[];
 }
 
 const defaultComponents: MetadataComponentsState = {
@@ -22,6 +35,7 @@ const defaultComponents: MetadataComponentsState = {
 export function createDefaultMetadataState(): RepositoryMetadataState {
   return {
     components: { ...defaultComponents },
+    acknowledgedDeletions: [],
   };
 }
 
@@ -63,6 +77,20 @@ export function parseRepositoryMetadataState(
     base.lastSyncedAt = parsed.lastSyncedAt;
   } else if (typeof parsed.lastMetadataSync === "string") {
     base.lastSyncedAt = parsed.lastMetadataSync;
+  }
+
+  if (Array.isArray(parsed.acknowledgedDeletions)) {
+    base.acknowledgedDeletions = parsed.acknowledgedDeletions.flatMap(
+      (entry: unknown): AcknowledgedDeletion[] => {
+        if (!entry || typeof entry !== "object") return [];
+        const branch = (entry as { branch?: unknown }).branch;
+        const giteaSha = (entry as { giteaSha?: unknown }).giteaSha;
+        if (typeof branch !== "string" || typeof giteaSha !== "string") {
+          return [];
+        }
+        return [{ branch, giteaSha }];
+      }
+    );
   }
 
   return base;

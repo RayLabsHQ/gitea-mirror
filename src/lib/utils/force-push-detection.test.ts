@@ -316,4 +316,189 @@ describe("detectForcePush", () => {
     expect(result.skipped).toBe(true);
     expect(result.skipReason).toContain("Failed to fetch GitHub branches");
   });
+
+  // --- acknowledgedDeletions: suppress already-handled deleted branches ---
+  //
+  // Production reproduction (Simple-WP-Helpdesk, May 2026): a branch
+  // deleted on GitHub remained in the Gitea mirror because gitea-mirror
+  // is one-way. Every 4h sync re-detected it as "deleted" and inserted
+  // a fresh "Snapshot created" job row — 7 zombies accumulated in 24h.
+  // Fix: caller threads in the list of (branch, giteaSha) pairs already
+  // backed up; detector suppresses matching entries.
+
+  it("suppresses a deleted branch when acknowledged at the same giteaSha", async () => {
+    const deps = makeDeps({
+      giteaBranches: [
+        { name: "main", sha: "aaa" },
+        { name: "fix/abandoned", sha: "bbb" },
+      ],
+      githubBranches: [{ name: "main", sha: "aaa" }],
+    });
+
+    const result = await detectForcePush({
+      ...baseArgs,
+      octokit: dummyOctokit,
+      acknowledgedDeletions: [{ branch: "fix/abandoned", giteaSha: "bbb" }],
+      _deps: deps,
+    });
+
+    expect(result.detected).toBe(false);
+    expect(result.affectedBranches).toHaveLength(0);
+  });
+
+  it("re-flags a previously-acknowledged branch if its giteaSha changed", async () => {
+    // Edge case: a deleted branch was restored (Gitea picked up the
+    // new history), then re-deleted. Same name but different giteaSha
+    // means the acknowledged entry doesn't match — back up the new
+    // state.
+    const deps = makeDeps({
+      giteaBranches: [
+        { name: "main", sha: "aaa" },
+        { name: "fix/abandoned", sha: "ccc" },
+      ],
+      githubBranches: [{ name: "main", sha: "aaa" }],
+    });
+
+    const result = await detectForcePush({
+      ...baseArgs,
+      octokit: dummyOctokit,
+      acknowledgedDeletions: [{ branch: "fix/abandoned", giteaSha: "bbb" }], // stale SHA
+      _deps: deps,
+    });
+
+    expect(result.detected).toBe(true);
+    expect(result.affectedBranches).toHaveLength(1);
+    expect(result.affectedBranches[0]).toMatchObject({
+      name: "fix/abandoned",
+      reason: "deleted",
+      giteaSha: "ccc",
+    });
+  });
+
+  it("suppresses only the acknowledged deletion when multiple deletions exist", async () => {
+    const deps = makeDeps({
+      giteaBranches: [
+        { name: "main", sha: "aaa" },
+        { name: "fix/old", sha: "bbb" },
+        { name: "fix/new", sha: "ccc" },
+      ],
+      githubBranches: [{ name: "main", sha: "aaa" }],
+    });
+
+    const result = await detectForcePush({
+      ...baseArgs,
+      octokit: dummyOctokit,
+      acknowledgedDeletions: [{ branch: "fix/old", giteaSha: "bbb" }],
+      _deps: deps,
+    });
+
+    expect(result.detected).toBe(true);
+    expect(result.affectedBranches).toHaveLength(1);
+    expect(result.affectedBranches[0]?.name).toBe("fix/new");
+  });
+
+  it("treats undefined acknowledgedDeletions as empty (back-compat with callers that don't pass it)", async () => {
+    const deps = makeDeps({
+      giteaBranches: [
+        { name: "main", sha: "aaa" },
+        { name: "fix/abandoned", sha: "bbb" },
+      ],
+      githubBranches: [{ name: "main", sha: "aaa" }],
+    });
+
+    const result = await detectForcePush({
+      ...baseArgs,
+      octokit: dummyOctokit,
+      // acknowledgedDeletions omitted
+      _deps: deps,
+    });
+
+    expect(result.detected).toBe(true);
+    expect(result.affectedBranches[0]?.reason).toBe("deleted");
+  });
+
+  it("does not suppress diverged branches via the acknowledgedDeletions list", async () => {
+    // The suppression list is specifically for `reason: "deleted"`.
+    // A divergence at the same name + matching old giteaSha (an
+    // impossible-in-practice combination, but be explicit about the
+    // boundary) must still report.
+    const deps = makeDeps({
+      giteaBranches: [{ name: "main", sha: "aaa" }],
+      githubBranches: [{ name: "main", sha: "rewritten" }],
+      ancestryResult: false,
+    });
+
+    const result = await detectForcePush({
+      ...baseArgs,
+      octokit: dummyOctokit,
+      acknowledgedDeletions: [{ branch: "main", giteaSha: "aaa" }],
+      _deps: deps,
+    });
+
+    expect(result.detected).toBe(true);
+    expect(result.affectedBranches[0]?.reason).toBe("diverged");
+  });
+});
+
+// --- metadata-state round-trip for the new acknowledgedDeletions field ---
+
+describe("metadata-state acknowledgedDeletions persistence", () => {
+  it("parse → mutate → serialize → parse round-trips entries cleanly", async () => {
+    const {
+      parseRepositoryMetadataState,
+      serializeRepositoryMetadataState,
+      createDefaultMetadataState,
+    } = await import("../metadata-state");
+
+    const state = createDefaultMetadataState();
+    state.acknowledgedDeletions.push(
+      { branch: "fix/abandoned", giteaSha: "bbb" },
+      { branch: "fix/other", giteaSha: "ccc" },
+    );
+
+    const reparsed = parseRepositoryMetadataState(
+      serializeRepositoryMetadataState(state),
+    );
+
+    expect(reparsed.acknowledgedDeletions).toEqual([
+      { branch: "fix/abandoned", giteaSha: "bbb" },
+      { branch: "fix/other", giteaSha: "ccc" },
+    ]);
+  });
+
+  it("defaults acknowledgedDeletions to [] for legacy metadata blobs", async () => {
+    const { parseRepositoryMetadataState } = await import("../metadata-state");
+
+    // Metadata that predates this field — no acknowledgedDeletions key
+    const legacy = JSON.stringify({
+      components: {
+        releases: true,
+        issues: false,
+        pullRequests: false,
+        labels: false,
+        milestones: false,
+      },
+      lastSyncedAt: "2026-05-01T00:00:00Z",
+    });
+
+    expect(parseRepositoryMetadataState(legacy).acknowledgedDeletions).toEqual([]);
+  });
+
+  it("drops malformed acknowledged entries without throwing", async () => {
+    const { parseRepositoryMetadataState } = await import("../metadata-state");
+
+    const malformed = JSON.stringify({
+      components: {},
+      acknowledgedDeletions: [
+        { branch: "good", giteaSha: "abc" },
+        { branch: 42, giteaSha: "abc" }, // bad type
+        null,
+        { branch: "missing-sha" },
+      ],
+    });
+
+    expect(parseRepositoryMetadataState(malformed).acknowledgedDeletions).toEqual([
+      { branch: "good", giteaSha: "abc" },
+    ]);
+  });
 });
