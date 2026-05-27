@@ -6,6 +6,7 @@ import { db, users } from "./db";
 import * as schema from "./db/schema";
 import { eq } from "drizzle-orm";
 import { withBase } from "./base-path";
+import { headerAuthPlugin } from "./auth-header-plugin";
 
 /**
  * Resolves the list of trusted origins for Better Auth CSRF validation.
@@ -205,6 +206,14 @@ export const auth = betterAuth({
       // Trust email_verified claims from the upstream provider so we can link by matching email
       trustEmailVerified: true,
     }),
+
+    // Header / forward authentication bridge. Exposes
+    // POST /api/auth/sign-in/header so the middleware can mint a real
+    // Better Auth session from trusted upstream headers (Authentik /
+    // Authelia / oauth2-proxy / Caddy). Without this the SPA's
+    // /api/auth/get-session call returns null on header-auth-only
+    // requests and bounces the user to /login. See auth-header-plugin.ts.
+    headerAuthPlugin(),
   ],
 });
 

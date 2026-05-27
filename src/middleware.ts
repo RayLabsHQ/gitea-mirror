@@ -6,7 +6,8 @@ import { startRepositoryCleanupService, stopRepositoryCleanupService } from './l
 import { initializeShutdownManager, registerShutdownCallback } from './lib/shutdown-manager';
 import { setupSignalHandlers } from './lib/signal-handlers';
 import { auth } from './lib/auth';
-import { isHeaderAuthEnabled, authenticateWithHeaders } from './lib/auth-header';
+import { isHeaderAuthEnabled } from './lib/auth-header';
+import { mintSessionFromHeaders } from './lib/auth-header-bridge';
 import { initializeConfigFromEnv } from './lib/env-config-loader';
 import { db, users } from './lib/db';
 import { getBasePath } from './lib/base-path';
@@ -37,6 +38,13 @@ let envConfigCheckCount = 0; // Track attempts to avoid excessive checking
 export const onRequest = defineMiddleware(async (context, next) => {
   const basePath = getBasePath();
 
+  // Set-Cookie headers we mint during the header-auth bridge below.
+  // Forwarded onto the outbound response after `next()` so the browser
+  // persists the Better Auth session cookie. Until that happens the
+  // SPA's /api/auth/get-session call returns null and bounces to
+  // /login — see the bridge block for the full rationale.
+  let pendingSetCookies: string[] = [];
+
   // First, try Better Auth session (cookie-based)
   try {
     const session = await auth.api.getSession({
@@ -46,36 +54,26 @@ export const onRequest = defineMiddleware(async (context, next) => {
     if (session) {
       context.locals.user = session.user;
       context.locals.session = session.session;
-    } else {
-      // No cookie session, check for header authentication
-      if (isHeaderAuthEnabled()) {
-        const headerUser = await authenticateWithHeaders(context.request.headers);
-        if (headerUser) {
-          // Create a session-like object for header auth
-          context.locals.user = {
-            id: headerUser.id,
-            email: headerUser.email,
-            emailVerified: headerUser.emailVerified,
-            name: headerUser.name || headerUser.username,
-            username: headerUser.username,
-            createdAt: headerUser.createdAt,
-            updatedAt: headerUser.updatedAt,
-          };
-          context.locals.session = {
-            id: `header-${headerUser.id}`,
-            userId: headerUser.id,
-            expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000), // 1 day
-            ipAddress: context.request.headers.get('x-forwarded-for') || context.clientAddress,
-            userAgent: context.request.headers.get('user-agent'),
-          };
-        } else {
-          context.locals.user = null;
-          context.locals.session = null;
-        }
+    } else if (isHeaderAuthEnabled()) {
+      // No cookie session, but header auth is on. Call the
+      // header-auth plugin endpoint to mint a real Better Auth
+      // session from the trusted upstream headers, then forward the
+      // Set-Cookie onto the outbound response so the SPA's next
+      // /api/auth/get-session call carries the cookie. Without this
+      // bridge the React app sees null on mount and redirects to
+      // /login even though server-rendered code paths know the user.
+      const bridge = await mintSessionFromHeaders(context.request);
+      if (bridge) {
+        context.locals.user = bridge.user;
+        context.locals.session = bridge.session;
+        pendingSetCookies = bridge.setCookies;
       } else {
         context.locals.user = null;
         context.locals.session = null;
       }
+    } else {
+      context.locals.user = null;
+      context.locals.session = null;
     }
   } catch (error) {
     // If there's an error getting the session, set to null
@@ -251,6 +249,17 @@ export const onRequest = defineMiddleware(async (context, next) => {
 
   // Continue with the request
   const response = await next();
+
+  // Forward any Set-Cookie headers minted by the header-auth bridge
+  // onto the outbound response. Done before the early returns below so
+  // every return path (basePath rewrite, non-HTML responses, etc.)
+  // carries the cookie. The body-rewrite branch further down clones
+  // `response.headers`, so anything appended here survives the clone.
+  if (pendingSetCookies.length > 0) {
+    for (const cookie of pendingSetCookies) {
+      response.headers.append("set-cookie", cookie);
+    }
+  }
 
   if (basePath === "/") {
     return response;
