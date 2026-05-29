@@ -123,9 +123,11 @@ export {
   accounts,
   verificationTokens,
   verifications,
-  oauthApplications,
+  oauthClients,
   oauthAccessTokens,
-  oauthConsent,
+  oauthRefreshTokens,
+  oauthConsents,
+  jwkss,
   ssoProviders,
   rateLimits
 } from "./schema";

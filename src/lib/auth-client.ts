@@ -1,6 +1,6 @@
 import "@/lib/polyfills/buffer";
 import { createAuthClient } from "better-auth/react";
-import { oidcClient } from "better-auth/client/plugins";
+import { oauthProviderClient } from "@better-auth/oauth-provider/client";
 import { ssoClient } from "@better-auth/sso/client";
 import type { Session as BetterAuthSession, User as BetterAuthUser } from "better-auth";
 import { withBase } from "@/lib/base-path";
@@ -41,7 +41,7 @@ export const authClient = createAuthClient({
   })(),
   basePath: withBase('/api/auth'), // Explicitly set the base path
   plugins: [
-    oidcClient(),
+    oauthProviderClient(),
     ssoClient(),
   ],
 });

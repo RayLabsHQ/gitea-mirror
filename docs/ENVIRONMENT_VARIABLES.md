@@ -40,6 +40,7 @@ Essential application settings required for running Gitea Mirror.
 | `BETTER_AUTH_URL` | Authentication origin (scheme + host only, e.g. `https://git.example.com`). Do **not** include a path — any path is automatically stripped, and `BASE_URL` is applied separately. | `http://localhost:4321` | No |
 | `PUBLIC_BETTER_AUTH_URL` | Client-side auth origin for multi-origin access (same rule: origin only, no path). Set this to your primary domain when you need to access the app from different origins (e.g., both IP and domain). The client will use this URL for all auth requests instead of the current browser origin. | - | No |
 | `BETTER_AUTH_TRUSTED_ORIGINS` | Trusted origins for authentication requests. Comma-separated list of URLs. Use this to specify additional access URLs (e.g., local IP + domain: `http://10.10.20.45:4321,https://gitea-mirror.mydomain.tld`), SSO providers, reverse proxies, etc. | - | No |
+| `BETTER_AUTH_LOG_LEVEL` | Better Auth logger verbosity. Set to `debug` to surface the full SSO/OIDC sign-in and callback trace when troubleshooting authentication. Accepted values: `debug`, `info`, `warn`, `error`. (Better Auth does **not** use the `DEBUG` env var.) | `warn` | No |
 | `ENCRYPTION_SECRET` | Optional encryption key for tokens (generate with: `openssl rand -base64 48`) | - | No |
 
 ## HTTPS / TLS

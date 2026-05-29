@@ -90,41 +90,29 @@ export default function ConsentPage() {
   const handleConsent = async (accept: boolean) => {
     setIsSubmitting(true);
     try {
+      // The OAuth provider redirected here with the authorization request in
+      // the query string (client_id, scope, code). Hand that back via
+      // `oauth_query` so the provider can resume the flow. It validates the
+      // redirect URI server-side and returns the URL to navigate to — either
+      // with an authorization code (accept) or an error (deny).
+      const oauthQuery = window.location.search.replace(/^\?/, '');
       const result = await authClient.oauth2.consent({
         accept,
+        oauth_query: oauthQuery,
+        scope: Array.from(selectedScopes).join(' '),
       });
 
       if (result.error) {
         throw new Error(result.error.message || 'Consent failed');
       }
 
-      // The consent method should handle the redirect
-      if (!accept) {
-        // If denied, redirect back to the application with error
-        const params = new URLSearchParams(window.location.search);
-        const redirectUri = params.get('redirect_uri');
-        
-        if (redirectUri && application) {
-          // Validate redirect URI against authorized URIs
-          const authorizedUris = parseRedirectUris(application.redirectURLs);
-          
-          if (isValidRedirectUri(redirectUri, authorizedUris)) {
-            try {
-              // Parse and reconstruct the URL to ensure it's safe
-              const url = new URL(redirectUri);
-              url.searchParams.set('error', 'access_denied');
-              
-              // Safe to redirect - URI has been validated and sanitized
-              window.location.href = url.toString();
-            } catch (e) {
-              console.error('Failed to parse redirect URI:', e);
-              setError('Invalid redirect URI');
-            }
-          } else {
-            console.error('Unauthorized redirect URI:', redirectUri);
-            setError('Invalid redirect URI');
-          }
-        }
+      const redirectUri = (result.data as { redirect_uri?: string } | undefined)?.redirect_uri;
+      if (redirectUri) {
+        // The redirect URI is produced and validated server-side.
+        window.location.href = redirectUri;
+      } else if (!accept) {
+        // No redirect target returned on denial — return to the app.
+        window.location.href = '/';
       }
     } catch (error) {
       showErrorToast(error, toast);

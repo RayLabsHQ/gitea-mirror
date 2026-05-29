@@ -47,8 +47,11 @@ export async function POST(context: APIContext) {
     }
 
     try {
-      // Use Better Auth server API to register OAuth2 application
-      const response = await auth.api.registerOAuthApplication({
+      // Use Better Auth server API to register OAuth2 client (RFC 7591
+      // dynamic client registration via @better-auth/oauth-provider).
+      // Note: jwks / jwks_uri / metadata are not part of the new
+      // registration body and are intentionally omitted.
+      const response = await auth.api.registerOAuthClient({
         body: {
           client_name,
           redirect_uris,
@@ -61,9 +64,6 @@ export async function POST(context: APIContext) {
           contacts,
           tos_uri,
           policy_uri,
-          jwks_uri,
-          jwks,
-          metadata,
           software_id,
           software_version,
           software_statement,

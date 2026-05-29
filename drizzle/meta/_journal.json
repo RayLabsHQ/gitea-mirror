@@ -85,6 +85,13 @@
       "when": 1774058400000,
       "tag": "0011_notification_config",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1774062000000,
+      "tag": "0012_oauth_provider_migration",
+      "breakpoints": true
     }
   ]
 }

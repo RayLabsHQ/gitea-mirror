@@ -1,6 +1,7 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { oidcProvider } from "better-auth/plugins";
+import { jwt } from "better-auth/plugins";
+import { oauthProvider } from "@better-auth/oauth-provider";
 import { sso } from "@better-auth/sso";
 import { db, users } from "./db";
 import * as schema from "./db/schema";
@@ -74,6 +75,23 @@ export async function resolveTrustedOrigins(request?: Request): Promise<string[]
   return uniqueOrigins;
 }
 
+/**
+ * Resolves the Better Auth logger level from BETTER_AUTH_LOG_LEVEL.
+ * Returns undefined for unset/invalid values so Better Auth falls back
+ * to its built-in default ("warn"). "success" is intentionally excluded
+ * — it is an output level, not a valid threshold.
+ */
+function resolveAuthLogLevel(): "debug" | "info" | "warn" | "error" | undefined {
+  const raw = process.env.BETTER_AUTH_LOG_LEVEL?.trim().toLowerCase();
+  if (raw === "debug" || raw === "info" || raw === "warn" || raw === "error") {
+    return raw;
+  }
+  if (raw) {
+    console.warn(`Invalid BETTER_AUTH_LOG_LEVEL: "${raw}", using default ("warn")`);
+  }
+  return undefined;
+}
+
 export const auth = betterAuth({
   // Database configuration
   database: drizzleAdapter(db, {
@@ -84,6 +102,17 @@ export const auth = betterAuth({
 
   // Secret for signing tokens
   secret: process.env.BETTER_AUTH_SECRET,
+
+  // Logger configuration.
+  //
+  // Better Auth ships its own logger (it does NOT read the `DEBUG` env
+  // var / the `debug` npm package — `DEBUG=better-auth:*` is a no-op).
+  // The default level is "warn", so SSO/OIDC debug and info messages
+  // are hidden out of the box. Set BETTER_AUTH_LOG_LEVEL=debug to surface
+  // the full sign-in / callback trace when troubleshooting SSO.
+  logger: {
+    level: resolveAuthLogLevel(),
+  },
 
   // Base URL configuration - use the primary URL (Better Auth only supports single baseURL)
   baseURL: (() => {
@@ -154,26 +183,57 @@ export const auth = betterAuth({
     },
   },
 
+  // Account linking configuration.
+  //
+  // This is what lets a user who first registered with email/password later
+  // sign in through an external SSO/OIDC provider (e.g. Authentik) and land
+  // on the *same* account instead of being rejected/bounced back to /login.
+  // Better Auth enables linking by default, but auto-linking an SSO sign-in
+  // to a pre-existing email account only happens when the provider is trusted
+  // or the upstream email is verified. We trust the local "email-password"
+  // provider so the existing admin account can be matched by email, and rely
+  // on the SSO plugin's `trustEmailVerified` for the upstream side.
+  account: {
+    accountLinking: {
+      enabled: true,
+      trustedProviders: ["email-password"],
+      // Keep the default (false): never link accounts whose emails differ.
+      allowDifferentEmails: false,
+    },
+  },
+
   // Plugins configuration
   plugins: [
-    // OIDC Provider plugin - allows this app to act as an OIDC provider
-    oidcProvider({
+    // JWT plugin — provides the JWKS keypair that the OAuth provider uses to
+    // sign OIDC id_tokens with an asymmetric key (what most relying parties
+    // expect). Required by @better-auth/oauth-provider unless disableJwtPlugin
+    // is set. Keys are persisted in the `jwks` table.
+    jwt(),
+
+    // OAuth 2.1 / OIDC Provider — allows this app to act as an identity
+    // provider for other applications. Replaces the deprecated `oidcProvider`
+    // plugin (which Better Auth will remove in a future release). Client and
+    // consent records now live in the oauth_clients / oauth_consents tables.
+    oauthProvider({
       loginPage: withBase("/login"),
       consentPage: withBase("/oauth/consent"),
       // Allow dynamic client registration for flexibility
       allowDynamicClientRegistration: true,
-      // Note: trustedClients would be configured here if Better Auth supports it
-      // For now, we'll use dynamic registration
-      // Customize user info claims based on scopes
-      getAdditionalUserInfoClaim: (user, scopes) => {
+      // Mirror the old getAdditionalUserInfoClaim: expose our extra `username`
+      // field on both the userinfo endpoint and the id_token when the
+      // "profile" scope is granted.
+      customUserInfoClaims: ({ user, scopes }) => {
         const claims: Record<string, any> = {};
-        if (scopes.includes("profile")) {
-          claims.username = user.username;
-        }
+        if (scopes.includes("profile")) claims.username = (user as any).username;
+        return claims;
+      },
+      customIdTokenClaims: ({ user, scopes }) => {
+        const claims: Record<string, any> = {};
+        if (scopes.includes("profile")) claims.username = (user as any).username;
         return claims;
       },
     }),
-    
+
     // SSO plugin - allows users to authenticate with external OIDC providers
     sso({
       // Provision new users when they sign in with SSO
