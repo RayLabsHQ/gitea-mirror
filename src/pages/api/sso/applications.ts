@@ -1,26 +1,61 @@
 import type { APIContext } from "astro";
 import { createSecureErrorResponse } from "@/lib/utils";
 import { requireAuth } from "@/lib/utils/auth-helpers";
-import { db, oauthApplications } from "@/lib/db";
-import { nanoid } from "nanoid";
+import { auth } from "@/lib/auth";
+import { db, oauthClients } from "@/lib/db";
 import { eq } from "drizzle-orm";
-import { generateRandomString } from "@/lib/utils";
 
-// GET /api/sso/applications - List all OAuth applications
+// Backward-compatible OAuth application management API.
+//
+// Migrated from the deprecated `oidc-provider` plugin to
+// `@better-auth/oauth-provider`. Clients now live in the `oauth_clients`
+// table and are managed by the plugin (which generates and hashes the
+// client secret), so mutations delegate to `auth.api.*OAuthClient`. Reads
+// are served straight from the table and mapped back to the legacy response
+// shape (`redirectURLs` as a comma-separated string) so existing consumers
+// — notably the consent page — keep working.
+
+// `redirectUris` is stored by the adapter as a JSON-encoded string[].
+function parseRedirectUris(value: unknown): string[] {
+  if (Array.isArray(value)) return value as string[];
+  if (typeof value === "string" && value.length > 0) {
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) return parsed;
+    } catch {
+      // Legacy comma-separated fallback
+      return value.split(",").map((s) => s.trim()).filter(Boolean);
+    }
+  }
+  return [];
+}
+
+// Map a new oauth_clients row onto the legacy application response shape.
+function toLegacyApplication(row: typeof oauthClients.$inferSelect) {
+  return {
+    id: row.id,
+    clientId: row.clientId,
+    name: row.name ?? "",
+    redirectURLs: parseRedirectUris(row.redirectUris).join(","),
+    type: row.type ?? "web",
+    disabled: row.disabled ?? false,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+    // Never expose the (hashed) client secret in list responses
+    clientSecret: undefined,
+  };
+}
+
+// GET /api/sso/applications - List all OAuth clients
 export async function GET(context: APIContext) {
   try {
-    const { user, response } = await requireAuth(context);
+    const { response } = await requireAuth(context);
     if (response) return response;
 
-    const applications = await db.select().from(oauthApplications);
+    const rows = await db.select().from(oauthClients);
+    const sanitized = rows.map(toLegacyApplication);
 
-    // Don't send client secrets in list response
-    const sanitizedApps = applications.map(app => ({
-      ...app,
-      clientSecret: undefined,
-    }));
-
-    return new Response(JSON.stringify(sanitizedApps), {
+    return new Response(JSON.stringify(sanitized), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
@@ -29,10 +64,10 @@ export async function GET(context: APIContext) {
   }
 }
 
-// POST /api/sso/applications - Create a new OAuth application
+// POST /api/sso/applications - Register a new OAuth client
 export async function POST(context: APIContext) {
   try {
-    const { user, response } = await requireAuth(context);
+    const { response } = await requireAuth(context);
     if (response) return response;
 
     const body = await context.request.json();
@@ -49,27 +84,27 @@ export async function POST(context: APIContext) {
       );
     }
 
-    // Generate client credentials
-    const clientId = `client_${generateRandomString(32)}`;
-    const clientSecret = `secret_${generateRandomString(48)}`;
+    const redirect_uris = Array.isArray(redirectURLs)
+      ? redirectURLs
+      : String(redirectURLs)
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
 
-    // Insert new application
-    const [newApp] = await db
-      .insert(oauthApplications)
-      .values({
-        id: nanoid(),
-        clientId,
-        clientSecret,
-        name,
-        redirectURLs: Array.isArray(redirectURLs) ? redirectURLs.join(",") : redirectURLs,
+    // Delegate to the OAuth provider plugin so the client_id / client_secret
+    // are generated and the secret is stored using the plugin's hashing.
+    const created = await auth.api.createOAuthClient({
+      headers: context.request.headers,
+      body: {
+        client_name: name,
+        redirect_uris,
         type,
-        metadata: metadata ? JSON.stringify(metadata) : null,
-        userId: user.id,
-        disabled: false,
-      })
-      .returning();
+      },
+    });
 
-    return new Response(JSON.stringify(newApp), {
+    // The plugin returns RFC-style snake_case fields. Surface them plus the
+    // one-time client_secret (only returned here, never again).
+    return new Response(JSON.stringify(created), {
       status: 201,
       headers: { "Content-Type": "application/json" },
     });
@@ -78,18 +113,19 @@ export async function POST(context: APIContext) {
   }
 }
 
-// PUT /api/sso/applications/:id - Update an OAuth application
+// PUT /api/sso/applications?id=<clientId> - Update an OAuth client
 export async function PUT(context: APIContext) {
   try {
-    const { user, response } = await requireAuth(context);
+    const { response } = await requireAuth(context);
     if (response) return response;
 
     const url = new URL(context.request.url);
-    const appId = url.pathname.split("/").pop();
+    // Accept the OAuth client_id either from the query string or the path.
+    const clientId = url.searchParams.get("id") || url.pathname.split("/").pop();
 
-    if (!appId) {
+    if (!clientId) {
       return new Response(
-        JSON.stringify({ error: "Application ID is required" }),
+        JSON.stringify({ error: "Client ID is required" }),
         {
           status: 400,
           headers: { "Content-Type": "application/json" },
@@ -98,35 +134,26 @@ export async function PUT(context: APIContext) {
     }
 
     const body = await context.request.json();
-    const { name, redirectURLs, disabled, metadata } = body;
+    const { name, redirectURLs, disabled } = body;
 
-    const updateData: any = {};
-    if (name !== undefined) updateData.name = name;
+    const updateBody: Record<string, unknown> = { client_id: clientId };
+    if (name !== undefined) updateBody.client_name = name;
+    if (disabled !== undefined) updateBody.disabled = disabled;
     if (redirectURLs !== undefined) {
-      updateData.redirectURLs = Array.isArray(redirectURLs) 
-        ? redirectURLs.join(",") 
-        : redirectURLs;
-    }
-    if (disabled !== undefined) updateData.disabled = disabled;
-    if (metadata !== undefined) updateData.metadata = JSON.stringify(metadata);
-
-    const [updated] = await db
-      .update(oauthApplications)
-      .set({
-        ...updateData,
-        updatedAt: new Date(),
-      })
-      .where(eq(oauthApplications.id, appId))
-      .returning();
-
-    if (!updated) {
-      return new Response(JSON.stringify({ error: "Application not found" }), {
-        status: 404,
-        headers: { "Content-Type": "application/json" },
-      });
+      updateBody.redirect_uris = Array.isArray(redirectURLs)
+        ? redirectURLs
+        : String(redirectURLs)
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean);
     }
 
-    return new Response(JSON.stringify({ ...updated, clientSecret: undefined }), {
+    const updated = await auth.api.updateOAuthClient({
+      headers: context.request.headers,
+      body: updateBody as any,
+    });
+
+    return new Response(JSON.stringify(updated), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
@@ -135,18 +162,18 @@ export async function PUT(context: APIContext) {
   }
 }
 
-// DELETE /api/sso/applications/:id - Delete an OAuth application
+// DELETE /api/sso/applications?id=<clientId> - Delete an OAuth client
 export async function DELETE(context: APIContext) {
   try {
-    const { user, response } = await requireAuth(context);
+    const { response } = await requireAuth(context);
     if (response) return response;
 
     const url = new URL(context.request.url);
-    const appId = url.searchParams.get("id");
+    const clientId = url.searchParams.get("id");
 
-    if (!appId) {
+    if (!clientId) {
       return new Response(
-        JSON.stringify({ error: "Application ID is required" }),
+        JSON.stringify({ error: "Client ID is required" }),
         {
           status: 400,
           headers: { "Content-Type": "application/json" },
@@ -154,17 +181,25 @@ export async function DELETE(context: APIContext) {
       );
     }
 
-    const deleted = await db
-      .delete(oauthApplications)
-      .where(eq(oauthApplications.id, appId))
-      .returning();
+    // Ensure the client exists so we can return a 404 (the plugin endpoint
+    // may otherwise succeed silently).
+    const existing = await db
+      .select()
+      .from(oauthClients)
+      .where(eq(oauthClients.clientId, clientId))
+      .limit(1);
 
-    if (deleted.length === 0) {
+    if (existing.length === 0) {
       return new Response(JSON.stringify({ error: "Application not found" }), {
         status: 404,
         headers: { "Content-Type": "application/json" },
       });
     }
+
+    await auth.api.deleteOAuthClient({
+      headers: context.request.headers,
+      body: { client_id: clientId },
+    });
 
     return new Response(JSON.stringify({ success: true }), {
       status: 200,

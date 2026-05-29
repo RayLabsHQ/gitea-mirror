@@ -188,6 +188,58 @@ function verify0011Migration(db: any) {
   assert(parsed.provider === "ntfy", "Expected default notification_config.provider to be 'ntfy'");
 }
 
+function seedPre0012Database(db: any) {
+  // The harness has already run migrations 0000-0011, so the legacy
+  // oidc-provider tables exist. Seed a registered client (with the legacy
+  // comma-separated redirect_urls format) plus the related token/consent rows
+  // to exercise the create/transform/drop paths in 0012.
+  db.run("INSERT INTO users (id, email, username, name) VALUES ('u1', 'u1@example.com', 'user1', 'User One')");
+  db.run("INSERT INTO oauth_applications (id, client_id, client_secret, name, redirect_urls, type, disabled, user_id) VALUES ('app1', 'client-1', 'secret-1', 'Example App', 'https://example.com/callback,https://example.com/cb2', 'web', false, 'u1')");
+  db.run("INSERT INTO oauth_access_tokens (id, access_token, refresh_token, access_token_expires_at, refresh_token_expires_at, client_id, user_id, scopes) VALUES ('oat1', 'tok', 'rtok', 7000, 8000, 'client-1', 'u1', '[\"repo\"]')");
+  db.run("INSERT INTO oauth_consent (id, user_id, client_id, scopes, consent_given) VALUES ('cons1', 'u1', 'client-1', '[\"repo\"]', true)");
+}
+
+function verify0012Migration(db: any) {
+  // Old provider tables are dropped.
+  for (const table of ["oauth_applications", "oauth_consent"]) {
+    const row = db
+      .query("SELECT name FROM sqlite_master WHERE type='table' AND name = ?")
+      .get(table) as { name: string } | null;
+    assert(!row, `Expected ${table} table to be dropped after migration`);
+  }
+
+  // New provider tables exist.
+  for (const table of ["oauth_clients", "oauth_access_tokens", "oauth_refresh_tokens", "oauth_consents", "jwks"]) {
+    const row = db
+      .query("SELECT name FROM sqlite_master WHERE type='table' AND name = ?")
+      .get(table) as { name: string } | null;
+    assert(row, `Expected ${table} table to exist after migration`);
+  }
+
+  // The registered client is preserved and its redirect URIs converted from
+  // the legacy comma-separated string into a JSON string[].
+  const client = db
+    .query("SELECT client_id, client_secret, name, redirect_uris, type, user_id FROM oauth_clients WHERE id = 'app1'")
+    .get() as { client_id: string; client_secret: string; name: string; redirect_uris: string; type: string; user_id: string } | null;
+  assert(client, "Expected migrated oauth_clients row for app1");
+  assert(client.client_id === "client-1", "Expected client_id to be preserved");
+  assert(client.name === "Example App", "Expected client name to be preserved");
+  assert(client.user_id === "u1", "Expected owner user_id to be preserved");
+
+  const uris = JSON.parse(client.redirect_uris);
+  assert(
+    Array.isArray(uris) && uris.length === 2 && uris[0] === "https://example.com/callback" && uris[1] === "https://example.com/cb2",
+    `Expected redirect_uris to be a JSON array of the two callbacks, got ${client.redirect_uris}`,
+  );
+
+  // The reshaped tables accept the new column layout.
+  db.run("INSERT INTO oauth_clients (id, client_id, redirect_uris) VALUES ('app2', 'client-2', '[\"https://example.com/cb\"]')");
+  db.run("INSERT INTO oauth_refresh_tokens (id, token, client_id, user_id, scopes) VALUES ('rt1', 'refresh-1', 'client-2', 'u1', '[\"openid\"]')");
+  db.run("INSERT INTO oauth_access_tokens (id, token, client_id, user_id, scopes) VALUES ('at1', 'access-1', 'client-2', 'u1', '[\"openid\"]')");
+  db.run("INSERT INTO oauth_consents (id, client_id, user_id, scopes) VALUES ('co1', 'client-2', 'u1', '[\"openid\"]')");
+  db.run("INSERT INTO jwks (id, public_key, private_key) VALUES ('jwk1', 'public', 'private')");
+}
+
 const latestUpgradeFixtures: Record<string, UpgradeFixture> = {
   "0009_nervous_tyger_tiger": {
     seed: seedPre0009Database,
@@ -200,6 +252,10 @@ const latestUpgradeFixtures: Record<string, UpgradeFixture> = {
   "0011_notification_config": {
     seed: seedPre0011Database,
     verify: verify0011Migration,
+  },
+  "0012_oauth_provider_migration": {
+    seed: seedPre0012Database,
+    verify: verify0012Migration,
   },
 };
 

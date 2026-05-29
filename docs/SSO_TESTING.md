@@ -125,10 +125,51 @@ npm start
 
 ### Debug Mode:
 
-Enable debug logging by setting environment variable:
+> **Note:** Better Auth uses its own logger and does **not** read the `DEBUG`
+> environment variable (it is not based on the `debug` npm package). An older
+> version of this guide suggested `DEBUG=better-auth:*` — that has no effect.
+
+Better Auth's logger defaults to the `warn` level, so SSO/OIDC sign-in and
+callback details are hidden. Set the log level to `debug` to surface the full
+trace:
+
 ```bash
-DEBUG=better-auth:* bun run dev
+# Local dev
+BETTER_AUTH_LOG_LEVEL=debug bun run dev
 ```
+
+```yaml
+# Docker Compose
+services:
+  gitea-mirror:
+    environment:
+      - BETTER_AUTH_LOG_LEVEL=debug
+```
+
+Then watch the server logs (e.g. `docker compose logs -f gitea-mirror`) while you
+attempt an SSO login. Lines are prefixed with `[Better Auth]:`. Accepted values
+are `debug`, `info`, `warn`, and `error`.
+
+#### Debugging a login that bounces back to `/login`
+
+If clicking the SSO button sends you to the provider and then straight back to
+the login screen, the OAuth flow itself usually succeeded but **no session
+cookie was persisted**. Work through these checks:
+
+1. **Enable `BETTER_AUTH_LOG_LEVEL=debug`** (above) and look for errors during
+   the `/api/auth/sso/callback/<provider-id>` request.
+2. **Check the redirect URI** registered in your IdP exactly matches
+   `https://<your-domain>/api/auth/sso/callback/<provider-id>` (scheme, host,
+   and provider ID — no trailing slash).
+3. **Confirm the session cookie is set.** In the browser DevTools → Network,
+   inspect the callback response for a `Set-Cookie: better-auth-session=…`
+   header, and DevTools → Application → Cookies for the stored cookie. Behind a
+   reverse proxy, ensure `BETTER_AUTH_URL` is your **external HTTPS** URL so the
+   cookie is issued with the correct domain and `Secure` flag, and that the
+   proxy forwards `X-Forwarded-Proto: https` and `X-Forwarded-Host`.
+4. **A `401` on `/api/sso/applications` is unrelated** to client login — that
+   endpoint backs the OAuth *provider* (consent) management UI and requires an
+   existing session. It is not part of the Authentik/OIDC sign-in flow.
 
 ## Testing Different Scenarios
 
