@@ -240,6 +240,33 @@ function verify0012Migration(db: any) {
   db.run("INSERT INTO jwks (id, public_key, private_key) VALUES ('jwk1', 'public', 'private')");
 }
 
+function seedPre0013Database(db: any) {
+  // Migrations 0000-0012 have run, so sso_providers exists in its pre-saml
+  // shape. Seed an OIDC provider row so we can confirm the ADD COLUMN does
+  // not disturb existing data.
+  db.run("INSERT INTO users (id, email, username, name) VALUES ('u-sso', 'sso@example.com', 'sso', 'SSO User')");
+  db.run("INSERT INTO sso_providers (id, issuer, domain, oidc_config, user_id, provider_id) VALUES ('sso-pre13', 'https://idp.example.com', 'example.com', '{\"clientId\":\"x\"}', 'u-sso', 'idp-pre13')");
+}
+
+function verify0013Migration(db: any) {
+  const cols = db
+    .query("PRAGMA table_info(sso_providers)")
+    .all() as Array<{ name: string; notnull: number }>;
+  const saml = cols.find((c) => c.name === "saml_config");
+  assert(saml, "Expected sso_providers.saml_config column to exist");
+  assert(saml.notnull === 0, "Expected saml_config to be nullable");
+
+  // Pre-existing OIDC row is untouched and saml_config defaults to NULL.
+  const row = db
+    .query("SELECT provider_id, oidc_config, saml_config FROM sso_providers WHERE id = 'sso-pre13'")
+    .get() as { provider_id: string; oidc_config: string; saml_config: string | null } | null;
+  assert(row, "Expected pre-existing OIDC provider row to survive migration");
+  assert(row.saml_config === null, `Expected saml_config to be NULL, got ${row.saml_config}`);
+
+  // New rows can opt into SAML config.
+  db.run("INSERT INTO sso_providers (id, issuer, domain, oidc_config, saml_config, user_id, provider_id) VALUES ('sso-saml', 'https://idp.example.com', 'example.com', '{}', '{\"entryPoint\":\"https://idp.example.com/saml\"}', 'u-sso', 'idp-saml')");
+}
+
 const latestUpgradeFixtures: Record<string, UpgradeFixture> = {
   "0009_nervous_tyger_tiger": {
     seed: seedPre0009Database,
@@ -256,6 +283,10 @@ const latestUpgradeFixtures: Record<string, UpgradeFixture> = {
   "0012_oauth_provider_migration": {
     seed: seedPre0012Database,
     verify: verify0012Migration,
+  },
+  "0013_sso_saml_config": {
+    seed: seedPre0013Database,
+    verify: verify0013Migration,
   },
 };
 

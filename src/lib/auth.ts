@@ -3,7 +3,7 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { jwt } from "better-auth/plugins";
 import { oauthProvider } from "@better-auth/oauth-provider";
 import { sso } from "@better-auth/sso";
-import { db, users } from "./db";
+import { db, users, ssoProviders } from "./db";
 import * as schema from "./db/schema";
 import { eq } from "drizzle-orm";
 import { withBase } from "./base-path";
@@ -185,18 +185,31 @@ export const auth = betterAuth({
 
   // Account linking configuration.
   //
-  // This is what lets a user who first registered with email/password later
-  // sign in through an external SSO/OIDC provider (e.g. Authentik) and land
-  // on the *same* account instead of being rejected/bounced back to /login.
-  // Better Auth enables linking by default, but auto-linking an SSO sign-in
-  // to a pre-existing email account only happens when the provider is trusted
-  // or the upstream email is verified. We trust the local "email-password"
-  // provider so the existing admin account can be matched by email, and rely
-  // on the SSO plugin's `trustEmailVerified` for the upstream side.
+  // Lets a user who first registered with email/password sign in through SSO
+  // and land on the *same* account, instead of being bounced back to /login.
+  // Better Auth's auto-link path (link-account.mjs) refuses unless BOTH sides
+  // pass:
+  //   - upstream: provider is "trusted" OR userInfo.emailVerified === true
+  //   - local:    requireLocalEmailVerified is false OR existing user is verified
+  // We've never wired up an email-verification flow, so the local admin always
+  // has emailVerified=false — `requireLocalEmailVerified: false` is required.
+  // For the upstream side we trust every SSO provider the operator explicitly
+  // registered through our own UI/API: the providerId list is read at request
+  // time so newly-registered providers are picked up without a restart.
   account: {
     accountLinking: {
       enabled: true,
-      trustedProviders: ["email-password"],
+      requireLocalEmailVerified: false,
+      trustedProviders: async () => {
+        try {
+          const rows = await db
+            .select({ providerId: ssoProviders.providerId })
+            .from(ssoProviders);
+          return rows.map((r) => r.providerId);
+        } catch {
+          return [];
+        }
+      },
       // Keep the default (false): never link accounts whose emails differ.
       allowDifferentEmails: false,
     },

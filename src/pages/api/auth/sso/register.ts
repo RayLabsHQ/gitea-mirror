@@ -152,24 +152,13 @@ export async function POST(context: APIContext) {
       headers.set("cookie", cookieHeader);
     }
 
-    // Register the SSO provider using Better Auth's API
-    const response = await auth.api.registerSSOProvider({
+    // Register the SSO provider using Better Auth's API.
+    // auth.api.* returns the parsed result directly (not a fetch Response); it
+    // throws APIError on failure, which createSecureErrorResponse handles below.
+    const result = await auth.api.registerSSOProvider({
       body: registrationBody,
       headers,
     });
-
-    if (!response.ok) {
-      const error = await response.text();
-      return new Response(
-        JSON.stringify({ error: `Failed to register SSO provider: ${error}` }),
-        {
-          status: response.status,
-          headers: { "Content-Type": "application/json" },
-        }
-      );
-    }
-
-    const result = await response.json();
 
     // Mirror provider entry into local SSO table for UI listing
     try {

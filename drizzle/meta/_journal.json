@@ -92,6 +92,13 @@
       "when": 1774062000000,
       "tag": "0012_oauth_provider_migration",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1774065600000,
+      "tag": "0013_sso_saml_config",
+      "breakpoints": true
     }
   ]
 }

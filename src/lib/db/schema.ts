@@ -741,6 +741,9 @@ export const ssoProviders = sqliteTable("sso_providers", {
   issuer: text("issuer").notNull(),
   domain: text("domain").notNull(),
   oidcConfig: text("oidc_config").notNull(), // JSON string with OIDC configuration
+  // The upgraded @better-auth/sso plugin writes this on every insert (null for OIDC providers).
+  // Drizzle's adapter rejects unknown fields, so the column must exist.
+  samlConfig: text("saml_config"),
   userId: text("user_id").notNull(), // Admin who created this provider
   providerId: text("provider_id").notNull().unique(), // Unique identifier for the provider
   organizationId: text("organization_id"), // Optional - if provider is linked to an organization
