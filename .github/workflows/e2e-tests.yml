@@ -88,6 +88,24 @@ jobs:
 
       - name: Start Gitea and git-server containers
         run: |
+          # Retry pulls before `up` — Docker Hub occasionally returns
+          # "context deadline exceeded" on the first attempt. Pulling
+          # separately also keeps the failure mode obvious if it persists.
+          echo "Pulling images..."
+          for attempt in 1 2 3; do
+            if docker compose -f tests/e2e/docker-compose.e2e.yml pull --quiet; then
+              echo "✓ Images pulled (attempt $attempt)"
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "ERROR: docker compose pull failed after 3 attempts"
+              exit 1
+            fi
+            sleep_s=$((attempt * 10))
+            echo "Pull attempt $attempt failed, retrying in ${sleep_s}s..."
+            sleep "$sleep_s"
+          done
+
           echo "Starting containers via docker compose..."
           docker compose -f tests/e2e/docker-compose.e2e.yml up -d
 
