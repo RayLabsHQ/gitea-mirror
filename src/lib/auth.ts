@@ -3,7 +3,7 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { jwt } from "better-auth/plugins";
 import { oauthProvider } from "@better-auth/oauth-provider";
 import { sso } from "@better-auth/sso";
-import { db, users, ssoProviders } from "./db";
+import { db, users } from "./db";
 import * as schema from "./db/schema";
 import { eq } from "drizzle-orm";
 import { withBase } from "./base-path";
@@ -189,27 +189,25 @@ export const auth = betterAuth({
   // and land on the *same* account, instead of being bounced back to /login.
   // Better Auth's auto-link path (link-account.mjs) refuses unless BOTH sides
   // pass:
-  //   - upstream: provider is "trusted" OR userInfo.emailVerified === true
-  //   - local:    requireLocalEmailVerified is false OR existing user is verified
-  // We've never wired up an email-verification flow, so the local admin always
-  // has emailVerified=false — `requireLocalEmailVerified: false` is required.
-  // For the upstream side we trust every SSO provider the operator explicitly
-  // registered through our own UI/API: the providerId list is read at request
-  // time so newly-registered providers are picked up without a restart.
+  //   - upstream: userInfo.emailVerified === true (or the SSO provider is in
+  //               `trustedProviders`)
+  //   - local:    existing user is verified (or requireLocalEmailVerified=false)
+  //
+  // We don't wire an email-verification flow, so the local admin always has
+  // emailVerified=false — `requireLocalEmailVerified: false` is required.
+  //
+  // We deliberately do NOT add SSO providers to `trustedProviders`. Doing so
+  // would mean "the operator registered this IdP → its email assertion is
+  // trusted unconditionally," which is unsafe: a permissive IdP (e.g. one
+  // that lets users self-register with any email without verification) could
+  // be abused to claim a local admin's email and silently absorb that
+  // account. Instead we rely on the SSO plugin's `trustEmailVerified: true`
+  // (below), which passes through whatever `email_verified` the IdP claims —
+  // so linking only happens when the IdP itself confirms the upstream email.
   account: {
     accountLinking: {
       enabled: true,
       requireLocalEmailVerified: false,
-      trustedProviders: async () => {
-        try {
-          const rows = await db
-            .select({ providerId: ssoProviders.providerId })
-            .from(ssoProviders);
-          return rows.map((r) => r.providerId);
-        } catch {
-          return [];
-        }
-      },
       // Keep the default (false): never link accounts whose emails differ.
       allowDifferentEmails: false,
     },
