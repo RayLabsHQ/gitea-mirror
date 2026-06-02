@@ -279,6 +279,18 @@ export const auth = betterAuth({
       disableImplicitSignUp: false,
       // Trust email_verified claims from the upstream provider so we can link by matching email
       trustEmailVerified: true,
+      // Surface `domainVerified` to the model so account-linking can read it.
+      //
+      // Better Auth's adapter transformOutput (factory.mjs) only copies fields
+      // that are declared in the plugin's model schema; the SSO plugin only
+      // declares `domainVerified` when this option is enabled. Without it the
+      // column is in the DB but stripped from the returned provider object, so
+      // the trust check `"domainVerified" in provider` is silently false and
+      // sign-ins land on /?error=UNKNOWN. We don't use the DNS-based
+      // verify-domain flow this option also exposes — we set
+      // `domainVerified: true` directly in src/pages/api/auth/sso/register.ts
+      // after the plugin's create, scoped by the operator-supplied `domain`.
+      domainVerification: { enabled: true },
     }),
 
     // Header / forward authentication bridge. Exposes
