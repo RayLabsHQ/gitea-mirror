@@ -158,16 +158,23 @@ cookie was persisted**. Work through these checks:
 
 1. **Enable `BETTER_AUTH_LOG_LEVEL=debug`** (above) and look for errors during
    the `/api/auth/sso/callback/<provider-id>` request.
-2. **Check the redirect URI** registered in your IdP exactly matches
+2. **Check for `?error=UNKNOWN` on the landing URL** (or `?error=account%20not%20linked` in dev).
+   That's Better Auth's account-linking step refusing to attach the SSO identity
+   to an existing email/password account. The debug log line to look for is
+   `User already exist but account isn't linked to <providerId>`. The fix is
+   almost always to set the SSO provider's **Domain** field to the email domain
+   your users actually have — auto-linking is gated on that domain match.
+   See [docs/SSO-OIDC-SETUP.md#account-linking](./SSO-OIDC-SETUP.md#account-linking).
+3. **Check the redirect URI** registered in your IdP exactly matches
    `https://<your-domain>/api/auth/sso/callback/<provider-id>` (scheme, host,
    and provider ID — no trailing slash).
-3. **Confirm the session cookie is set.** In the browser DevTools → Network,
+4. **Confirm the session cookie is set.** In the browser DevTools → Network,
    inspect the callback response for a `Set-Cookie: better-auth-session=…`
    header, and DevTools → Application → Cookies for the stored cookie. Behind a
    reverse proxy, ensure `BETTER_AUTH_URL` is your **external HTTPS** URL so the
    cookie is issued with the correct domain and `Secure` flag, and that the
    proxy forwards `X-Forwarded-Proto: https` and `X-Forwarded-Host`.
-4. **A `401` on `/api/sso/applications` is unrelated** to client login — that
+5. **A `401` on `/api/sso/applications` is unrelated** to client login — that
    endpoint backs the OAuth *provider* (consent) management UI and requires an
    existing session. It is not part of the Authentik/OIDC sign-in flow.
 

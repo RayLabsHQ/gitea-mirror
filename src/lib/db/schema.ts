@@ -744,6 +744,12 @@ export const ssoProviders = sqliteTable("sso_providers", {
   // The upgraded @better-auth/sso plugin writes this on every insert (null for OIDC providers).
   // Drizzle's adapter rejects unknown fields, so the column must exist.
   samlConfig: text("saml_config"),
+  // Used by the SSO plugin's account-linking trust check: a sign-in is treated
+  // as trusted when this is true AND the user's email domain matches `domain`
+  // above. We set this to true on register (see /api/auth/sso/register.ts) so
+  // domain-scoped auto-linking works out of the box; the column default keeps
+  // existing rows trusted after upgrade.
+  domainVerified: integer("domain_verified", { mode: "boolean" }).notNull().default(true),
   userId: text("user_id").notNull(), // Admin who created this provider
   providerId: text("provider_id").notNull().unique(), // Unique identifier for the provider
   organizationId: text("organization_id"), // Optional - if provider is linked to an organization

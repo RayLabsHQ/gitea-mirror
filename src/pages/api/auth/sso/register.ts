@@ -172,6 +172,13 @@ export async function POST(context: APIContext) {
         issuer: registrationBody.issuer,
         domain: registrationBody.domain,
         organizationId: registrationBody.organizationId,
+        // Mark this provider as trusted for the `domain` it was registered
+        // under. Better Auth's SSO plugin gates account auto-linking on this
+        // flag together with an email-domain match (validateEmailDomain), so
+        // sign-ins from users outside the registered domain are NOT
+        // auto-linked even though the provider is trusted. The plugin's own
+        // create call hardcodes this to false, so we set it here.
+        domainVerified: true,
         updatedAt: new Date(),
       };
 
@@ -199,6 +206,7 @@ export async function POST(context: APIContext) {
           userId: user.id,
           providerId: registrationBody.providerId,
           organizationId: registrationBody.organizationId,
+          domainVerified: true,
         });
       }
     } catch (mirroringError) {

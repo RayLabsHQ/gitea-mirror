@@ -241,30 +241,53 @@ function verify0012Migration(db: any) {
 }
 
 function seedPre0013Database(db: any) {
-  // Migrations 0000-0012 have run, so sso_providers exists in its pre-saml
-  // shape. Seed an OIDC provider row so we can confirm the ADD COLUMN does
-  // not disturb existing data.
+  // Migrations 0000-0012 have run, so sso_providers lacks samlConfig /
+  // domainVerified and the organizations table still carries the inherited
+  // DEFAULT '' on normalized_name from 0007. Seed both so the table-rebuild
+  // and the column-adds can be verified end-to-end.
   db.run("INSERT INTO users (id, email, username, name) VALUES ('u-sso', 'sso@example.com', 'sso', 'SSO User')");
+  db.run("INSERT INTO configs (id, user_id, name, is_active, github_config, gitea_config, schedule_config, cleanup_config) VALUES ('cfg-pre13', 'u-sso', 'Default', 1, '{}', '{}', '{}', '{}')");
   db.run("INSERT INTO sso_providers (id, issuer, domain, oidc_config, user_id, provider_id) VALUES ('sso-pre13', 'https://idp.example.com', 'example.com', '{\"clientId\":\"x\"}', 'u-sso', 'idp-pre13')");
+  db.run("INSERT INTO organizations (id, user_id, config_id, name, avatar_url, normalized_name) VALUES ('org-pre13', 'u-sso', 'cfg-pre13', 'Example', 'https://example.com/a.png', 'example')");
 }
 
 function verify0013Migration(db: any) {
-  const cols = db
+  // New columns on sso_providers.
+  const ssoCols = db
     .query("PRAGMA table_info(sso_providers)")
-    .all() as Array<{ name: string; notnull: number }>;
-  const saml = cols.find((c) => c.name === "saml_config");
+    .all() as Array<{ name: string; notnull: number; dflt_value: string | null }>;
+  const saml = ssoCols.find((c) => c.name === "saml_config");
+  const domainVerified = ssoCols.find((c) => c.name === "domain_verified");
   assert(saml, "Expected sso_providers.saml_config column to exist");
   assert(saml.notnull === 0, "Expected saml_config to be nullable");
+  assert(domainVerified, "Expected sso_providers.domain_verified column to exist");
+  assert(domainVerified.notnull === 1, "Expected domain_verified to be NOT NULL");
+  assert(
+    domainVerified.dflt_value === "true",
+    `Expected domain_verified DEFAULT true, got ${domainVerified.dflt_value}`,
+  );
 
-  // Pre-existing OIDC row is untouched and saml_config defaults to NULL.
-  const row = db
-    .query("SELECT provider_id, oidc_config, saml_config FROM sso_providers WHERE id = 'sso-pre13'")
-    .get() as { provider_id: string; oidc_config: string; saml_config: string | null } | null;
-  assert(row, "Expected pre-existing OIDC provider row to survive migration");
-  assert(row.saml_config === null, `Expected saml_config to be NULL, got ${row.saml_config}`);
+  // Pre-existing SSO row picked up the default (1 = true) on domain_verified.
+  const ssoRow = db
+    .query("SELECT provider_id, saml_config, domain_verified FROM sso_providers WHERE id = 'sso-pre13'")
+    .get() as { provider_id: string; saml_config: string | null; domain_verified: number } | null;
+  assert(ssoRow, "Expected pre-existing OIDC provider row to survive migration");
+  assert(ssoRow.saml_config === null, `Expected saml_config NULL, got ${ssoRow.saml_config}`);
+  assert(ssoRow.domain_verified === 1, `Expected domain_verified=1, got ${ssoRow.domain_verified}`);
 
-  // New rows can opt into SAML config.
-  db.run("INSERT INTO sso_providers (id, issuer, domain, oidc_config, saml_config, user_id, provider_id) VALUES ('sso-saml', 'https://idp.example.com', 'example.com', '{}', '{\"entryPoint\":\"https://idp.example.com/saml\"}', 'u-sso', 'idp-saml')");
+  // Organizations rebuild preserved the seeded row and dropped the inherited
+  // DEFAULT '' on normalized_name (drizzle reconciles to schema.ts).
+  const orgRow = db
+    .query("SELECT id, normalized_name FROM organizations WHERE id = 'org-pre13'")
+    .get() as { id: string; normalized_name: string } | null;
+  assert(orgRow, "Expected pre-existing organization row to survive table rebuild");
+  assert(orgRow.normalized_name === "example", `Expected organization normalized_name preserved, got ${orgRow.normalized_name}`);
+  const orgCols = db
+    .query("PRAGMA table_info(organizations)")
+    .all() as Array<{ name: string; dflt_value: string | null }>;
+  const normName = orgCols.find((c) => c.name === "normalized_name");
+  assert(normName, "Expected organizations.normalized_name column to exist");
+  assert(normName.dflt_value === null, `Expected normalized_name to have no default, got ${normName.dflt_value}`);
 }
 
 const latestUpgradeFixtures: Record<string, UpgradeFixture> = {
@@ -284,7 +307,7 @@ const latestUpgradeFixtures: Record<string, UpgradeFixture> = {
     seed: seedPre0012Database,
     verify: verify0012Migration,
   },
-  "0013_sso_saml_config": {
+  "0013_slim_galactus": {
     seed: seedPre0013Database,
     verify: verify0013Migration,
   },

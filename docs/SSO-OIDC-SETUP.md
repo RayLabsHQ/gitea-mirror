@@ -28,7 +28,7 @@ SSO allows your users to sign in using external identity providers like Google, 
 #### Required Fields
 
 - **Issuer URL**: The OIDC issuer URL (e.g., `https://accounts.google.com`)
-- **Domain**: The email domain for this provider (e.g., `example.com`)
+- **Domain**: The email domain this provider serves (e.g., `example.com`). **This is load-bearing for account-linking trust — see [Account Linking](#account-linking) below.** Multi-domain IdPs can use a comma-separated list (`example.com,subsidiary.com`).
 - **Provider ID**: A unique identifier for this provider (e.g., `google-sso`)
 - **Client ID**: The OAuth client ID from your provider
 - **Client Secret**: The OAuth client secret from your provider
@@ -56,6 +56,22 @@ https://your-domain.com/api/auth/sso/callback/{provider-id}
 ```
 
 Replace `{provider-id}` with your chosen Provider ID.
+
+### Account Linking
+
+When a user signs in via SSO whose email matches an **existing** email/password account, Gitea Mirror will try to *link* the SSO identity to that account so the user lands on the same dashboard — instead of being bounced to the login page or creating a duplicate account.
+
+The trust model is **domain-scoped**:
+
+- Every SSO provider you register is automatically marked `domainVerified: true` for the **Domain** field you set on registration.
+- An SSO sign-in is auto-linked to an existing local account **only when** the user's email address actually belongs to that registered domain. Cross-domain emails are rejected even if the provider is registered.
+- Local email/password accounts in this app are never verified (no email-verification flow exists), so we deliberately turn off `requireLocalEmailVerified` on the linker — otherwise no one could ever link.
+
+**What this means for you:**
+
+- Set the **Domain** field to the email domain(s) your IdP actually issues identities for. Don't set it to `example.com` if your IdP issues `@elsewhere.com` emails — auto-linking will silently refuse them.
+- If your IdP allows users to self-register or claim arbitrary emails *within the registered domain*, an attacker on that IdP can absorb a local account by claiming the same email. This is a trust decision: by registering an IdP, you're vouching for its identity model for that domain.
+- Multi-domain IdPs (one Authentik serving `acme.com,acquired.io`) work fine — list every domain comma-separated in the **Domain** field.
 
 ### Example: Google SSO Setup
 
@@ -99,7 +115,7 @@ Working Authentik deployments (see [#134](https://github.com/RayLabsHQ/gitea-mir
 
 Notes:
 - Make sure `BETTER_AUTH_URL` and (if you serve the UI from multiple origins) `BETTER_AUTH_TRUSTED_ORIGINS` point at the public URL users reach. A mismatch can surface as 500 errors after redirect.
-- Authentik must report the user’s email as verified (default behavior) so Gitea Mirror can auto-link accounts.
+- Set the **Domain** field to the email domain your Authentik users actually have. Auto-linking to an existing local admin only happens for emails in that domain — see [Account Linking](#account-linking) for the trust model. (Authentik's default email scope mapping returns `email_verified: False` for OIDC clients, which is why account linking is gated on the domain match here rather than the IdP's verified-email claim.)
 - If you created an Authentik provider before v3.8.10 you should delete it and re-add it after upgrading; older versions saved incomplete endpoint data which leads to the `url.startsWith` error explained in the Troubleshooting section.
 
 ## Setting up Header / Forward Authentication
@@ -257,7 +273,8 @@ When an application requests authentication:
 1. **"Invalid origin" error**: Check that your Gitea Mirror URL matches the configured redirect URI
 2. **"Provider not found" error**: Ensure the provider is properly configured and enabled
 3. **Redirect loop**: Verify the redirect URI in both Gitea Mirror and the SSO provider match exactly
-4. **`TypeError: undefined is not an object (evaluating 'url.startsWith')`**: This indicates the stored provider configuration is missing OIDC endpoints. Delete the provider from Gitea Mirror and re-register it using the **Discover** button so authorization/token URLs are saved (see [#73](https://github.com/RayLabsHQ/gitea-mirror/issues/73) and [#122](https://github.com/RayLabsHQ/gitea-mirror/issues/122) for examples).
+4. **`?error=UNKNOWN` on the homepage after a successful upstream login** (or `?error=account%20not%20linked` in development): the SSO callback succeeded but Better Auth refused to link the SSO identity to an existing local account. The most common cause is the SSO provider's registered **Domain** not matching the user's actual email domain — see [Account Linking](#account-linking). Set `BETTER_AUTH_LOG_LEVEL=debug` to see Better Auth's full callback trace (look for "User already exist but account isn't linked to ...") and confirm the diagnosis. The same symptom in production gets sanitized to `UNKNOWN` by Better Auth's error page before the redirect, which is why the visible error is opaque.
+5. **`TypeError: undefined is not an object (evaluating 'url.startsWith')`**: This indicates the stored provider configuration is missing OIDC endpoints. Delete the provider from Gitea Mirror and re-register it using the **Discover** button so authorization/token URLs are saved (see [#73](https://github.com/RayLabsHQ/gitea-mirror/issues/73) and [#122](https://github.com/RayLabsHQ/gitea-mirror/issues/122) for examples).
 
 ### OIDC Provider Issues
 

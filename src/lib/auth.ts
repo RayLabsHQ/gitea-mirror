@@ -189,21 +189,24 @@ export const auth = betterAuth({
   // and land on the *same* account, instead of being bounced back to /login.
   // Better Auth's auto-link path (link-account.mjs) refuses unless BOTH sides
   // pass:
-  //   - upstream: userInfo.emailVerified === true (or the SSO provider is in
-  //               `trustedProviders`)
+  //   - upstream: provider is "trusted" (either listed in `trustedProviders`
+  //               or the SSO plugin marks it trusted via domainVerified +
+  //               domain match) OR userInfo.emailVerified === true
   //   - local:    existing user is verified (or requireLocalEmailVerified=false)
   //
   // We don't wire an email-verification flow, so the local admin always has
   // emailVerified=false — `requireLocalEmailVerified: false` is required.
   //
-  // We deliberately do NOT add SSO providers to `trustedProviders`. Doing so
-  // would mean "the operator registered this IdP → its email assertion is
-  // trusted unconditionally," which is unsafe: a permissive IdP (e.g. one
-  // that lets users self-register with any email without verification) could
-  // be abused to claim a local admin's email and silently absorb that
-  // account. Instead we rely on the SSO plugin's `trustEmailVerified: true`
-  // (below), which passes through whatever `email_verified` the IdP claims —
-  // so linking only happens when the IdP itself confirms the upstream email.
+  // We deliberately do NOT use the catch-all `trustedProviders` list (which
+  // would blanket-trust every registered IdP). Instead the SSO provider's
+  // own `domainVerified` flag — set to true at registration time, scoped to
+  // the operator-supplied `domain` — gates linking. The SSO plugin enforces
+  // `validateEmailDomain(userInfo.email, provider.domain)` on top of it, so
+  // a sign-in is only auto-linked when (a) the operator vouched for the IdP
+  // by registering it, and (b) the user's email actually belongs to the
+  // domain that was vouched for. Cross-domain claims from a compromised or
+  // permissive IdP do not silently absorb local accounts. (Same-domain
+  // claims still require the operator to trust their IdP's identity model.)
   account: {
     accountLinking: {
       enabled: true,
