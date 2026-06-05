@@ -3,6 +3,10 @@
 import { Database } from "bun:sqlite";
 import { readFileSync } from "fs";
 import path from "path";
+import {
+  repairDuplicateSsoColumns,
+  restoreSsoDataAfter0013,
+} from "../src/lib/db/migration-repairs";
 
 type JournalEntry = {
   idx: number;
@@ -290,6 +294,100 @@ function verify0013Migration(db: any) {
   assert(normName.dflt_value === null, `Expected normalized_name to have no default, got ${normName.dflt_value}`);
 }
 
+const MIGRATION_0012_TIMESTAMP = 1774062000000;
+const MIGRATION_0013_TIMESTAMP = 1780377747526;
+
+/**
+ * Reproduce the issue #312 crash state — sso_providers already carries
+ * saml_config / domain_verified before migration 0013 runs (stranded on an
+ * intermediate build), with __drizzle_migrations recorded only through 0012 —
+ * and verify repairDuplicateSsoColumns()/restoreSsoDataAfter0013() let the
+ * canonical 0013 run while preserving real SAML provider data.
+ */
+function validateBroken0013Repair() {
+  const migration0013 = migrations.find((m) => m.entry.tag === "0013_slim_galactus");
+  if (!migration0013) return; // 0013 not present (shouldn't happen) — nothing to test.
+
+  const db = new Database(":memory:");
+  try {
+    runMigrations(db, migrations.slice(0, 13)); // 0000-0012
+
+    // A real upgraded instance has a __drizzle_migrations table recorded
+    // through 0012 but not 0013.
+    db.run(
+      "CREATE TABLE IF NOT EXISTS `__drizzle_migrations` (id INTEGER PRIMARY KEY AUTOINCREMENT, hash text NOT NULL, created_at numeric)",
+    );
+    db.run("INSERT INTO `__drizzle_migrations` (hash, created_at) VALUES ('through-0012', ?)", [
+      MIGRATION_0012_TIMESTAMP,
+    ]);
+
+    // Stranded columns from the intermediate build.
+    db.run("ALTER TABLE sso_providers ADD saml_config text");
+    db.run("ALTER TABLE sso_providers ADD domain_verified integer DEFAULT true NOT NULL");
+
+    db.run("INSERT INTO users (id, email, username, name) VALUES ('u1', 'u1@example.com', 'u1', 'User One')");
+    const samlJson = '{"entryPoint":"https://idp.example.com/sso","cert":"ABC123"}';
+    db.run(
+      "INSERT INTO sso_providers (id, issuer, domain, oidc_config, user_id, provider_id, saml_config, domain_verified) VALUES ('oidc1', 'https://idp', 'a.com', '{}', 'u1', 'p-oidc', NULL, 1)",
+    );
+    db.run(
+      "INSERT INTO sso_providers (id, issuer, domain, oidc_config, user_id, provider_id, saml_config, domain_verified) VALUES ('saml1', 'https://idp', 'b.com', '{}', 'u1', 'p-saml', ?, 1)",
+      [samlJson],
+    );
+    db.run(
+      "INSERT INTO sso_providers (id, issuer, domain, oidc_config, user_id, provider_id, saml_config, domain_verified) VALUES ('unv1', 'https://idp', 'c.com', '{}', 'u1', 'p-unv', NULL, 0)",
+    );
+
+    const preserved = repairDuplicateSsoColumns(db);
+
+    const colsAfterRepair = (db.query("PRAGMA table_info(sso_providers)").all() as TableInfoRow[]).map(
+      (c) => c.name,
+    );
+    assert(!colsAfterRepair.includes("saml_config"), "Expected repair to drop stranded saml_config column");
+    assert(
+      !colsAfterRepair.includes("domain_verified"),
+      "Expected repair to drop stranded domain_verified column",
+    );
+    const preservedIds = preserved.map((r) => r.id).sort();
+    assert(
+      preservedIds.length === 2 && preservedIds[0] === "saml1" && preservedIds[1] === "unv1",
+      `Expected SAML + unverified rows to be preserved, got ${JSON.stringify(preservedIds)}`,
+    );
+
+    // The canonical 0013 must now run without a duplicate-column error.
+    runMigration(db, migration0013);
+    restoreSsoDataAfter0013(db, preserved);
+
+    const rows = db
+      .query("SELECT id, saml_config, domain_verified FROM sso_providers ORDER BY id")
+      .all() as Array<{ id: string; saml_config: string | null; domain_verified: number }>;
+    const byId = Object.fromEntries(rows.map((r) => [r.id, r]));
+
+    assert(byId.oidc1.saml_config === null, "Expected OIDC provider saml_config to remain NULL");
+    assert(byId.oidc1.domain_verified === 1, "Expected OIDC provider domain_verified default 1");
+    assert(byId.saml1.saml_config === samlJson, "Expected SAML provider config to be preserved");
+    assert(byId.saml1.domain_verified === 1, "Expected SAML provider domain_verified preserved as 1");
+    assert(byId.unv1.saml_config === null, "Expected unverified provider saml_config NULL");
+    assert(byId.unv1.domain_verified === 0, "Expected explicit domain_verified=0 to be preserved");
+
+    // Idempotency: 0013 is now applied, so a re-run of the repair is a no-op.
+    db.run("INSERT INTO `__drizzle_migrations` (hash, created_at) VALUES ('through-0013', ?)", [
+      MIGRATION_0013_TIMESTAMP,
+    ]);
+    const secondPass = repairDuplicateSsoColumns(db);
+    assert(secondPass.length === 0, "Expected repair to no-op once migration 0013 is recorded");
+    const colsAfterSecondPass = (
+      db.query("PRAGMA table_info(sso_providers)").all() as TableInfoRow[]
+    ).map((c) => c.name);
+    assert(
+      colsAfterSecondPass.includes("saml_config") && colsAfterSecondPass.includes("domain_verified"),
+      "Expected columns to remain intact on the no-op second pass",
+    );
+  } finally {
+    db.close();
+  }
+}
+
 const latestUpgradeFixtures: Record<string, UpgradeFixture> = {
   "0009_nervous_tyger_tiger": {
     seed: seedPre0009Database,
@@ -361,8 +459,11 @@ function validateMigrations() {
     upgradeDb.close();
   }
 
+  // Exercise the runtime repair for the issue #312 duplicate-column crash.
+  validateBroken0013Repair();
+
   console.log(
-    `Validated ${migrations.length} migrations from scratch and upgrade path for ${latestMigration.entry.tag}.`,
+    `Validated ${migrations.length} migrations from scratch and upgrade path for ${latestMigration.entry.tag}, plus the #312 SSO-column repair.`,
   );
 }
 

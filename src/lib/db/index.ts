@@ -3,6 +3,7 @@ import { drizzle } from "drizzle-orm/bun-sqlite";
 import fs from "fs";
 import path from "path";
 import { migrate } from "drizzle-orm/bun-sqlite/migrator";
+import { repairDuplicateSsoColumns, restoreSsoDataAfter0013 } from "./migration-repairs";
 
 // Skip database initialization in test environment
 let db: ReturnType<typeof drizzle>;
@@ -95,8 +96,16 @@ if (process.env.NODE_ENV !== "test") {
       // Fix any migrations that were recorded but actually failed (e.g. v3.13.0 bug)
       repairFailedMigrations();
 
+      // Fix the v3.17.0 duplicate-column crash: reconcile stranded sso_providers
+      // columns so migration 0013 can run (see #312). Returns data to re-apply
+      // once 0013 has re-added the columns.
+      const preservedSsoData = repairDuplicateSsoColumns(sqlite);
+
       // Run migrations using Drizzle migrate function
       migrate(db, { migrationsFolder: "./drizzle" });
+
+      // Re-apply any SSO provider data preserved by the repair above.
+      restoreSsoDataAfter0013(sqlite, preservedSsoData);
 
       console.log("✅ Database migrations completed successfully");
     } catch (error) {
