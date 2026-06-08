@@ -99,6 +99,7 @@ export default function RepositoryTable({
   onDismissSync,
 }: RepositoryTableProps) {
   const tableParentRef = useRef<HTMLDivElement>(null);
+  const lastSelectedIndexRef = useRef<number | null>(null);
   const { giteaConfig } = useGiteaConfig();
 
   const handleUpdateDestination = async (repoId: string, newDestination: string | null) => {
@@ -235,6 +236,7 @@ export default function RepositoryTable({
 
   // Selection handlers
   const handleSelectAll = (checked: boolean) => {
+    lastSelectedIndexRef.current = null;
     if (checked) {
       const allIds = new Set(
         visibleRepositories
@@ -247,7 +249,7 @@ export default function RepositoryTable({
     }
   };
 
-  const handleSelectRepo = (repoId: string, checked: boolean) => {
+  const handleSelectRepo = (repoId: string, checked: boolean, index?: number) => {
     const newSelection = new Set(selectedRepoIds);
     if (checked) {
       newSelection.add(repoId);
@@ -255,6 +257,32 @@ export default function RepositoryTable({
       newSelection.delete(repoId);
     }
     onSelectionChange(newSelection);
+    if (index !== undefined) {
+      lastSelectedIndexRef.current = index;
+    }
+  };
+
+  const handleShiftRangeSelect = (currentIndex: number) => {
+    const lastIndex = lastSelectedIndexRef.current;
+    if (lastIndex === null) {
+      const repo = visibleRepositories[currentIndex];
+      if (repo?.id) {
+        const newSelection = new Set(selectedRepoIds);
+        newSelection.add(repo.id);
+        onSelectionChange(newSelection);
+        lastSelectedIndexRef.current = currentIndex;
+      }
+      return;
+    }
+    const start = Math.min(lastIndex, currentIndex);
+    const end = Math.max(lastIndex, currentIndex);
+    const newSelection = new Set(selectedRepoIds);
+    for (let i = start; i <= end; i++) {
+      const id = visibleRepositories[i]?.id;
+      if (id) newSelection.add(id);
+    }
+    onSelectionChange(newSelection);
+    lastSelectedIndexRef.current = currentIndex;
   };
 
   const isAllSelected =
@@ -263,7 +291,7 @@ export default function RepositoryTable({
   const isPartiallySelected = selectedRepoIds.size > 0 && !isAllSelected;
 
   // Mobile card layout for repository
-  const RepositoryCard = ({ repo }: { repo: Repository }) => {
+  const RepositoryCard = ({ repo, index }: { repo: Repository; index: number }) => {
     const isLoading = repo.id ? loadingRepoIds.has(repo.id) : false;
     const isSelected = repo.id ? selectedRepoIds.has(repo.id) : false;
     const giteaUrl = getGiteaRepoUrl(repo);
@@ -274,12 +302,21 @@ export default function RepositoryTable({
           <div className="flex flex-col gap-3">
             {/* Header with checkbox and repo name */}
             <div className="flex items-start gap-3">
-              <Checkbox
-                checked={isSelected}
-                onCheckedChange={(checked) => repo.id && handleSelectRepo(repo.id, checked as boolean)}
-                className="mt-1 h-5 w-5"
-                aria-label={`Select ${repo.name}`}
-              />
+              <div
+                onClickCapture={(e) => {
+                  if (e.shiftKey && repo.id) {
+                    e.stopPropagation();
+                    handleShiftRangeSelect(index);
+                  }
+                }}
+              >
+                <Checkbox
+                  checked={isSelected}
+                  onCheckedChange={(checked) => repo.id && handleSelectRepo(repo.id, checked as boolean, index)}
+                  className="mt-1 h-5 w-5"
+                  aria-label={`Select ${repo.name}`}
+                />
+              </div>
               <div className="flex-1 min-w-0">
                 <h3 className="font-medium text-base truncate">{repo.name}</h3>
                 <div className="flex items-center gap-2 mt-1 flex-wrap">
@@ -635,8 +672,8 @@ export default function RepositoryTable({
             </div>
 
             {/* Repository cards */}
-            {visibleRepositories.map((repo) => (
-              <RepositoryCard key={repo.id} repo={repo} />
+            {visibleRepositories.map((repo, index) => (
+              <RepositoryCard key={repo.id} repo={repo} index={index} />
             ))}
           </div>
 
@@ -701,10 +738,18 @@ export default function RepositoryTable({
                       className="h-[65px] flex items-center justify-between bg-transparent border-b hover:bg-muted/50"
                     >
                       {/* Checkbox */}
-                      <div className="h-full p-3 flex items-center justify-center flex-[0.3]">
+                      <div
+                        className="h-full p-3 flex items-center justify-center flex-[0.3]"
+                        onClickCapture={(e) => {
+                          if (e.shiftKey && repo.id) {
+                            e.stopPropagation();
+                            handleShiftRangeSelect(virtualRow.index);
+                          }
+                        }}
+                      >
                         <Checkbox
                           checked={repo.id ? selectedRepoIds.has(repo.id) : false}
-                          onCheckedChange={(checked) => repo.id && handleSelectRepo(repo.id, !!checked)}
+                          onCheckedChange={(checked) => repo.id && handleSelectRepo(repo.id, !!checked, virtualRow.index)}
                           aria-label={`Select ${repo.name}`}
                         />
                       </div>
