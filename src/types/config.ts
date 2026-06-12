@@ -86,6 +86,7 @@ export interface AdvancedOptions {
   skipForks: boolean;
   starredCodeOnly: boolean;
   autoMirrorStarred?: boolean;
+  skipPersonalRepos?: boolean;
 }
 
 export interface SaveConfigApiRequest {

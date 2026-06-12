@@ -1,15 +1,23 @@
 import { describe, expect, test, mock } from "bun:test";
 import { getGithubRepositories } from "@/lib/github";
 
-function makeRepo() {
+function makeRepo(overrides: Partial<{
+  name: string;
+  full_name: string;
+  ownerLogin: string;
+  ownerType: string;
+  fork: boolean;
+}> = {}) {
+  const ownerLogin = overrides.ownerLogin ?? "octo";
+  const ownerType = overrides.ownerType ?? "User";
   return {
-    name: "demo",
-    full_name: "octo/demo",
-    html_url: "https://github.com/octo/demo",
-    clone_url: "https://github.com/octo/demo.git",
-    owner: { login: "octo", type: "User" },
+    name: overrides.name ?? "demo",
+    full_name: overrides.full_name ?? `${ownerLogin}/${overrides.name ?? "demo"}`,
+    html_url: `https://github.com/${ownerLogin}/${overrides.name ?? "demo"}`,
+    clone_url: `https://github.com/${ownerLogin}/${overrides.name ?? "demo"}.git`,
+    owner: { login: ownerLogin, type: ownerType },
     private: false,
-    fork: false,
+    fork: overrides.fork ?? false,
     has_issues: true,
     archived: false,
     size: 1,
@@ -23,11 +31,11 @@ function makeRepo() {
   };
 }
 
-function makeOctokit() {
+function makeOctokit(reposToReturn?: ReturnType<typeof makeRepo>[]) {
   let captured: Record<string, unknown> | null = null;
   const paginate = mock(async (_method: unknown, options?: Record<string, unknown>) => {
     captured = options ?? null;
-    return [makeRepo()];
+    return reposToReturn ?? [makeRepo()];
   });
   return {
     octokit: {
@@ -96,5 +104,63 @@ describe("getGithubRepositories - affiliation", () => {
       const aff = String(getCaptured()?.affiliation ?? "");
       expect(aff.split(",")).toContain("organization_member");
     }
+  });
+});
+
+describe("getGithubRepositories - skipPersonalRepos", () => {
+  const personalRepo = makeRepo({ name: "my-lib", ownerLogin: "octo", ownerType: "User" });
+  const orgRepo = makeRepo({ name: "org-lib", ownerLogin: "my-org", ownerType: "Organization" });
+  const otherUserRepo = makeRepo({ name: "collab-lib", ownerLogin: "other-user", ownerType: "User" });
+
+  test("default false — keeps all repos including personal", async () => {
+    const { octokit } = makeOctokit([personalRepo, orgRepo]);
+    const repos = await getGithubRepositories({
+      octokit,
+      config: { githubConfig: { owner: "octo", skipPersonalRepos: false } as any },
+    });
+    expect(repos.map((r) => r.name)).toContain("my-lib");
+    expect(repos.map((r) => r.name)).toContain("org-lib");
+  });
+
+  test("skipPersonalRepos=true — drops repos owned by authenticated user", async () => {
+    const { octokit } = makeOctokit([personalRepo, orgRepo]);
+    const repos = await getGithubRepositories({
+      octokit,
+      config: { githubConfig: { owner: "octo", skipPersonalRepos: true } as any },
+    });
+    expect(repos.map((r) => r.name)).not.toContain("my-lib");
+    expect(repos.map((r) => r.name)).toContain("org-lib");
+  });
+
+  test("skipPersonalRepos=true — keeps repos owned by other users (collaborator repos)", async () => {
+    const { octokit } = makeOctokit([personalRepo, orgRepo, otherUserRepo]);
+    const repos = await getGithubRepositories({
+      octokit,
+      config: { githubConfig: { owner: "octo", skipPersonalRepos: true } as any },
+    });
+    expect(repos.map((r) => r.name)).not.toContain("my-lib");
+    expect(repos.map((r) => r.name)).toContain("org-lib");
+    expect(repos.map((r) => r.name)).toContain("collab-lib");
+  });
+
+  test("skipPersonalRepos=true with no owner configured — keeps all repos (safe fallback)", async () => {
+    const { octokit } = makeOctokit([personalRepo, orgRepo]);
+    const repos = await getGithubRepositories({
+      octokit,
+      config: { githubConfig: { owner: "", skipPersonalRepos: true } as any },
+    });
+    // Empty owner means we can't identify the user, so nothing should be dropped
+    expect(repos.map((r) => r.name)).toContain("my-lib");
+    expect(repos.map((r) => r.name)).toContain("org-lib");
+  });
+
+  test("skipPersonalRepos=true — unset (undefined) behaves like false", async () => {
+    const { octokit } = makeOctokit([personalRepo, orgRepo]);
+    const repos = await getGithubRepositories({
+      octokit,
+      config: { githubConfig: { owner: "octo" } as any },
+    });
+    expect(repos.map((r) => r.name)).toContain("my-lib");
+    expect(repos.map((r) => r.name)).toContain("org-lib");
   });
 });

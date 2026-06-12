@@ -124,3 +124,37 @@ test("githubConfigSchema parses includeCollaboratorRepos with true default", () 
   });
   expect(parsed.includeCollaboratorRepos).toBe(true);
 });
+
+test("skipPersonalRepos defaults to false in githubConfigSchema", () => {
+  const parsed = githubConfigSchema.parse({
+    owner: "octo",
+    type: "personal",
+    token: "",
+  });
+  expect(parsed.skipPersonalRepos).toBe(false);
+});
+
+test("skipPersonalRepos round-trips UI -> DB -> UI when true", () => {
+  const ui = buildMinimalUiConfigs();
+  const advancedWithSkip: AdvancedOptions = { ...ui.advancedOptions, skipPersonalRepos: true };
+  const db = mapUiToDbConfig(ui.githubConfig, ui.giteaConfig, ui.mirrorOptions, advancedWithSkip);
+  expect(db.githubConfig.skipPersonalRepos).toBe(true);
+
+  const roundTripped = mapDbToUiConfig({ githubConfig: db.githubConfig, giteaConfig: db.giteaConfig });
+  expect(roundTripped.advancedOptions.skipPersonalRepos).toBe(true);
+});
+
+test("skipPersonalRepos round-trips UI -> DB -> UI when false", () => {
+  const ui = buildMinimalUiConfigs();
+  const advancedWithSkip: AdvancedOptions = { ...ui.advancedOptions, skipPersonalRepos: false };
+  const db = mapUiToDbConfig(ui.githubConfig, ui.giteaConfig, ui.mirrorOptions, advancedWithSkip);
+  expect(db.githubConfig.skipPersonalRepos).toBe(false);
+
+  const roundTripped = mapDbToUiConfig({ githubConfig: db.githubConfig, giteaConfig: db.giteaConfig });
+  expect(roundTripped.advancedOptions.skipPersonalRepos).toBe(false);
+});
+
+test("DB row missing skipPersonalRepos defaults to false on read", () => {
+  const ui = mapDbToUiConfig({ githubConfig: { owner: "octo", token: "" } });
+  expect(ui.advancedOptions.skipPersonalRepos).toBe(false);
+});
