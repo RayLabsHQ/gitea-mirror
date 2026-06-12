@@ -2515,6 +2515,37 @@ export const mirrorGitRepoIssuesToGitea = async ({
   );
 };
 
+/**
+ * Classify a set of GitHub releases against the set already present in Gitea.
+ *
+ * Returns:
+ *   - `toCreate`: tag names that exist on GitHub but are missing from Gitea
+ *   - `toSkip`:   tag names that already exist in Gitea (will be handled by PATCH-if-content-changed)
+ *
+ * Deliberately does NOT return anything to delete based on ordering — Gitea mirrors
+ * order releases by tag-commit date, which can permanently disagree with GitHub's
+ * published_at order (e.g. unaconfig_dart v0.1.0/v0.1.1 — #310). Destroying and
+ * re-emitting releases for a cosmetic display-order difference is never worth it.
+ */
+export function classifyReleasesForReconciliation(
+  githubTagNames: string[],
+  giteaTagNames: string[]
+): { toCreate: string[]; toSkip: string[] } {
+  const giteaSet = new Set(giteaTagNames);
+  const toCreate: string[] = [];
+  const toSkip: string[] = [];
+
+  for (const tag of githubTagNames) {
+    if (giteaSet.has(tag)) {
+      toSkip.push(tag);
+    } else {
+      toCreate.push(tag);
+    }
+  }
+
+  return { toCreate, toSkip };
+}
+
 export async function mirrorGitHubReleasesToGitea({
   octokit,
   repository,
@@ -2601,23 +2632,10 @@ export async function mirrorGitHubReleasesToGitea({
   let mirroredCount = 0;
   let skippedCount = 0;
 
-  const getReleaseTimestamp = (release: (typeof limitedReleases)[number]) => {
-    // Use published_at first (when the release was published on GitHub)
-    // Fall back to created_at (when the git tag was created) only if published_at is missing
-    // This matches GitHub's sorting behavior and handles cases where multiple tags
-    // point to the same commit but have different publish dates
-    const sourceDate = release.published_at ?? release.created_at ?? "";
-    const timestamp = sourceDate ? new Date(sourceDate).getTime() : 0;
-    return Number.isFinite(timestamp) ? timestamp : 0;
-  };
+  // Process releases in their GitHub API order (newest first by default)
+  const releasesToProcess = limitedReleases.slice();
 
-  // Capture the latest releases, then process them oldest-to-newest so Gitea mirrors keep chronological order
-  const releasesToProcess = limitedReleases
-    .slice()
-    .sort((a, b) => getReleaseTimestamp(b) - getReleaseTimestamp(a))
-    .sort((a, b) => getReleaseTimestamp(a) - getReleaseTimestamp(b));
-
-  console.log(`[Releases] Processing ${releasesToProcess.length} releases in chronological order (oldest to newest by published date)`);
+  console.log(`[Releases] Processing ${releasesToProcess.length} releases for ${repository.fullName}`);
   releasesToProcess.forEach((rel, idx) => {
     const publishedDate = new Date(rel.published_at || rel.created_at);
     const createdDate = new Date(rel.created_at);
@@ -2627,85 +2645,10 @@ export async function mirrorGitHubReleasesToGitea({
     console.log(`[Releases] ${idx + 1}. ${rel.tag_name} - ${dateInfo}`);
   });
 
-  // Check if existing releases in Gitea are in the wrong order
-  // If so, we need to delete and recreate them to fix the ordering
-  let needsRecreation = false;
-  try {
-    const existingReleasesResponse = await httpGet(
-      `${config.giteaConfig.url}/api/v1/repos/${repoOwner}/${repoName}/releases?per_page=100`,
-      {
-        Authorization: `token ${decryptedConfig.giteaConfig.token}`,
-      }
-    ).catch(() => null);
-
-    if (existingReleasesResponse && existingReleasesResponse.data && Array.isArray(existingReleasesResponse.data)) {
-      const existingReleases = existingReleasesResponse.data;
-
-      if (existingReleases.length > 0) {
-        console.log(`[Releases] Found ${existingReleases.length} existing releases in Gitea, checking chronological order...`);
-
-        // Create a map of tag_name to expected chronological index (0 = oldest, n = newest)
-        const expectedOrder = new Map<string, number>();
-        releasesToProcess.forEach((rel, idx) => {
-          expectedOrder.set(rel.tag_name, idx);
-        });
-
-        // Check if existing releases are in the correct order based on created_unix
-        // Gitea sorts by created_unix DESC, so newer releases should have higher created_unix values
-        const releasesThatShouldExist = existingReleases.filter(r => expectedOrder.has(r.tag_name));
-
-        if (releasesThatShouldExist.length > 1) {
-          for (let i = 0; i < releasesThatShouldExist.length - 1; i++) {
-            const current = releasesThatShouldExist[i];
-            const next = releasesThatShouldExist[i + 1];
-
-            const currentExpectedIdx = expectedOrder.get(current.tag_name)!;
-            const nextExpectedIdx = expectedOrder.get(next.tag_name)!;
-
-            // Since Gitea returns releases sorted by created_unix DESC:
-            // - Earlier releases in the list should have HIGHER expected indices (newer)
-            // - Later releases in the list should have LOWER expected indices (older)
-            if (currentExpectedIdx < nextExpectedIdx) {
-              console.log(`[Releases] ⚠️  Incorrect ordering detected: ${current.tag_name} (index ${currentExpectedIdx}) appears before ${next.tag_name} (index ${nextExpectedIdx})`);
-              needsRecreation = true;
-              break;
-            }
-          }
-        }
-
-        if (needsRecreation) {
-          console.log(`[Releases] ⚠️  Releases are in incorrect chronological order. Will delete and recreate all releases.`);
-
-          // Delete all existing releases that we're about to recreate
-          for (const existingRelease of releasesThatShouldExist) {
-            try {
-              console.log(`[Releases] Deleting incorrectly ordered release: ${existingRelease.tag_name}`);
-              await httpDelete(
-                `${config.giteaConfig.url}/api/v1/repos/${repoOwner}/${repoName}/releases/${existingRelease.id}`,
-                {
-                  Authorization: `token ${decryptedConfig.giteaConfig.token}`,
-                }
-              );
-            } catch (deleteError) {
-              console.error(`[Releases] Failed to delete release ${existingRelease.tag_name}: ${deleteError instanceof Error ? deleteError.message : String(deleteError)}`);
-            }
-          }
-
-          console.log(`[Releases] ✅ Deleted ${releasesThatShouldExist.length} releases. Will recreate in correct chronological order.`);
-        } else {
-          console.log(`[Releases] ✅ Existing releases are in correct chronological order.`);
-        }
-      }
-    }
-  } catch (orderCheckError) {
-    console.warn(`[Releases] Could not verify release order: ${orderCheckError instanceof Error ? orderCheckError.message : String(orderCheckError)}`);
-    // Continue with normal processing
-  }
-
   for (const release of releasesToProcess) {
     try {
-      // Check if release already exists (skip check if we just deleted all releases)
-      const existingReleasesResponse = needsRecreation ? null : await httpGet(
+      // Always check if release already exists — reconcile by tag set, not by ordering
+      const existingReleasesResponse = await httpGet(
         `${config.giteaConfig.url}/api/v1/repos/${repoOwner}/${repoName}/releases/tags/${release.tag_name}`,
         {
           Authorization: `token ${decryptedConfig.giteaConfig.token}`,
@@ -2842,12 +2785,6 @@ export async function mirrorGitHubReleasesToGitea({
       mirroredCount++;
       const noteInfo = originalReleaseNote ? ` with ${originalReleaseNote.length} character changelog` : " without changelog";
       console.log(`[Releases] Successfully mirrored release: ${release.tag_name}${noteInfo}`);
-
-      // Add delay to ensure proper timestamp ordering in Gitea
-      // Gitea sorts releases by created_unix DESC, and all releases created in quick succession
-      // will have nearly identical timestamps. The 1-second delay ensures proper chronological order.
-      console.log(`[Releases] Waiting 1 second to ensure proper timestamp ordering in Gitea...`);
-      await new Promise(resolve => setTimeout(resolve, 1000));
     } catch (error) {
       console.error(`[Releases] Failed to mirror release ${release.tag_name}: ${error instanceof Error ? error.message : String(error)}`);
     }
