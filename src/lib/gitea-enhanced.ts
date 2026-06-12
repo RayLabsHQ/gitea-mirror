@@ -544,9 +544,12 @@ export async function syncGiteaRepoEnhanced({
 
       // Create backup if strategy says so
       if (shouldBackupForStrategy(backupStrategy, forcePushDetected)) {
-        const cloneUrl =
-          repoInfo.clone_url ||
-          `${config.giteaConfig.url.replace(/\/$/, "")}/${repoOwner}/${repoName}.git`;
+        // Always derive the clone URL from the user-configured Gitea URL rather
+        // than repoInfo.clone_url (which reflects Gitea's ROOT_URL and may be
+        // unreachable from the app — e.g. Tailscale MagicDNS deployments where
+        // ROOT_URL resolves externally but the app talks to Gitea on a private
+        // address).
+        const cloneUrl = `${config.giteaConfig.url.replace(/\/$/, "")}/${repoOwner}/${repoName}.git`;
 
         try {
           const backupResult = await createPreSyncBundleBackup({
