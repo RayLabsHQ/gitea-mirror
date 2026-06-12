@@ -889,6 +889,32 @@ export async function syncGiteaRepoEnhanced({
             status: "failed",
           });
         }
+      } else if (syncError instanceof HttpError && syncError.status === 405) {
+        // Gitea returns HTTP 405 (with an empty body) when the repository is not
+        // a pull-mirror in its database — e.g. Gitea auto-disabled the mirror or
+        // the repo lost its mirror state after a manual edit.
+        const actionableMessage =
+          `Gitea reports this repository is not a pull mirror (HTTP 405). ` +
+          `In Gitea check Settings → Mirror Settings; if the mirror section is ` +
+          `missing, delete the repository in Gitea and re-mirror it from gitea-mirror.`;
+
+        await db
+          .update(repositories)
+          .set({
+            status: repoStatusEnum.parse("failed"),
+            updatedAt: new Date(),
+            errorMessage: actionableMessage,
+          })
+          .where(eq(repositories.id, repository.id!));
+
+        await createMirrorJob({
+          userId: config.userId,
+          repositoryId: repository.id,
+          repositoryName: repository.name,
+          message: `Sync failed: ${repository.name} is not a pull mirror in Gitea (HTTP 405)`,
+          details: actionableMessage,
+          status: "failed",
+        });
       }
       throw syncError;
     }
