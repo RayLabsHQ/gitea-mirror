@@ -431,13 +431,16 @@ async function checkAutoStartConfiguration(): Promise<boolean> {
       .where(eq(configs.isActive, true));
     
     for (const config of activeConfigs) {
-      // Check if scheduling is enabled via environment
+      // Check if scheduling is enabled.
+      // Note: env-config-loader already sets scheduleConfig.enabled=true when
+      // GITEA_MIRROR_INTERVAL is set at startup, so the enabled flag is the
+      // single authoritative gate here. Checking hasMirrorInterval directly
+      // would allow a configured interval to trigger auto-start even after the
+      // user explicitly disabled scheduling via the UI.
       const scheduleEnabled = config.scheduleConfig?.enabled === true;
-      const hasMirrorInterval = !!config.giteaConfig?.mirrorInterval;
-      
-      // If either SCHEDULE_ENABLED=true or GITEA_MIRROR_INTERVAL is set, we should auto-start
-      if (scheduleEnabled || hasMirrorInterval) {
-        console.log(`[Scheduler] Auto-start conditions met for user ${config.userId} (scheduleEnabled=${scheduleEnabled}, hasMirrorInterval=${hasMirrorInterval})`);
+
+      if (scheduleEnabled) {
+        console.log(`[Scheduler] Auto-start conditions met for user ${config.userId} (scheduleEnabled=${scheduleEnabled})`);
         return true;
       }
     }
@@ -472,10 +475,12 @@ async function performInitialAutoStart(): Promise<void> {
       }
       
       const scheduleEnabled = config.scheduleConfig?.enabled === true;
-      const hasMirrorInterval = !!config.giteaConfig?.mirrorInterval;
-      
-      // Only process configs that have scheduling or mirror interval configured
-      if (!scheduleEnabled && !hasMirrorInterval) {
+
+      // Only process configs where scheduling is explicitly enabled.
+      // env-config-loader already sets enabled=true when GITEA_MIRROR_INTERVAL
+      // is present, so this single check covers both the UI toggle and the
+      // env-var boot path without letting a bare interval override a disabled toggle.
+      if (!scheduleEnabled) {
         continue;
       }
       

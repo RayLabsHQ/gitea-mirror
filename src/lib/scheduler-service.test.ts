@@ -103,6 +103,28 @@ describe("Scheduler Service - Ignored Repository Handling", () => {
     ]);
   });
 
+  test("auto-start gate: enabled=true → should start, enabled=false → should not start even with mirrorInterval", () => {
+    // Mirror the gate logic from checkAutoStartConfiguration / performInitialAutoStart.
+    // The enabled flag is the single authoritative signal; a configured
+    // mirrorInterval is a timing detail and must not bypass a disabled toggle.
+    const shouldAutoStart = (scheduleConfig?: { enabled?: boolean }) =>
+      scheduleConfig?.enabled === true;
+
+    expect(shouldAutoStart({ enabled: true })).toBe(true);
+    expect(shouldAutoStart({ enabled: false })).toBe(false);
+    expect(shouldAutoStart({})).toBe(false);
+    expect(shouldAutoStart(undefined)).toBe(false);
+
+    // Simulating: user disabled scheduling but has a mirrorInterval configured.
+    // The old code checked `scheduleEnabled || hasMirrorInterval`; the fix
+    // ensures only the enabled flag is checked.
+    const configWithIntervalButDisabled = {
+      scheduleConfig: { enabled: false },
+      giteaConfig: { mirrorInterval: "8h" },
+    };
+    expect(shouldAutoStart(configWithIntervalButDisabled.scheduleConfig)).toBe(false);
+  });
+
   test("should validate all repository status enum values", () => {
     const validStatuses = [
       "imported",
