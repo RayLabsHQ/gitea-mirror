@@ -266,6 +266,27 @@ async function runScheduledSync(config: any): Promise<void> {
                     visibility: repositoryVisibilityEnum.parse(repo.visibility),
                   };
 
+                  // A `failed` repo whose recorded location still resolves to a
+                  // live same-source mirror (e.g. migrate succeeded but metadata
+                  // failed) must be SYNCED, not re-created — otherwise the
+                  // re-create loop spawns suffixed duplicates (#315). The create
+                  // path also reuses now, but routing to sync here avoids a
+                  // wasted migrate attempt and keeps recovery cheap.
+                  if (repo.status === 'failed' && repository.mirroredLocation) {
+                    const { findExistingMirror } = await import('@/lib/utils/mirror-source-match');
+                    const existing = await findExistingMirror({
+                      repository,
+                      config,
+                      candidateOwner: repository.mirroredLocation.split('/')[0] || '',
+                      candidateName: repository.name,
+                    });
+                    if (existing) {
+                      await syncGiteaRepo({ config, repository });
+                      console.log(`[Scheduler] Re-synced failed repository with live mirror: ${repo.fullName}`);
+                      return;
+                    }
+                  }
+
                   await mirrorGithubRepoToGitea({ octokit, repository, config });
                   console.log(`[Scheduler] Auto-mirrored repository: ${repo.fullName}`);
                 } catch (error) {

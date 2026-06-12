@@ -43,13 +43,18 @@ type SyncDependencies = {
 /**
  * Enhanced repository information including mirror status
  */
-interface GiteaRepoInfo {
+export interface GiteaRepoInfo {
   id: number;
   name: string;
   owner: { login: string } | string;
   mirror: boolean;
   mirror_interval?: string;
   clone_url?: string;
+  // Original migration source URL. Gitea/Forgejo populate this with the
+  // upstream clone address for migrated/mirrored repos, so it is the
+  // authoritative way to tell whether an existing mirror points at THIS
+  // GitHub source (vs. a same-named mirror of a different source).
+  original_url?: string;
   private: boolean;
 }
 
