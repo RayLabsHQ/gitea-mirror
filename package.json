@@ -56,7 +56,7 @@
   "dependencies": {
     "@astrojs/check": "^0.9.7",
     "@astrojs/mdx": "5.0.0",
-    "@astrojs/node": "10.0.1",
+    "@astrojs/node": "10.0.5",
     "@astrojs/react": "^5.0.0",
     "@better-auth/oauth-provider": "1.6.11",
     "@better-auth/sso": "1.6.11",
