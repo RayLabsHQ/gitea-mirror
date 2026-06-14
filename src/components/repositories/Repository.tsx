@@ -946,33 +946,24 @@ export default function Repository() {
   const handleBulkDelete = async () => {
     if (!user || !user.id) return;
     setIsDeletingBulk(true);
-    const repoIds = [...selectedRepoIds];
-    let successCount = 0;
-    let failCount = 0;
-    for (const repoId of repoIds) {
-      try {
-        const response = await apiRequest<{ success: boolean; error?: string }>(
-          `/repositories/${repoId}`,
-          { method: "DELETE" }
-        );
-        if (response.success) {
-          successCount++;
-        } else {
-          failCount++;
-        }
-      } catch {
-        failCount++;
+    try {
+      const response = await apiRequest<{ success: boolean; deleted?: number; error?: string }>(
+        "/repositories",
+        { method: "DELETE", body: JSON.stringify({ ids: [...selectedRepoIds] }) }
+      );
+      if (response.success) {
+        const count = response.deleted ?? selectedRepoIds.size;
+        toast.success(`Removed ${count} ${count === 1 ? "repository" : "repositories"} from Gitea Mirror.`);
+        setSelectedRepoIds(new Set());
+        await fetchRepositories(false);
+      } else {
+        showErrorToast(response.error || "Failed to delete repositories", toast);
       }
-    }
-    setIsDeletingBulk(false);
-    setIsBulkDeleteDialogOpen(false);
-    setSelectedRepoIds(new Set());
-    await fetchRepositories(false);
-    if (successCount > 0) {
-      toast.success(`Removed ${successCount} ${successCount === 1 ? "repository" : "repositories"} from Gitea Mirror.`);
-    }
-    if (failCount > 0) {
-      toast.error(`Failed to remove ${failCount} ${failCount === 1 ? "repository" : "repositories"}.`);
+    } catch (error) {
+      showErrorToast(error, toast);
+    } finally {
+      setIsDeletingBulk(false);
+      setIsBulkDeleteDialogOpen(false);
     }
   };
 
