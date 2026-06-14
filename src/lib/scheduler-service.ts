@@ -266,6 +266,27 @@ async function runScheduledSync(config: any): Promise<void> {
                     visibility: repositoryVisibilityEnum.parse(repo.visibility),
                   };
 
+                  // A `failed` repo whose recorded location still resolves to a
+                  // live same-source mirror (e.g. migrate succeeded but metadata
+                  // failed) must be SYNCED, not re-created — otherwise the
+                  // re-create loop spawns suffixed duplicates (#315). The create
+                  // path also reuses now, but routing to sync here avoids a
+                  // wasted migrate attempt and keeps recovery cheap.
+                  if (repo.status === 'failed' && repository.mirroredLocation) {
+                    const { findExistingMirror } = await import('@/lib/utils/mirror-source-match');
+                    const existing = await findExistingMirror({
+                      repository,
+                      config,
+                      candidateOwner: repository.mirroredLocation.split('/')[0] || '',
+                      candidateName: repository.name,
+                    });
+                    if (existing) {
+                      await syncGiteaRepo({ config, repository });
+                      console.log(`[Scheduler] Re-synced failed repository with live mirror: ${repo.fullName}`);
+                      return;
+                    }
+                  }
+
                   await mirrorGithubRepoToGitea({ octokit, repository, config });
                   console.log(`[Scheduler] Auto-mirrored repository: ${repo.fullName}`);
                 } catch (error) {
@@ -431,13 +452,16 @@ async function checkAutoStartConfiguration(): Promise<boolean> {
       .where(eq(configs.isActive, true));
     
     for (const config of activeConfigs) {
-      // Check if scheduling is enabled via environment
+      // Check if scheduling is enabled.
+      // Note: env-config-loader already sets scheduleConfig.enabled=true when
+      // GITEA_MIRROR_INTERVAL is set at startup, so the enabled flag is the
+      // single authoritative gate here. Checking hasMirrorInterval directly
+      // would allow a configured interval to trigger auto-start even after the
+      // user explicitly disabled scheduling via the UI.
       const scheduleEnabled = config.scheduleConfig?.enabled === true;
-      const hasMirrorInterval = !!config.giteaConfig?.mirrorInterval;
-      
-      // If either SCHEDULE_ENABLED=true or GITEA_MIRROR_INTERVAL is set, we should auto-start
-      if (scheduleEnabled || hasMirrorInterval) {
-        console.log(`[Scheduler] Auto-start conditions met for user ${config.userId} (scheduleEnabled=${scheduleEnabled}, hasMirrorInterval=${hasMirrorInterval})`);
+
+      if (scheduleEnabled) {
+        console.log(`[Scheduler] Auto-start conditions met for user ${config.userId} (scheduleEnabled=${scheduleEnabled})`);
         return true;
       }
     }
@@ -472,10 +496,12 @@ async function performInitialAutoStart(): Promise<void> {
       }
       
       const scheduleEnabled = config.scheduleConfig?.enabled === true;
-      const hasMirrorInterval = !!config.giteaConfig?.mirrorInterval;
-      
-      // Only process configs that have scheduling or mirror interval configured
-      if (!scheduleEnabled && !hasMirrorInterval) {
+
+      // Only process configs where scheduling is explicitly enabled.
+      // env-config-loader already sets enabled=true when GITEA_MIRROR_INTERVAL
+      // is present, so this single check covers both the UI toggle and the
+      // env-var boot path without letting a bare interval override a disabled toggle.
+      if (!scheduleEnabled) {
         continue;
       }
       

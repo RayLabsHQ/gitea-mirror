@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, useRef } from 'react';
 import { Button } from '@/components/ui/button';
-import { ChevronDown, Download, RefreshCw, Search, Trash2, Filter } from 'lucide-react';
+import { ChevronDown, Download, RefreshCw, Search, Trash2, Filter, StopCircle } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -85,6 +85,8 @@ export function ActivityLog() {
   const [activities, setActivities] = useState<MirrorJobWithKey[]>([]);
   const [isInitialLoading, setIsInitialLoading] = useState(false);
   const [showCleanupDialog, setShowCleanupDialog] = useState(false);
+  const [showCancelPendingDialog, setShowCancelPendingDialog] = useState(false);
+  const [isCancelPendingLoading, setIsCancelPendingLoading] = useState(false);
 
   // Ref to track if component is mounted to prevent state updates after unmount
   const isMountedRef = useRef(true);
@@ -354,6 +356,40 @@ export function ActivityLog() {
     setShowCleanupDialog(false);
   };
 
+  const confirmCancelPending = async () => {
+    if (!user?.id) return;
+
+    try {
+      setIsCancelPendingLoading(true);
+      setShowCancelPendingDialog(false);
+
+      const response = await fetch(withBase('/api/job/cancel-pending'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Unknown error occurred' }));
+        throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const res = await response.json();
+
+      if (res.success) {
+        toast.success(res.message);
+        // Refresh to show the new activity log entry
+        await fetchActivities(false);
+      } else {
+        showErrorToast(res.error || 'Failed to cancel pending mirrors.', toast);
+      }
+    } catch (error) {
+      console.error('Error cancelling pending mirrors:', error);
+      showErrorToast(error, toast);
+    } finally {
+      setIsCancelPendingLoading(false);
+    }
+  };
+
   // Check if any filters are active
   const hasActiveFilters = !!(filter.status || filter.type || filter.name);
   const activeFilterCount = [filter.status, filter.type, filter.name].filter(Boolean).length;
@@ -555,8 +591,19 @@ export function ActivityLog() {
           <Button
             variant="outline"
             size="icon"
+            onClick={() => setShowCancelPendingDialog(true)}
+            title="Stop pending mirrors"
+            className="text-amber-600 hover:text-amber-600 h-10 w-10 shrink-0"
+            disabled={isCancelPendingLoading}
+          >
+            <StopCircle className="h-4 w-4" />
+          </Button>
+
+          <Button
+            variant="outline"
+            size="icon"
             onClick={handleCleanupClick}
-            title="Delete all activities"
+            title="Clear activity history"
             className="text-destructive hover:text-destructive h-10 w-10 shrink-0"
           >
             <Trash2 className="h-4 w-4" />
@@ -683,12 +730,24 @@ export function ActivityLog() {
             <RefreshCw className="h-4 w-4" />
           </Button>
 
-          {/* cleanup all activities */}
+          {/* stop pending mirrors */}
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={() => setShowCancelPendingDialog(true)}
+            title="Stop pending mirrors"
+            className="text-amber-600 hover:text-amber-600 h-10 w-10"
+            disabled={isCancelPendingLoading}
+          >
+            <StopCircle className="h-4 w-4" />
+          </Button>
+
+          {/* clear activity history */}
           <Button
             variant="outline"
             size="icon"
             onClick={handleCleanupClick}
-            title="Delete all activities"
+            title="Clear activity history"
             className="text-destructive hover:text-destructive h-10 w-10"
           >
             <Trash2 className="h-4 w-4" />
@@ -709,9 +768,12 @@ export function ActivityLog() {
       <Dialog open={showCleanupDialog} onOpenChange={setShowCleanupDialog}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete All Activities</DialogTitle>
+            <DialogTitle>Clear Activity History</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete ALL activities? This action cannot be undone and will remove all mirror jobs and events from the database.
+              This clears the activity <strong>history log</strong> (mirror job records and events) — it does not stop
+              any pending or in-progress mirrors. Repositories keep their current status and the scheduler
+              will continue to pick up pending work. To stop pending mirrors, use the
+              &ldquo;Stop Pending Mirrors&rdquo; button instead.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -723,7 +785,35 @@ export function ActivityLog() {
               onClick={confirmCleanup}
               disabled={isInitialLoading}
             >
-              {isInitialLoading ? 'Deleting...' : 'Delete All Activities'}
+              {isInitialLoading ? 'Clearing...' : 'Clear History'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* cancel pending mirrors confirmation dialog */}
+      <Dialog open={showCancelPendingDialog} onOpenChange={setShowCancelPendingDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Stop Pending Mirrors</DialogTitle>
+            <DialogDescription>
+              This sets all repositories with status <strong>Imported</strong> or <strong>Failed</strong> to{' '}
+              <strong>Ignored</strong>, preventing the scheduler from mirroring them automatically.
+              Repositories that are currently mirroring are not affected.{' '}
+              You can re-enable individual repositories from the Repositories page.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowCancelPendingDialog(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="default"
+              className="bg-amber-600 hover:bg-amber-700"
+              onClick={confirmCancelPending}
+              disabled={isCancelPendingLoading}
+            >
+              {isCancelPendingLoading ? 'Stopping...' : 'Stop Pending Mirrors'}
             </Button>
           </DialogFooter>
         </DialogContent>

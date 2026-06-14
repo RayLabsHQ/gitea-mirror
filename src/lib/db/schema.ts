@@ -34,6 +34,7 @@ export const githubConfigSchema = z.object({
   autoMirrorStarred: z.boolean().default(false),
   skipStarredIssues: z.boolean().optional(), // Deprecated: kept for backward compatibility, use starredCodeOnly instead
   starredDuplicateStrategy: z.enum(["suffix", "prefix", "owner-org"]).default("suffix").optional(),
+  skipPersonalRepos: z.boolean().default(false),
 });
 
 export const backupStrategyEnum = z.enum([
@@ -156,7 +157,9 @@ export const configSchema = z.object({
   isActive: z.boolean().default(true),
   githubConfig: githubConfigSchema,
   giteaConfig: giteaConfigSchema,
+  // Unused/reserved — stored for future glob support but not currently read
   include: z.array(z.string()).default(["*"]),
+  // Unused/reserved — stored for future glob support but not currently read
   exclude: z.array(z.string()).default([]),
   scheduleConfig: scheduleConfigSchema,
   cleanupConfig: cleanupConfigSchema,

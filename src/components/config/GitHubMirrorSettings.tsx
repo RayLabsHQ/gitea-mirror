@@ -927,6 +927,26 @@ export function GitHubMirrorSettings({
               </p>
             </div>
           </div>
+
+          <div className="flex items-start space-x-3">
+            <Checkbox
+              id="skip-personal-repos"
+              checked={advancedOptions.skipPersonalRepos ?? false}
+              onCheckedChange={(checked) => handleAdvancedChange('skipPersonalRepos', !!checked)}
+            />
+            <div className="space-y-0.5 flex-1">
+              <Label
+                htmlFor="skip-personal-repos"
+                className="text-sm font-normal cursor-pointer flex items-center gap-2"
+              >
+                <Users className="h-3.5 w-3.5" />
+                Skip personal repositories (only mirror organization repos)
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                Exclude repositories owned by your personal GitHub account; only mirror repos belonging to organizations
+              </p>
+            </div>
+          </div>
         </div>
       </div>
     </div>

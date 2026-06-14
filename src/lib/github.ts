@@ -263,10 +263,21 @@ export async function getGithubRepositories({
     );
 
     const skipForks = config.githubConfig?.skipForks ?? false;
+    const skipPersonalRepos = config.githubConfig?.skipPersonalRepos ?? false;
+    // The authenticated user's login — used to identify personally-owned repos
+    const authenticatedUserLogin = config.githubConfig?.owner ?? "";
 
     const filteredRepos = repos.filter((repo) => {
       const isForkAllowed = !skipForks || !repo.fork;
-      return isForkAllowed;
+      // When skipPersonalRepos is true, drop repos owned by the authenticated user
+      // (owner.type === "User" and owner.login matches the configured GitHub username).
+      // Org repos have owner.type === "Organization" so they are always kept.
+      const isPersonalRepo =
+        skipPersonalRepos &&
+        authenticatedUserLogin.length > 0 &&
+        repo.owner.login === authenticatedUserLogin &&
+        repo.owner.type === "User";
+      return isForkAllowed && !isPersonalRepo;
     });
 
     return filteredRepos.map((repo) => ({

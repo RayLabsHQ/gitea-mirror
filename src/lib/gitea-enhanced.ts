@@ -43,13 +43,18 @@ type SyncDependencies = {
 /**
  * Enhanced repository information including mirror status
  */
-interface GiteaRepoInfo {
+export interface GiteaRepoInfo {
   id: number;
   name: string;
   owner: { login: string } | string;
   mirror: boolean;
   mirror_interval?: string;
   clone_url?: string;
+  // Original migration source URL. Gitea/Forgejo populate this with the
+  // upstream clone address for migrated/mirrored repos, so it is the
+  // authoritative way to tell whether an existing mirror points at THIS
+  // GitHub source (vs. a same-named mirror of a different source).
+  original_url?: string;
   private: boolean;
 }
 
@@ -544,9 +549,12 @@ export async function syncGiteaRepoEnhanced({
 
       // Create backup if strategy says so
       if (shouldBackupForStrategy(backupStrategy, forcePushDetected)) {
-        const cloneUrl =
-          repoInfo.clone_url ||
-          `${config.giteaConfig.url.replace(/\/$/, "")}/${repoOwner}/${repoName}.git`;
+        // Always derive the clone URL from the user-configured Gitea URL rather
+        // than repoInfo.clone_url (which reflects Gitea's ROOT_URL and may be
+        // unreachable from the app — e.g. Tailscale MagicDNS deployments where
+        // ROOT_URL resolves externally but the app talks to Gitea on a private
+        // address).
+        const cloneUrl = `${config.giteaConfig.url.replace(/\/$/, "")}/${repoOwner}/${repoName}.git`;
 
         try {
           const backupResult = await createPreSyncBundleBackup({
@@ -886,6 +894,32 @@ export async function syncGiteaRepoEnhanced({
             status: "failed",
           });
         }
+      } else if (syncError instanceof HttpError && syncError.status === 405) {
+        // Gitea returns HTTP 405 (with an empty body) when the repository is not
+        // a pull-mirror in its database — e.g. Gitea auto-disabled the mirror or
+        // the repo lost its mirror state after a manual edit.
+        const actionableMessage =
+          `Gitea reports this repository is not a pull mirror (HTTP 405). ` +
+          `In Gitea check Settings → Mirror Settings; if the mirror section is ` +
+          `missing, delete the repository in Gitea and re-mirror it from gitea-mirror.`;
+
+        await db
+          .update(repositories)
+          .set({
+            status: repoStatusEnum.parse("failed"),
+            updatedAt: new Date(),
+            errorMessage: actionableMessage,
+          })
+          .where(eq(repositories.id, repository.id!));
+
+        await createMirrorJob({
+          userId: config.userId,
+          repositoryId: repository.id,
+          repositoryName: repository.name,
+          message: `Sync failed: ${repository.name} is not a pull mirror in Gitea (HTTP 405)`,
+          details: actionableMessage,
+          status: "failed",
+        });
       }
       throw syncError;
     }

@@ -285,6 +285,8 @@ export async function initializeConfigFromEnv(): Promise<void> {
       starredCodeOnly: envConfig.github.starredCodeOnly ?? existingConfig?.[0]?.githubConfig?.starredCodeOnly ?? false,
       autoMirrorStarred: envConfig.github.autoMirrorStarred ?? existingConfig?.[0]?.githubConfig?.autoMirrorStarred ?? false,
       starredLists: envConfig.github.starredLists ?? existingConfig?.[0]?.githubConfig?.starredLists ?? [],
+      // ONLY_MIRROR_ORGS=true maps to skipPersonalRepos: true
+      skipPersonalRepos: envConfig.github.onlyMirrorOrgs ?? existingConfig?.[0]?.githubConfig?.skipPersonalRepos ?? false,
     };
 
     // Build Gitea config

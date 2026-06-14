@@ -114,7 +114,7 @@ Standard GitHub Enterprise Cloud on `github.com` works with the default — no o
 |----------|-------------|---------|---------|
 | `MIRROR_ORGANIZATIONS` | Mirror organization repositories | `false` | `true`, `false` |
 | `PRESERVE_ORG_STRUCTURE` | Preserve GitHub organization structure in Gitea | `false` | `true`, `false` |
-| `ONLY_MIRROR_ORGS` | Only mirror organization repos (skip personal) | `false` | `true`, `false` |
+| `ONLY_MIRROR_ORGS` | Only mirror organization repos (skip personal); sets `skipPersonalRepos: true` in GitHub config | `false` | `true`, `false` |
 | `MIRROR_STRATEGY` | Repository organization strategy | `preserve` | `preserve`, `single-org`, `flat-user`, `mixed` |
 
 ### Advanced Settings

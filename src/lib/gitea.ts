@@ -579,7 +579,27 @@ export const mirrorGithubRepoToGitea = async ({
     // Determine the actual repository name to use (handle duplicates for starred repos)
     let targetRepoName = repository.name;
 
-    if (
+    // REUSE-FIRST (issues #315 / #309): before generating any (suffixed) name,
+    // check whether this exact source is already mirrored — either at the
+    // recorded mirroredLocation or at the base name. If so, reuse that location
+    // and route into the "already mirrored" handling below instead of creating
+    // a duplicate. This must run before generateUniqueRepoName so the names
+    // converge under concurrency (the in-flight guard then becomes effective).
+    const { findExistingMirror } = await import("./utils/mirror-source-match");
+    const existingMirror = await findExistingMirror({
+      repository,
+      config,
+      candidateOwner: repoOwner,
+      candidateName: repository.name,
+    });
+
+    if (existingMirror) {
+      repoOwner = existingMirror.owner;
+      targetRepoName = existingMirror.repoName;
+      console.log(
+        `Reusing existing same-source mirror for ${repository.fullName} at ${repoOwner}/${targetRepoName}`
+      );
+    } else if (
       repository.isStarred &&
       config.githubConfig &&
       (config.githubConfig.starredReposMode || "dedicated-org") === "dedicated-org"
@@ -594,6 +614,7 @@ export const mirrorGithubRepoToGitea = async ({
         githubOwner,
         fullName: repository.fullName,
         strategy: config.githubConfig.starredDuplicateStrategy,
+        sourceCloneUrl: repository.cloneUrl,
       });
 
       if (targetRepoName !== repository.name) {
@@ -643,51 +664,82 @@ export const mirrorGithubRepoToGitea = async ({
           strategy: "delete", // Can be configured: "skip", "delete", or "rename"
         });
       } else if (existingRepoInfo?.mirror) {
-        console.log(
-          `Repository ${targetRepoName} already exists in Gitea under ${repoOwner}. Updating database status.`
-        );
+        // PHANTOM-FORK GUARD (#309): a mirror at this name is only "ours" if it
+        // mirrors THIS source. existingMirror short-circuits the check
+        // because findExistingMirror already confirmed the source match.
+        const { isMirrorOfSource } = await import("./utils/mirror-source-match");
+        const sameSource =
+          !!existingMirror ||
+          isMirrorOfSource(existingRepoInfo, repository.cloneUrl);
 
-        await syncRepositoryMetadataToGitea({
-          config,
-          octokit,
-          repository,
-          giteaOwner: repoOwner,
-          giteaRepoName: targetRepoName,
-          giteaToken: decryptedConfig.giteaConfig.token,
-        });
+        if (!sameSource) {
+          // A different source occupies this name. Treat as a genuine collision:
+          // generate a unique name and fall through to create a separate mirror.
+          console.warn(
+            `[Mirror] ${repoOwner}/${targetRepoName} is a mirror of a different source. ` +
+            `Generating a unique name for ${repository.fullName} to avoid overwriting it.`
+          );
+          targetRepoName = await generateUniqueRepoName({
+            config,
+            orgName: repoOwner,
+            baseName: repository.name,
+            githubOwner: repository.fullName.split("/")[0],
+            fullName: repository.fullName,
+            strategy: config.githubConfig?.starredDuplicateStrategy,
+            sourceCloneUrl: repository.cloneUrl,
+          });
+          // expectedLocation is recomputed below before the "mirroring" write.
+        } else {
+          console.log(
+            `Repository ${targetRepoName} already exists in Gitea under ${repoOwner}. Updating database status.`
+          );
 
-        // Update database to reflect that the repository is already mirrored
-        await db
-          .update(repositories)
-          .set({
-            status: repoStatusEnum.parse("mirrored"),
-            updatedAt: new Date(),
-            lastMirrored: new Date(),
-            errorMessage: null,
-            mirroredLocation: `${repoOwner}/${targetRepoName}`,
-          })
-          .where(eq(repositories.id, repository.id!));
+          await syncRepositoryMetadataToGitea({
+            config,
+            octokit,
+            repository,
+            giteaOwner: repoOwner,
+            giteaRepoName: targetRepoName,
+            giteaToken: decryptedConfig.giteaConfig.token,
+          });
 
-        // Append log for "mirrored" status
-        await createMirrorJob({
-          userId: config.userId,
-          repositoryId: repository.id,
-          repositoryName: repository.name,
-          message: `Repository ${repository.name} already exists in Gitea`,
-          details: `Repository ${repository.name} was found to already exist in Gitea under ${repoOwner} and database status was updated.`,
-          status: "mirrored",
-        });
+          // Update database to reflect that the repository is already mirrored
+          await db
+            .update(repositories)
+            .set({
+              status: repoStatusEnum.parse("mirrored"),
+              updatedAt: new Date(),
+              lastMirrored: new Date(),
+              errorMessage: null,
+              mirroredLocation: `${repoOwner}/${targetRepoName}`,
+            })
+            .where(eq(repositories.id, repository.id!));
 
-        console.log(
-          `Repository ${repository.name} database status updated to mirrored`
-        );
-        return;
+          // Append log for "mirrored" status
+          await createMirrorJob({
+            userId: config.userId,
+            repositoryId: repository.id,
+            repositoryName: repository.name,
+            message: `Repository ${repository.name} already exists in Gitea`,
+            details: `Repository ${repository.name} was found to already exist in Gitea under ${repoOwner} and database status was updated.`,
+            status: "mirrored",
+          });
+
+          console.log(
+            `Repository ${repository.name} database status updated to mirrored`
+          );
+          return;
+        }
       } else {
         console.warn(
           `[Mirror] Repository ${repoOwner}/${targetRepoName} exists but mirror status could not be verified. Continuing with mirror creation flow.`
         );
       }
     }
+
+    // Recompute the target location in case a phantom-fork collision above
+    // forced a renamed target after the initial expectedLocation was derived.
+    const targetLocation = `${repoOwner}/${targetRepoName}`;
 
     console.log(`Mirroring repository ${repository.name}`);
 
@@ -696,7 +748,7 @@ export const mirrorGithubRepoToGitea = async ({
     const finalCheck = await isRepoCurrentlyMirroring({
       config,
       repoName: targetRepoName,
-      expectedLocation,
+      expectedLocation: targetLocation,
     });
 
     if (finalCheck) {
@@ -714,7 +766,7 @@ export const mirrorGithubRepoToGitea = async ({
       .update(repositories)
       .set({
         status: repoStatusEnum.parse("mirroring"),
-        mirroredLocation: expectedLocation,
+        mirroredLocation: targetLocation,
         updatedAt: new Date(),
       })
       .where(eq(repositories.id, repository.id!));
@@ -1177,6 +1229,14 @@ async function isMirroredLocationClaimedInDb({
  * Checks both the Gitea instance (HTTP) and the local DB (mirroredLocation)
  * to reduce collisions during concurrent batch mirroring.
  *
+ * Source-aware (issues #315 / #309): when a candidate name is already occupied
+ * by a mirror of THIS SAME GitHub source, the name is REUSED rather than
+ * suffixed — this is what previously caused starred repos to spawn `-owner`,
+ * `-owner-1`, … duplicates on every re-mirror. Suffixing only happens on a
+ * genuine different-source collision (preserving the #95/#236 cross-owner
+ * behavior). The per-user DB claim check is retained so two users mirroring the
+ * same source into a shared org stay separated.
+ *
  * NOTE: This function only checks availability — it does NOT claim the name.
  * The actual claim happens later when mirroredLocation is written at the
  * status="mirroring" DB update, which is protected by a unique partial index
@@ -1189,6 +1249,7 @@ async function generateUniqueRepoName({
   githubOwner,
   fullName,
   strategy,
+  sourceCloneUrl,
 }: {
   config: Partial<Config>;
   orgName: string;
@@ -1196,6 +1257,10 @@ async function generateUniqueRepoName({
   githubOwner: string;
   fullName: string;
   strategy?: string;
+  // Source GitHub clone URL, used to decide whether an occupied name belongs to
+  // THIS repo's mirror (reuse) or a different source (suffix). When omitted,
+  // behavior degrades to the legacy "any occupant collides" semantics.
+  sourceCloneUrl?: string;
 }): Promise<string> {
   if (!fullName?.includes("/")) {
     throw new Error(
@@ -1206,33 +1271,55 @@ async function generateUniqueRepoName({
   const duplicateStrategy = strategy || "suffix";
   const userId = config.userId || "";
 
-  // Helper: check both Gitea and local DB for a candidate name
-  const isNameTaken = async (candidateName: string): Promise<boolean> => {
+  const { getGiteaRepoInfo } = await import("./gitea-enhanced");
+  const { classifyCandidateName } = await import("./utils/mirror-source-match");
+
+  // Resolve the I/O for a candidate name (Gitea existence, DB claim, repo info)
+  // and defer the available/reusable/taken decision to the pure, unit-tested
+  // classifyCandidateName helper.
+  const classifyName = async (candidateName: string) => {
     const existsInGitea = await isRepoPresentInGitea({
       config,
       owner: orgName,
       repoName: candidateName,
     });
-    if (existsInGitea) return true;
 
-    // Also check local DB to catch concurrent batch operations
-    // where another repo claimed this location but hasn't created it in Gitea yet
+    // A DB claim by a DIFFERENT repo (concurrent batch) always blocks reuse.
+    let claimedByOther = false;
     if (userId) {
-      const claimedInDb = await isMirroredLocationClaimedInDb({
+      claimedByOther = await isMirroredLocationClaimedInDb({
         userId,
         candidateLocation: `${orgName}/${candidateName}`,
         excludeFullName: fullName,
       });
-      if (claimedInDb) return true;
     }
 
-    return false;
+    // Only fetch repo info when it can actually change the decision (existing,
+    // same-source candidate that is not DB-claimed by another repo).
+    const repoInfo =
+      existsInGitea && sourceCloneUrl && !claimedByOther
+        ? await getGiteaRepoInfo({
+            config,
+            owner: orgName,
+            repoName: candidateName,
+          })
+        : null;
+
+    return classifyCandidateName({
+      existsInGitea,
+      claimedByOther,
+      repoInfo,
+      sourceCloneUrl,
+    });
   };
 
-  // First check if base name is available
-  const baseExists = await isNameTaken(baseName);
-
-  if (!baseExists) {
+  // First check the base name — reuse it if it already holds our own mirror.
+  const baseClass = await classifyName(baseName);
+  if (baseClass === "available") {
+    return baseName;
+  }
+  if (baseClass === "reusable") {
+    console.log(`Reusing existing same-source mirror name: ${orgName}/${baseName}`);
     return baseName;
   }
 
@@ -1262,9 +1349,14 @@ async function generateUniqueRepoName({
         break;
     }
 
-    const exists = await isNameTaken(candidateName);
+    const candidateClass = await classifyName(candidateName);
 
-    if (!exists) {
+    if (candidateClass === "reusable") {
+      console.log(`Reusing existing same-source mirror name: ${orgName}/${candidateName}`);
+      return candidateName;
+    }
+
+    if (candidateClass === "available") {
       console.log(`Found unique name for duplicate starred repo: ${candidateName}`);
       return candidateName;
     }
@@ -1314,8 +1406,29 @@ export async function mirrorGitHubRepoToGiteaOrg({
 
     // Determine the actual repository name to use (handle duplicates for starred repos)
     let targetRepoName = repository.name;
+    // The org we will record/reuse for. Stays === orgName on the create path
+    // (migration uses orgName + giteaOrgId); a reuse hit may repoint it to the
+    // recorded mirroredLocation's owner for the early-return DB update.
+    let targetOwner = orgName;
 
-    if (
+    // REUSE-FIRST (issues #315 / #309): reuse an existing same-source mirror
+    // before generating any suffixed name. See mirrorGithubRepoToGitea for the
+    // rationale. Routes a hit into the "already mirrored" handling below.
+    const { findExistingMirror } = await import("./utils/mirror-source-match");
+    const existingMirror = await findExistingMirror({
+      repository,
+      config,
+      candidateOwner: orgName,
+      candidateName: repository.name,
+    });
+
+    if (existingMirror) {
+      targetOwner = existingMirror.owner;
+      targetRepoName = existingMirror.repoName;
+      console.log(
+        `Reusing existing same-source mirror for ${repository.fullName} at ${targetOwner}/${targetRepoName}`
+      );
+    } else if (
       repository.isStarred &&
       config.githubConfig &&
       (config.githubConfig.starredReposMode || "dedicated-org") === "dedicated-org"
@@ -1330,6 +1443,7 @@ export async function mirrorGitHubRepoToGiteaOrg({
         githubOwner,
         fullName: repository.fullName,
         strategy: config.githubConfig.starredDuplicateStrategy,
+        sourceCloneUrl: repository.cloneUrl,
       });
 
       if (targetRepoName !== repository.name) {
@@ -1340,7 +1454,7 @@ export async function mirrorGitHubRepoToGiteaOrg({
     }
 
     // IDEMPOTENCY CHECK: Check if this repo is already being mirrored
-    const expectedLocation = `${orgName}/${targetRepoName}`;
+    const expectedLocation = `${targetOwner}/${targetRepoName}`;
     const isCurrentlyMirroring = await isRepoCurrentlyMirroring({
       config,
       repoName: targetRepoName,
@@ -1358,7 +1472,7 @@ export async function mirrorGitHubRepoToGiteaOrg({
 
     const isExisting = await isRepoPresentInGitea({
       config,
-      owner: orgName,
+      owner: targetOwner,
       repoName: targetRepoName,
     });
 
@@ -1366,7 +1480,7 @@ export async function mirrorGitHubRepoToGiteaOrg({
       const { getGiteaRepoInfo, handleExistingNonMirrorRepo } = await import("./gitea-enhanced");
       const existingRepoInfo = await getGiteaRepoInfo({
         config,
-        owner: orgName,
+        owner: targetOwner,
         repoName: targetRepoName,
       });
 
@@ -1379,51 +1493,82 @@ export async function mirrorGitHubRepoToGiteaOrg({
           strategy: "delete", // Can be configured: "skip", "delete", or "rename"
         });
       } else if (existingRepoInfo?.mirror) {
-        console.log(
-          `Repository ${targetRepoName} already exists in Gitea organization ${orgName}. Updating database status.`
-        );
+        // PHANTOM-FORK GUARD (#309): only treat this as "ours" if it mirrors
+        // THIS source. existingMirror short-circuits because findExistingMirror already
+        // confirmed the source match.
+        const { isMirrorOfSource } = await import("./utils/mirror-source-match");
+        const sameSource =
+          !!existingMirror ||
+          isMirrorOfSource(existingRepoInfo, repository.cloneUrl);
 
-        await syncRepositoryMetadataToGitea({
-          config,
-          octokit,
-          repository,
-          giteaOwner: orgName,
-          giteaRepoName: targetRepoName,
-          giteaToken: decryptedConfig.giteaConfig.token,
-        });
+        if (!sameSource) {
+          // Different source occupies this name: generate a unique name and
+          // fall through to create a separate mirror under orgName/giteaOrgId.
+          console.warn(
+            `[Mirror] ${targetOwner}/${targetRepoName} is a mirror of a different source. ` +
+            `Generating a unique name for ${repository.fullName} to avoid overwriting it.`
+          );
+          targetOwner = orgName;
+          targetRepoName = await generateUniqueRepoName({
+            config,
+            orgName,
+            baseName: repository.name,
+            githubOwner: repository.fullName.split("/")[0],
+            fullName: repository.fullName,
+            strategy: config.githubConfig?.starredDuplicateStrategy,
+            sourceCloneUrl: repository.cloneUrl,
+          });
+        } else {
+          console.log(
+            `Repository ${targetRepoName} already exists in Gitea organization ${targetOwner}. Updating database status.`
+          );
 
-        // Update database to reflect that the repository is already mirrored
-        await db
-          .update(repositories)
-          .set({
-            status: repoStatusEnum.parse("mirrored"),
-            updatedAt: new Date(),
-            lastMirrored: new Date(),
-            errorMessage: null,
-            mirroredLocation: `${orgName}/${targetRepoName}`,
-          })
-          .where(eq(repositories.id, repository.id!));
+          await syncRepositoryMetadataToGitea({
+            config,
+            octokit,
+            repository,
+            giteaOwner: targetOwner,
+            giteaRepoName: targetRepoName,
+            giteaToken: decryptedConfig.giteaConfig.token,
+          });
 
-        // Create a mirror job log entry
-        await createMirrorJob({
-          userId: config.userId,
-          repositoryId: repository.id,
-          repositoryName: repository.name,
-          message: `Repository ${targetRepoName} already exists in Gitea organization ${orgName}`,
-          details: `Repository ${targetRepoName} was found to already exist in Gitea organization ${orgName} and database status was updated.`,
-          status: "mirrored",
-        });
+          // Update database to reflect that the repository is already mirrored
+          await db
+            .update(repositories)
+            .set({
+              status: repoStatusEnum.parse("mirrored"),
+              updatedAt: new Date(),
+              lastMirrored: new Date(),
+              errorMessage: null,
+              mirroredLocation: `${targetOwner}/${targetRepoName}`,
+            })
+            .where(eq(repositories.id, repository.id!));
 
-        console.log(
-          `Repository ${targetRepoName} database status updated to mirrored in organization ${orgName}`
-        );
-        return;
+          // Create a mirror job log entry
+          await createMirrorJob({
+            userId: config.userId,
+            repositoryId: repository.id,
+            repositoryName: repository.name,
+            message: `Repository ${targetRepoName} already exists in Gitea organization ${targetOwner}`,
+            details: `Repository ${targetRepoName} was found to already exist in Gitea organization ${targetOwner} and database status was updated.`,
+            status: "mirrored",
+          });
+
+          console.log(
+            `Repository ${targetRepoName} database status updated to mirrored in organization ${targetOwner}`
+          );
+          return;
+        }
       } else {
         console.warn(
-          `[Mirror] Repository ${orgName}/${targetRepoName} exists but mirror status could not be verified. Continuing with mirror creation flow.`
+          `[Mirror] Repository ${targetOwner}/${targetRepoName} exists but mirror status could not be verified. Continuing with mirror creation flow.`
         );
       }
     }
+
+    // Recompute the target location in case a phantom-fork collision above
+    // forced a renamed target after the initial expectedLocation was derived.
+    const targetLocation = `${orgName}/${targetRepoName}`;
 
     console.log(
       `Mirroring repository ${repository.fullName} to organization ${orgName} as ${targetRepoName}`
@@ -1437,7 +1582,7 @@ export async function mirrorGitHubRepoToGiteaOrg({
     const finalCheck = await isRepoCurrentlyMirroring({
       config,
       repoName: targetRepoName,
-      expectedLocation,
+      expectedLocation: targetLocation,
     });
 
     if (finalCheck) {
@@ -1455,7 +1600,7 @@ export async function mirrorGitHubRepoToGiteaOrg({
       .update(repositories)
       .set({
         status: repoStatusEnum.parse("mirroring"),
-        mirroredLocation: expectedLocation,
+        mirroredLocation: targetLocation,
         updatedAt: new Date(),
       })
       .where(eq(repositories.id, repository.id!));
@@ -2515,6 +2660,37 @@ export const mirrorGitRepoIssuesToGitea = async ({
   );
 };
 
+/**
+ * Classify a set of GitHub releases against the set already present in Gitea.
+ *
+ * Returns:
+ *   - `toCreate`: tag names that exist on GitHub but are missing from Gitea
+ *   - `toSkip`:   tag names that already exist in Gitea (will be handled by PATCH-if-content-changed)
+ *
+ * Deliberately does NOT return anything to delete based on ordering — Gitea mirrors
+ * order releases by tag-commit date, which can permanently disagree with GitHub's
+ * published_at order (e.g. unaconfig_dart v0.1.0/v0.1.1 — #310). Destroying and
+ * re-emitting releases for a cosmetic display-order difference is never worth it.
+ */
+export function classifyReleasesForReconciliation(
+  githubTagNames: string[],
+  giteaTagNames: string[]
+): { toCreate: string[]; toSkip: string[] } {
+  const giteaSet = new Set(giteaTagNames);
+  const toCreate: string[] = [];
+  const toSkip: string[] = [];
+
+  for (const tag of githubTagNames) {
+    if (giteaSet.has(tag)) {
+      toSkip.push(tag);
+    } else {
+      toCreate.push(tag);
+    }
+  }
+
+  return { toCreate, toSkip };
+}
+
 export async function mirrorGitHubReleasesToGitea({
   octokit,
   repository,
@@ -2601,23 +2777,10 @@ export async function mirrorGitHubReleasesToGitea({
   let mirroredCount = 0;
   let skippedCount = 0;
 
-  const getReleaseTimestamp = (release: (typeof limitedReleases)[number]) => {
-    // Use published_at first (when the release was published on GitHub)
-    // Fall back to created_at (when the git tag was created) only if published_at is missing
-    // This matches GitHub's sorting behavior and handles cases where multiple tags
-    // point to the same commit but have different publish dates
-    const sourceDate = release.published_at ?? release.created_at ?? "";
-    const timestamp = sourceDate ? new Date(sourceDate).getTime() : 0;
-    return Number.isFinite(timestamp) ? timestamp : 0;
-  };
+  // Process releases in their GitHub API order (newest first by default)
+  const releasesToProcess = limitedReleases.slice();
 
-  // Capture the latest releases, then process them oldest-to-newest so Gitea mirrors keep chronological order
-  const releasesToProcess = limitedReleases
-    .slice()
-    .sort((a, b) => getReleaseTimestamp(b) - getReleaseTimestamp(a))
-    .sort((a, b) => getReleaseTimestamp(a) - getReleaseTimestamp(b));
-
-  console.log(`[Releases] Processing ${releasesToProcess.length} releases in chronological order (oldest to newest by published date)`);
+  console.log(`[Releases] Processing ${releasesToProcess.length} releases for ${repository.fullName}`);
   releasesToProcess.forEach((rel, idx) => {
     const publishedDate = new Date(rel.published_at || rel.created_at);
     const createdDate = new Date(rel.created_at);
@@ -2627,85 +2790,10 @@ export async function mirrorGitHubReleasesToGitea({
     console.log(`[Releases] ${idx + 1}. ${rel.tag_name} - ${dateInfo}`);
   });
 
-  // Check if existing releases in Gitea are in the wrong order
-  // If so, we need to delete and recreate them to fix the ordering
-  let needsRecreation = false;
-  try {
-    const existingReleasesResponse = await httpGet(
-      `${config.giteaConfig.url}/api/v1/repos/${repoOwner}/${repoName}/releases?per_page=100`,
-      {
-        Authorization: `token ${decryptedConfig.giteaConfig.token}`,
-      }
-    ).catch(() => null);
-
-    if (existingReleasesResponse && existingReleasesResponse.data && Array.isArray(existingReleasesResponse.data)) {
-      const existingReleases = existingReleasesResponse.data;
-
-      if (existingReleases.length > 0) {
-        console.log(`[Releases] Found ${existingReleases.length} existing releases in Gitea, checking chronological order...`);
-
-        // Create a map of tag_name to expected chronological index (0 = oldest, n = newest)
-        const expectedOrder = new Map<string, number>();
-        releasesToProcess.forEach((rel, idx) => {
-          expectedOrder.set(rel.tag_name, idx);
-        });
-
-        // Check if existing releases are in the correct order based on created_unix
-        // Gitea sorts by created_unix DESC, so newer releases should have higher created_unix values
-        const releasesThatShouldExist = existingReleases.filter(r => expectedOrder.has(r.tag_name));
-
-        if (releasesThatShouldExist.length > 1) {
-          for (let i = 0; i < releasesThatShouldExist.length - 1; i++) {
-            const current = releasesThatShouldExist[i];
-            const next = releasesThatShouldExist[i + 1];
-
-            const currentExpectedIdx = expectedOrder.get(current.tag_name)!;
-            const nextExpectedIdx = expectedOrder.get(next.tag_name)!;
-
-            // Since Gitea returns releases sorted by created_unix DESC:
-            // - Earlier releases in the list should have HIGHER expected indices (newer)
-            // - Later releases in the list should have LOWER expected indices (older)
-            if (currentExpectedIdx < nextExpectedIdx) {
-              console.log(`[Releases] ⚠️  Incorrect ordering detected: ${current.tag_name} (index ${currentExpectedIdx}) appears before ${next.tag_name} (index ${nextExpectedIdx})`);
-              needsRecreation = true;
-              break;
-            }
-          }
-        }
-
-        if (needsRecreation) {
-          console.log(`[Releases] ⚠️  Releases are in incorrect chronological order. Will delete and recreate all releases.`);
-
-          // Delete all existing releases that we're about to recreate
-          for (const existingRelease of releasesThatShouldExist) {
-            try {
-              console.log(`[Releases] Deleting incorrectly ordered release: ${existingRelease.tag_name}`);
-              await httpDelete(
-                `${config.giteaConfig.url}/api/v1/repos/${repoOwner}/${repoName}/releases/${existingRelease.id}`,
-                {
-                  Authorization: `token ${decryptedConfig.giteaConfig.token}`,
-                }
-              );
-            } catch (deleteError) {
-              console.error(`[Releases] Failed to delete release ${existingRelease.tag_name}: ${deleteError instanceof Error ? deleteError.message : String(deleteError)}`);
-            }
-          }
-
-          console.log(`[Releases] ✅ Deleted ${releasesThatShouldExist.length} releases. Will recreate in correct chronological order.`);
-        } else {
-          console.log(`[Releases] ✅ Existing releases are in correct chronological order.`);
-        }
-      }
-    }
-  } catch (orderCheckError) {
-    console.warn(`[Releases] Could not verify release order: ${orderCheckError instanceof Error ? orderCheckError.message : String(orderCheckError)}`);
-    // Continue with normal processing
-  }
-
   for (const release of releasesToProcess) {
     try {
-      // Check if release already exists (skip check if we just deleted all releases)
-      const existingReleasesResponse = needsRecreation ? null : await httpGet(
+      // Always check if release already exists — reconcile by tag set, not by ordering
+      const existingReleasesResponse = await httpGet(
         `${config.giteaConfig.url}/api/v1/repos/${repoOwner}/${repoName}/releases/tags/${release.tag_name}`,
         {
           Authorization: `token ${decryptedConfig.giteaConfig.token}`,
@@ -2842,12 +2930,6 @@ export async function mirrorGitHubReleasesToGitea({
       mirroredCount++;
       const noteInfo = originalReleaseNote ? ` with ${originalReleaseNote.length} character changelog` : " without changelog";
       console.log(`[Releases] Successfully mirrored release: ${release.tag_name}${noteInfo}`);
-
-      // Add delay to ensure proper timestamp ordering in Gitea
-      // Gitea sorts releases by created_unix DESC, and all releases created in quick succession
-      // will have nearly identical timestamps. The 1-second delay ensures proper chronological order.
-      console.log(`[Releases] Waiting 1 second to ensure proper timestamp ordering in Gitea...`);
-      await new Promise(resolve => setTimeout(resolve, 1000));
     } catch (error) {
       console.error(`[Releases] Failed to mirror release ${release.tag_name}: ${error instanceof Error ? error.message : String(error)}`);
     }
