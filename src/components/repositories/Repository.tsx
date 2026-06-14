@@ -921,11 +921,9 @@ export default function Repository() {
 
     setIsDeletingRepo(true);
     try {
-      const response = await apiRequest<{ success: boolean; error?: string }>(
-        `/repositories/${repoToDelete.id}`,
-        {
-          method: "DELETE",
-        }
+      const response = await apiRequest<{ success: boolean; deleted?: number; error?: string }>(
+        "/repositories",
+        { method: "DELETE", body: JSON.stringify({ ids: [repoToDelete.id] }) }
       );
 
       if (response.success) {
