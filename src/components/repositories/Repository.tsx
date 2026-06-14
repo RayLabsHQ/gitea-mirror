@@ -98,6 +98,8 @@ export default function Repository() {
   const [repoToDelete, setRepoToDelete] = useState<Repository | null>(null);
   const [isDeleteRepoDialogOpen, setIsDeleteRepoDialogOpen] = useState(false);
   const [isDeletingRepo, setIsDeletingRepo] = useState(false);
+  const [isBulkDeleteDialogOpen, setIsBulkDeleteDialogOpen] = useState(false);
+  const [isDeletingBulk, setIsDeletingBulk] = useState(false);
 
   // Create a stable callback using useCallback
   const handleNewMessage = useCallback((data: MirrorJob) => {
@@ -941,6 +943,39 @@ export default function Repository() {
     }
   };
 
+  const handleBulkDelete = async () => {
+    if (!user || !user.id) return;
+    setIsDeletingBulk(true);
+    const repoIds = [...selectedRepoIds];
+    let successCount = 0;
+    let failCount = 0;
+    for (const repoId of repoIds) {
+      try {
+        const response = await apiRequest<{ success: boolean; error?: string }>(
+          `/repositories/${repoId}`,
+          { method: "DELETE" }
+        );
+        if (response.success) {
+          successCount++;
+        } else {
+          failCount++;
+        }
+      } catch {
+        failCount++;
+      }
+    }
+    setIsDeletingBulk(false);
+    setIsBulkDeleteDialogOpen(false);
+    setSelectedRepoIds(new Set());
+    await fetchRepositories(false);
+    if (successCount > 0) {
+      toast.success(`Removed ${successCount} ${successCount === 1 ? "repository" : "repositories"} from Gitea Mirror.`);
+    }
+    if (failCount > 0) {
+      toast.error(`Failed to remove ${failCount} ${failCount === 1 ? "repository" : "repositories"}.`);
+    }
+  };
+
   // Determine what actions are available for selected repositories
   const getAvailableActions = () => {
     if (selectedRepoIds.size === 0) return [];
@@ -977,7 +1012,9 @@ export default function Repository() {
     if (selectedRepos.some(repo => repo.status === "ignored")) {
       actions.push('include');
     }
-    
+
+    actions.push('delete');
+
     return actions;
   };
   
@@ -994,6 +1031,7 @@ export default function Repository() {
       retry: selectedRepos.filter(repo => repo.status === "failed").length,
       ignore: selectedRepos.filter(repo => repo.status !== "ignored").length,
       include: selectedRepos.filter(repo => repo.status === "ignored").length,
+      delete: selectedRepos.length,
     };
   };
   
@@ -1415,6 +1453,16 @@ export default function Repository() {
               Include
             </Button>
           )}
+
+          <Button
+            variant="destructive"
+            size="default"
+            onClick={() => setIsBulkDeleteDialogOpen(true)}
+            disabled={loadingRepoIds.size > 0}
+          >
+            <Trash2 className="h-4 w-4 mr-2" />
+            Delete ({actionCounts.delete})
+          </Button>
         </div>
       )}
 
@@ -1507,6 +1555,16 @@ export default function Repository() {
               Include
             </Button>
           )}
+
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => setIsBulkDeleteDialogOpen(true)}
+            disabled={loadingRepoIds.size > 0}
+          >
+            <Trash2 className="h-4 w-4 mr-2" />
+            Delete ({actionCounts.delete})
+          </Button>
           </div>
         </div>
       )}
@@ -1581,6 +1639,41 @@ export default function Repository() {
                 <LoaderCircle className="h-4 w-4 animate-spin" />
               ) : (
                 "Continue"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isBulkDeleteDialogOpen}
+        onOpenChange={(open) => {
+          if (!open && !isDeletingBulk) setIsBulkDeleteDialogOpen(false);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Remove {selectedRepoIds.size} {selectedRepoIds.size === 1 ? "repository" : "repositories"} from Gitea Mirror?</DialogTitle>
+            <DialogDescription>
+              These repositories will be deleted from Gitea Mirror only. Any mirrors on Gitea will remain untouched; remove them manually in Gitea if needed.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsBulkDeleteDialogOpen(false)}
+              disabled={isDeletingBulk}
+            >
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleBulkDelete} disabled={isDeletingBulk}>
+              {isDeletingBulk ? (
+                <LoaderCircle className="h-4 w-4 animate-spin" />
+              ) : (
+                <span className="flex items-center gap-2">
+                  <Trash2 className="h-4 w-4" />
+                  Delete {selectedRepoIds.size} {selectedRepoIds.size === 1 ? "repository" : "repositories"}
+                </span>
               )}
             </Button>
           </DialogFooter>
