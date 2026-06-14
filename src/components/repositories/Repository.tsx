@@ -1312,110 +1312,111 @@ export default function Repository() {
             </Button>
           </div>
 
-          {/* Bulk actions on desktop - integrated into the same line */}
+          {/* Mirror All action */}
           <div className="flex items-center gap-2 border-l pl-4">
-            {selectedRepoIds.size === 0 ? (
-              <Button
-                variant="default"
-                onClick={handleMirrorAllRepos}
-                disabled={isInitialLoading || loadingRepoIds.size > 0}
-                className="whitespace-nowrap"
-              >
-                <FlipHorizontal className="h-4 w-4 mr-2" />
-                Mirror All
-              </Button>
-            ) : (
-              <>
-                <div className="flex items-center gap-2 px-3 py-1 bg-muted/50 rounded-md">
-                  <span className="text-sm font-medium">
-                    {selectedRepoIds.size} selected
-                  </span>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-5 w-5"
-                    onClick={() => setSelectedRepoIds(new Set())}
-                  >
-                    <X className="h-3 w-3" />
-                  </Button>
-                </div>
-                
-                {availableActions.includes('mirror') && (
-                  <Button
-                    variant="default"
-                    size="default"
-                    onClick={handleBulkMirror}
-                    disabled={loadingRepoIds.size > 0}
-                  >
-                    <FlipHorizontal className="h-4 w-4 mr-2" />
-                    Mirror ({actionCounts.mirror})
-                  </Button>
-                )}
-                
-                {availableActions.includes('sync') && (
-                  <Button
-                    variant="outline"
-                    size="default"
-                    onClick={handleBulkSync}
-                    disabled={loadingRepoIds.size > 0}
-                  >
-                    <RefreshCw className="h-4 w-4 mr-2" />
-                    Sync ({actionCounts.sync})
-                  </Button>
-                )}
-
-                {availableActions.includes('rerun-metadata') && (
-                  <Button
-                    variant="outline"
-                    size="default"
-                    onClick={handleBulkRerunMetadata}
-                    disabled={loadingRepoIds.size > 0}
-                  >
-                    <RefreshCw className="h-4 w-4 mr-2" />
-                    Re-run Metadata ({actionCounts.rerunMetadata})
-                  </Button>
-                )}
-                
-                {availableActions.includes('retry') && (
-                  <Button
-                    variant="outline"
-                    size="default"
-                    onClick={handleBulkRetry}
-                    disabled={loadingRepoIds.size > 0}
-                  >
-                    <RotateCcw className="h-4 w-4 mr-2" />
-                    Retry
-                  </Button>
-                )}
-                
-                {availableActions.includes('ignore') && (
-                  <Button
-                    variant="ghost"
-                    size="default"
-                    onClick={() => handleBulkSkip(true)}
-                    disabled={loadingRepoIds.size > 0}
-                  >
-                    <Ban className="h-4 w-4 mr-2" />
-                    Ignore
-                  </Button>
-                )}
-                
-                {availableActions.includes('include') && (
-                  <Button
-                    variant="outline"
-                    size="default"
-                    onClick={() => handleBulkSkip(false)}
-                    disabled={loadingRepoIds.size > 0}
-                  >
-                    <Check className="h-4 w-4 mr-2" />
-                    Include
-                  </Button>
-                )}
-              </>
-            )}
+            <Button
+              variant="default"
+              onClick={handleMirrorAllRepos}
+              disabled={isInitialLoading || loadingRepoIds.size > 0}
+              className="whitespace-nowrap"
+            >
+              <FlipHorizontal className="h-4 w-4 mr-2" />
+              Mirror All
+            </Button>
           </div>
         </div>
       </div>
+
+      {/* Desktop: Bulk actions row - shown when repos are selected */}
+      {selectedRepoIds.size > 0 && (
+        <div className="hidden sm:flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-2 px-3 py-1 bg-muted/50 rounded-md">
+            <span className="text-sm font-medium">
+              {selectedRepoIds.size} selected
+            </span>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-5 w-5"
+              onClick={() => setSelectedRepoIds(new Set())}
+            >
+              <X className="h-3 w-3" />
+            </Button>
+          </div>
+
+          {availableActions.includes('mirror') && (
+            <Button
+              variant="default"
+              size="default"
+              onClick={handleBulkMirror}
+              disabled={loadingRepoIds.size > 0}
+            >
+              <FlipHorizontal className="h-4 w-4 mr-2" />
+              Mirror ({actionCounts.mirror})
+            </Button>
+          )}
+
+          {availableActions.includes('sync') && (
+            <Button
+              variant="outline"
+              size="default"
+              onClick={handleBulkSync}
+              disabled={loadingRepoIds.size > 0}
+            >
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Sync ({actionCounts.sync})
+            </Button>
+          )}
+
+          {availableActions.includes('rerun-metadata') && (
+            <Button
+              variant="outline"
+              size="default"
+              onClick={handleBulkRerunMetadata}
+              disabled={loadingRepoIds.size > 0}
+            >
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Re-run Metadata ({actionCounts.rerunMetadata})
+            </Button>
+          )}
+
+          {availableActions.includes('retry') && (
+            <Button
+              variant="outline"
+              size="default"
+              onClick={handleBulkRetry}
+              disabled={loadingRepoIds.size > 0}
+            >
+              <RotateCcw className="h-4 w-4 mr-2" />
+              Retry
+            </Button>
+          )}
+
+          {availableActions.includes('ignore') && (
+            <Button
+              variant="ghost"
+              size="default"
+              onClick={() => handleBulkSkip(true)}
+              disabled={loadingRepoIds.size > 0}
+            >
+              <Ban className="h-4 w-4 mr-2" />
+              Ignore
+            </Button>
+          )}
+
+          {availableActions.includes('include') && (
+            <Button
+              variant="outline"
+              size="default"
+              onClick={() => handleBulkSkip(false)}
+              disabled={loadingRepoIds.size > 0}
+            >
+              <Check className="h-4 w-4 mr-2" />
+              Include
+            </Button>
+          )}
+        </div>
+      )}
 
       {/* Action buttons for mobile - only show when items are selected */}
       {selectedRepoIds.size > 0 && (
