@@ -678,9 +678,11 @@ export async function getGithubStarredListNames({
 export async function getGithubOrganizations({
   octokit,
   config,
+  skipOrgNames,
 }: {
   octokit: Octokit;
   config: Partial<Config>;
+  skipOrgNames?: Set<string>;
 }): Promise<{ organizations: GitOrg[]; failedOrgs: { name: string; avatarUrl: string; reason: string }[] }> {
   try {
     const { data: orgs } = await octokit.orgs.listForAuthenticatedUser({
@@ -693,12 +695,16 @@ export async function getGithubOrganizations({
       ? excludedOrgsEnv.split(",").map((org) => org.trim().toLowerCase())
       : [];
 
-    // Filter out excluded organizations
+    // Filter out excluded and user-ignored organizations
     const filteredOrgs = orgs.filter((org) => {
       if (excludedOrgs.includes(org.login.toLowerCase())) {
         console.log(
           `Skipping organization ${org.login} - excluded via GITHUB_EXCLUDED_ORGS environment variable`,
         );
+        return false;
+      }
+      if (skipOrgNames?.has(org.login.toLowerCase())) {
+        console.log(`Skipping organization ${org.login} - ignored by user`);
         return false;
       }
       return true;

@@ -49,13 +49,20 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const githubUsername = config.githubConfig?.owner || undefined;
     const octokit = createGitHubClient(decryptedToken, userId, githubUsername);
 
+    // Load ignored orgs from the DB so we can skip them during import
+    const ignoredOrgRows = await db
+      .select({ normalizedName: organizations.normalizedName })
+      .from(organizations)
+      .where(and(eq(organizations.userId, userId), eq(organizations.status, "ignored")));
+    const ignoredOrgNames = new Set(ignoredOrgRows.map((o) => o.normalizedName));
+
     // Fetch GitHub data in parallel
     const [basicAndForkedRepos, starredRepos, orgResult] = await Promise.all([
       getGithubRepositories({ octokit, config }),
       config.githubConfig?.includeStarred
         ? getGithubStarredRepositories({ octokit, config })
         : Promise.resolve([]),
-      getGithubOrganizations({ octokit, config }),
+      getGithubOrganizations({ octokit, config, skipOrgNames: ignoredOrgNames }),
     ]);
     const { organizations: gitOrgs, failedOrgs } = orgResult;
 
@@ -152,7 +159,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
       const existingOrgMap = new Map(existingOrgs.map((o) => [o.normalizedName, o.status]));
 
       insertedRepos = newRepos.filter(
-        (r) => !existingRepoNames.has(r.normalizedFullName)
+        (r) =>
+          !existingRepoNames.has(r.normalizedFullName) &&
+          (!r.organization || !ignoredOrgNames.has(r.organization.toLowerCase()))
       );
       insertedOrgs = newOrgs.filter((o) => !existingOrgMap.has(o.normalizedName));
 
@@ -258,7 +267,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
         newRepositories: insertedRepos.length,
         newOrganizations: insertedOrgs.length,
         skippedDisabledRepositories: allGithubRepos.length - mirrorableGithubRepos.length,
-        failedOrgs: failedOrgs.map((o) => o.name),
+        failedOrgs: failedOrgs.filter((o) => !ignoredOrgNames.has(o.name.toLowerCase())).map((o) => o.name),
         recoveredOrgs: recoveredOrgCount,
       },
     });
