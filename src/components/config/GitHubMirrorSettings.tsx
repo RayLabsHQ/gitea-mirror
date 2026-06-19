@@ -77,6 +77,7 @@ export function GitHubMirrorSettings({
   const [starListsOpen, setStarListsOpen] = React.useState(false);
   const [starListSearch, setStarListSearch] = React.useState("");
   const [customStarListName, setCustomStarListName] = React.useState("");
+  const [customOrgName, setCustomOrgName] = React.useState("");
   const [availableStarLists, setAvailableStarLists] = React.useState<string[]>([]);
   const [loadingStarLists, setLoadingStarLists] = React.useState(false);
   const [loadedStarLists, setLoadedStarLists] = React.useState(false);
@@ -137,6 +138,38 @@ export function GitHubMirrorSettings({
       starredLists: normalizeStarListNames(lists),
     });
   }, [githubConfig, normalizeStarListNames, onGitHubConfigChange]);
+
+  const includedOrgs = React.useMemo(
+    () => githubConfig.includeOrganizations ?? [],
+    [githubConfig.includeOrganizations],
+  );
+
+  const addIncludedOrg = React.useCallback(() => {
+    const trimmed = customOrgName.trim();
+    if (!trimmed) return;
+    const exists = includedOrgs.some(
+      (org) => org.toLowerCase() === trimmed.toLowerCase(),
+    );
+    if (!exists) {
+      onGitHubConfigChange({
+        ...githubConfig,
+        includeOrganizations: [...includedOrgs, trimmed],
+      });
+    }
+    setCustomOrgName("");
+  }, [customOrgName, includedOrgs, githubConfig, onGitHubConfigChange]);
+
+  const removeIncludedOrg = React.useCallback(
+    (name: string) => {
+      onGitHubConfigChange({
+        ...githubConfig,
+        includeOrganizations: includedOrgs.filter(
+          (org) => org.toLowerCase() !== name.toLowerCase(),
+        ),
+      });
+    },
+    [includedOrgs, githubConfig, onGitHubConfigChange],
+  );
 
   const loadStarLists = React.useCallback(async () => {
     if (
@@ -945,6 +978,64 @@ export function GitHubMirrorSettings({
               <p className="text-xs text-muted-foreground">
                 Exclude repositories owned by your personal GitHub account; only mirror repos belonging to organizations
               </p>
+            </div>
+          </div>
+
+          <div className="flex items-start space-x-3">
+            <Users className="h-4 w-4 mt-0.5 text-muted-foreground" />
+            <div className="space-y-2 flex-1">
+              <div className="space-y-0.5">
+                <Label className="text-sm font-normal flex items-center gap-2">
+                  Limit to specific organizations
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  Leave empty to mirror repos from every organization you belong to.
+                  Add one or more organizations to mirror only their repositories.
+                </p>
+              </div>
+
+              {includedOrgs.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {includedOrgs.map((org) => (
+                    <Badge key={org} variant="secondary" className="gap-1">
+                      <span>{org}</span>
+                      <button
+                        type="button"
+                        onClick={() => removeIncludedOrg(org)}
+                        className="rounded-sm hover:text-foreground/80"
+                        aria-label={`Remove ${org} organization`}
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </Badge>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex items-center gap-2">
+                <Input
+                  value={customOrgName}
+                  onChange={(event) => setCustomOrgName(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      addIncludedOrg();
+                    }
+                  }}
+                  placeholder="Add organization name"
+                  className="h-8 text-xs"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8"
+                  onClick={addIncludedOrg}
+                  disabled={!customOrgName.trim()}
+                >
+                  Add
+                </Button>
+              </div>
             </div>
           </div>
         </div>

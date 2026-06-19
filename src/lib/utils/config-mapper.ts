@@ -31,6 +31,24 @@ function normalizeStarredLists(lists: string[] | undefined): string[] {
   return [...deduped];
 }
 
+// Trim, drop blanks, and de-duplicate case-insensitively while preserving the
+// first-seen casing of each organization name.
+function normalizeOrgList(orgs: string[] | undefined): string[] {
+  if (!Array.isArray(orgs)) return [];
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const org of orgs) {
+    if (typeof org !== "string") continue;
+    const trimmed = org.trim();
+    if (!trimmed) continue;
+    const key = trimmed.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(trimmed);
+  }
+  return result;
+}
+
 /**
  * Maps UI config structure to database schema structure
  */
@@ -56,8 +74,8 @@ export function mapUiToDbConfig(
     includeArchived: false, // Not in UI yet, default to false
     includePublic: true, // Not in UI yet, default to true
     
-    // Organization related fields
-    includeOrganizations: [], // Not in UI yet
+    // Organization related fields — opt-in allowlist (empty = all org repos)
+    includeOrganizations: normalizeOrgList(githubConfig.includeOrganizations),
     
     // Starred repos organization
     starredReposOrg: giteaConfig.starredReposOrg,
@@ -145,6 +163,7 @@ export function mapDbToUiConfig(dbConfig: any): {
     token: dbConfig.githubConfig?.token || "",
     privateRepositories: dbConfig.githubConfig?.includePrivate || false, // Map includePrivate to privateRepositories
     includeCollaboratorRepos: dbConfig.githubConfig?.includeCollaboratorRepos ?? true,
+    includeOrganizations: normalizeOrgList(dbConfig.githubConfig?.includeOrganizations),
     mirrorStarred: dbConfig.githubConfig?.includeStarred || false, // Map includeStarred to mirrorStarred
     starredLists: normalizeStarredLists(dbConfig.githubConfig?.starredLists),
   };

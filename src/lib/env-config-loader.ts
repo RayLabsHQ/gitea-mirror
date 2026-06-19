@@ -20,6 +20,7 @@ interface EnvConfig {
     skipForks?: boolean;
     includeArchived?: boolean;
     mirrorOrganizations?: boolean;
+    includeOrganizations?: string[];
     preserveOrgStructure?: boolean;
     onlyMirrorOrgs?: boolean;
     starredCodeOnly?: boolean;
@@ -101,6 +102,9 @@ function parseEnvConfig(): EnvConfig {
   const protectedRepos = process.env.CLEANUP_PROTECTED_REPOS 
     ? process.env.CLEANUP_PROTECTED_REPOS.split(',').map(r => r.trim()).filter(Boolean)
     : undefined;
+  const includeOrganizations = process.env.INCLUDE_ORGANIZATIONS
+    ? process.env.INCLUDE_ORGANIZATIONS.split(',').map((org) => org.trim()).filter(Boolean)
+    : undefined;
   const starredLists = process.env.MIRROR_STARRED_LISTS
     ? process.env.MIRROR_STARRED_LISTS.split(',').map((list) => list.trim()).filter(Boolean)
     : undefined;
@@ -121,6 +125,7 @@ function parseEnvConfig(): EnvConfig {
       skipForks: process.env.SKIP_FORKS === 'true',
       includeArchived: process.env.INCLUDE_ARCHIVED === 'true',
       mirrorOrganizations: process.env.MIRROR_ORGANIZATIONS === 'true',
+      includeOrganizations,
       preserveOrgStructure: process.env.PRESERVE_ORG_STRUCTURE === 'true',
       onlyMirrorOrgs: process.env.ONLY_MIRROR_ORGS === 'true',
       starredCodeOnly: process.env.SKIP_STARRED_ISSUES === 'true',
@@ -277,7 +282,9 @@ export async function initializeConfigFromEnv(): Promise<void> {
       includePrivate: envConfig.github.privateRepositories ?? existingConfig?.[0]?.githubConfig?.includePrivate ?? false,
       includePublic: envConfig.github.publicRepositories ?? existingConfig?.[0]?.githubConfig?.includePublic ?? true,
       includeCollaboratorRepos: envConfig.github.includeCollaboratorRepos ?? existingConfig?.[0]?.githubConfig?.includeCollaboratorRepos ?? true,
-      includeOrganizations: envConfig.github.mirrorOrganizations ? [] : (existingConfig?.[0]?.githubConfig?.includeOrganizations ?? []),
+      // Opt-in org allowlist from INCLUDE_ORGANIZATIONS (comma-separated). Falls
+      // back to existing config so the UI-managed list isn't clobbered on restart.
+      includeOrganizations: envConfig.github.includeOrganizations ?? existingConfig?.[0]?.githubConfig?.includeOrganizations ?? [],
       starredReposOrg: envConfig.github.starredReposOrg || existingConfig?.[0]?.githubConfig?.starredReposOrg || 'starred',
       starredReposMode: envConfig.github.starredReposMode || existingConfig?.[0]?.githubConfig?.starredReposMode || 'dedicated-org',
       mirrorStrategy,

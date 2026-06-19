@@ -62,6 +62,7 @@ export interface GitHubConfig {
   token: string;
   privateRepositories: boolean;
   includeCollaboratorRepos?: boolean;
+  includeOrganizations?: string[];
   mirrorStarred: boolean;
   starredLists?: string[];
   starredDuplicateStrategy?: DuplicateNameStrategy;

@@ -236,6 +236,7 @@ export async function getGithubRepositories({
   octokit,
   config,
   includeCollaboratorReposOverride,
+  includeAllOrgsOverride,
 }: {
   octokit: Octokit;
   config: Partial<Config>;
@@ -243,6 +244,10 @@ export async function getGithubRepositories({
   // cleanup service so we never mark a collab repo as orphaned just because
   // the import filter is currently off.
   includeCollaboratorReposOverride?: boolean;
+  // Bypass the includeOrganizations allowlist so all org repos are returned.
+  // Used by the cleanup service so a previously-mirrored org repo isn't flagged
+  // as orphaned just because the user narrowed the allowlist.
+  includeAllOrgsOverride?: boolean;
 }): Promise<GitRepo[]> {
   try {
     const includeCollab =
@@ -266,6 +271,16 @@ export async function getGithubRepositories({
     const skipPersonalRepos = config.githubConfig?.skipPersonalRepos ?? false;
     // The authenticated user's login — used to identify personally-owned repos
     const authenticatedUserLogin = config.githubConfig?.owner ?? "";
+    // Opt-in organization allowlist. When non-empty, only repos owned by the
+    // listed organizations are imported; org repos from any other org the user
+    // happens to be a member of are dropped. Empty = import all org repos
+    // (backward-compatible default). Owned/collaborator repos are unaffected.
+    const includeOrgs = includeAllOrgsOverride
+      ? []
+      : config.githubConfig?.includeOrganizations ?? [];
+    const allowedOrgs = new Set(
+      includeOrgs.map((org) => org.trim().toLowerCase()).filter(Boolean),
+    );
 
     const filteredRepos = repos.filter((repo) => {
       const isForkAllowed = !skipForks || !repo.fork;
@@ -277,7 +292,13 @@ export async function getGithubRepositories({
         authenticatedUserLogin.length > 0 &&
         repo.owner.login === authenticatedUserLogin &&
         repo.owner.type === "User";
-      return isForkAllowed && !isPersonalRepo;
+      // When an allowlist is configured, only keep org repos whose owning org
+      // is listed. Non-org repos (owned/collaborator) are never restricted here.
+      const isOrgAllowed =
+        allowedOrgs.size === 0 ||
+        repo.owner.type !== "Organization" ||
+        allowedOrgs.has(repo.owner.login.toLowerCase());
+      return isForkAllowed && !isPersonalRepo && isOrgAllowed;
     });
 
     return filteredRepos.map((repo) => ({

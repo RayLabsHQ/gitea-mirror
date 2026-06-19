@@ -164,3 +164,92 @@ describe("getGithubRepositories - skipPersonalRepos", () => {
     expect(repos.map((r) => r.name)).toContain("org-lib");
   });
 });
+
+describe("getGithubRepositories - includeOrganizations allowlist", () => {
+  const personalRepo = makeRepo({ name: "my-lib", ownerLogin: "octo", ownerType: "User" });
+  const wantedOrgRepo = makeRepo({ name: "wanted", ownerLogin: "wanted-org", ownerType: "Organization" });
+  const otherOrgRepo = makeRepo({ name: "noise", ownerLogin: "noise-org", ownerType: "Organization" });
+  const collabRepo = makeRepo({ name: "collab", ownerLogin: "other-user", ownerType: "User" });
+
+  test("empty allowlist — keeps repos from all orgs (backward compat)", async () => {
+    const { octokit } = makeOctokit([wantedOrgRepo, otherOrgRepo]);
+    const repos = await getGithubRepositories({
+      octokit,
+      config: { githubConfig: { owner: "octo", includeOrganizations: [] } as any },
+    });
+    expect(repos.map((r) => r.name)).toContain("wanted");
+    expect(repos.map((r) => r.name)).toContain("noise");
+  });
+
+  test("non-empty allowlist — keeps only listed orgs, drops other orgs", async () => {
+    const { octokit } = makeOctokit([wantedOrgRepo, otherOrgRepo]);
+    const repos = await getGithubRepositories({
+      octokit,
+      config: { githubConfig: { owner: "octo", includeOrganizations: ["wanted-org"] } as any },
+    });
+    expect(repos.map((r) => r.name)).toContain("wanted");
+    expect(repos.map((r) => r.name)).not.toContain("noise");
+  });
+
+  test("allowlist match is case-insensitive", async () => {
+    const { octokit } = makeOctokit([wantedOrgRepo, otherOrgRepo]);
+    const repos = await getGithubRepositories({
+      octokit,
+      config: { githubConfig: { owner: "octo", includeOrganizations: ["Wanted-Org"] } as any },
+    });
+    expect(repos.map((r) => r.name)).toContain("wanted");
+    expect(repos.map((r) => r.name)).not.toContain("noise");
+  });
+
+  test("allowlist never restricts personal or collaborator repos", async () => {
+    const { octokit } = makeOctokit([personalRepo, collabRepo, wantedOrgRepo, otherOrgRepo]);
+    const repos = await getGithubRepositories({
+      octokit,
+      config: { githubConfig: { owner: "octo", includeOrganizations: ["wanted-org"] } as any },
+    });
+    // User-owned and collaborator repos pass through regardless of the allowlist
+    expect(repos.map((r) => r.name)).toContain("my-lib");
+    expect(repos.map((r) => r.name)).toContain("collab");
+    expect(repos.map((r) => r.name)).toContain("wanted");
+    expect(repos.map((r) => r.name)).not.toContain("noise");
+  });
+
+  test("composes with skipPersonalRepos — drops personal, keeps only listed org", async () => {
+    const { octokit } = makeOctokit([personalRepo, wantedOrgRepo, otherOrgRepo]);
+    const repos = await getGithubRepositories({
+      octokit,
+      config: {
+        githubConfig: {
+          owner: "octo",
+          skipPersonalRepos: true,
+          includeOrganizations: ["wanted-org"],
+        } as any,
+      },
+    });
+    expect(repos.map((r) => r.name)).not.toContain("my-lib");
+    expect(repos.map((r) => r.name)).toContain("wanted");
+    expect(repos.map((r) => r.name)).not.toContain("noise");
+  });
+
+  test("blank/whitespace entries are ignored (treated as empty allowlist)", async () => {
+    const { octokit } = makeOctokit([wantedOrgRepo, otherOrgRepo]);
+    const repos = await getGithubRepositories({
+      octokit,
+      config: { githubConfig: { owner: "octo", includeOrganizations: ["  ", ""] } as any },
+    });
+    expect(repos.map((r) => r.name)).toContain("wanted");
+    expect(repos.map((r) => r.name)).toContain("noise");
+  });
+
+  test("includeAllOrgsOverride bypasses allowlist (cleanup safety)", async () => {
+    const { octokit } = makeOctokit([wantedOrgRepo, otherOrgRepo]);
+    const repos = await getGithubRepositories({
+      octokit,
+      config: { githubConfig: { owner: "octo", includeOrganizations: ["wanted-org"] } as any },
+      includeAllOrgsOverride: true,
+    });
+    // Override returns all org repos so cleanup never false-orphans excluded orgs
+    expect(repos.map((r) => r.name)).toContain("wanted");
+    expect(repos.map((r) => r.name)).toContain("noise");
+  });
+});
