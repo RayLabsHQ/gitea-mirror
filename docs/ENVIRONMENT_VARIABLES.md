@@ -107,6 +107,7 @@ Standard GitHub Enterprise Cloud on `github.com` works with the default — no o
 | `MIRROR_STARRED_LISTS` | Optional comma-separated GitHub Star List names to mirror (only used when `MIRROR_STARRED=true`) | - | Comma-separated list names (empty = all starred repos) |
 | `STARRED_REPOS_ORG` | Organization name for starred repos | `starred` | Any string |
 | `STARRED_REPOS_MODE` | How starred repos are mirrored | `dedicated-org` | `dedicated-org`, `preserve-owner` |
+| `STARRED_DUPLICATE_STRATEGY` | Name collision strategy when two starred repos share a name from different owners (`suffix` = `repo-owner`, `prefix` = `owner-repo`) | `suffix` | `suffix`, `prefix`, `owner-org` |
 
 ### Organization Settings
 

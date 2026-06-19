@@ -27,6 +27,7 @@ interface EnvConfig {
     autoMirrorStarred?: boolean;
     starredReposOrg?: string;
     starredReposMode?: 'dedicated-org' | 'preserve-owner';
+    starredDuplicateStrategy?: 'suffix' | 'prefix' | 'owner-org';
     starredLists?: string[];
     mirrorStrategy?: 'preserve' | 'single-org' | 'flat-user' | 'mixed';
   };
@@ -132,6 +133,7 @@ function parseEnvConfig(): EnvConfig {
       autoMirrorStarred: process.env.AUTO_MIRROR_STARRED === 'true',
       starredReposOrg: process.env.STARRED_REPOS_ORG,
       starredReposMode: process.env.STARRED_REPOS_MODE as 'dedicated-org' | 'preserve-owner',
+      starredDuplicateStrategy: process.env.STARRED_DUPLICATE_STRATEGY as 'suffix' | 'prefix' | 'owner-org',
       starredLists,
       mirrorStrategy: process.env.MIRROR_STRATEGY as 'preserve' | 'single-org' | 'flat-user' | 'mixed',
     },
@@ -287,6 +289,7 @@ export async function initializeConfigFromEnv(): Promise<void> {
       includeOrganizations: envConfig.github.includeOrganizations ?? existingConfig?.[0]?.githubConfig?.includeOrganizations ?? [],
       starredReposOrg: envConfig.github.starredReposOrg || existingConfig?.[0]?.githubConfig?.starredReposOrg || 'starred',
       starredReposMode: envConfig.github.starredReposMode || existingConfig?.[0]?.githubConfig?.starredReposMode || 'dedicated-org',
+      starredDuplicateStrategy: envConfig.github.starredDuplicateStrategy || existingConfig?.[0]?.githubConfig?.starredDuplicateStrategy || 'suffix',
       mirrorStrategy,
       defaultOrg: envConfig.gitea.organization || existingConfig?.[0]?.githubConfig?.defaultOrg || 'github-mirrors',
       starredCodeOnly: envConfig.github.starredCodeOnly ?? existingConfig?.[0]?.githubConfig?.starredCodeOnly ?? false,

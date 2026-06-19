@@ -81,6 +81,7 @@ export function mapUiToDbConfig(
     starredReposOrg: giteaConfig.starredReposOrg,
     starredReposMode: giteaConfig.starredReposMode || "dedicated-org",
     starredLists: normalizeStarredLists(githubConfig.starredLists),
+    starredDuplicateStrategy: githubConfig.starredDuplicateStrategy ?? "suffix",
     
     // Mirror strategy
     mirrorStrategy: giteaConfig.mirrorStrategy || "preserve",
@@ -166,6 +167,7 @@ export function mapDbToUiConfig(dbConfig: any): {
     includeOrganizations: normalizeOrgList(dbConfig.githubConfig?.includeOrganizations),
     mirrorStarred: dbConfig.githubConfig?.includeStarred || false, // Map includeStarred to mirrorStarred
     starredLists: normalizeStarredLists(dbConfig.githubConfig?.starredLists),
+    starredDuplicateStrategy: dbConfig.githubConfig?.starredDuplicateStrategy ?? "suffix",
   };
 
   // Map from database Gitea config to UI fields

@@ -158,3 +158,36 @@ test("DB row missing skipPersonalRepos defaults to false on read", () => {
   const ui = mapDbToUiConfig({ githubConfig: { owner: "octo", token: "" } });
   expect(ui.advancedOptions.skipPersonalRepos).toBe(false);
 });
+
+// Regression for #326: the Name Collision Strategy dropdown didn't persist
+// because starredDuplicateStrategy was missing from both mapper directions.
+test("starredDuplicateStrategy round-trips UI -> DB -> UI when set to prefix", () => {
+  const ui = buildMinimalUiConfigs();
+  ui.githubConfig.starredDuplicateStrategy = "prefix";
+  const db = mapUiToDbConfig(ui.githubConfig, ui.giteaConfig, ui.mirrorOptions, ui.advancedOptions);
+  expect(db.githubConfig.starredDuplicateStrategy).toBe("prefix");
+
+  const roundTripped = mapDbToUiConfig({ githubConfig: db.githubConfig, giteaConfig: db.giteaConfig });
+  expect(roundTripped.githubConfig.starredDuplicateStrategy).toBe("prefix");
+});
+
+test("starredDuplicateStrategy round-trips UI -> DB -> UI when set to suffix", () => {
+  const ui = buildMinimalUiConfigs();
+  ui.githubConfig.starredDuplicateStrategy = "suffix";
+  const db = mapUiToDbConfig(ui.githubConfig, ui.giteaConfig, ui.mirrorOptions, ui.advancedOptions);
+  expect(db.githubConfig.starredDuplicateStrategy).toBe("suffix");
+
+  const roundTripped = mapDbToUiConfig({ githubConfig: db.githubConfig, giteaConfig: db.giteaConfig });
+  expect(roundTripped.githubConfig.starredDuplicateStrategy).toBe("suffix");
+});
+
+test("starredDuplicateStrategy defaults to suffix on save when unset", () => {
+  const ui = buildMinimalUiConfigs();
+  const db = mapUiToDbConfig(ui.githubConfig, ui.giteaConfig, ui.mirrorOptions, ui.advancedOptions);
+  expect(db.githubConfig.starredDuplicateStrategy).toBe("suffix");
+});
+
+test("DB row missing starredDuplicateStrategy defaults to suffix on read", () => {
+  const ui = mapDbToUiConfig({ githubConfig: { owner: "octo", token: "" } });
+  expect(ui.githubConfig.starredDuplicateStrategy).toBe("suffix");
+});
