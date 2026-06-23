@@ -27,7 +27,10 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { classifyReleasesForReconciliation } from "@/lib/gitea";
+import {
+  classifyReleasesForReconciliation,
+  classifyAssetsForReconciliation,
+} from "@/lib/gitea";
 
 describe("classifyReleasesForReconciliation", () => {
   describe("normal repo — published_at order matches tag-commit order", () => {
@@ -146,5 +149,84 @@ describe("classifyReleasesForReconciliation", () => {
       expect(toSkip).toEqual(["v1.0.0"]);
       // v0.9.0 not mentioned in either output — handled by retention cleanup, not here
     });
+  });
+});
+
+/**
+ * Asset reconciliation — regression for #331.
+ *
+ * Root cause: assets were uploaded only on the create path. When a Gitea release
+ * already existed (every re-sync, or after an interrupted first upload), the update
+ * path PATCHed the body and `continue`d without ever touching assets — so a release
+ * that existed without its full asset set stayed permanently asset-less and re-syncing
+ * could never heal it. Reproduced on a real Forgejo pull-mirror: GitHub release with
+ * two 35-40MB binaries → Gitea release with 0 assets → re-sync logged "Updating
+ * existing release" and left it at 0.
+ *
+ * Fix: reconcile assets idempotently on both paths via classifyAssetsForReconciliation.
+ */
+describe("classifyAssetsForReconciliation", () => {
+  it("uploads all assets when the Gitea release has none (the #331 broken state)", () => {
+    const github = [
+      { name: "base.zip", size: 40_264_954 },
+      { name: "extras.zip", size: 37_098_528 },
+    ];
+    const gitea: Array<{ id: number; name: string; size: number }> = [];
+
+    const { toUpload, toSkip } = classifyAssetsForReconciliation(github, gitea);
+
+    expect(toSkip).toEqual([]);
+    expect(toUpload).toEqual([
+      { name: "base.zip", replaceAssetId: null },
+      { name: "extras.zip", replaceAssetId: null },
+    ]);
+  });
+
+  it("backfills only the missing asset when one already exists", () => {
+    const github = [
+      { name: "base.zip", size: 40_264_954 },
+      { name: "extras.zip", size: 37_098_528 },
+    ];
+    const gitea = [{ id: 9, name: "base.zip", size: 40_264_954 }];
+
+    const { toUpload, toSkip } = classifyAssetsForReconciliation(github, gitea);
+
+    expect(toSkip).toEqual(["base.zip"]);
+    expect(toUpload).toEqual([{ name: "extras.zip", replaceAssetId: null }]);
+  });
+
+  it("is idempotent — skips everything when all assets already match by name+size", () => {
+    const github = [
+      { name: "base.zip", size: 40_264_954 },
+      { name: "extras.zip", size: 37_098_528 },
+    ];
+    const gitea = [
+      { id: 9, name: "base.zip", size: 40_264_954 },
+      { id: 10, name: "extras.zip", size: 37_098_528 },
+    ];
+
+    const { toUpload, toSkip } = classifyAssetsForReconciliation(github, gitea);
+
+    expect(toUpload).toEqual([]);
+    expect(toSkip).toEqual(["base.zip", "extras.zip"]);
+  });
+
+  it("replaces an asset whose size changed upstream (re-upload over the stale copy)", () => {
+    const github = [{ name: "firmware.bin", size: 2048 }];
+    const gitea = [{ id: 42, name: "firmware.bin", size: 1024 }]; // truncated/stale
+
+    const { toUpload, toSkip } = classifyAssetsForReconciliation(github, gitea);
+
+    expect(toSkip).toEqual([]);
+    expect(toUpload).toEqual([{ name: "firmware.bin", replaceAssetId: 42 }]);
+  });
+
+  it("handles a release with no GitHub assets", () => {
+    const { toUpload, toSkip } = classifyAssetsForReconciliation(
+      [],
+      [{ id: 1, name: "leftover.zip", size: 10 }]
+    );
+    expect(toUpload).toEqual([]);
+    expect(toSkip).toEqual([]);
   });
 });

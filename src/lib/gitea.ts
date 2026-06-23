@@ -2691,6 +2691,168 @@ export function classifyReleasesForReconciliation(
   return { toCreate, toSkip };
 }
 
+/**
+ * Decide which of a GitHub release's assets need (re)uploading to Gitea.
+ *
+ * Compared by name:
+ *   - present in Gitea with a matching size  -> skip (already mirrored)
+ *   - present with a different size          -> upload, replacing the stale copy
+ *   - absent                                 -> upload (fresh)
+ *
+ * Pure function so the create/update reconciliation decision is unit-testable
+ * without hitting the network (regression guard for #331).
+ */
+export function classifyAssetsForReconciliation(
+  githubAssets: Array<{ name: string; size: number }>,
+  giteaAssets: Array<{ id: number; name: string; size: number }>
+): {
+  toUpload: Array<{ name: string; replaceAssetId: number | null }>;
+  toSkip: string[];
+} {
+  const existingByName = new Map(giteaAssets.map((a) => [a.name, a]));
+  const toUpload: Array<{ name: string; replaceAssetId: number | null }> = [];
+  const toSkip: string[] = [];
+
+  for (const asset of githubAssets) {
+    const existing = existingByName.get(asset.name);
+    if (existing && existing.size === asset.size) {
+      toSkip.push(asset.name);
+    } else {
+      toUpload.push({ name: asset.name, replaceAssetId: existing ? existing.id : null });
+    }
+  }
+
+  return { toUpload, toSkip };
+}
+
+/**
+ * Idempotently mirror a GitHub release's assets onto the matching Gitea release.
+ *
+ * Runs on BOTH the create and update paths so assets are reconciled on every sync,
+ * not only on the single sync where the Gitea release is first created. Previously
+ * assets were uploaded inline in the create path only; the update path PATCHed the
+ * body and `continue`d without ever looking at assets. Any release whose assets
+ * failed or were interrupted on first creation therefore stayed permanently
+ * asset-less, and re-syncing could never heal it (#331).
+ *
+ * Strategy: compare by asset name. Skip assets already present with a matching size;
+ * (re)upload anything missing, and replace an existing asset whose size differs
+ * (truncated/changed upstream). Returns per-release counts so the caller can report.
+ */
+async function reconcileReleaseAssets({
+  config,
+  decryptedConfig,
+  repoOwner,
+  repoName,
+  giteaReleaseId,
+  githubAssets,
+  tagName,
+}: {
+  config: Partial<Config>;
+  decryptedConfig: Config;
+  repoOwner: string;
+  repoName: string;
+  giteaReleaseId: number;
+  githubAssets: Array<{ name: string; size: number; browser_download_url: string }>;
+  tagName: string;
+}): Promise<{ uploaded: number; failed: number; skipped: number }> {
+  let uploaded = 0;
+  let failed = 0;
+  let skipped = 0;
+
+  if (!githubAssets || githubAssets.length === 0) {
+    return { uploaded, failed, skipped };
+  }
+
+  const giteaBaseUrl = config.giteaConfig!.url;
+  const giteaAuth = { Authorization: `token ${decryptedConfig.giteaConfig!.token}` };
+
+  // Fetch existing attachments so we only transfer what's missing or changed.
+  const existingAssets: Array<{ id: number; name: string; size: number }> = await httpGet(
+    `${giteaBaseUrl}/api/v1/repos/${repoOwner}/${repoName}/releases/${giteaReleaseId}/assets`,
+    giteaAuth
+  )
+    .then((r) => (Array.isArray(r?.data) ? r.data : []))
+    .catch(() => []);
+
+  const { toUpload, toSkip } = classifyAssetsForReconciliation(
+    githubAssets,
+    existingAssets
+  );
+  skipped = toSkip.length;
+
+  const githubByName = new Map(githubAssets.map((a) => [a.name, a]));
+
+  for (const { name, replaceAssetId } of toUpload) {
+    const asset = githubByName.get(name)!;
+    try {
+      // Download from GitHub. fetch strips the Authorization header on the
+      // cross-host redirect to GitHub's object storage, so this works for both
+      // public and private release assets.
+      console.log(
+        `[Releases] Downloading asset: ${asset.name} (${asset.size} bytes) for ${tagName}`
+      );
+      const assetResponse = await fetch(asset.browser_download_url, {
+        headers: {
+          Accept: "application/octet-stream",
+          Authorization: `token ${decryptedConfig.githubConfig!.token}`,
+        },
+      });
+
+      if (!assetResponse.ok) {
+        console.error(
+          `[Releases] Failed to download asset ${asset.name}: ${assetResponse.status} ${assetResponse.statusText}`
+        );
+        failed++;
+        continue;
+      }
+
+      const assetData = await assetResponse.arrayBuffer();
+
+      // Gitea rejects a duplicate attachment name, so drop a stale/mismatched
+      // copy before re-uploading.
+      if (replaceAssetId !== null) {
+        await httpDelete(
+          `${giteaBaseUrl}/api/v1/repos/${repoOwner}/${repoName}/releases/${giteaReleaseId}/assets/${replaceAssetId}`,
+          giteaAuth
+        ).catch(() => null);
+      }
+
+      const formData = new FormData();
+      formData.append("attachment", new Blob([assetData]), asset.name);
+
+      const uploadResponse = await fetch(
+        `${giteaBaseUrl}/api/v1/repos/${repoOwner}/${repoName}/releases/${giteaReleaseId}/assets?name=${encodeURIComponent(asset.name)}`,
+        {
+          method: "POST",
+          headers: { Authorization: `token ${decryptedConfig.giteaConfig!.token}` },
+          body: formData,
+        }
+      );
+
+      if (uploadResponse.ok) {
+        console.log(`[Releases] Successfully uploaded asset: ${asset.name}`);
+        uploaded++;
+      } else {
+        const errorText = await uploadResponse.text();
+        console.error(
+          `[Releases] Failed to upload asset ${asset.name}: ${uploadResponse.status} ${errorText}`
+        );
+        failed++;
+      }
+    } catch (assetError) {
+      console.error(
+        `[Releases] Error processing asset ${asset.name}: ${
+          assetError instanceof Error ? assetError.message : String(assetError)
+        }`
+      );
+      failed++;
+    }
+  }
+
+  return { uploaded, failed, skipped };
+}
+
 export async function mirrorGitHubReleasesToGitea({
   octokit,
   repository,
@@ -2776,6 +2938,8 @@ export async function mirrorGitHubReleasesToGitea({
 
   let mirroredCount = 0;
   let skippedCount = 0;
+  let totalAssetsUploaded = 0;
+  let totalAssetsFailed = 0;
 
   // Process releases in their GitHub API order (newest first by default)
   const releasesToProcess = limitedReleases.slice();
@@ -2853,6 +3017,26 @@ export async function mirrorGitHubReleasesToGitea({
           console.log(`[Releases] Release ${release.tag_name} already up-to-date, skipping`);
           skippedCount++;
         }
+
+        // Reconcile assets on every sync — backfill any that are missing or changed.
+        // The update path used to `continue` here without touching assets, so a
+        // release that existed without its full asset set stayed broken forever (#331).
+        const assetResult = await reconcileReleaseAssets({
+          config,
+          decryptedConfig,
+          repoOwner,
+          repoName,
+          giteaReleaseId: existingRelease.id,
+          githubAssets: release.assets || [],
+          tagName: release.tag_name,
+        });
+        if (assetResult.uploaded > 0) {
+          console.log(
+            `[Releases] Backfilled ${assetResult.uploaded} missing/changed asset(s) for existing release ${release.tag_name}`
+          );
+        }
+        totalAssetsUploaded += assetResult.uploaded;
+        totalAssetsFailed += assetResult.failed;
         continue;
       }
 
@@ -2878,55 +3062,22 @@ export async function mirrorGitHubReleasesToGitea({
         }
       );
       
-      // Mirror release assets if they exist
+      // Mirror release assets if they exist (idempotent — see reconcileReleaseAssets)
       if (release.assets && release.assets.length > 0) {
         console.log(`[Releases] Mirroring ${release.assets.length} assets for release ${release.tag_name}`);
-        
-        for (const asset of release.assets) {
-          try {
-            // Download the asset from GitHub
-            console.log(`[Releases] Downloading asset: ${asset.name} (${asset.size} bytes)`);
-            const assetResponse = await fetch(asset.browser_download_url, {
-              headers: {
-                'Accept': 'application/octet-stream',
-                'Authorization': `token ${decryptedConfig.githubConfig.token}`,
-              },
-            });
-            
-            if (!assetResponse.ok) {
-              console.error(`[Releases] Failed to download asset ${asset.name}: ${assetResponse.statusText}`);
-              continue;
-            }
-            
-            const assetData = await assetResponse.arrayBuffer();
-            
-            // Upload the asset to Gitea release
-            const formData = new FormData();
-            formData.append('attachment', new Blob([assetData]), asset.name);
-            
-            const uploadResponse = await fetch(
-              `${config.giteaConfig.url}/api/v1/repos/${repoOwner}/${repoName}/releases/${createReleaseResponse.data.id}/assets?name=${encodeURIComponent(asset.name)}`,
-              {
-                method: 'POST',
-                headers: {
-                  'Authorization': `token ${decryptedConfig.giteaConfig.token}`,
-                },
-                body: formData,
-              }
-            );
-            
-            if (uploadResponse.ok) {
-              console.log(`[Releases] Successfully uploaded asset: ${asset.name}`);
-            } else {
-              const errorText = await uploadResponse.text();
-              console.error(`[Releases] Failed to upload asset ${asset.name}: ${errorText}`);
-            }
-          } catch (assetError) {
-            console.error(`[Releases] Error processing asset ${asset.name}: ${assetError instanceof Error ? assetError.message : String(assetError)}`);
-          }
-        }
+        const assetResult = await reconcileReleaseAssets({
+          config,
+          decryptedConfig,
+          repoOwner,
+          repoName,
+          giteaReleaseId: createReleaseResponse.data.id,
+          githubAssets: release.assets,
+          tagName: release.tag_name,
+        });
+        totalAssetsUploaded += assetResult.uploaded;
+        totalAssetsFailed += assetResult.failed;
       }
-      
+
       mirroredCount++;
       const noteInfo = originalReleaseNote ? ` with ${originalReleaseNote.length} character changelog` : " without changelog";
       console.log(`[Releases] Successfully mirrored release: ${release.tag_name}${noteInfo}`);
@@ -2935,7 +3086,15 @@ export async function mirrorGitHubReleasesToGitea({
     }
   }
 
-  console.log(`✅ Mirrored/Updated ${mirroredCount} releases to Gitea (${skippedCount} already up-to-date)`);
+  console.log(
+    `✅ Mirrored/Updated ${mirroredCount} releases to Gitea (${skippedCount} already up-to-date); assets uploaded: ${totalAssetsUploaded}, failed: ${totalAssetsFailed}`
+  );
+
+  if (totalAssetsFailed > 0) {
+    console.error(
+      `[Releases] ⚠️ ${totalAssetsFailed} release asset(s) failed to mirror for ${repository.fullName} — they will be retried on the next sync`
+    );
+  }
 
   // Enforce release retention limit by removing the oldest excess releases from Gitea
   try {
