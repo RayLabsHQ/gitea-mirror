@@ -2938,6 +2938,7 @@ export async function mirrorGitHubReleasesToGitea({
 
   let mirroredCount = 0;
   let skippedCount = 0;
+  let skippedMissingTagCount = 0;
   let totalAssetsUploaded = 0;
   let totalAssetsFailed = 0;
 
@@ -2996,7 +2997,8 @@ export async function mirrorGitHubReleasesToGitea({
             `${config.giteaConfig.url}/api/v1/repos/${repoOwner}/${repoName}/releases/${existingRelease.id}`,
             {
               tag_name: release.tag_name,
-              target: release.target_commitish,
+              // Omit `target` — the release already exists and is anchored to its tag;
+              // re-sending target_commitish risks the same "target not found" 404 (#331).
               title: release.name || release.tag_name,
               body: releaseNote,
               draft: release.draft,
@@ -3040,18 +3042,43 @@ export async function mirrorGitHubReleasesToGitea({
         continue;
       }
 
+      // The git tag must already exist in Gitea before we create a release for it.
+      // For a mirror, tags are synced from upstream by Gitea's own git mirror, which
+      // can lag behind this metadata sync (e.g. a large/slow initial clone). If the
+      // tag isn't present yet, skip and let a later sync pick it up — do NOT ask Gitea
+      // to create the release against a `target` branch:
+      //   - if the target can't be resolved Gitea returns 404 "The target couldn't be
+      //     found" and the release is lost (#331),
+      //   - if it can, Gitea would create a brand-new tag at the wrong commit.
+      const tagExists = await httpGet(
+        `${config.giteaConfig.url}/api/v1/repos/${repoOwner}/${repoName}/tags/${encodeURIComponent(release.tag_name)}`,
+        { Authorization: `token ${decryptedConfig.giteaConfig.token}` }
+      )
+        .then(() => true)
+        .catch(() => false);
+
+      if (!tagExists) {
+        console.warn(
+          `[Releases] Tag ${release.tag_name} is not present in Gitea yet — skipping release for now (the git mirror may still be syncing; it will be retried on the next sync)`
+        );
+        skippedMissingTagCount++;
+        continue;
+      }
+
       // Create new release with changelog/body content (includes GitHub date header)
       if (originalReleaseNote) {
         console.log(`[Releases] Including changelog for ${release.tag_name} (${originalReleaseNote.length} characters + GitHub date header)`);
       } else {
         console.log(`[Releases] Creating release ${release.tag_name} with GitHub date header (no changelog)`);
       }
-      
+
       const createReleaseResponse = await httpPost(
         `${config.giteaConfig.url}/api/v1/repos/${repoOwner}/${repoName}/releases`,
         {
           tag_name: release.tag_name,
-          target: release.target_commitish,
+          // Intentionally omit `target`: the tag already exists (verified above), so
+          // Gitea attaches the release to it. Sending target_commitish can 404 with
+          // "The target couldn't be found" on some Gitea/Forgejo versions (#331).
           title: release.name || release.tag_name,
           body: releaseNote,
           draft: release.draft,
@@ -3087,8 +3114,14 @@ export async function mirrorGitHubReleasesToGitea({
   }
 
   console.log(
-    `✅ Mirrored/Updated ${mirroredCount} releases to Gitea (${skippedCount} already up-to-date); assets uploaded: ${totalAssetsUploaded}, failed: ${totalAssetsFailed}`
+    `✅ Mirrored/Updated ${mirroredCount} releases to Gitea (${skippedCount} already up-to-date, ${skippedMissingTagCount} skipped: tag not synced yet); assets uploaded: ${totalAssetsUploaded}, failed: ${totalAssetsFailed}`
   );
+
+  if (skippedMissingTagCount > 0) {
+    console.warn(
+      `[Releases] ${skippedMissingTagCount} release(s) skipped because their git tag is not in Gitea yet for ${repository.fullName} — these will be created automatically once the git mirror finishes syncing the tags`
+    );
+  }
 
   if (totalAssetsFailed > 0) {
     console.error(
