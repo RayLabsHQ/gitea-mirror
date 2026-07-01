@@ -2186,6 +2186,52 @@ export const syncGiteaRepo = async ({
   }
 };
 
+/**
+ * Replace the label set on an existing Gitea issue (or PR-as-issue) via the
+ * dedicated labels sub-resource.
+ *
+ * Gitea/Forgejo's `EditIssueOption` has no `labels` field (only
+ * `CreateIssueOption` does), so a `labels` key in a `PATCH .../issues/{index}`
+ * body is silently dropped by the JSON decoder — the same class of bug as the
+ * release `title` vs `name` mix-up (#334). Label changes on an already-mirrored
+ * issue therefore have to go through `PUT .../issues/{index}/labels`, which
+ * replaces the whole set idempotently: it both applies newly added labels and
+ * removes ones deleted upstream.
+ *
+ * Best-effort: labels are secondary metadata, so a transient failure here is
+ * logged and left to self-heal on the next sync rather than failing (and
+ * retrying) the entire issue + comment mirror.
+ */
+async function reconcileGiteaIssueLabels({
+  config,
+  decryptedConfig,
+  giteaOwner,
+  repoName,
+  issueNumber,
+  labelIds,
+}: {
+  config: Partial<Config>;
+  decryptedConfig: Config;
+  giteaOwner: string;
+  repoName: string;
+  issueNumber: number;
+  labelIds: number[];
+}): Promise<void> {
+  try {
+    await httpPut(
+      `${config.giteaConfig!.url}/api/v1/repos/${giteaOwner}/${repoName}/issues/${issueNumber}/labels`,
+      { labels: labelIds ?? [] },
+      { Authorization: `token ${decryptedConfig.giteaConfig!.token}` }
+    );
+  } catch (error) {
+    console.warn(
+      `[Labels] Failed to reconcile labels on issue #${issueNumber}: ${
+        error instanceof Error ? error.message : String(error)
+      } (will retry on next sync)`
+    );
+  }
+}
+
 export const mirrorGitRepoIssuesToGitea = async ({
   config,
   octokit,
@@ -2438,10 +2484,11 @@ export const mirrorGitRepoIssuesToGitea = async ({
         await httpPatch(
           `${config.giteaConfig!.url}/api/v1/repos/${giteaOwner}/${repoName}/issues/${targetIssueNumber}`,
           {
+            // `labels` is intentionally omitted: Gitea's EditIssueOption ignores
+            // it. Labels are reconciled below via the labels sub-resource (#334 sibling).
             title: issuePayload.title,
             body: issuePayload.body,
             state: issue.state === "closed" ? "closed" : "open",
-            labels: issuePayload.labels,
           },
           {
             Authorization: `token ${decryptedConfig.giteaConfig!.token}`,
@@ -2488,10 +2535,10 @@ export const mirrorGitRepoIssuesToGitea = async ({
           await httpPatch(
             `${config.giteaConfig!.url}/api/v1/repos/${giteaOwner}/${repoName}/issues/${targetIssueNumber}`,
             {
+              // See note above — labels reconciled via the sub-resource, not here.
               title: issuePayload.title,
               body: issuePayload.body,
               state: issue.state === "closed" ? "closed" : "open",
-              labels: issuePayload.labels,
             },
             {
               Authorization: `token ${decryptedConfig.giteaConfig!.token}`,
@@ -2529,6 +2576,21 @@ export const mirrorGitRepoIssuesToGitea = async ({
             }
           }
         }
+      }
+
+      // Gitea's EditIssueOption ignores `labels`, so the PATCH above can't change
+      // them on an already-mirrored issue — reconcile via the labels sub-resource.
+      // Only needed on the update paths; a freshly POSTed issue already got its
+      // labels from CreateIssueOption. (#334 sibling)
+      if (existingIssue) {
+        await reconcileGiteaIssueLabels({
+          config,
+          decryptedConfig,
+          giteaOwner,
+          repoName,
+          issueNumber: targetIssueNumber,
+          labelIds: giteaLabelIds,
+        });
       }
 
       // Clone comments
@@ -3478,10 +3540,11 @@ export async function mirrorGitRepoPullRequestsToGitea({
           await httpPatch(
             `${config.giteaConfig!.url}/api/v1/repos/${giteaOwner}/${repoName}/issues/${existingPrIssue.number}`,
             {
+              // `labels` omitted — EditIssueOption ignores it; reconciled below
+              // via the labels sub-resource (#334 sibling).
               title: issueData.title,
               body: issueData.body,
               state: issueData.closed ? "closed" : "open",
-              labels: issueData.labels,
             },
             {
               Authorization: `token ${decryptedConfig.giteaConfig!.token}`,
@@ -3519,6 +3582,20 @@ export async function mirrorGitRepoPullRequestsToGitea({
               );
             }
           }
+        }
+
+        // Gitea drops `labels` on issue edit, so the "pull-request" marker label
+        // can't be set via the PATCH above — reconcile it on the update path.
+        // (#334 sibling)
+        if (existingPrIssue) {
+          await reconcileGiteaIssueLabels({
+            config,
+            decryptedConfig,
+            giteaOwner,
+            repoName,
+            issueNumber: existingPrIssue.number,
+            labelIds: issueData.labels,
+          });
         }
 
         successCount++;
@@ -3566,10 +3643,11 @@ export async function mirrorGitRepoPullRequestsToGitea({
             await httpPatch(
               `${config.giteaConfig!.url}/api/v1/repos/${giteaOwner}/${repoName}/issues/${existingPrIssue.number}`,
               {
+                // `labels` omitted — reconciled below via the labels sub-resource
+                // (#334 sibling).
                 title: basicIssueData.title,
                 body: basicIssueData.body,
                 state: basicIssueData.closed ? "closed" : "open",
-                labels: basicIssueData.labels,
               },
               {
                 Authorization: `token ${decryptedConfig.giteaConfig!.token}`,
@@ -3606,6 +3684,19 @@ export async function mirrorGitRepoPullRequestsToGitea({
                 );
               }
             }
+          }
+
+          // Same as the enriched path — reconcile the marker label via the labels
+          // sub-resource since PATCH ignores it. (#334 sibling)
+          if (existingPrIssue) {
+            await reconcileGiteaIssueLabels({
+              config,
+              decryptedConfig,
+              giteaOwner,
+              repoName,
+              issueNumber: existingPrIssue.number,
+              labelIds: basicIssueData.labels,
+            });
           }
 
           successCount++;
