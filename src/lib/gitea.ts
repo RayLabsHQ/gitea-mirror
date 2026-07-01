@@ -2999,7 +2999,10 @@ export async function mirrorGitHubReleasesToGitea({
               tag_name: release.tag_name,
               // Omit `target` — the release already exists and is anchored to its tag;
               // re-sending target_commitish risks the same "target not found" 404 (#331).
-              title: release.name || release.tag_name,
+              // Gitea/Forgejo expose the release title as the JSON field `name`, not
+              // `title` (the Go struct is `Title string \`json:"name"\``). Sending `title`
+              // is silently ignored and leaves the release name blank (#334).
+              name: release.name || release.tag_name,
               body: releaseNote,
               draft: release.draft,
               prerelease: release.prerelease,
@@ -3079,7 +3082,10 @@ export async function mirrorGitHubReleasesToGitea({
           // Intentionally omit `target`: the tag already exists (verified above), so
           // Gitea attaches the release to it. Sending target_commitish can 404 with
           // "The target couldn't be found" on some Gitea/Forgejo versions (#331).
-          title: release.name || release.tag_name,
+          // Gitea/Forgejo expose the release title as the JSON field `name`, not `title`
+          // (the Go struct is `Title string \`json:"name"\``). Sending `title` is silently
+          // ignored, leaving the mirrored release name blank (#334).
+          name: release.name || release.tag_name,
           body: releaseNote,
           draft: release.draft,
           prerelease: release.prerelease,
