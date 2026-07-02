@@ -26,6 +26,7 @@ import {
   strategyNeedsDetection,
 } from "./repo-backup";
 import { detectForcePush } from "./utils/force-push-detection";
+import { sanitizeRepoNameAlphaDashDot } from "./gitea";
 import {
   parseRepositoryMetadataState,
   serializeRepositoryMetadataState,
@@ -61,6 +62,27 @@ export interface GiteaRepoInfo {
 interface SyncTargetCandidate {
   owner: string;
   repoName: string;
+  /**
+   * True for the guessed `archived-{name}` fallback candidate (see
+   * syncGiteaRepoEnhanced). Unlike the recorded mirroredLocation or the
+   * expected-owner candidate, this one is derived purely from the repo NAME,
+   * so it can collide with a different source repo that shares the same base
+   * name — it must pass an original_url source check before being accepted.
+   */
+  isArchivedFallback?: boolean;
+}
+
+/**
+ * Normalize a git remote URL for source-identity comparison: lowercase,
+ * strip trailing slashes and a trailing `.git`.
+ */
+function normalizeSourceUrl(url: string): string {
+  return url
+    .trim()
+    .toLowerCase()
+    .replace(/\/+$/, "")
+    .replace(/\.git$/, "")
+    .replace(/\/+$/, "");
 }
 
 function parseMirroredLocation(location?: string | null): SyncTargetCandidate | null {
@@ -329,12 +351,32 @@ export async function syncGiteaRepoEnhanced({
     // Resolve sync target in a backward-compatible order:
     // 1) recorded mirroredLocation (actual historical mirror location)
     // 2) owner derived from current strategy/config
+    // 3) (archived repos only) the `archived-{name}` rename that
+    //    archiveGiteaRepo applies to mirror repos (see #331 follow-up).
+    //    Repos archived before mirroredLocation was backfilled on rename, or
+    //    any lingering false-positive orphan hit, would otherwise be
+    //    unreachable from "Manual Sync" — the UI's documented way to refresh
+    //    an archived mirror — because the recorded/expected name no longer
+    //    exists and Gitea returns HTTP 405 for it.
     const dependencies = deps ?? (await import("./gitea"));
     const expectedOwner = await dependencies.getGiteaRepoOwnerAsync({ config, repository });
     const recordedTarget = parseMirroredLocation(repository.mirroredLocation);
+    // Archived state can live in either field: the cleanup service sets both,
+    // but a failed retry can clobber `status` while `isArchived` survives.
+    const isArchivedRepo =
+      repository.status === "archived" || !!repository.isArchived;
     const candidateTargets = dedupeSyncTargets([
       ...(recordedTarget ? [recordedTarget] : []),
       { owner: expectedOwner, repoName: repository.name },
+      ...(isArchivedRepo
+        ? [
+            {
+              owner: expectedOwner,
+              repoName: `archived-${sanitizeRepoNameAlphaDashDot(repository.name)}`,
+              isArchivedFallback: true,
+            },
+          ]
+        : []),
     ]);
 
     let repoOwner = expectedOwner;
@@ -360,8 +402,45 @@ export async function syncGiteaRepoEnhanced({
         continue;
       }
 
-      repoOwner = target.owner;
-      repoName = target.repoName;
+      // The archived-{name} fallback candidate is guessed from the repo NAME
+      // alone, so it can hit a DIFFERENT source's archived mirror when two
+      // sources share a base name (e.g. foo/tools and bar/tools both mirrored;
+      // foo's archived as `archived-tools`). Before accepting it, verify the
+      // candidate's original_url (the authoritative migration source — see
+      // GiteaRepoInfo) points at THIS repository's GitHub source. An empty/
+      // unset original_url is accepted as before (some migrations leave it
+      // unset). This guard deliberately does NOT apply to the recorded
+      // mirroredLocation or expected-name candidates.
+      if (
+        target.isArchivedFallback &&
+        typeof candidateInfo.original_url === "string" &&
+        candidateInfo.original_url.trim() !== ""
+      ) {
+        const candidateSource = normalizeSourceUrl(candidateInfo.original_url);
+        const ownSources = [repository.cloneUrl, repository.url]
+          .filter((u): u is string => typeof u === "string" && u.trim() !== "")
+          .map(normalizeSourceUrl);
+
+        if (!ownSources.includes(candidateSource)) {
+          console.warn(
+            `[Sync] Skipping archived-name candidate ${target.owner}/${target.repoName} for ${repository.name}: its original_url (${candidateInfo.original_url}) points at a different source`
+          );
+          continue;
+        }
+      }
+
+      // Adopt the canonical identity from the response, not the requested target.
+      // Gitea/Forgejo answer GETs for a renamed repo's old name with a 301 that
+      // fetch follows silently, so `target` may be a stale pre-rename name; a
+      // follow-up POST (mirror-sync) to the stale path gets its method downgraded
+      // by the redirect and fails with 405. The response body always carries the
+      // repo's current name/owner (#331 follow-up, verified on Forgejo 15).
+      const canonicalOwner =
+        typeof candidateInfo.owner === "string"
+          ? candidateInfo.owner
+          : candidateInfo.owner?.login;
+      repoOwner = canonicalOwner || target.owner;
+      repoName = candidateInfo.name || target.repoName;
       repoInfo = candidateInfo;
       break;
     }
@@ -621,7 +700,13 @@ export async function syncGiteaRepoEnhanced({
     // NOTE: Gitea/Forgejo's PATCH /repos/{owner}/{repo} API does not support
     // updating mirror credentials (mirror_username/mirror_password). Repos that
     // were originally migrated without credentials must be deleted and re-mirrored.
-    if (config.giteaConfig?.mirrorInterval) {
+    //
+    // Skipped for archived repos: archiveGiteaRepo deliberately disabled
+    // Gitea's own periodic pulling, and the documented contract
+    // (AutomationSettings.tsx: "Archive ... disables automatic syncs—use
+    // Manual Sync when you want to refresh") says a Manual Sync refreshes
+    // once without re-enabling any automatic syncing.
+    if (config.giteaConfig?.mirrorInterval && !isArchivedRepo) {
       try {
         console.log(`[Sync] Updating mirror interval for ${repoOwner}/${repoName} to ${config.giteaConfig.mirrorInterval}`);
         const updateUrl = `${config.giteaConfig.url}/api/v1/repos/${repoOwner}/${repoName}`;
@@ -844,14 +929,22 @@ export async function syncGiteaRepoEnhanced({
         metadataState.lastSyncedAt = new Date().toISOString();
       }
 
-      // Mark repo as "synced" in DB
+      // Mark repo as "synced" in DB — unless it's archived. The documented
+      // contract (AutomationSettings.tsx: "Archive ... disables automatic
+      // syncs—use Manual Sync when you want to refresh") means a Manual Sync
+      // of an archived repo must NOT re-enroll it into the scheduler's
+      // auto-sync pool (which selects mirrored/synced/failed/pending) nor
+      // clear the archived errorMessage annotation shown in the UI; it still
+      // records lastMirrored and the (possibly corrected) mirroredLocation.
       await db
         .update(repositories)
         .set({
-          status: repoStatusEnum.parse("synced"),
+          status: isArchivedRepo
+            ? repoStatusEnum.parse("archived")
+            : repoStatusEnum.parse("synced"),
           updatedAt: new Date(),
           lastMirrored: new Date(),
-          errorMessage: null,
+          ...(isArchivedRepo ? {} : { errorMessage: null }),
           mirroredLocation: `${repoOwner}/${repoName}`,
           metadata: metadataUpdated
             ? serializeRepositoryMetadataState(metadataState)

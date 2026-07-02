@@ -2986,6 +2986,14 @@ export async function mirrorGitHubReleasesToGitea({
   const repoOwner = giteaOwner || (await getGiteaRepoOwnerAsync({ config, repository }));
   const repoName = giteaRepoName || repository.name;
 
+  // Derive GITHUB coordinates from fullName, matching the issues/PRs/labels/
+  // milestones mirror functions (`const [owner, repo] = repository.fullName.split("/")`).
+  // repository.name/owner can drift from the GitHub source (e.g. Gitea-side
+  // renames), so fullName is authoritative; fall back only if it's malformed.
+  const [fullNameOwner, fullNameRepo] = (repository.fullName || "").split("/");
+  const githubOwner = fullNameOwner && fullNameRepo ? fullNameOwner : repository.owner;
+  const githubRepo = fullNameOwner && fullNameRepo ? fullNameRepo : repository.name;
+
   // Verify the repository exists in Gitea before attempting to mirror releases
   console.log(`[Releases] Verifying repository ${repoName} exists at ${repoOwner}`);
   const repoExists = await isRepoPresentInGitea({
@@ -3011,8 +3019,8 @@ export async function mirrorGitHubReleasesToGitea({
 
   while (releases.length < releaseLimit) {
     const response = await octokit.rest.repos.listReleases({
-      owner: repository.owner,
-      repo: repository.name,
+      owner: githubOwner,
+      repo: githubRepo,
       per_page: perPage,
       page,
     });
@@ -4045,28 +4053,42 @@ export async function deleteGiteaRepo(
 }
 
 /**
+ * Sanitize a repository name to satisfy Gitea's AlphaDashDot rule for repo
+ * names (letters, digits, `.`, and `-`; no leading/trailing separators).
+ *
+ * Extracted from archiveGiteaRepo (module-level, exported) so gitea-enhanced.ts
+ * can build the identical `archived-{name}` candidate when probing for a repo
+ * that was renamed by this exact archive flow — either just now, or by an
+ * older version of this code before mirroredLocation was backfilled on rename
+ * (see #331 follow-up).
+ */
+export function sanitizeRepoNameAlphaDashDot(name: string): string {
+  // Replace anything that's not [A-Za-z0-9.-] with '-'
+  const base = name.replace(/[^A-Za-z0-9.-]+/g, "-").replace(/-+/g, "-");
+  // Trim leading/trailing separators and dots for safety
+  return base.replace(/^[.-]+/, "").replace(/[.-]+$/, "");
+}
+
+/**
  * Archive a repository in Gitea
- * 
+ *
  * IMPORTANT: This function NEVER deletes data. It only marks repositories as archived.
  * - For regular repos: Uses Gitea's archive feature (makes read-only)
  * - For mirror repos: Renames with [ARCHIVED] prefix (Gitea doesn't allow archiving mirrors)
- * 
+ *
  * This ensures backups are preserved even when the GitHub source disappears.
+ *
+ * Returns the Gitea-side name the repository ended up with after a rename
+ * (mirror path), or `null` when no rename occurred (regular-repo archive
+ * path, or any failure). Callers that persist `mirroredLocation` should only
+ * update it when `archivedName` is non-null.
  */
 export async function archiveGiteaRepo(
   client: { url: string; token: string },
   owner: string,
   repo: string
-): Promise<void> {
+): Promise<{ archivedName: string | null }> {
   try {
-    // Helper: sanitize to Gitea's AlphaDashDot rule
-    const sanitizeRepoNameAlphaDashDot = (name: string): string => {
-      // Replace anything that's not [A-Za-z0-9.-] with '-'
-      const base = name.replace(/[^A-Za-z0-9.-]+/g, "-").replace(/-+/g, "-");
-      // Trim leading/trailing separators and dots for safety
-      return base.replace(/^[.-]+/, "").replace(/[.-]+$/, "");
-    };
-
     // First, check if this is a mirror repository
     const repoResponse = await httpGet(
       `${client.url}/api/v1/repos/${owner}/${repo}`,
@@ -4077,7 +4099,7 @@ export async function archiveGiteaRepo(
     
     if (!repoResponse.data) {
       console.warn(`[Archive] Repository ${owner}/${repo} not found in Gitea. Skipping.`);
-      return;
+      return { archivedName: null };
     }
     
     if (repoResponse.data?.mirror) {
@@ -4099,7 +4121,7 @@ export async function archiveGiteaRepo(
         normalizedName.startsWith('archived-')
       ) {
         console.log(`[Archive] Repository ${owner}/${repo} already marked as archived. Skipping.`);
-        return;
+        return { archivedName: currentName };
       }
       
       // Use a safe prefix and sanitize the name to satisfy AlphaDashDot rule
@@ -4144,7 +4166,7 @@ export async function archiveGiteaRepo(
           // If this also fails, log but don't throw - data remains preserved
           console.error(`[Archive] Failed to rename mirror repository ${owner}/${repo}:`, e2);
           console.log(`[Archive] Repository ${owner}/${repo} remains accessible but not marked as archived`);
-          return;
+          return { archivedName: null };
         }
       }
       
@@ -4168,6 +4190,8 @@ export async function archiveGiteaRepo(
         // Non-critical - repo is still preserved even if we can't change interval
         console.debug(`[Archive] Could not disable mirror interval (non-critical):`, intervalError);
       }
+
+      return { archivedName };
     } else {
       // For non-mirror repositories, use Gitea's native archive feature
       // This makes the repository read-only but preserves all data
@@ -4188,10 +4212,11 @@ export async function archiveGiteaRepo(
         // If archive fails, log but data is still preserved in Gitea
         console.error(`[Archive] Failed to archive repository ${owner}/${repo}: ${response.status}`);
         console.log(`[Archive] Repository ${owner}/${repo} remains accessible but not marked as archived`);
-        return;
+        return { archivedName: null };
       }
-      
+
       console.log(`[Archive] Successfully archived repository ${owner}/${repo} (now read-only)`);
+      return { archivedName: null };
     }
   } catch (error) {
     // Even on error, the repository data is preserved in Gitea
@@ -4199,5 +4224,6 @@ export async function archiveGiteaRepo(
     console.error(`[Archive] Could not mark repository ${owner}/${repo} as archived:`, error);
     console.log(`[Archive] Repository ${owner}/${repo} data is preserved but not marked as archived`);
     // Don't throw - we want cleanup to continue for other repos
+    return { archivedName: null };
   }
 }

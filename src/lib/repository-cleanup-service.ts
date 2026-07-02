@@ -16,6 +16,37 @@ let cleanupInterval: NodeJS.Timeout | null = null;
 let isCleanupRunning = false;
 
 /**
+ * Decide whether a DB repository that appears to be missing from the bulk
+ * GitHub fetch should actually be treated as orphaned.
+ *
+ * The bulk fetch (owned+collaborator+org repos, plus starred repos) that
+ * feeds `fullNameFoundInBulkList` can be transiently incomplete — rate-limit
+ * timing, GraphQL star-list pagination quirks, org-allowlist edge cases,
+ * etc. — so a repo missing from it is only a *candidate*, not a confirmed
+ * orphan. It is only orphaned when a direct, targeted GitHub call ALSO
+ * confirms the repo is gone (a clean 404). Any other outcome — the repo
+ * still exists, or the direct check itself failed for some other reason
+ * (network error, rate limit, 5xx, timeout) — must NOT be treated as
+ * orphaned; this fails safe and matches the existing fail-safe philosophy
+ * already in this module for GitHub API errors.
+ *
+ * Pure/exported so the decision logic is unit-testable without hitting the
+ * DB or octokit (see repository-cleanup-service.test.ts).
+ */
+export function resolveOrphanVerdict({
+  fullNameFoundInBulkList,
+  directCheckConfirmsGone,
+}: {
+  fullNameFoundInBulkList: boolean;
+  directCheckConfirmsGone: boolean;
+}): boolean {
+  if (fullNameFoundInBulkList) {
+    return false;
+  }
+  return directCheckConfirmsGone;
+}
+
+/**
  * Identify orphaned repositories for a user
  * These are repositories that exist in our database (and likely in Gitea)
  * but are no longer in GitHub based on current criteria
@@ -80,8 +111,12 @@ async function identifyOrphanedRepositories(config: any): Promise<any[]> {
       .where(eq(repositories.userId, userId));
     
     // Only identify repositories as orphaned if we successfully accessed GitHub
-    // This prevents false positives when GitHub is down or account is inaccessible
-    const orphanedRepos = dbRepos.filter(repo => {
+    // This prevents false positives when GitHub is down or account is inaccessible.
+    //
+    // First pass (sync, cheap): filter down to repos that merely *look*
+    // orphaned based on map membership against the single bulk fetch above.
+    // This is the false-positive-prone signal — see resolveOrphanVerdict.
+    const candidateOrphans = dbRepos.filter(repo => {
       // Skip repositories we've already archived/preserved
       if (repo.status === 'archived' || repo.isArchived) {
         console.log(`[Repository Cleanup] Skipping ${repo.fullName} - already archived`);
@@ -97,6 +132,8 @@ async function identifyOrphanedRepositories(config: any): Promise<any[]> {
 
       const githubRepo = githubReposByFullName.get(repo.fullName);
       if (!githubRepo) {
+        // Missing from the bulk list — candidate for direct confirmation below,
+        // not yet a confirmed orphan.
         return true;
       }
 
@@ -107,11 +144,93 @@ async function identifyOrphanedRepositories(config: any): Promise<any[]> {
 
       return false;
     });
-    
+
+    if (candidateOrphans.length === 0) {
+      return [];
+    }
+
+    // Second pass (async, targeted): confirm each candidate directly against
+    // GitHub before finalizing it as orphaned. This only adds extra API calls
+    // for the (presumably small) set of repos that look orphaned, not for
+    // every repo, so it shouldn't meaningfully increase rate-limit pressure
+    // in the common case (few or no orphans per run). Promise.allSettled so
+    // one repo's verification failure can't block the others.
+    const verificationOutcomes = await Promise.allSettled(
+      candidateOrphans.map(async (repo) => {
+        if (repo.isStarred) {
+          try {
+            await octokit.rest.activity.checkRepoIsStarredByAuthenticatedUser({
+              owner: repo.owner,
+              repo: repo.name,
+            });
+            // Resolves (no throw) => still starred; the bulk star fetch
+            // missed it. Fail safe: do not treat as orphaned.
+            return { repo, directCheckConfirmsGone: false };
+          } catch (starError: any) {
+            if (starError?.status === 404) {
+              return { repo, directCheckConfirmsGone: true };
+            }
+            console.warn(
+              `[Repository Cleanup] Direct star-check for ${repo.fullName} failed with a non-404 error; skipping this cycle to be safe: ${
+                starError instanceof Error ? starError.message : String(starError)
+              }`
+            );
+            return { repo, directCheckConfirmsGone: false };
+          }
+        }
+
+        try {
+          await octokit.rest.repos.get({ owner: repo.owner, repo: repo.name });
+          // Resolves (no throw) => repo still exists; the bulk fetch missed
+          // it (e.g. an org-allowlist edge case). Fail safe: not orphaned.
+          return { repo, directCheckConfirmsGone: false };
+        } catch (repoError: any) {
+          if (repoError?.status === 404) {
+            return { repo, directCheckConfirmsGone: true };
+          }
+          console.warn(
+            `[Repository Cleanup] Direct existence check for ${repo.fullName} failed with a non-404 error; skipping this cycle to be safe: ${
+              repoError instanceof Error ? repoError.message : String(repoError)
+            }`
+          );
+          return { repo, directCheckConfirmsGone: false };
+        }
+      })
+    );
+
+    const orphanedRepos = verificationOutcomes
+      .map((outcome, index) => {
+        if (outcome.status !== 'fulfilled') {
+          const repo = candidateOrphans[index];
+          console.warn(
+            `[Repository Cleanup] Direct orphan verification threw unexpectedly for ${repo.fullName}; skipping this cycle to be safe: ${
+              outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason)
+            }`
+          );
+          return null;
+        }
+
+        const { repo, directCheckConfirmsGone } = outcome.value;
+        const isOrphaned = resolveOrphanVerdict({
+          fullNameFoundInBulkList: false,
+          directCheckConfirmsGone,
+        });
+
+        if (!isOrphaned) {
+          return null;
+        }
+
+        console.log(
+          `[Repository Cleanup] Confirmed orphaned via direct GitHub check: ${repo.fullName}`
+        );
+        return repo;
+      })
+      .filter((repo): repo is (typeof dbRepos)[number] => repo !== null);
+
     if (orphanedRepos.length > 0) {
       console.log(`[Repository Cleanup] Found ${orphanedRepos.length} orphaned repositories for user ${userId}`);
     }
-    
+
     return orphanedRepos;
   } catch (error) {
     console.error(`[Repository Cleanup] Error identifying orphaned repositories for user ${userId}:`, error);
@@ -185,15 +304,30 @@ async function handleOrphanedRepository(
         // Non-fatal; continue with best guess
       }
 
-      await archiveGiteaRepo(giteaClient, giteaOwner, giteaRepoName);
-      
-      // Update database status
-      await db.update(repositories).set({
+      const { archivedName } = await archiveGiteaRepo(giteaClient, giteaOwner, giteaRepoName);
+
+      // Update database status. If the archive call renamed the repo in Gitea
+      // (mirror path), persist the new location so a subsequent "Manual Sync"
+      // (the UI's documented path for refreshing an archived mirror) can find
+      // it by its actual current name instead of the stale pre-rename one —
+      // otherwise syncGiteaRepoEnhanced looks up a name that no longer exists
+      // and Gitea returns HTTP 405 ("not a pull mirror").
+      //
+      // Only mirroredLocation gets the Gitea-side `archived-{name}` value.
+      // Do NOT write it into `name`: repositories.name is consumed as the
+      // GITHUB repo name elsewhere (release listing, force-push detection),
+      // and mirroredLocation alone is what syncGiteaRepoEnhanced resolves
+      // first when locating the Gitea mirror.
+      const dbUpdate: Record<string, any> = {
         status: 'archived',
         isArchived: true,
         errorMessage: 'Repository archived - no longer in GitHub',
         updatedAt: new Date(),
-      }).where(eq(repositories.id, repo.id));
+      };
+      if (archivedName && archivedName !== giteaRepoName) {
+        dbUpdate.mirroredLocation = `${giteaOwner}/${archivedName}`;
+      }
+      await db.update(repositories).set(dbUpdate).where(eq(repositories.id, repo.id));
       
       // Create event
       await publishEvent({

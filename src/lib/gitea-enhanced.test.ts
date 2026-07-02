@@ -19,15 +19,19 @@ const mockCreatePreSyncBundleBackup = mock(() =>
 let mockShouldCreatePreSyncBackup = false;
 let mockShouldBlockSyncOnBackupFailure = true;
 
-// Mock the database module
+// Mock the database module. Every db.update(...).set(payload) is captured in
+// dbUpdateSetCalls so tests can assert on what got written (e.g. archived
+// repos keeping status "archived" after a Manual Sync).
+const dbUpdateSetCalls: any[] = [];
 const mockDb = {
   insert: mock((table: any) => ({
     values: mock((data: any) => Promise.resolve({ insertedId: "mock-id" }))
   })),
   update: mock(() => ({
-    set: mock(() => ({
-      where: mock(() => Promise.resolve())
-    }))
+    set: mock((data: any) => {
+      dbUpdateSetCalls.push(data);
+      return { where: mock(() => Promise.resolve()) };
+    })
   }))
 };
 
@@ -173,10 +177,74 @@ const mockHttpGet = mock(async (url: string, headers?: any) => {
       headers: new Headers(),
     };
   }
+  // Only reachable at the "archived-{name}" candidate — the base name
+  // ("starred/broken-repo") deliberately falls through to the generic 404
+  // below, simulating a repo that archiveGiteaRepo already renamed in Gitea.
+  // original_url matches the test repository's GitHub source, so the
+  // fallback candidate's source-identity guard accepts it.
+  if (url.includes("/api/v1/repos/starred/archived-broken-repo")) {
+    return {
+      data: {
+        id: 792,
+        name: "archived-broken-repo",
+        mirror: true,
+        owner: { login: "starred" },
+        mirror_interval: "0h",
+        original_url: "https://github.com/user/broken-repo.git",
+        private: false,
+      },
+      status: 200,
+      statusText: "OK",
+      headers: new Headers(),
+    };
+  }
+  // Collision scenario: this archived mirror belongs to a DIFFERENT GitHub
+  // source (otheruser/collide-repo) that happens to share the base name with
+  // the test repository (user/collide-repo). The base name
+  // ("starred/collide-repo") falls through to the generic 404 below, so the
+  // archived-{name} fallback candidate is the only match — and its
+  // original_url must cause the source-identity guard to reject it.
+  if (url.includes("/api/v1/repos/starred/archived-collide-repo")) {
+    return {
+      data: {
+        id: 793,
+        name: "archived-collide-repo",
+        mirror: true,
+        owner: { login: "starred" },
+        mirror_interval: "0h",
+        original_url: "https://github.com/otheruser/collide-repo.git",
+        private: false,
+      },
+      status: 200,
+      statusText: "OK",
+      headers: new Headers(),
+    };
+  }
+  // Simulates Forgejo silently following a 301 redirect for a renamed repo:
+  // a GET for the STALE (pre-rename) path returns 200 with the repo's
+  // CURRENT identity in the response body (name differs from what was
+  // requested), exactly as Bun's fetch behaves after following Forgejo's
+  // redirect for a repo renamed from "renamed-repo" to
+  // "archived-renamed-repo". See #331 follow-up / canonical-identity
+  // adoption in syncGiteaRepoEnhanced.
+  if (url.includes("/api/v1/repos/starred/renamed-repo")) {
+    return {
+      data: {
+        id: 891,
+        name: "archived-renamed-repo",
+        mirror: true,
+        owner: { login: "starred" },
+        private: false,
+      },
+      status: 200,
+      statusText: "OK",
+      headers: new Headers(),
+    };
+  }
   if (url.includes("/api/v1/repos/")) {
     throw new MockHttpError("Not Found", 404, "Not Found");
   }
-  
+
   // Handle org GET requests based on test context
   if (url.includes("/api/v1/orgs/starred")) {
     orgCheckCount++;
@@ -239,10 +307,18 @@ const mockHttpDelete = mock(async (url: string, headers?: any) => {
   return { data: {}, status: 200, statusText: "OK", headers: new Headers() };
 });
 
+// Observable so tests can assert that the mirror-interval PATCH is (not)
+// issued — e.g. archived repos must never have Gitea's periodic pulling
+// re-enabled by a Manual Sync.
+const mockHttpPatch = mock(async (url: string, body?: any, headers?: any) => {
+  return { data: {}, status: 200, statusText: "OK", headers: new Headers() };
+});
+
 mock.module("@/lib/http-client", () => ({
   httpGet: mockHttpGet,
   httpPost: mockHttpPost,
   httpDelete: mockHttpDelete,
+  httpPatch: mockHttpPatch,
   HttpError: MockHttpError
 }));
 
@@ -284,6 +360,8 @@ describe("Enhanced Gitea Operations", () => {
     mockHttpGet.mockClear();
     mockHttpPost.mockClear();
     mockHttpDelete.mockClear();
+    mockHttpPatch.mockClear();
+    dbUpdateSetCalls.length = 0;
     mockCreatePreSyncBundleBackup.mockClear();
     mockCreatePreSyncBundleBackup.mockImplementation(() =>
       Promise.resolve({ bundlePath: "/tmp/mock.bundle" })
@@ -610,6 +688,303 @@ describe("Enhanced Gitea Operations", () => {
       expect(mirrorSyncCalls).toHaveLength(1);
       expect(String(mirrorSyncCalls[0][0])).toContain("/api/v1/repos/starred/test-repo/mirror-sync");
       expect(String(mirrorSyncCalls[0][0])).not.toContain("/api/v1/repos/ceph/test-repo/mirror-sync");
+    });
+
+    test("falls back to the archived-{name} candidate when repository.status is 'archived'", async () => {
+      // Regression for #331 follow-up: repos archived before mirroredLocation
+      // was backfilled on rename (or any lingering false-positive orphan hit)
+      // are unreachable by name/expected-owner alone once archiveGiteaRepo has
+      // renamed them in Gitea to `archived-{sanitized name}`. syncGiteaRepoEnhanced
+      // must still find them via "Manual Sync" without manual intervention.
+      const config: Partial<Config> = {
+        userId: "user123",
+        githubConfig: {
+          username: "testuser",
+          token: "github-token",
+          privateRepositories: false,
+          mirrorStarred: true,
+        },
+        giteaConfig: {
+          url: "https://gitea.example.com",
+          token: "encrypted-token",
+          defaultOwner: "testuser",
+          mirrorReleases: false,
+        },
+      };
+
+      const repository: Repository = {
+        id: "repoArchived1",
+        name: "broken-repo",
+        fullName: "user/broken-repo",
+        owner: "user",
+        cloneUrl: "https://github.com/user/broken-repo.git",
+        isPrivate: false,
+        isStarred: true,
+        status: repoStatusEnum.parse("archived"),
+        visibility: "public",
+        userId: "user123",
+        // No mirroredLocation recorded — this repo predates the DB backfill
+        // added alongside archiveGiteaRepo's new return value.
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      const result = await syncGiteaRepoEnhanced(
+        { config, repository },
+        {
+          getGiteaRepoOwnerAsync: mockGetGiteaRepoOwnerAsync,
+          mirrorGitHubReleasesToGitea: mockMirrorGitHubReleasesToGitea,
+          mirrorGitRepoIssuesToGitea: mockMirrorGitRepoIssuesToGitea,
+          mirrorGitRepoPullRequestsToGitea: mockMirrorGitRepoPullRequestsToGitea,
+          mirrorGitRepoLabelsToGitea: mockMirrorGitRepoLabelsToGitea,
+          mirrorGitRepoMilestonesToGitea: mockMirrorGitRepoMilestonesToGitea,
+        }
+      );
+
+      expect(result).toEqual({ success: true });
+
+      const mirrorSyncCalls = mockHttpPost.mock.calls.filter((call) =>
+        String(call[0]).includes("/mirror-sync")
+      );
+      expect(mirrorSyncCalls).toHaveLength(1);
+      expect(String(mirrorSyncCalls[0][0])).toContain(
+        "/api/v1/repos/starred/archived-broken-repo/mirror-sync"
+      );
+      // The base (pre-archive) name must have been probed and rejected
+      // (404) before falling back to the archived-{name} candidate.
+      const repoInfoGets = mockHttpGet.mock.calls.filter((call) =>
+        String(call[0]).includes("/api/v1/repos/starred/")
+      );
+      expect(
+        repoInfoGets.some((call) =>
+          String(call[0]).endsWith("/api/v1/repos/starred/broken-repo")
+        )
+      ).toBe(true);
+      expect(
+        repoInfoGets.some((call) =>
+          String(call[0]).endsWith("/api/v1/repos/starred/archived-broken-repo")
+        )
+      ).toBe(true);
+    });
+
+    test("adopts canonical identity from response body when GET follows a stale-name redirect", async () => {
+      // Regression for #331 follow-up, verified end-to-end on Forgejo 15.0.3:
+      // when a repo has been renamed (e.g. by the orphan-archive flow, or
+      // manually by a user), Forgejo answers a GET for the OLD name with a
+      // 301 redirect to the new name. Bun's fetch follows it silently and
+      // returns 200 with the repo's CURRENT data in the body, while the
+      // code still has the stale name it requested. If syncGiteaRepoEnhanced
+      // kept using the requested (stale) name for the follow-up POST
+      // .../mirror-sync, that POST would hit the same 301, get its method
+      // downgraded to GET per the WHATWG redirect spec, and the POST-only
+      // endpoint would return 405. This must work for non-archived repos
+      // too — a user renaming a repo in Forgejo manually is the general case.
+      const config: Partial<Config> = {
+        userId: "user123",
+        githubConfig: {
+          username: "testuser",
+          token: "github-token",
+          privateRepositories: false,
+          mirrorStarred: true,
+        },
+        giteaConfig: {
+          url: "https://gitea.example.com",
+          token: "encrypted-token",
+          defaultOwner: "testuser",
+          mirrorReleases: false,
+        },
+      };
+
+      const repository: Repository = {
+        id: "repoRenamed1",
+        name: "renamed-repo",
+        fullName: "user/renamed-repo",
+        owner: "user",
+        cloneUrl: "https://github.com/user/renamed-repo.git",
+        isPrivate: false,
+        isStarred: true,
+        status: repoStatusEnum.parse("mirrored"),
+        visibility: "public",
+        userId: "user123",
+        // Stale: recorded before the rename happened in Gitea/Forgejo.
+        mirroredLocation: "starred/renamed-repo",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      const result = await syncGiteaRepoEnhanced(
+        { config, repository },
+        {
+          getGiteaRepoOwnerAsync: mockGetGiteaRepoOwnerAsync,
+          mirrorGitHubReleasesToGitea: mockMirrorGitHubReleasesToGitea,
+          mirrorGitRepoIssuesToGitea: mockMirrorGitRepoIssuesToGitea,
+          mirrorGitRepoPullRequestsToGitea: mockMirrorGitRepoPullRequestsToGitea,
+          mirrorGitRepoLabelsToGitea: mockMirrorGitRepoLabelsToGitea,
+          mirrorGitRepoMilestonesToGitea: mockMirrorGitRepoMilestonesToGitea,
+        }
+      );
+
+      expect(result).toEqual({ success: true });
+
+      const mirrorSyncCalls = mockHttpPost.mock.calls.filter((call) =>
+        String(call[0]).includes("/mirror-sync")
+      );
+      expect(mirrorSyncCalls).toHaveLength(1);
+      expect(String(mirrorSyncCalls[0][0])).toContain(
+        "/api/v1/repos/starred/archived-renamed-repo/mirror-sync"
+      );
+      expect(String(mirrorSyncCalls[0][0])).not.toContain(
+        "/api/v1/repos/starred/renamed-repo/mirror-sync"
+      );
+    });
+
+    test("keeps archived repos archived and skips the mirror-interval PATCH on Manual Sync", async () => {
+      // Documented contract (AutomationSettings.tsx): "Archive renames mirror
+      // backups with an archived- prefix and disables automatic syncs—use
+      // Manual Sync when you want to refresh." A successful Manual Sync of an
+      // archived repo must therefore refresh once WITHOUT (a) flipping status
+      // to "synced" (which would re-enroll it into the scheduler's auto-sync
+      // pool), (b) clearing the archived errorMessage annotation, or
+      // (c) PATCHing the mirror interval (which would re-enable Forgejo's own
+      // periodic pulling that archiveGiteaRepo disabled).
+      const config: Partial<Config> = {
+        userId: "user123",
+        githubConfig: {
+          username: "testuser",
+          token: "github-token",
+          privateRepositories: false,
+          mirrorStarred: true,
+        },
+        giteaConfig: {
+          url: "https://gitea.example.com",
+          token: "encrypted-token",
+          defaultOwner: "testuser",
+          mirrorReleases: false,
+          // Would normally trigger the mirror-interval PATCH on every sync.
+          mirrorInterval: "8h",
+        },
+      };
+
+      const repository: Repository = {
+        id: "repoArchived2",
+        name: "broken-repo",
+        fullName: "user/broken-repo",
+        owner: "user",
+        url: "https://github.com/user/broken-repo",
+        cloneUrl: "https://github.com/user/broken-repo.git",
+        isPrivate: false,
+        isStarred: true,
+        status: repoStatusEnum.parse("archived"),
+        isArchived: true,
+        visibility: "public",
+        userId: "user123",
+        errorMessage: "Repository archived - no longer in GitHub",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      const result = await syncGiteaRepoEnhanced(
+        { config, repository },
+        {
+          getGiteaRepoOwnerAsync: mockGetGiteaRepoOwnerAsync,
+          mirrorGitHubReleasesToGitea: mockMirrorGitHubReleasesToGitea,
+          mirrorGitRepoIssuesToGitea: mockMirrorGitRepoIssuesToGitea,
+          mirrorGitRepoPullRequestsToGitea: mockMirrorGitRepoPullRequestsToGitea,
+          mirrorGitRepoLabelsToGitea: mockMirrorGitRepoLabelsToGitea,
+          mirrorGitRepoMilestonesToGitea: mockMirrorGitRepoMilestonesToGitea,
+        }
+      );
+
+      expect(result).toEqual({ success: true });
+
+      // The mirror-sync itself must still happen (that's the point of
+      // Manual Sync on an archived repo).
+      const mirrorSyncCalls = mockHttpPost.mock.calls.filter((call) =>
+        String(call[0]).includes("/mirror-sync")
+      );
+      expect(mirrorSyncCalls).toHaveLength(1);
+      expect(String(mirrorSyncCalls[0][0])).toContain(
+        "/api/v1/repos/starred/archived-broken-repo/mirror-sync"
+      );
+
+      // No mirror-interval PATCH despite config.giteaConfig.mirrorInterval.
+      expect(mockHttpPatch).not.toHaveBeenCalled();
+
+      // The success-path DB update (the one recording lastMirrored) keeps
+      // status "archived" and does not clear errorMessage.
+      const successUpdate = dbUpdateSetCalls.find((data) => "lastMirrored" in data);
+      expect(successUpdate).toBeDefined();
+      expect(successUpdate.status).toBe("archived");
+      expect("errorMessage" in successUpdate).toBe(false);
+      expect(successUpdate.mirroredLocation).toBe("starred/archived-broken-repo");
+    });
+
+    test("rejects an archived-{name} fallback candidate whose original_url points at a different source", async () => {
+      // Two sources sharing a base name: the user mirrors user/collide-repo,
+      // but starred/archived-collide-repo in Gitea is the archived mirror of
+      // otheruser/collide-repo. The guessed archived-{name} fallback must be
+      // rejected via its original_url instead of syncing (and rewriting the
+      // DB row of) the wrong repository. With every candidate exhausted, the
+      // sync fails with the not-found error.
+      const config: Partial<Config> = {
+        userId: "user123",
+        githubConfig: {
+          username: "testuser",
+          token: "github-token",
+          privateRepositories: false,
+          mirrorStarred: true,
+        },
+        giteaConfig: {
+          url: "https://gitea.example.com",
+          token: "encrypted-token",
+          defaultOwner: "testuser",
+          mirrorReleases: false,
+        },
+      };
+
+      const repository: Repository = {
+        id: "repoCollide1",
+        name: "collide-repo",
+        fullName: "user/collide-repo",
+        owner: "user",
+        url: "https://github.com/user/collide-repo",
+        cloneUrl: "https://github.com/user/collide-repo.git",
+        isPrivate: false,
+        isStarred: true,
+        status: repoStatusEnum.parse("archived"),
+        isArchived: true,
+        visibility: "public",
+        userId: "user123",
+        // No mirroredLocation — forces reliance on the guessed fallback.
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      await expect(
+        syncGiteaRepoEnhanced(
+          { config, repository },
+          {
+            getGiteaRepoOwnerAsync: mockGetGiteaRepoOwnerAsync,
+            mirrorGitHubReleasesToGitea: mockMirrorGitHubReleasesToGitea,
+            mirrorGitRepoIssuesToGitea: mockMirrorGitRepoIssuesToGitea,
+            mirrorGitRepoPullRequestsToGitea: mockMirrorGitRepoPullRequestsToGitea,
+            mirrorGitRepoLabelsToGitea: mockMirrorGitRepoLabelsToGitea,
+            mirrorGitRepoMilestonesToGitea: mockMirrorGitRepoMilestonesToGitea,
+          }
+        )
+      ).rejects.toThrow("Repository collide-repo not found in Gitea. Tried locations:");
+
+      // The wrong repo must never receive a mirror-sync POST.
+      const mirrorSyncCalls = mockHttpPost.mock.calls.filter((call) =>
+        String(call[0]).includes("/mirror-sync")
+      );
+      expect(mirrorSyncCalls).toHaveLength(0);
+      // The fallback candidate WAS probed (and then rejected by the guard).
+      expect(
+        mockHttpGet.mock.calls.some((call) =>
+          String(call[0]).endsWith("/api/v1/repos/starred/archived-collide-repo")
+        )
+      ).toBe(true);
     });
 
     test("blocks sync when pre-sync snapshot fails and blocking is enabled", async () => {
