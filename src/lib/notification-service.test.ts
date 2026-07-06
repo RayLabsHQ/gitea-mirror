@@ -71,6 +71,32 @@ describe("sendNotification", () => {
     expect(url).toBe("http://apprise:8000/notify/my-token");
   });
 
+  test("sends gotify notification when provider is gotify", async () => {
+    const config: NotificationConfig = {
+      enabled: true,
+      provider: "gotify",
+      notifyOnSyncError: true,
+      notifyOnSyncSuccess: true,
+      notifyOnNewRepo: false,
+      gotify: {
+        url: "https://gotify.example.com",
+        token: "my-app-token",
+        priority: 5,
+      },
+    };
+
+    await sendNotification(config, {
+      title: "Test",
+      message: "Test message",
+      type: "sync_success",
+    });
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe("https://gotify.example.com/message");
+    expect(opts.headers["X-Gotify-Key"]).toBe("my-app-token");
+  });
+
   test("does not throw when fetch fails", async () => {
     mockFetch = mock(() => Promise.reject(new Error("Network error")));
     globalThis.fetch = mockFetch as any;
@@ -129,6 +155,29 @@ describe("sendNotification", () => {
       apprise: {
         url: "",
         token: "my-token",
+      },
+    };
+
+    await sendNotification(config, {
+      title: "Test",
+      message: "Test message",
+      type: "sync_success",
+    });
+
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  test("skips notification when gotify token is missing", async () => {
+    const config: NotificationConfig = {
+      enabled: true,
+      provider: "gotify",
+      notifyOnSyncError: true,
+      notifyOnSyncSuccess: true,
+      notifyOnNewRepo: false,
+      gotify: {
+        url: "https://gotify.example.com",
+        token: "",
+        priority: 5,
       },
     };
 

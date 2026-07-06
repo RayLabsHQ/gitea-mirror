@@ -162,6 +162,13 @@ export const POST: APIRoute = async ({ request, locals }) => {
           token: encrypt(processedNotificationConfig.apprise.token),
         };
       }
+      // Encrypt gotify token if present
+      if (processedNotificationConfig.gotify?.token) {
+        processedNotificationConfig.gotify = {
+          ...processedNotificationConfig.gotify,
+          token: encrypt(processedNotificationConfig.gotify.token),
+        };
+      }
     }
 
     if (existingConfig) {
@@ -342,6 +349,13 @@ export const GET: APIRoute = async ({ request, locals }) => {
             notificationConfig.apprise = { ...notificationConfig.apprise, token: decrypt(notificationConfig.apprise.token) };
           } catch {
             notificationConfig.apprise = { ...notificationConfig.apprise, token: "" };
+          }
+        }
+        if (notificationConfig.gotify?.token) {
+          try {
+            notificationConfig.gotify = { ...notificationConfig.gotify, token: decrypt(notificationConfig.gotify.token) };
+          } catch {
+            notificationConfig.gotify = { ...notificationConfig.gotify, token: "" };
           }
         }
       }

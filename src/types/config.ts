@@ -119,14 +119,21 @@ export interface AppriseConfig {
   tag?: string;
 }
 
+export interface GotifyConfig {
+  url: string;
+  token: string;
+  priority: number;
+}
+
 export interface NotificationConfig {
   enabled: boolean;
-  provider: "ntfy" | "apprise";
+  provider: "ntfy" | "apprise" | "gotify";
   notifyOnSyncError: boolean;
   notifyOnSyncSuccess: boolean;
   notifyOnNewRepo: boolean;
   ntfy?: NtfyConfig;
   apprise?: AppriseConfig;
+  gotify?: GotifyConfig;
 }
 
 export interface Config extends ConfigType {}

@@ -93,7 +93,7 @@ export function NotificationSettings({
               </Label>
               <Select
                 value={notificationConfig.provider}
-                onValueChange={(value: "ntfy" | "apprise") =>
+                onValueChange={(value: "ntfy" | "apprise" | "gotify") =>
                   onNotificationChange({ ...notificationConfig, provider: value })
                 }
               >
@@ -103,6 +103,7 @@ export function NotificationSettings({
                 <SelectContent>
                   <SelectItem value="ntfy">Ntfy.sh</SelectItem>
                   <SelectItem value="apprise">Apprise API</SelectItem>
+                  <SelectItem value="gotify">Gotify</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -302,6 +303,92 @@ export function NotificationSettings({
                   />
                   <p className="text-xs text-muted-foreground">
                     Optional tag to filter which Apprise services receive notifications
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* Gotify configuration */}
+            {notificationConfig.provider === "gotify" && (
+              <div className="space-y-4 p-4 border border-border rounded-lg bg-card/50">
+                <h3 className="text-sm font-medium">Gotify Settings</h3>
+
+                <div className="space-y-2">
+                  <Label htmlFor="gotify-url" className="text-sm">
+                    Server URL <span className="text-destructive">*</span>
+                  </Label>
+                  <Input
+                    id="gotify-url"
+                    type="url"
+                    placeholder="https://gotify.example.com"
+                    value={notificationConfig.gotify?.url || ""}
+                    onChange={(e) =>
+                      onNotificationChange({
+                        ...notificationConfig,
+                        gotify: {
+                          ...notificationConfig.gotify!,
+                          url: e.target.value,
+                          token: notificationConfig.gotify?.token || "",
+                          priority: notificationConfig.gotify?.priority ?? 5,
+                        },
+                      })
+                    }
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    URL of your Gotify server
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="gotify-token" className="text-sm">
+                    Application token <span className="text-destructive">*</span>
+                  </Label>
+                  <Input
+                    id="gotify-token"
+                    type="password"
+                    placeholder="A1b2C3d4..."
+                    value={notificationConfig.gotify?.token || ""}
+                    onChange={(e) =>
+                      onNotificationChange({
+                        ...notificationConfig,
+                        gotify: {
+                          ...notificationConfig.gotify!,
+                          url: notificationConfig.gotify?.url || "",
+                          token: e.target.value,
+                          priority: notificationConfig.gotify?.priority ?? 5,
+                        },
+                      })
+                    }
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Create an application in Gotify and paste its token here
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="gotify-priority" className="text-sm">
+                    Default priority (0-10)
+                  </Label>
+                  <Input
+                    id="gotify-priority"
+                    type="number"
+                    min={0}
+                    max={10}
+                    value={notificationConfig.gotify?.priority ?? 5}
+                    onChange={(e) =>
+                      onNotificationChange({
+                        ...notificationConfig,
+                        gotify: {
+                          ...notificationConfig.gotify!,
+                          url: notificationConfig.gotify?.url || "",
+                          token: notificationConfig.gotify?.token || "",
+                          priority: Math.min(10, Math.max(0, Number(e.target.value) || 0)),
+                        },
+                      })
+                    }
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Error notifications always use priority 8 regardless of this setting
                   </p>
                 </div>
               </div>

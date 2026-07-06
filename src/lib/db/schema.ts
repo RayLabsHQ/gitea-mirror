@@ -138,14 +138,21 @@ export const appriseConfigSchema = z.object({
   tag: z.string().optional(),
 });
 
+export const gotifyConfigSchema = z.object({
+  url: z.string().default(""),
+  token: z.string().default(""),
+  priority: z.number().int().min(0).max(10).default(5),
+});
+
 export const notificationConfigSchema = z.object({
   enabled: z.boolean().default(false),
-  provider: z.enum(["ntfy", "apprise"]).default("ntfy"),
+  provider: z.enum(["ntfy", "apprise", "gotify"]).default("ntfy"),
   notifyOnSyncError: z.boolean().default(true),
   notifyOnSyncSuccess: z.boolean().default(false),
   notifyOnNewRepo: z.boolean().default(false),
   ntfy: ntfyConfigSchema.optional(),
   apprise: appriseConfigSchema.optional(),
+  gotify: gotifyConfigSchema.optional(),
 });
 
 export type NotificationConfig = z.infer<typeof notificationConfigSchema>;

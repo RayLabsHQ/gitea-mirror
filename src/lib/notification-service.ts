@@ -2,6 +2,7 @@ import type { NotificationConfig } from "@/types/config";
 import type { NotificationEvent } from "./providers/ntfy";
 import { sendNtfyNotification } from "./providers/ntfy";
 import { sendAppriseNotification } from "./providers/apprise";
+import { sendGotifyNotification } from "./providers/gotify";
 import { db, configs } from "@/lib/db";
 import { eq, sql } from "drizzle-orm";
 import { decrypt } from "@/lib/utils/encryption";
@@ -52,6 +53,12 @@ export async function sendNotification(
         return;
       }
       await sendAppriseNotification(config.apprise, event);
+    } else if (config.provider === "gotify") {
+      if (!config.gotify?.url || !config.gotify?.token) {
+        console.warn("[NotificationService] Gotify URL or token is not configured, skipping notification");
+        return;
+      }
+      await sendGotifyNotification(config.gotify, event);
     }
   } catch (error) {
     console.error("[NotificationService] Failed to send notification:", error);
@@ -83,6 +90,11 @@ export async function testNotification(
         return { success: false, error: "Apprise URL and token are required" };
       }
       await sendAppriseNotification(notificationConfig.apprise, event);
+    } else if (notificationConfig.provider === "gotify") {
+      if (!notificationConfig.gotify?.url || !notificationConfig.gotify?.token) {
+        return { success: false, error: "Gotify URL and token are required" };
+      }
+      await sendGotifyNotification(notificationConfig.gotify, event);
     } else {
       return { success: false, error: `Unknown provider: ${notificationConfig.provider}` };
     }
@@ -164,6 +176,12 @@ export async function triggerJobNotification({
       decryptedConfig.apprise = {
         ...decryptedConfig.apprise,
         token: decrypt(decryptedConfig.apprise.token),
+      };
+    }
+    if (decryptedConfig.provider === "gotify" && decryptedConfig.gotify?.token) {
+      decryptedConfig.gotify = {
+        ...decryptedConfig.gotify,
+        token: decrypt(decryptedConfig.gotify.token),
       };
     }
 
