@@ -6,7 +6,7 @@
 import { findInterruptedJobs, resumeInterruptedJob } from './helpers';
 import { db, repositories, organizations, mirrorJobs, configs } from './db';
 import { eq, and, lt, inArray, sql } from 'drizzle-orm';
-import { mirrorGithubRepoToGitea, mirrorGitHubOrgRepoToGiteaOrg, syncGiteaRepo } from './gitea';
+import { mirrorGithubRepoToGitea, syncGiteaRepo } from './gitea';
 import { createGitHubClient } from './github';
 import { processWithResilience } from './utils/concurrency';
 import { repositoryVisibilityEnum, repoStatusEnum } from '@/types/Repository';
@@ -290,21 +290,11 @@ async function recoverMirrorJob(job: any, remainingItemIds: string[]) {
           mirroredLocation: repo.mirroredLocation || "",
         };
 
-        // Mirror the repository based on whether it's in an organization
-        if (repo.organization && config.giteaConfig.preserveOrgStructure) {
-          await mirrorGitHubOrgRepoToGiteaOrg({
-            config,
-            octokit,
-            orgName: repo.organization,
-            repository: repoData,
-          });
-        } else {
-          await mirrorGithubRepoToGitea({
-            octokit,
-            repository: repoData,
-            config,
-          });
-        }
+        await mirrorGithubRepoToGitea({
+          octokit,
+          repository: repoData,
+          config,
+        });
 
         return repo;
       },
