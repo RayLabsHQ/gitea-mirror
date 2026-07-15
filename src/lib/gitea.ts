@@ -1995,11 +1995,20 @@ export async function mirrorGitHubOrgToGitea({
     const mirrorStrategy = config.githubConfig?.mirrorStrategy ||
       (config.giteaConfig?.preserveOrgStructure ? "preserve" : "flat-user");
 
-    let giteaOrgId: number;
+    let giteaOrgId: number | undefined;
     let targetOrgName: string;
 
     // Determine the target organization based on strategy
-    if (mirrorStrategy === "single-org" && config.giteaConfig?.organization) {
+    if (organization.destinationOrg) {
+      // Organization-level override takes precedence over the strategy
+      targetOrgName = organization.destinationOrg;
+      giteaOrgId = await getOrCreateGiteaOrg({
+        orgId: organization.id,
+        orgName: targetOrgName,
+        config,
+      });
+      console.log(`Using organization override: ${organization.name} -> ${targetOrgName}`);
+    } else if (mirrorStrategy === "single-org" && config.giteaConfig?.organization) {
       // For single-org strategy, use the configured destination organization
       targetOrgName = config.giteaConfig.organization || config.giteaConfig.defaultOwner;
       giteaOrgId = await getOrCreateGiteaOrg({
@@ -2062,22 +2071,34 @@ export async function mirrorGitHubOrgToGitea({
             `Starting mirror for repository: ${repo.name} from GitHub org ${organization.name}`
           );
 
-          // Mirror the repository based on strategy
-          if (mirrorStrategy === "flat-user") {
-            // For flat-user strategy, mirror directly to user account
+          // Resolve per repo with the canonical precedence
+          const owner = await getGiteaRepoOwnerAsync({ config, repository: repoData });
+
+          if (owner === config.giteaConfig?.defaultOwner) {
             await mirrorGithubRepoToGitea({
               octokit,
               repository: repoData,
               config,
             });
-          } else {
-            // For preserve and single-org strategies, use organization
+          } else if (owner === targetOrgName && giteaOrgId !== undefined) {
             await mirrorGitHubRepoToGiteaOrg({
               octokit,
               config,
               repository: repoData,
-              giteaOrgId: giteaOrgId!,
+              giteaOrgId,
               orgName: targetOrgName,
+            });
+          } else {
+            const ownerOrgId = await getOrCreateGiteaOrg({
+              orgName: owner,
+              config,
+            });
+            await mirrorGitHubRepoToGiteaOrg({
+              octokit,
+              config,
+              repository: repoData,
+              giteaOrgId: ownerOrgId,
+              orgName: owner,
             });
           }
 
