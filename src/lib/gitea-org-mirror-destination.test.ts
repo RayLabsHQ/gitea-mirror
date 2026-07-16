@@ -3,14 +3,33 @@
  * bulk "Mirror Organization" must honor the canonical destination
  * precedence (starred mode > repo override > org override > strategy).
  *
- * NOTE: run standalone (`bun test src/lib/gitea-org-mirror-destination.test.ts`).
- * These tests replace @/lib/db, @/lib/gitea-enhanced, @/lib/http-client,
- * @/lib/helpers, and @/lib/utils/mirror-source-match with module mocks;
- * bun's mock.module is process-wide, so running this file in the full
- * suite could pollute other test files (see the comment in
- * gitea-mirror-failure-recovery.test.ts).
+ * NOTE: these tests replace @/lib/db, @/lib/gitea-enhanced, @/lib/http-client,
+ * @/lib/helpers, and globalThis.fetch with mocks. bun's mock.module (and the
+ * fetch swap) are process-wide and leak into other test files, so in the
+ * shared test process this file registers NOTHING: it re-runs itself in an
+ * isolated child process (`bun test <this file>` with GITEA_ORG_MIRROR_DEST_ISOLATED=1)
+ * where the mocks are safely contained.
  */
 import { describe, test, expect, mock, beforeEach } from "bun:test";
+
+const CHILD_FLAG = "GITEA_ORG_MIRROR_DEST_ISOLATED";
+const isChild = !!process.env[CHILD_FLAG];
+
+if (!isChild) {
+  test("bulk org mirror destination routing (#343) — isolated child suite", () => {
+    const res = Bun.spawnSync({
+      cmd: [process.execPath, "test", import.meta.path],
+      env: { ...process.env, [CHILD_FLAG]: "1" },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    if (res.exitCode !== 0) {
+      console.error(res.stdout.toString());
+      console.error(res.stderr.toString());
+    }
+    expect(res.exitCode).toBe(0);
+  }, 60_000);
+}
 
 // ---------------------------------------------------------------------------
 // Shared mutable state the module mocks read from / write to
@@ -48,6 +67,10 @@ function promiseWithLimit(rows: any[], limitRows?: any[]) {
   p.limit = () => Promise.resolve(limitRows ?? rows);
   return p;
 }
+
+// Everything below only exists in the isolated child process — registering
+// these mocks in the shared test process poisons other test files.
+if (isChild) {
 
 mock.module("@/lib/db", () => {
   const mockDb = {
@@ -135,7 +158,11 @@ globalThis.fetch = mock(async () =>
   new Response("not found", { status: 404 })
 ) as any;
 
-const { mirrorGitHubOrgToGitea } = await import("./gitea");
+} // end if (isChild)
+
+const { mirrorGitHubOrgToGitea } = isChild
+  ? await import("./gitea")
+  : ({ mirrorGitHubOrgToGitea: undefined as any });
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -227,7 +254,7 @@ beforeEach(() => {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("mirrorGitHubOrgToGitea destination routing (#343)", () => {
+describe.skipIf(!isChild)("mirrorGitHubOrgToGitea destination routing (#343)", () => {
 
   test("Scenario 1: preserve strategy honors organization destinationOrg override", async () => {
     const config = makeConfig({ githubConfig: { mirrorStrategy: "preserve" } });
