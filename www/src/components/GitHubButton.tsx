@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { Github, Star } from 'lucide-react';
+import { Star } from 'lucide-react';
+import { GithubIcon } from './icons/GithubIcon';
 import { Button } from './ui/button';
 
 export function GitHubButton() {
@@ -44,7 +45,7 @@ export function GitHubButton() {
         asChild
       >
         <a href="https://github.com/RayLabsHQ/gitea-mirror" target="_blank" rel="noopener noreferrer" className="flex items-center">
-          <Github className="w-4 h-4 mr-2" />
+          <GithubIcon className="w-4 h-4 mr-2" />
           <span>Star on GitHub</span>
           {stars !== null && (
             <>
