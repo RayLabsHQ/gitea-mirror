@@ -4,12 +4,16 @@ import { formatDate, getStatusColor } from "@/lib/utils";
 import { Button } from "../ui/button";
 import { Activity, Clock } from "lucide-react";
 import { withBase } from "@/lib/base-path";
+import { useTimeFormat } from "@/hooks/useTimeFormat";
 
 interface RecentActivityProps {
   activities: MirrorJob[];
 }
 
 export function RecentActivity({ activities }: RecentActivityProps) {
+  // Re-render timestamps when the user changes the 12h/24h preference.
+  useTimeFormat();
+
   return (
     <Card className="w-full">
       <CardHeader className="flex flex-row items-center justify-between">

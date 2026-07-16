@@ -2,6 +2,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "../ui/checkbox";
 import type { ScheduleConfig } from "@/types/config";
 import { formatDate } from "@/lib/utils";
+import { useTimeFormat } from "@/hooks/useTimeFormat";
 import {
   Select,
   SelectContent,
@@ -24,6 +25,9 @@ export function ScheduleConfigForm({
   onAutoSave,
   isAutoSaving = false,
 }: ScheduleConfigFormProps) {
+  // Re-render timestamps when the user changes the 12h/24h preference.
+  useTimeFormat();
+
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>
   ) => {

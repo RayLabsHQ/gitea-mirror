@@ -1,5 +1,6 @@
 import { describe, test, expect } from "bun:test";
 import { jsonResponse, formatDate, formatDateShort, truncate, safeParse, parseErrorMessage, showErrorToast } from "./utils";
+import { formatDateTime } from "./utils/time-format";
 
 describe("jsonResponse", () => {
   test("creates a Response with JSON content", () => {
@@ -44,10 +45,11 @@ describe("formatDate", () => {
     const date = new Date("2023-01-15T12:30:45Z");
     const formatted = formatDate(date);
 
-    // The exact format might depend on the locale, so we'll check for parts
+    // The exact format depends on the system locale and the user's time
+    // format preference, so check for locale-independent parts and that it
+    // delegates to the shared time-format utility.
     expect(formatted).toContain("2023");
-    expect(formatted).toContain("January");
-    expect(formatted).toContain("15");
+    expect(formatted).toBe(formatDateTime(date));
   });
 
   test("formats a date string", () => {
@@ -55,8 +57,7 @@ describe("formatDate", () => {
     const formatted = formatDate(dateStr);
 
     expect(formatted).toContain("2023");
-    expect(formatted).toContain("January");
-    expect(formatted).toContain("15");
+    expect(formatted).toBe(formatDateTime(dateStr));
   });
 
   test("returns 'Never' for null or undefined", () => {

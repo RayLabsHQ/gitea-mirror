@@ -6,6 +6,7 @@ import { Button } from '../ui/button';
 import { RefreshCw, Check, X, Loader2, Import } from 'lucide-react';
 import { Card } from '../ui/card';
 import { formatDate, getStatusColor } from '@/lib/utils';
+import { useTimeFormat } from '@/hooks/useTimeFormat';
 import { Skeleton } from '../ui/skeleton';
 import type { FilterParams } from '@/types/filter';
 import {
@@ -32,6 +33,9 @@ export default function ActivityList({
   filter,
   setFilter,
 }: ActivityListProps) {
+  // Re-render timestamps when the user changes the 12h/24h preference.
+  useTimeFormat();
+
   const [expandedItems, setExpandedItems] = useState<Set<string>>(
     () => new Set(),
   );

@@ -3,6 +3,7 @@ import { twMerge } from "tailwind-merge";
 import { httpRequest, HttpError } from "@/lib/http-client";
 import type { RepoStatus } from "@/types/Repository";
 import { withBase } from "@/lib/base-path";
+import { formatDateTime } from "@/lib/utils/time-format";
 
 export const API_BASE = withBase("/api");
 
@@ -23,13 +24,8 @@ export function generateRandomString(length: number): string {
 
 export function formatDate(date?: Date | string | null): string {
   if (!date) return "Never";
-  return new Intl.DateTimeFormat("en-US", {
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(date));
+  // Locale-aware and respects the user's 12h/24h time format preference.
+  return formatDateTime(date);
 }
 
 export function formatDateShort(date?: Date | string | null): string | undefined {

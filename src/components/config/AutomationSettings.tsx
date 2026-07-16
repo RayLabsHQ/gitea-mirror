@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/tooltip";
 import type { ScheduleConfig, DatabaseCleanupConfig } from "@/types/config";
 import { formatDate } from "@/lib/utils";
+import { useTimeFormat } from "@/hooks/useTimeFormat";
 import {
   buildClockCronExpression,
   getNextCronOccurrence,
@@ -89,6 +90,9 @@ export function AutomationSettings({
   isAutoSavingSchedule,
   isAutoSavingCleanup,
 }: AutomationSettingsProps) {
+  // Re-render timestamps when the user changes the 12h/24h preference.
+  useTimeFormat();
+
   const browserTimezone =
     typeof Intl !== "undefined"
       ? Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"

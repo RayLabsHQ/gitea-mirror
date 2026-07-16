@@ -2,6 +2,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { Button } from "@/components/ui/button";
 
 import { ModeToggle } from "@/components/theme/ModeToggle";
+import { TimeFormatToggle } from "@/components/layout/TimeFormatToggle";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useLiveRefresh } from "@/hooks/useLiveRefresh";
 import { useConfigStatus } from "@/hooks/useConfigStatus";
@@ -124,6 +125,8 @@ export function Header({ currentPage, onNavigate, onMenuClick, onToggleCollapse,
               <span className="text-sm font-medium hidden sm:inline">LIVE</span>
             </Button>
           )}
+
+          <TimeFormatToggle />
 
           <ModeToggle />
 

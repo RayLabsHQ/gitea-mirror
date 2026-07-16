@@ -17,6 +17,8 @@ import { usePageVisibility } from "@/hooks/usePageVisibility";
 import { useConfigStatus } from "@/hooks/useConfigStatus";
 import { useNavigation } from "@/components/layout/MainLayout";
 import { withBase } from "@/lib/base-path";
+import { formatShortDateTime } from "@/lib/utils/time-format";
+import { useTimeFormat } from "@/hooks/useTimeFormat";
 
 // Helper function to format last sync time
 function formatLastSyncTime(date: Date | null): string {
@@ -45,17 +47,11 @@ function formatLastSyncTime(date: Date | null): string {
 }
 
 // Helper function to format full timestamp
+// Locale-aware and respects the user's 12h/24h time format preference.
 function formatFullTimestamp(date: Date | null): string {
   if (!date) return "";
-  
-  return new Date(date).toLocaleString("en-US", {
-    month: "2-digit",
-    day: "2-digit",
-    year: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: true
-  }).replace(',', '');
+
+  return formatShortDateTime(date).replace(',', '');
 }
 
 export function Dashboard() {
@@ -64,6 +60,8 @@ export function Dashboard() {
   const isPageVisible = usePageVisibility();
   const { isFullyConfigured } = useConfigStatus();
   const { navigationKey } = useNavigation();
+  // Re-render timestamps when the user changes the 12h/24h preference.
+  useTimeFormat();
 
   const [repositories, setRepositories] = useState<Repository[]>([]);
   const [organizations, setOrganizations] = useState<Organization[]>([]);
