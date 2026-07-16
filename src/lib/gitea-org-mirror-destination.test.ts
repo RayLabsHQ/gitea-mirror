@@ -27,11 +27,13 @@ let httpPostCalls: Array<{ url: string; payload: any }> = [];
 /** Every org get-or-create: orgName -> deterministic id. */
 let orgCreateCalls: string[] = [];
 
-const ORG_IDS: Record<string, number> = {};
-let nextOrgId = 100;
+// Deterministic id derived purely from the name — must not depend on call
+// order: bun may re-instantiate mock factories, so an order-dependent counter
+// can diverge between the mocked flow and the test's assertions.
 function orgIdFor(name: string): number {
-  if (!(name in ORG_IDS)) ORG_IDS[name] = nextOrgId++;
-  return ORG_IDS[name];
+  let h = 0;
+  for (const c of name) h = (h * 31 + c.charCodeAt(0)) % 100_000;
+  return 100 + h;
 }
 
 // ---------------------------------------------------------------------------
