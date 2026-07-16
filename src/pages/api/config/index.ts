@@ -94,38 +94,48 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     const existingConfig = existingConfigResult[0];
 
+    // Parse the stored configs once — used both to preserve fields the
+    // Configuration form doesn't expose (e.g. env-configured mirrorInterval,
+    // see issue #338) and to preserve tokens when the form submits them empty.
+    let existingGithub: Record<string, any> | undefined;
+    let existingGitea: Record<string, any> | undefined;
+    if (existingConfig) {
+      try {
+        existingGithub =
+          typeof existingConfig.githubConfig === "string"
+            ? JSON.parse(existingConfig.githubConfig)
+            : existingConfig.githubConfig;
+
+        existingGitea =
+          typeof existingConfig.giteaConfig === "string"
+            ? JSON.parse(existingConfig.giteaConfig)
+            : existingConfig.giteaConfig;
+      } catch (parseError) {
+        console.error("Failed to parse existing config:", parseError);
+      }
+    }
+
     // Map UI structure to database schema structure first
     const { githubConfig: mappedGithubConfig, giteaConfig: mappedGiteaConfig } = mapUiToDbConfig(
       githubConfig,
       giteaConfig,
       mirrorOptions,
-      advancedOptions
+      advancedOptions,
+      { githubConfig: existingGithub, giteaConfig: existingGitea }
     );
-    
+
     // Preserve tokens if fields are empty
-    if (existingConfig) {
-      try {
-        const existingGithub =
-          typeof existingConfig.githubConfig === "string"
-            ? JSON.parse(existingConfig.githubConfig)
-            : existingConfig.githubConfig;
-
-        const existingGitea =
-          typeof existingConfig.giteaConfig === "string"
-            ? JSON.parse(existingConfig.giteaConfig)
-            : existingConfig.giteaConfig;
-
-        // Decrypt existing tokens before preserving
-        if (!mappedGithubConfig.token && existingGithub.token) {
-          mappedGithubConfig.token = decrypt(existingGithub.token);
-        }
-
-        if (!mappedGiteaConfig.token && existingGitea.token) {
-          mappedGiteaConfig.token = decrypt(existingGitea.token);
-        }
-      } catch (tokenError) {
-        console.error("Failed to preserve tokens:", tokenError);
+    try {
+      // Decrypt existing tokens before preserving
+      if (!mappedGithubConfig.token && existingGithub?.token) {
+        mappedGithubConfig.token = decrypt(existingGithub.token);
       }
+
+      if (!mappedGiteaConfig.token && existingGitea?.token) {
+        mappedGiteaConfig.token = decrypt(existingGitea.token);
+      }
+    } catch (tokenError) {
+      console.error("Failed to preserve tokens:", tokenError);
     }
     
     // Encrypt tokens before saving

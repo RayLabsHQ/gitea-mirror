@@ -191,3 +191,69 @@ test("DB row missing starredDuplicateStrategy defaults to suffix on read", () =>
   const ui = mapDbToUiConfig({ githubConfig: { owner: "octo", token: "" } });
   expect(ui.githubConfig.starredDuplicateStrategy).toBe("suffix");
 });
+
+// Regression for #338: saving any setting from the Configuration page reset
+// giteaConfig.mirrorInterval (set via GITEA_MIRROR_INTERVAL) back to "8h"
+// because the mapper hardcoded the default instead of preserving the stored value.
+test("mapUiToDbConfig preserves env-configured mirrorInterval on save", () => {
+  const ui = buildMinimalUiConfigs();
+  const db = mapUiToDbConfig(ui.githubConfig, ui.giteaConfig, ui.mirrorOptions, ui.advancedOptions, {
+    giteaConfig: { mirrorInterval: "10m" },
+  });
+  expect(db.giteaConfig.mirrorInterval).toBe("10m");
+});
+
+test("mapUiToDbConfig defaults mirrorInterval to 8h without existing config", () => {
+  const ui = buildMinimalUiConfigs();
+  const db = mapUiToDbConfig(ui.githubConfig, ui.giteaConfig, ui.mirrorOptions, ui.advancedOptions);
+  expect(db.giteaConfig.mirrorInterval).toBe("8h");
+});
+
+test("mapUiToDbConfig preserves non-UI fields from existing config on save", () => {
+  const ui = buildMinimalUiConfigs();
+  const db = mapUiToDbConfig(ui.githubConfig, ui.giteaConfig, ui.mirrorOptions, ui.advancedOptions, {
+    githubConfig: { type: "organization", includeArchived: true, includePublic: false },
+    giteaConfig: {
+      createOrg: false,
+      templateOwner: "templates",
+      templateRepo: "base",
+      addTopics: false,
+      topicPrefix: "gh-",
+      preserveVisibility: true,
+    },
+  });
+  expect(db.githubConfig.type).toBe("organization");
+  expect(db.githubConfig.includeArchived).toBe(true);
+  expect(db.githubConfig.includePublic).toBe(false);
+  expect(db.giteaConfig.createOrg).toBe(false);
+  expect(db.giteaConfig.templateOwner).toBe("templates");
+  expect(db.giteaConfig.templateRepo).toBe("base");
+  expect(db.giteaConfig.addTopics).toBe(false);
+  expect(db.giteaConfig.topicPrefix).toBe("gh-");
+  expect(db.giteaConfig.preserveVisibility).toBe(true);
+});
+
+test("mapUiToDbConfig keeps env-configured full-copy forkStrategy when forks are included", () => {
+  const ui = buildMinimalUiConfigs();
+  const db = mapUiToDbConfig(ui.githubConfig, ui.giteaConfig, ui.mirrorOptions, ui.advancedOptions, {
+    giteaConfig: { forkStrategy: "full-copy" },
+  });
+  expect(db.giteaConfig.forkStrategy).toBe("full-copy");
+});
+
+test("mapUiToDbConfig lets skipForks override a stored forkStrategy", () => {
+  const ui = buildMinimalUiConfigs();
+  const withSkip: AdvancedOptions = { ...ui.advancedOptions, skipForks: true };
+  const db = mapUiToDbConfig(ui.githubConfig, ui.giteaConfig, ui.mirrorOptions, withSkip, {
+    giteaConfig: { forkStrategy: "full-copy" },
+  });
+  expect(db.giteaConfig.forkStrategy).toBe("skip");
+});
+
+test("mapUiToDbConfig resets a stale skip forkStrategy to reference when skipForks is unchecked", () => {
+  const ui = buildMinimalUiConfigs();
+  const db = mapUiToDbConfig(ui.githubConfig, ui.giteaConfig, ui.mirrorOptions, ui.advancedOptions, {
+    giteaConfig: { forkStrategy: "skip" },
+  });
+  expect(db.giteaConfig.forkStrategy).toBe("reference");
+});

@@ -51,28 +51,37 @@ function normalizeOrgList(orgs: string[] | undefined): string[] {
 
 /**
  * Maps UI config structure to database schema structure
+ *
+ * `existing` is the stored DB config (if any). Fields the Configuration form
+ * doesn't expose (mirrorInterval, topics, templates, ...) are preserved from it
+ * so a UI save can't silently reset values configured via environment variables
+ * (e.g. GITEA_MIRROR_INTERVAL, see issue #338).
  */
 export function mapUiToDbConfig(
   githubConfig: GitHubConfig,
   giteaConfig: GiteaConfig,
   mirrorOptions: MirrorOptions,
-  advancedOptions: AdvancedOptions
+  advancedOptions: AdvancedOptions,
+  existing?: {
+    githubConfig?: Partial<DbGitHubConfig>;
+    giteaConfig?: Partial<DbGiteaConfig>;
+  }
 ): { githubConfig: DbGitHubConfig; giteaConfig: DbGiteaConfig } {
   // Map GitHub config to match database schema fields
   const dbGithubConfig: DbGitHubConfig = {
     // Map username to owner field
     owner: githubConfig.username,
-    type: "personal", // Default to personal, could be made configurable
+    type: existing?.githubConfig?.type || "personal", // Not in UI; preserve stored value
     token: githubConfig.token || "",
-    
+
     // Map checkbox fields with proper names
     includeStarred: githubConfig.mirrorStarred,
     includePrivate: githubConfig.privateRepositories,
     includeCollaboratorRepos: githubConfig.includeCollaboratorRepos ?? true,
     includeForks: !advancedOptions.skipForks, // Note: UI has skipForks, DB has includeForks
     skipForks: advancedOptions.skipForks, // Add skipForks field
-    includeArchived: false, // Not in UI yet, default to false
-    includePublic: true, // Not in UI yet, default to true
+    includeArchived: existing?.githubConfig?.includeArchived ?? false, // Not in UI; preserve stored value
+    includePublic: existing?.githubConfig?.includePublic ?? true, // Not in UI; preserve stored value
     
     // Organization related fields — opt-in allowlist (empty = all org repos)
     includeOrganizations: normalizeOrgList(githubConfig.includeOrganizations),
@@ -102,28 +111,35 @@ export function mapUiToDbConfig(
     organization: giteaConfig.organization, // Add organization field
     preserveOrgStructure: giteaConfig.mirrorStrategy === "preserve" || giteaConfig.mirrorStrategy === "mixed", // Add preserveOrgStructure field
     
-    // Mirror interval and options
-    mirrorInterval: "8h", // Default value, could be made configurable
+    // Mirror interval — not in UI; preserve the stored value so a save doesn't
+    // reset an env-configured GITEA_MIRROR_INTERVAL back to the default (#338)
+    mirrorInterval: existing?.giteaConfig?.mirrorInterval || "8h",
     lfs: mirrorOptions.mirrorLFS || false, // LFS mirroring option
     wiki: mirrorOptions.mirrorMetadata && mirrorOptions.metadataComponents.wiki,
-    
+
     // Visibility settings
     visibility: giteaConfig.visibility || "default",
-    preserveVisibility: false, // This should be a separate field, not the same as preserveOrgStructure
-    
-    // Organization creation
-    createOrg: true, // Default to true
-    
-    // Template settings (not in UI yet)
-    templateOwner: undefined,
-    templateRepo: undefined,
-    
-    // Topics
-    addTopics: true, // Default to true
-    topicPrefix: undefined,
-    
-    // Fork strategy
-    forkStrategy: advancedOptions.skipForks ? "skip" : "reference",
+    preserveVisibility: existing?.giteaConfig?.preserveVisibility ?? false, // Not in UI; preserve stored value
+
+    // Organization creation — not in UI; preserve stored value
+    createOrg: existing?.giteaConfig?.createOrg ?? true,
+
+    // Template settings (not in UI yet) — preserve stored values
+    templateOwner: existing?.giteaConfig?.templateOwner,
+    templateRepo: existing?.giteaConfig?.templateRepo,
+
+    // Topics — not in UI; preserve stored values
+    addTopics: existing?.giteaConfig?.addTopics ?? true,
+    topicPrefix: existing?.giteaConfig?.topicPrefix,
+
+    // Fork strategy — skipForks is the only UI control; keep an env-configured
+    // "full-copy" instead of downgrading it, but reset a stale "skip" once the
+    // user unchecks skipForks.
+    forkStrategy: advancedOptions.skipForks
+      ? "skip"
+      : existing?.giteaConfig?.forkStrategy && existing.giteaConfig.forkStrategy !== "skip"
+        ? existing.giteaConfig.forkStrategy
+        : "reference",
     
     // Mirror options from UI
     issueConcurrency: giteaConfig.issueConcurrency ?? 3,
