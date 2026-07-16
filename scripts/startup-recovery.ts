@@ -13,6 +13,7 @@
  */
 
 import { initializeRecovery, hasJobsNeedingRecovery, getRecoveryStatus } from "../src/lib/recovery";
+import { resetStuckMirrorStatuses } from "../src/lib/stuck-status-recovery";
 
 // Parse command line arguments
 const args = process.argv.slice(2);
@@ -41,10 +42,29 @@ async function runStartupRecovery() {
       }, timeout);
     });
 
+    // Reset repositories/organizations stuck in an in-flight status
+    // ("mirroring"/"syncing") from a previous run (issue #339). This must
+    // happen BEFORE the needsRecovery early-exit below: scheduler-driven
+    // syncs create no resilient job records, so a crash mid-scheduled-sync
+    // leaves stuck repo rows but NO interrupted jobs — the early exit would
+    // skip them forever. The app is not running while this script executes,
+    // so every in-flight row is an orphan by definition (this script's own
+    // process start is the cutoff). Never throws.
+    console.log('Checking for repositories stuck in an in-flight status...');
+    const stuckReset = await resetStuckMirrorStatuses();
+    if (stuckReset.repositories > 0 || stuckReset.organizations > 0) {
+      console.log(
+        `✅ Reset ${stuckReset.repositories} stuck repositor${stuckReset.repositories === 1 ? 'y' : 'ies'} ` +
+        `and ${stuckReset.organizations} stuck organization(s) to "failed" for retry.`
+      );
+    } else {
+      console.log('✅ No stuck repository/organization statuses found.');
+    }
+
     // Check if recovery is needed first
     console.log('Checking if recovery is needed...');
     const needsRecovery = await hasJobsNeedingRecovery();
-    
+
     if (!needsRecovery) {
       console.log('✅ No jobs need recovery. Startup can proceed.');
       process.exit(0);

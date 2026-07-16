@@ -15,6 +15,7 @@ import { mergeGitReposPreferStarred, normalizeGitRepoToInsert, calcBatchSizeForI
 import { isMirrorableGitHubRepo } from '@/lib/repo-eligibility';
 import { createMirrorJob } from '@/lib/helpers';
 import { getNextScheduledRun, isCronExpression, normalizeTimezone } from '@/lib/utils/schedule-utils';
+import { resetStuckMirrorStatuses } from '@/lib/stuck-status-recovery';
 
 let schedulerInterval: NodeJS.Timeout | null = null;
 let isSchedulerRunning = false;
@@ -723,8 +724,20 @@ async function schedulerLoop(): Promise<void> {
   }
   
   isSchedulerRunning = true;
-  
+
   try {
+    // Heal repositories/organizations stuck in an in-flight status
+    // ("mirroring"/"syncing") from a crash or restart (issue #339). Runs on
+    // every tick, before the enabled-config filtering, so stuck rows are
+    // reset even for users without scheduling enabled. Never throws.
+    const stuckReset = await resetStuckMirrorStatuses();
+    if (stuckReset.repositories > 0 || stuckReset.organizations > 0) {
+      console.log(
+        `[Scheduler] Reset ${stuckReset.repositories} stuck repositor${stuckReset.repositories === 1 ? 'y' : 'ies'} ` +
+        `and ${stuckReset.organizations} stuck organization(s) from in-flight status to "failed"`
+      );
+    }
+
     // Get all active configurations with scheduling enabled
     const activeConfigs = await db
       .select()

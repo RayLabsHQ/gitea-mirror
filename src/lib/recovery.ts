@@ -4,6 +4,7 @@
  */
 
 import { findInterruptedJobs, resumeInterruptedJob } from './helpers';
+import { resetStuckMirrorStatuses } from './stuck-status-recovery';
 import { db, repositories, organizations, mirrorJobs, configs } from './db';
 import { eq, and, lt, inArray, sql } from 'drizzle-orm';
 import { mirrorGithubRepoToGitea, mirrorGitHubOrgRepoToGiteaOrg, syncGiteaRepo } from './gitea';
@@ -120,6 +121,13 @@ export async function initializeRecovery(options: {
 
       // Clean up stale jobs first
       await cleanupStaleJobs();
+
+      // Reset repositories/organizations stuck in an in-flight status
+      // ("mirroring"/"syncing") with no live process behind them (issue
+      // #339). Job-level recovery below only reconciles mirrorJobs rows;
+      // repository.status is never reconciled by it, so rows orphaned by
+      // a crash would otherwise stay "syncing" forever. Never throws.
+      await resetStuckMirrorStatuses();
 
       // Find interrupted jobs (with per-job logging — this is the
       // active recovery path that will immediately try to resume them)
