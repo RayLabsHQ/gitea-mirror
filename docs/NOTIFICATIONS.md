@@ -107,7 +107,7 @@ The secret is encrypted at rest.
 |-------|---------|-------------|
 | Sync errors | On | A mirror job failed |
 | Sync success | Off | A mirror job completed successfully |
-| New repo discovered | Off | A new GitHub repo was auto-imported during scheduled sync |
+| New repo discovered | Off | Not yet implemented; the toggle is disabled in the UI |
 
 ## Testing
 
