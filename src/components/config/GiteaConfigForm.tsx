@@ -22,9 +22,11 @@ interface GiteaConfigFormProps {
   onAutoSave?: (giteaConfig: GiteaConfig) => Promise<void>;
   isAutoSaving?: boolean;
   githubUsername?: string;
+  /** Which card to render: the connection card or the organization card. */
+  part?: "connection" | "organization";
 }
 
-export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, githubUsername }: GiteaConfigFormProps) {
+export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, githubUsername, part = "connection" }: GiteaConfigFormProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [serverInfo, setServerInfo] = useState<GiteaServerInfo | null>(null);
 
@@ -40,8 +42,10 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
 
   const [mirrorStrategy, setMirrorStrategy] = useState<MirrorStrategy>(getMirrorStrategy());
 
-  // Update config when strategy changes
+  // Update config when strategy changes. Only the organization instance runs
+  // this effect so a second (connection) instance can't double-fire autosave.
   useEffect(() => {
+    if (part !== "organization") return;
     const newConfig = { ...config };
 
     switch (mirrorStrategy) {
@@ -150,9 +154,8 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
     }
   };
 
-  return (
-    <div className="flex flex-col gap-6">
-      {/* Gitea Connection */}
+  if (part === "connection") {
+    return (
       <SettingsCard
         icon={Server}
         title="Gitea Connection"
@@ -174,14 +177,12 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
           </div>
         }
         footer={
-          <StatusFooterItem
-            icon={Info}
-            label={
-              serverInfo
-                ? `${serverInfo.type === "forgejo" ? "Forgejo" : "Gitea"} ${serverInfo.version} detected`
-                : "Test the connection to detect your server version"
-            }
-          />
+          serverInfo ? (
+            <StatusFooterItem
+              icon={Info}
+              label={`${serverInfo.type === "forgejo" ? "Forgejo" : "Gitea"} ${serverInfo.version} detected`}
+            />
+          ) : undefined
         }
       >
         <CardSection>
@@ -289,7 +290,11 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
           </div>
         </CardSection>
       </SettingsCard>
+    );
+  }
 
+  return (
+    <>
       {/* Organization Structure */}
       <SettingsCard
         icon={Building2}
@@ -349,6 +354,6 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
           />
         </CardSection>
       </SettingsCard>
-    </div>
+    </>
   );
 }

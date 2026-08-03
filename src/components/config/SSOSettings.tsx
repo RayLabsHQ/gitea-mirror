@@ -8,13 +8,14 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { apiRequest, showErrorToast } from '@/lib/utils';
 import { toast } from 'sonner';
-import { Plus, Trash2, Loader2, AlertCircle, KeyRound, Shield, ShieldCheck, Edit2 } from 'lucide-react';
+import { Plus, Trash2, Loader2, AlertCircle, Info, KeyRound, Shield, ShieldCheck, Edit2 } from 'lucide-react';
 import { Skeleton } from '../ui/skeleton';
 import { Badge } from '../ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { MultiSelect } from '@/components/ui/multi-select';
 import { withBase } from '@/lib/base-path';
+import { SwitchRow, accentSwitch } from './settings-ui';
 
 function isTrustedIssuer(issuer: string, allowedHosts: string[]): boolean {
   try {
@@ -289,23 +290,7 @@ export function SSOSettings() {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header with status indicators */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-semibold">Authentication & SSO</h2>
-          <p className="text-sm text-muted-foreground mt-1">
-            Configure how users authenticate with your application
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className={`h-2 w-2 rounded-full ${providers.length > 0 ? 'bg-green-500' : 'bg-muted'}`} />
-          <span className="text-sm text-muted-foreground">
-            {providers.length} Provider{providers.length !== 1 ? 's' : ''} configured
-          </span>
-        </div>
-      </div>
-
+    <div className="grid grid-cols-1 items-stretch gap-6 lg:grid-cols-2">
       {/* Authentication Methods Overview */}
       <div className="flex flex-col overflow-hidden rounded-xl border border-border bg-card">
         <div className="flex items-center gap-3 px-6 py-4">
@@ -313,64 +298,51 @@ export function SSOSettings() {
           <h3 className="text-base font-semibold">Sign-in Methods</h3>
         </div>
         <div className="border-t border-border" />
-        <div className="space-y-4 p-6">
-          {/* Email & Password - Always enabled */}
-          <div className="flex items-center justify-between gap-4">
-            <div className="space-y-1">
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium leading-none">Email & Password</span>
-                <Badge variant="secondary" className="text-xs">Default</Badge>
-              </div>
-              <p className="text-[13px] text-muted-foreground">Built-in accounts, always available</p>
-            </div>
-            <span className="flex items-center gap-2 text-xs font-medium text-green-500">
-              <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
-              Active
-            </span>
-          </div>
-
-          {/* Header Authentication Status */}
-          {headerAuthEnabled && (
-            <div className="flex items-center justify-between gap-4">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium leading-none">Header Authentication</span>
-                  <Badge variant="secondary" className="text-xs">Auto-login</Badge>
-                </div>
-                <p className="text-[13px] text-muted-foreground">Trusts identity headers from your reverse proxy</p>
-              </div>
-              <span className="flex items-center gap-2 text-xs font-medium text-green-500">
-                <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
-                Active
-              </span>
-            </div>
-          )}
-
-          {/* SSO Providers Status */}
-          <div className="flex items-center justify-between gap-4">
-            <div className="space-y-1">
-              <span className="text-sm font-medium leading-none">SSO / OIDC Providers</span>
-              <p className="text-[13px] text-muted-foreground">Sign in through an external identity provider</p>
-            </div>
-            <span className={`flex items-center gap-2 text-xs font-medium ${providers.length > 0 ? 'text-green-500' : 'text-muted-foreground'}`}>
-              <span className={`h-1.5 w-1.5 rounded-full ${providers.length > 0 ? 'bg-green-500' : 'bg-muted-foreground/40'}`} />
-              {providers.length > 0 ? `${providers.length} configured` : 'Not configured'}
-            </span>
-          </div>
+        <div className="flex-1 divide-y divide-border p-6">
+          {/* These methods are not toggleable from the UI, so the switches
+              reflect real state and explain where each is controlled. */}
+          <SwitchRow
+            className="py-4 first:pt-0 last:pb-0"
+            label="Email & Password"
+            badge="DEFAULT"
+            description="Built-in accounts, always available"
+            info="Always enabled so you can never lock yourself out."
+            checked
+            disabled
+            onCheckedChange={() => {}}
+          />
+          <SwitchRow
+            className="py-4 first:pt-0 last:pb-0"
+            label="Single Sign-On (OIDC)"
+            description="Sign in through an external identity provider"
+            info={
+              providers.length > 0
+                ? `${providers.length} provider${providers.length !== 1 ? 's' : ''} configured`
+                : "Turns on automatically when you add an identity provider."
+            }
+            checked={providers.length > 0}
+            disabled
+            onCheckedChange={() => {}}
+          />
+          <SwitchRow
+            className="py-4 first:pt-0 last:pb-0"
+            label="Header Authentication"
+            description="Trust identity headers from your reverse proxy"
+            info="Controlled by the HEADER_AUTH environment variables. See the environment variable docs."
+            checked={headerAuthEnabled}
+            disabled
+            onCheckedChange={() => {}}
+          />
         </div>
-        {headerAuthEnabled && (
-          <>
-            <div className="border-t border-border" />
-            <div className="flex items-center gap-2 px-6 py-3.5 text-xs text-muted-foreground/70">
-              <Shield className="h-3.5 w-3.5" />
-              Header auth trusts your proxy — only run it behind a trusted network
-            </div>
-          </>
-        )}
+        <div className="border-t border-border" />
+        <div className="flex items-center gap-2 px-6 py-3.5 text-xs text-muted-foreground/70">
+          <Shield className="h-3.5 w-3.5" />
+          Only enable header auth behind a trusted reverse proxy
+        </div>
       </div>
 
       {/* SSO Providers */}
-      <Card>
+      <Card className="flex h-full flex-col">
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
@@ -398,11 +370,21 @@ export function SSOSettings() {
                           : 'Configure an external identity provider for user authentication'}
                       </DialogDescription>
                     </DialogHeader>
-                    <div className="flex-1 overflow-y-auto px-1 -mx-1">
+                    <div className="flex-1 overflow-y-auto px-1 -mx-1 [&_label]:text-xs [&_label]:font-medium [&_label]:text-muted-foreground">
                       <Tabs value={providerType} onValueChange={(value) => setProviderType(value as 'oidc' | 'saml')}>
-                        <TabsList className="grid w-full grid-cols-2 sticky top-0 z-10 bg-background">
-                          <TabsTrigger value="oidc">OIDC / OAuth2</TabsTrigger>
-                          <TabsTrigger value="saml">SAML 2.0</TabsTrigger>
+                        <TabsList className="sticky top-0 z-10 grid w-full grid-cols-2 gap-1 rounded-lg bg-muted p-1">
+                          <TabsTrigger
+                            value="oidc"
+                            className="rounded-md text-xs text-muted-foreground data-[state=active]:bg-background data-[state=active]:font-medium data-[state=active]:text-foreground data-[state=active]:shadow-sm"
+                          >
+                            OIDC / OAuth2
+                          </TabsTrigger>
+                          <TabsTrigger
+                            value="saml"
+                            className="rounded-md text-xs text-muted-foreground data-[state=active]:bg-background data-[state=active]:font-medium data-[state=active]:text-foreground data-[state=active]:shadow-sm"
+                          >
+                            SAML 2.0
+                          </TabsTrigger>
                         </TabsList>
                         
                         {/* Common Fields */}
@@ -526,6 +508,7 @@ export function SSOSettings() {
                             id="pkce"
                             checked={providerForm.pkce}
                             onCheckedChange={(checked) => setProviderForm(prev => ({ ...prev, pkce: checked }))}
+                            className={accentSwitch}
                           />
                           <Label htmlFor="pkce">Enable PKCE</Label>
                         </div>
@@ -622,7 +605,11 @@ export function SSOSettings() {
                       >
                         Cancel
                       </Button>
-                      <Button onClick={createProvider} disabled={addingProvider}>
+                      <Button
+                        onClick={createProvider}
+                        disabled={addingProvider}
+                        className="bg-indigo-500 text-white hover:bg-indigo-600"
+                      >
                         {addingProvider ? (
                           <>
                             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -637,7 +624,7 @@ export function SSOSettings() {
                 </Dialog>
               </div>
             </CardHeader>
-            <CardContent>
+            <CardContent className="flex-1">
               {providers.length === 0 ? (
                 <div className="text-center py-12">
                   <div className="mx-auto h-12 w-12 text-muted-foreground/50">
@@ -738,6 +725,11 @@ export function SSOSettings() {
                 </div>
               )}
             </CardContent>
+      <div className="mt-auto border-t border-border" />
+      <div className="flex items-center gap-2 px-6 py-3.5 text-xs text-muted-foreground/70">
+        <Info className="h-3.5 w-3.5" />
+        Users are matched to existing accounts by email address
+      </div>
       </Card>
     </div>
   );

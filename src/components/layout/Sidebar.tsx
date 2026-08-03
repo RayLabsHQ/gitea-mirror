@@ -3,6 +3,7 @@ import { cn } from "@/lib/utils";
 import { ExternalLink } from "lucide-react";
 import { links } from "@/data/Sidebar";
 import { VersionInfo } from "./VersionInfo";
+import { ThemeSwitcher } from "@/components/theme/ThemeSwitcher";
 import {
   Tooltip,
   TooltipContent,
@@ -196,6 +197,16 @@ export function Sidebar({ className, onNavigate, isOpen, isCollapsed = false, on
               </TooltipProvider>
             </div>
             <div className={cn(
+              "mt-3 flex items-center justify-between",
+              isCollapsed ? "md:hidden xl:flex" : "flex"
+            )}>
+              <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/70">
+                Theme
+              </span>
+              <ThemeSwitcher />
+            </div>
+            <div className={cn(
+              "mt-1",
               isCollapsed ? "md:hidden xl:block" : "block"
             )}>
               <VersionInfo />

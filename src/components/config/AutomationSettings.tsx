@@ -125,8 +125,13 @@ export function AutomationSettings({
       ? Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
       : "UTC";
 
-  // Use saved timezone, but treat "UTC" as unset for users who never chose it
-  const effectiveTimezone = scheduleConfig.timezone || browserTimezone;
+  // Use saved timezone, but treat "UTC" as unset for users who never chose
+  // it: older versions stored UTC as a default without asking. Anyone truly
+  // in UTC gets the same result via their browser timezone.
+  const effectiveTimezone =
+    scheduleConfig.timezone && scheduleConfig.timezone !== "UTC"
+      ? scheduleConfig.timezone
+      : browserTimezone;
 
   const nextScheduledRun = useMemo(() => {
     if (!scheduleConfig.enabled) return null;
@@ -341,13 +346,7 @@ export function AutomationSettings({
         >
           {cleanupConfig.enabled && (
             <CardSection>
-              <SectionTitle
-                action={
-                  <InfoNote text="Activity logs and events older than the retention period are removed. Cleanup frequency adapts to the period you pick." />
-                }
-              >
-                Data retention
-              </SectionTitle>
+              <SectionTitle>Data retention</SectionTitle>
               <div className="flex items-center gap-3">
                 <Select
                   value={cleanupConfig.retentionDays.toString()}
@@ -376,6 +375,10 @@ export function AutomationSettings({
                   Cleanup runs {getCleanupFrequencyText(cleanupConfig.retentionDays)}
                 </p>
               </div>
+              <p className="max-w-md text-[13px] leading-relaxed text-muted-foreground">
+                Activity logs and events older than the retention period are
+                removed. Cleanup frequency adapts to the period you pick.
+              </p>
             </CardSection>
           )}
         </SettingsCard>
@@ -438,13 +441,5 @@ export function AutomationSettings({
         )}
       </SettingsCard>
     </div>
-  );
-}
-
-function InfoNote({ text }: { text: string }) {
-  return (
-    <span className="max-w-[220px] text-right text-[11px] leading-snug text-muted-foreground/70">
-      {text}
-    </span>
   );
 }

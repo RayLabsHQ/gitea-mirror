@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { GitHubConfigForm } from './GitHubConfigForm';
 import { GiteaConfigForm } from './GiteaConfigForm';
+import { GitHubMirrorSettings } from './GitHubMirrorSettings';
 import { AutomationSettings } from './AutomationSettings';
 import { SSOSettings } from './SSOSettings';
 import { NotificationSettings } from './NotificationSettings';
@@ -686,7 +687,7 @@ export function ConfigTabs() {
                 ? 'Import in progress'
                 : 'Import GitHub Data'
             }
-            className="w-full md:w-auto"
+            className="w-full bg-indigo-500 text-white hover:bg-indigo-600 disabled:bg-muted disabled:text-muted-foreground md:w-auto"
           >
             {isSyncing ? (
               <>
@@ -705,78 +706,106 @@ export function ConfigTabs() {
 
       {/* Content section - Tabs layout */}
       <Tabs defaultValue="connections" className="space-y-4">
-        <TabsList className="grid w-full grid-cols-4">
+        <TabsList className="grid h-auto w-full grid-cols-2 gap-1 sm:grid-cols-4">
           <TabsTrigger value="connections">Connections</TabsTrigger>
           <TabsTrigger value="automation">Automation</TabsTrigger>
           <TabsTrigger value="notifications">Notifications</TabsTrigger>
           <TabsTrigger value="sso">Authentication</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="connections" className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:items-start">
-            <GitHubConfigForm
-              config={config.githubConfig}
-              setConfig={update =>
+        <TabsContent value="connections" className="space-y-6">
+          {(() => {
+            const githubFormProps = {
+              config: config.githubConfig,
+              setConfig: (update: React.SetStateAction<typeof config.githubConfig>) =>
                 setConfig(prev => ({
                   ...prev,
                   githubConfig:
                     typeof update === 'function'
                       ? update(prev.githubConfig)
                       : update,
-                }))
-              }
-              mirrorOptions={config.mirrorOptions}
-              setMirrorOptions={update =>
+                })),
+              mirrorOptions: config.mirrorOptions,
+              setMirrorOptions: (update: React.SetStateAction<typeof config.mirrorOptions>) =>
                 setConfig(prev => ({
                   ...prev,
                   mirrorOptions:
                     typeof update === 'function'
                       ? update(prev.mirrorOptions)
                       : update,
-                }))
-              }
-              advancedOptions={config.advancedOptions}
-              setAdvancedOptions={update =>
+                })),
+              advancedOptions: config.advancedOptions,
+              setAdvancedOptions: (update: React.SetStateAction<typeof config.advancedOptions>) =>
                 setConfig(prev => ({
                   ...prev,
                   advancedOptions:
                     typeof update === 'function'
                       ? update(prev.advancedOptions)
                       : update,
-                }))
-              }
-              giteaConfig={config.giteaConfig}
-              setGiteaConfig={update =>
+                })),
+              giteaConfig: config.giteaConfig,
+              setGiteaConfig: (update: React.SetStateAction<typeof config.giteaConfig>) =>
                 setConfig(prev => ({
                   ...prev,
                   giteaConfig:
                     typeof update === 'function'
                       ? update(prev.giteaConfig)
                       : update,
-                }))
-              }
-              onAutoSave={autoSaveGitHubConfig}
-              onMirrorOptionsAutoSave={autoSaveMirrorOptions}
-              onAdvancedOptionsAutoSave={autoSaveAdvancedOptions}
-              onGiteaAutoSave={autoSaveGiteaConfig}
-              isAutoSaving={isAutoSavingGitHub}
-            />
-            <GiteaConfigForm
-              config={config.giteaConfig}
-              setConfig={update =>
+                })),
+              onAutoSave: autoSaveGitHubConfig,
+              onMirrorOptionsAutoSave: autoSaveMirrorOptions,
+              onAdvancedOptionsAutoSave: autoSaveAdvancedOptions,
+              onGiteaAutoSave: autoSaveGiteaConfig,
+              isAutoSaving: isAutoSavingGitHub,
+            };
+            const giteaFormProps = {
+              config: config.giteaConfig,
+              setConfig: (update: React.SetStateAction<typeof config.giteaConfig>) =>
                 setConfig(prev => ({
                   ...prev,
                   giteaConfig:
                     typeof update === 'function'
                       ? update(prev.giteaConfig)
                       : update,
-                }))
-              }
-              onAutoSave={autoSaveGiteaConfig}
-              isAutoSaving={isAutoSavingGitea}
-              githubUsername={config.githubConfig.username}
-            />
-          </div>
+                })),
+              onAutoSave: autoSaveGiteaConfig,
+              isAutoSaving: isAutoSavingGitea,
+              githubUsername: config.githubConfig.username,
+            };
+            return (
+              <>
+                {/* Connection cards share a stretched row so they stay equal height */}
+                <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+                  <GitHubConfigForm {...githubFormProps} part="connection" />
+                  <GiteaConfigForm {...giteaFormProps} part="connection" />
+                </div>
+                <div className="grid grid-cols-1 gap-6 md:grid-cols-2 md:items-start">
+                  <GitHubConfigForm {...githubFormProps} part="settings" />
+                  <div className="flex flex-col gap-6">
+                    <GiteaConfigForm {...giteaFormProps} part="organization" />
+                    <GitHubMirrorSettings
+                      part="content"
+                      githubConfig={config.githubConfig}
+                      mirrorOptions={config.mirrorOptions}
+                      advancedOptions={config.advancedOptions}
+                      onGitHubConfigChange={newConfig => {
+                        setConfig(prev => ({ ...prev, githubConfig: newConfig }));
+                        autoSaveGitHubConfig(newConfig);
+                      }}
+                      onMirrorOptionsChange={newOptions => {
+                        setConfig(prev => ({ ...prev, mirrorOptions: newOptions }));
+                        autoSaveMirrorOptions(newOptions);
+                      }}
+                      onAdvancedOptionsChange={newOptions => {
+                        setConfig(prev => ({ ...prev, advancedOptions: newOptions }));
+                        autoSaveAdvancedOptions(newOptions);
+                      }}
+                    />
+                  </div>
+                </div>
+              </>
+            );
+          })()}
         </TabsContent>
 
         <TabsContent value="automation" className="space-y-4">

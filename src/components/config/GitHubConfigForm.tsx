@@ -7,7 +7,6 @@ import { Label } from "../ui/label";
 import { toast } from "sonner";
 import {
   Activity,
-  Archive,
   CircleOff,
   DatabaseBackup,
   ExternalLink,
@@ -44,6 +43,9 @@ interface GitHubConfigFormProps {
   onAdvancedOptionsAutoSave?: (advancedOptions: AdvancedOptions) => Promise<void>;
   onGiteaAutoSave?: (giteaConfig: GiteaConfig) => Promise<void>;
   isAutoSaving?: boolean;
+  /** Which card group to render: the connection card, or the settings stack
+   *  (repository selection + destructive update protection). */
+  part?: "connection" | "settings";
 }
 
 const backupStrategies = [
@@ -90,7 +92,8 @@ export function GitHubConfigForm({
   onMirrorOptionsAutoSave,
   onAdvancedOptionsAutoSave,
   onGiteaAutoSave,
-  isAutoSaving
+  isAutoSaving,
+  part = "connection"
 }: GitHubConfigFormProps) {
   const [isLoading, setIsLoading] = useState(false);
 
@@ -142,9 +145,8 @@ export function GitHubConfigForm({
 
   const backupStrategy = giteaConfig?.backupStrategy ?? "on-force-push";
 
-  return (
-    <div className="flex flex-col gap-6">
-      {/* GitHub Connection */}
+  if (part === "connection") {
+    return (
       <SettingsCard
         icon={SiGithub}
         title="GitHub Connection"
@@ -164,13 +166,6 @@ export function GitHubConfigForm({
               {isLoading ? "Testing..." : "Test"}
             </Button>
           </div>
-        }
-        footer={
-          <StatusFooterItem
-            icon={ShieldCheck}
-            label="Required scopes:"
-            value="repo, admin:org"
-          />
         }
       >
         <CardSection>
@@ -212,40 +207,48 @@ export function GitHubConfigForm({
             </p>
           </div>
 
-          <div className="space-y-2.5 rounded-lg bg-muted/40 p-3.5">
-            <div className="flex items-center gap-2">
-              <KeyRound className="h-3.5 w-3.5 text-muted-foreground" />
-              <span className="text-xs font-semibold text-muted-foreground">
-                Creating your token
-              </span>
+          <div className="space-y-3 rounded-lg bg-muted/40 p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <KeyRound className="h-4 w-4 text-muted-foreground" />
+                <span className="text-[13px] font-semibold text-muted-foreground">
+                  Creating your token
+                </span>
+              </div>
+              <a
+                href="https://github.com/settings/tokens"
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Open github.com/settings/tokens"
+                aria-label="Open GitHub token settings"
+                className="text-indigo-500 hover:text-indigo-400"
+              >
+                <ExternalLink className="h-4 w-4" />
+              </a>
             </div>
-            <ol className="list-decimal space-y-1 pl-4 text-[11px] leading-relaxed text-muted-foreground">
+            <ol className="list-decimal space-y-1.5 pl-4 text-xs leading-relaxed text-muted-foreground">
               <li>GitHub → Settings → Developer settings</li>
               <li>Personal access tokens → Generate new token (classic)</li>
               <li>Select the scopes below and paste the token here</li>
             </ol>
             <div className="flex items-center gap-2">
-              <code className="rounded bg-muted px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
+              <code className="rounded bg-muted px-2 py-0.5 font-mono text-[11px] text-muted-foreground">
                 repo
               </code>
-              <code className="rounded bg-muted px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
+              <code className="rounded bg-muted px-2 py-0.5 font-mono text-[11px] text-muted-foreground">
                 admin:org
               </code>
             </div>
-            <a
-              href="https://github.com/settings/tokens"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 text-[11px] font-medium text-indigo-500 hover:underline"
-            >
-              <ExternalLink className="h-3 w-3" />
-              Open github.com/settings/tokens
-            </a>
           </div>
         </CardSection>
       </SettingsCard>
+    );
+  }
 
+  return (
+    <div className="flex flex-col gap-6">
       <GitHubMirrorSettings
+        part="selection"
         githubConfig={config}
         mirrorOptions={mirrorOptions}
         advancedOptions={advancedOptions}

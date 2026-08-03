@@ -22,19 +22,13 @@ const runtimeBasePath = normalizeBasePath(process.env.BASE_URL);
   window[BASE_PATH_WINDOW_KEY] = runtimeBasePath;
 
   const getThemePreference = () => {
-    if (typeof localStorage !== 'undefined' && localStorage.getItem('theme')) {
-      return localStorage.getItem('theme');
+    if (typeof localStorage !== 'undefined') {
+      const stored = localStorage.getItem('theme');
+      if (stored === 'light' || stored === 'dark') return stored;
     }
+    // "system" or nothing stored: follow the OS.
     return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   };
   const isDark = getThemePreference() === 'dark';
   document.documentElement.classList[isDark ? 'add' : 'remove']('dark');
-
-  if (typeof localStorage !== 'undefined') {
-    const observer = new MutationObserver(() => {
-      const isDark = document.documentElement.classList.contains('dark');
-      localStorage.setItem('theme', isDark ? 'dark' : 'light');
-    });
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
-  }
 </script>

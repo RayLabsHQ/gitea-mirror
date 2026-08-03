@@ -1,13 +1,37 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { MirrorJob } from "@/lib/db/schema";
-import { formatDate, getStatusColor } from "@/lib/utils";
+import { formatDate } from "@/lib/utils";
 import { Button } from "../ui/button";
-import { Activity, Clock } from "lucide-react";
+import {
+  Activity,
+  CircleCheck,
+  Clock,
+  RefreshCw,
+  Sparkles,
+  TriangleAlert,
+} from "lucide-react";
 import { withBase } from "@/lib/base-path";
 import { useTimeFormat } from "@/hooks/useTimeFormat";
 
 interface RecentActivityProps {
   activities: MirrorJob[];
+}
+
+function activityIcon(status: MirrorJob["status"]) {
+  switch (status) {
+    case "mirrored":
+    case "synced":
+      return { Icon: CircleCheck, color: "text-green-500" };
+    case "mirroring":
+    case "syncing":
+      return { Icon: RefreshCw, color: "text-indigo-400" };
+    case "imported":
+      return { Icon: Sparkles, color: "text-muted-foreground" };
+    case "failed":
+      return { Icon: TriangleAlert, color: "text-red-500" };
+    default:
+      return { Icon: Activity, color: "text-muted-foreground" };
+  }
 }
 
 export function RecentActivity({ activities }: RecentActivityProps) {
@@ -44,25 +68,24 @@ export function RecentActivity({ activities }: RecentActivityProps) {
           </div>
         ) : (
           <div className="flex flex-col divide-y divide-border">
-            {activities.map((activity, index) => (
-              <div key={index} className="flex items-center gap-x-3 py-3.5">
-                <div className="relative flex-shrink-0">
-                  <div
-                    className={`h-2 w-2 rounded-full ${getStatusColor(
-                      activity.status
-                    )}`}
-                  />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium">
-                    {activity.message}
+            {activities.map((activity, index) => {
+              const { Icon, color } = activityIcon(activity.status);
+              return (
+                <div key={index} className="flex items-center gap-x-3 py-3">
+                  <div className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-muted">
+                    <Icon className={`h-4 w-4 ${color}`} />
                   </div>
-                  <div className="text-xs text-muted-foreground mt-1">
-                    {formatDate(activity.timestamp)}
+                  <div className="flex-1 min-w-0">
+                    <div className="truncate text-sm font-medium">
+                      {activity.message}
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      {formatDate(activity.timestamp)}
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </CardContent>

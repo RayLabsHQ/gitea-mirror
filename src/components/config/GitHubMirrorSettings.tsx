@@ -74,6 +74,8 @@ interface GitHubMirrorSettingsProps {
   onGitHubConfigChange: (config: GitHubConfig) => void;
   onMirrorOptionsChange: (options: MirrorOptions) => void;
   onAdvancedOptionsChange: (options: AdvancedOptions) => void;
+  /** Which card to render; defaults to both. */
+  part?: "selection" | "content" | "both";
 }
 
 export function GitHubMirrorSettings({
@@ -83,6 +85,7 @@ export function GitHubMirrorSettings({
   onGitHubConfigChange,
   onMirrorOptionsChange,
   onAdvancedOptionsChange,
+  part = "both",
 }: GitHubMirrorSettingsProps) {
   const [starListsOpen, setStarListsOpen] = React.useState(false);
   const [starListSearch, setStarListSearch] = React.useState("");
@@ -539,7 +542,17 @@ export function GitHubMirrorSettings({
   return (
     <>
       {/* Repository Selection */}
-      <SettingsCard icon={GitBranch} title="Repository Selection">
+      {part !== "content" && (
+      <SettingsCard
+        icon={GitBranch}
+        title="Repository Selection"
+        footer={
+          <StatusFooterItem
+            icon={Info}
+            label="Changes apply on the next sync or repository discovery"
+          />
+        }
+      >
         <CardSection>
           <SectionTitle>Repositories to mirror</SectionTitle>
 
@@ -817,8 +830,10 @@ export function GitHubMirrorSettings({
           </div>
         </CardSection>
       </SettingsCard>
+      )}
 
       {/* Mirror Content */}
+      {part !== "selection" && (
       <SettingsCard
         icon={Archive}
         title="Mirror Content"
@@ -889,6 +904,7 @@ export function GitHubMirrorSettings({
           />
         </CardSection>
       </SettingsCard>
+      )}
     </>
   );
 }
