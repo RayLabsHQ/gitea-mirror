@@ -1,7 +1,4 @@
 import { useEffect, useMemo } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -10,24 +7,21 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import {
   Clock,
   Database,
   RefreshCw,
   Calendar,
   Activity,
-  Zap,
-  Info,
   Archive,
+  ArchiveRestore,
+  CircleOff,
   Globe,
+  History,
+  Info,
+  Trash2,
 } from "lucide-react";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import type { ScheduleConfig, DatabaseCleanupConfig } from "@/types/config";
 import { formatDate } from "@/lib/utils";
 import { useTimeFormat } from "@/hooks/useTimeFormat";
@@ -35,6 +29,15 @@ import {
   buildClockCronExpression,
   getNextCronOccurrence,
 } from "@/lib/utils/schedule-utils";
+import {
+  SettingsCard,
+  SectionTitle,
+  SwitchRow,
+  OptionTile,
+  StatusFooterItem,
+  CardDivider,
+  CardSection,
+} from "./settings-ui";
 
 interface AutomationSettingsProps {
   scheduleConfig: ScheduleConfig;
@@ -82,6 +85,30 @@ function getCleanupFrequencyText(retentionSeconds: number): string {
   return "weekly";
 }
 
+const orphanActions = [
+  {
+    value: "skip" as const,
+    label: "Skip",
+    description: "Leave the mirror untouched",
+    icon: CircleOff,
+    info: "Orphaned mirrors stay exactly as they are and keep their sync settings.",
+  },
+  {
+    value: "archive" as const,
+    label: "Archive",
+    description: "Kept read-only with an archived prefix",
+    icon: Archive,
+    info: "Renames the mirror with an archived- prefix and disables automatic syncs. Nothing is lost; use Manual Sync to refresh.",
+  },
+  {
+    value: "delete" as const,
+    label: "Delete",
+    description: "Remove the mirror from Gitea",
+    icon: Trash2,
+    info: "Permanently deletes the mirror repository from Gitea.",
+  },
+];
+
 export function AutomationSettings({
   scheduleConfig,
   cleanupConfig,
@@ -123,429 +150,301 @@ export function AutomationSettings({
     }
   }, [cleanupConfig.enabled, cleanupConfig.retentionDays]);
 
+  const savingSpinner = (saving?: boolean) =>
+    saving ? (
+      <Activity className="h-4 w-4 animate-spin text-muted-foreground" />
+    ) : undefined;
+
   return (
-    <Card className="w-full">
-      <CardHeader>
-        <CardTitle className="text-lg font-semibold flex items-center gap-2">
-          <Zap className="h-5 w-5" />
-          Automation & Maintenance
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <button className="ml-1 inline-flex items-center justify-center rounded-full w-4 h-4 bg-muted hover:bg-muted/80 transition-colors">
-                  <Info className="h-3 w-3" />
-                  <span className="sr-only">Background operations info</span>
-                </button>
-              </TooltipTrigger>
-              <TooltipContent side="right" className="max-w-xs">
-                <div className="space-y-2">
-                  <p className="font-medium">Background Operations</p>
-                  <p className="text-xs">
-                    These automated tasks run in the background to keep your mirrors up-to-date and maintain optimal database performance. 
-                    Choose intervals that match your workflow and repository update frequency.
-                  </p>
-                </div>
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        </CardTitle>
-      </CardHeader>
-      
-  <CardContent className="space-y-6">
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-      {/* Automatic Syncing Section */}
-      <div className="flex flex-col gap-4 p-4 border border-border rounded-lg bg-card/50">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-medium flex items-center gap-2">
-            <RefreshCw className="h-4 w-4 text-primary" />
-                Automatic Syncing
-              </h3>
-              {isAutoSavingSchedule && (
-                <Activity className="h-4 w-4 animate-spin text-muted-foreground" />
-              )}
-            </div>
-
-            <div className="flex-1 flex flex-col gap-4">
-              <div className="flex items-start space-x-3">
-                <Checkbox
-                  id="enable-auto-mirror"
-                  checked={scheduleConfig.enabled}
-                  className="mt-1.25"
-                  onCheckedChange={(checked) =>
-                    onScheduleChange({
-                      ...scheduleConfig,
-                      enabled: !!checked,
-                      timezone: checked ? browserTimezone : scheduleConfig.timezone,
-                      startTime: scheduleConfig.startTime || "22:00",
-                      clockFrequencyHours: scheduleConfig.clockFrequencyHours || 24,
-                      scheduleMode: "clock",
-                    })
+    <div className="flex flex-col gap-6">
+      <div className="grid grid-cols-1 items-stretch gap-6 md:grid-cols-2">
+        {/* Automatic Syncing */}
+        <SettingsCard
+          icon={RefreshCw}
+          title="Automatic Syncing"
+          enabled={scheduleConfig.enabled}
+          onEnabledChange={(checked) =>
+            onScheduleChange({
+              ...scheduleConfig,
+              enabled: checked,
+              timezone: checked ? browserTimezone : scheduleConfig.timezone,
+              startTime: scheduleConfig.startTime || "22:00",
+              clockFrequencyHours: scheduleConfig.clockFrequencyHours || 24,
+              scheduleMode: "clock",
+            })
+          }
+          headerAction={savingSpinner(isAutoSavingSchedule)}
+          footer={
+            <>
+              <StatusFooterItem
+                icon={History}
+                label="Last sync"
+                value={
+                  scheduleConfig.lastRun
+                    ? formatDate(scheduleConfig.lastRun)
+                    : "Never"
+                }
+              />
+              {scheduleConfig.enabled ? (
+                <StatusFooterItem
+                  icon={Calendar}
+                  label="Next sync"
+                  value={
+                    scheduleConfig.nextRun
+                      ? formatDate(scheduleConfig.nextRun)
+                      : nextScheduledRun
+                        ? formatDate(nextScheduledRun)
+                        : "Calculating..."
                   }
+                  valueClassName="text-indigo-500"
                 />
-                <div className="space-y-0.5 flex-1">
-                  <Label
-                    htmlFor="enable-auto-mirror"
-                    className="text-sm font-normal cursor-pointer"
-                  >
-                    Enable automatic repository syncing
-                  </Label>
-                  <p className="text-xs text-muted-foreground">
-                    Periodically sync GitHub changes to Gitea
-                  </p>
-                </div>
-              </div>
-
-              {scheduleConfig.enabled && (
-                <div className="space-y-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                      Schedule
-                    </p>
-                    <span className="inline-flex items-center gap-1.5 rounded-full border border-border/70 px-2.5 py-0.5 text-[11px] text-muted-foreground">
+              ) : (
+                <span className="text-xs text-muted-foreground/70">
+                  Enable syncing to schedule updates
+                </span>
+              )}
+            </>
+          }
+        >
+          {scheduleConfig.enabled && (
+            <>
+              <CardSection>
+                <SectionTitle
+                  action={
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-[11px] text-muted-foreground">
                       <Globe className="h-3 w-3" />
                       {effectiveTimezone}
                     </span>
+                  }
+                >
+                  Schedule
+                </SectionTitle>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label
+                      htmlFor="clock-frequency"
+                      className="text-xs font-medium text-muted-foreground"
+                    >
+                      Frequency
+                    </Label>
+                    <Select
+                      value={String(scheduleConfig.clockFrequencyHours || 24)}
+                      onValueChange={(value) =>
+                        onScheduleChange({
+                          ...scheduleConfig,
+                          scheduleMode: "clock",
+                          clockFrequencyHours: parseInt(value, 10),
+                          startTime: scheduleConfig.startTime || "22:00",
+                          timezone: effectiveTimezone,
+                        })
+                      }
+                    >
+                      <SelectTrigger id="clock-frequency" className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {clockFrequencies.map((option) => (
+                          <SelectItem
+                            key={option.value}
+                            value={option.value.toString()}
+                          >
+                            {option.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
 
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="space-y-1.5">
-                      <Label
-                        htmlFor="clock-frequency"
-                        className="text-xs font-medium uppercase tracking-wide text-muted-foreground"
-                      >
-                        Frequency
-                      </Label>
-                      <Select
-                        value={String(scheduleConfig.clockFrequencyHours || 24)}
-                        onValueChange={(value) =>
+                  <div className="space-y-1.5">
+                    <Label
+                      htmlFor="clock-start-time"
+                      className="text-xs font-medium text-muted-foreground"
+                    >
+                      Start time
+                    </Label>
+                    <div className="relative">
+                      <div className="text-muted-foreground pointer-events-none absolute inset-y-0 left-0 flex items-center justify-center pl-3">
+                        <Clock className="size-4" />
+                      </div>
+                      <Input
+                        id="clock-start-time"
+                        type="time"
+                        value={scheduleConfig.startTime || "22:00"}
+                        onChange={(event) =>
                           onScheduleChange({
                             ...scheduleConfig,
                             scheduleMode: "clock",
-                            clockFrequencyHours: parseInt(value, 10),
-                            startTime: scheduleConfig.startTime || "22:00",
+                            startTime: event.target.value,
+                            clockFrequencyHours:
+                              scheduleConfig.clockFrequencyHours || 24,
                             timezone: effectiveTimezone,
                           })
                         }
-                      >
-                        <SelectTrigger id="clock-frequency" className="w-full">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {clockFrequencies.map((option) => (
-                            <SelectItem
-                              key={option.value}
-                              value={option.value.toString()}
-                            >
-                              {option.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <Label
-                        htmlFor="clock-start-time"
-                        className="text-xs font-medium uppercase tracking-wide text-muted-foreground"
-                      >
-                        Start time
-                      </Label>
-                      <div className="relative">
-                        <div className="text-muted-foreground pointer-events-none absolute inset-y-0 left-0 flex items-center justify-center pl-3">
-                          <Clock className="size-4" />
-                        </div>
-                        <Input
-                          id="clock-start-time"
-                          type="time"
-                          value={scheduleConfig.startTime || "22:00"}
-                          onChange={(event) =>
-                            onScheduleChange({
-                              ...scheduleConfig,
-                              scheduleMode: "clock",
-                              startTime: event.target.value,
-                              clockFrequencyHours:
-                                scheduleConfig.clockFrequencyHours || 24,
-                              timezone: effectiveTimezone,
-                            })
-                          }
-                          className="appearance-none pl-9 dark:bg-input/30 [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none"
-                        />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-start space-x-3 pt-1">
-                    <Checkbox
-                      id="enable-auto-mirror-new"
-                      checked={scheduleConfig.autoMirror ?? false}
-                      className="mt-1.25"
-                      onCheckedChange={(checked) =>
-                        onScheduleChange({
-                          ...scheduleConfig,
-                          autoMirror: !!checked,
-                        })
-                      }
-                    />
-                    <div className="space-y-0.5 flex-1">
-                      <Label
-                        htmlFor="enable-auto-mirror-new"
-                        className="text-sm font-normal cursor-pointer"
-                      >
-                        Auto-mirror new repositories
-                      </Label>
-                      <p className="text-xs text-muted-foreground">
-                        Automatically mirror newly imported repositories on each scheduled sync. When off, new repos are imported for browsing but require a manual mirror click. (Starred repos have their own toggle in GitHub settings.)
-                      </p>
+                        className="appearance-none pl-9 dark:bg-input/30 [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none"
+                      />
                     </div>
                   </div>
                 </div>
-              )}
-
-              <div className="mt-auto flex items-center justify-between border-t border-border/50 pt-3 text-xs text-muted-foreground">
-                <span className="flex items-center gap-1.5">
-                  <Clock className="h-3.5 w-3.5" />
-                  Last sync{" "}
-                  <span className="font-medium">
-                    {scheduleConfig.lastRun
-                      ? formatDate(scheduleConfig.lastRun)
-                      : "Never"}
-                  </span>
-                </span>
-                {scheduleConfig.enabled ? (
-                  <span className="flex items-center gap-1.5">
-                    <Calendar className="h-3.5 w-3.5" />
-                    Next sync{" "}
-                    <span className="font-medium text-primary">
-                      {scheduleConfig.nextRun
-                        ? formatDate(scheduleConfig.nextRun)
-                        : nextScheduledRun
-                          ? formatDate(nextScheduledRun)
-                          : "Calculating..."}
-                    </span>
-                  </span>
-                ) : (
-                  <span>Enable syncing to schedule updates</span>
-                )}
-              </div>
-        </div>
-      </div>
-
-      {/* Database Cleanup Section */}
-      <div className="flex flex-col gap-4 p-4 border border-border rounded-lg bg-card/50">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-medium flex items-center gap-2">
-            <Database className="h-4 w-4 text-primary" />
-            Database Maintenance
-          </h3>
-              {isAutoSavingCleanup && (
-                <Activity className="h-4 w-4 animate-spin text-muted-foreground" />
-              )}
-            </div>
-
-            <div className="flex-1 flex flex-col gap-4">
-              <div className="flex items-start space-x-3">
-                <Checkbox
-                  id="enable-auto-cleanup"
-                  checked={cleanupConfig.enabled}
-                  className="mt-1.25"
+              </CardSection>
+              <CardDivider />
+              <CardSection>
+                <SwitchRow
+                  label="Auto-mirror new repositories"
+                  description="Mirror repos discovered during sync automatically"
+                  info="When off, newly discovered repos are imported for browsing and wait for a manual mirror click. Starred repos have their own toggle in GitHub settings."
+                  checked={scheduleConfig.autoMirror ?? false}
                   onCheckedChange={(checked) =>
-                    onCleanupChange({ ...cleanupConfig, enabled: !!checked })
+                    onScheduleChange({ ...scheduleConfig, autoMirror: checked })
                   }
                 />
-                <div className="space-y-0.5 flex-1">
-                  <Label
-                    htmlFor="enable-auto-cleanup"
-                    className="text-sm font-normal cursor-pointer"
-                  >
-                    Enable automatic database cleanup
-                  </Label>
-                  <p className="text-xs text-muted-foreground">
-                    Remove old activity logs to optimize storage
-                  </p>
-                </div>
-              </div>
-
-              {cleanupConfig.enabled && (
-                <div className="space-y-5">
-                  <div className="space-y-2">
-                    <Label htmlFor="retention-period" className="text-sm flex items-center gap-2">
-                      Data retention period
-                      <TooltipProvider>
-                        <Tooltip>
-                          <TooltipTrigger>
-                            <Info className="h-3 w-3 text-muted-foreground" />
-                          </TooltipTrigger>
-                          <TooltipContent side="top" className="max-w-xs">
-                            <p className="text-xs">
-                              Activity logs and events older than this will be removed. 
-                              Cleanup frequency is automatically optimized based on your retention period.
-                            </p>
-                          </TooltipContent>
-                        </Tooltip>
-                      </TooltipProvider>
-                    </Label>
-                    <div className="flex items-center gap-3 mt-1.5">
-                      <Select
-                        value={cleanupConfig.retentionDays.toString()}
-                        onValueChange={(value) =>
-                          onCleanupChange({
-                            ...cleanupConfig,
-                            retentionDays: parseInt(value, 10),
-                          })
-                        }
-                      >
-                        <SelectTrigger id="retention-period" className="w-40">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {retentionPeriods.map((option) => (
-                            <SelectItem
-                              key={option.value}
-                              value={option.value.toString()}
-                            >
-                              {option.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <p className="text-xs text-muted-foreground">
-                        Cleanup runs {getCleanupFrequencyText(cleanupConfig.retentionDays)}
-                      </p>
-                    </div>
-                  </div>
-
-                </div>
-              )}
-
-              <div className="mt-auto space-y-2 pt-3 border-t border-border/50">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="flex items-center gap-1.5">
-                    <Clock className="h-3.5 w-3.5" />
-                    Last cleanup
-                  </span>
-                  <span className="font-medium text-muted-foreground">
-                    {cleanupConfig.lastRun
-                      ? formatDate(cleanupConfig.lastRun)
-                      : "Never"}
-                  </span>
-                </div>
-                {cleanupConfig.enabled ? (
-                  cleanupConfig.nextRun && (
-                    <div className="flex items-center justify-between text-xs">
-                      <span className="flex items-center gap-1.5">
-                        <Calendar className="h-3.5 w-3.5" />
-                        Next cleanup
-                      </span>
-                      <span className="font-medium">
-                        {formatDate(cleanupConfig.nextRun)}
-                      </span>
-                    </div>
-                  )
-                ) : (
-                  <div className="text-xs text-muted-foreground">
-                    Enable automatic cleanup to optimize database storage
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Repository Cleanup Section */}
-      <div className="space-y-4 p-4 border border-border rounded-lg bg-card/50 md:col-span-2">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-medium flex items-center gap-2">
-            <Archive className="h-4 w-4 text-primary" />
-            Repository Cleanup (orphaned mirrors)
-          </h3>
-          {isAutoSavingCleanup && (
-            <Activity className="h-4 w-4 animate-spin text-muted-foreground" />
+              </CardSection>
+            </>
           )}
-        </div>
+        </SettingsCard>
 
-        <div className="space-y-4">
-          <div className="flex items-start space-x-3">
-            <Checkbox
-              id="cleanup-handle-orphans"
-              checked={Boolean(cleanupConfig.deleteIfNotInGitHub)}
-              className="mt-1.25"
-              onCheckedChange={(checked) =>
-                onCleanupChange({
-                  ...cleanupConfig,
-                  deleteIfNotInGitHub: Boolean(checked),
-                })
-              }
-            />
-            <div className="space-y-0.5 flex-1">
-              <Label
-                htmlFor="cleanup-handle-orphans"
-                className="text-sm font-normal cursor-pointer"
+        {/* Database Maintenance */}
+        <SettingsCard
+          icon={Database}
+          title="Database Maintenance"
+          enabled={cleanupConfig.enabled}
+          onEnabledChange={(checked) =>
+            onCleanupChange({ ...cleanupConfig, enabled: checked })
+          }
+          headerAction={savingSpinner(isAutoSavingCleanup)}
+          className="md:h-full"
+          footer={
+            <>
+              <StatusFooterItem
+                icon={History}
+                label="Last cleanup"
+                value={
+                  cleanupConfig.lastRun
+                    ? formatDate(cleanupConfig.lastRun)
+                    : "Never"
+                }
+              />
+              {cleanupConfig.enabled && cleanupConfig.nextRun ? (
+                <StatusFooterItem
+                  icon={Calendar}
+                  label="Next cleanup"
+                  value={formatDate(cleanupConfig.nextRun)}
+                  valueClassName="text-indigo-500"
+                />
+              ) : (
+                <span className="text-xs text-muted-foreground/70">
+                  Old activity logs are removed automatically
+                </span>
+              )}
+            </>
+          }
+        >
+          {cleanupConfig.enabled && (
+            <CardSection>
+              <SectionTitle
+                action={
+                  <InfoNote text="Activity logs and events older than the retention period are removed. Cleanup frequency adapts to the period you pick." />
+                }
               >
-                Handle orphaned repositories automatically
-              </Label>
-              <p className="text-xs text-muted-foreground">
-                Keep your Gitea backups when GitHub repos disappear. Archive is the safest option—it preserves data and disables automatic syncs.
-              </p>
-            </div>
-          </div>
-
-          {cleanupConfig.deleteIfNotInGitHub && (
-            <div className="space-y-3 ml-6">
-              <div className="space-y-1">
-                <Label htmlFor="cleanup-orphaned-action" className="text-sm font-medium">
-                  Action for orphaned repositories
-                </Label>
+                Data retention
+              </SectionTitle>
+              <div className="flex items-center gap-3">
                 <Select
-                  value={cleanupConfig.orphanedRepoAction ?? "archive"}
+                  value={cleanupConfig.retentionDays.toString()}
                   onValueChange={(value) =>
                     onCleanupChange({
                       ...cleanupConfig,
-                      orphanedRepoAction: value as DatabaseCleanupConfig["orphanedRepoAction"],
+                      retentionDays: parseInt(value, 10),
                     })
                   }
                 >
-                  <SelectTrigger id="cleanup-orphaned-action">
+                  <SelectTrigger id="retention-period" className="w-40">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="archive">Archive (preserve data)</SelectItem>
-                    <SelectItem value="skip">Skip (leave as-is)</SelectItem>
-                    <SelectItem value="delete">Delete from Gitea</SelectItem>
+                    {retentionPeriods.map((option) => (
+                      <SelectItem
+                        key={option.value}
+                        value={option.value.toString()}
+                      >
+                        {option.label}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
-                  Archive renames mirror backups with an <code>archived-</code> prefix and disables automatic syncs—use Manual Sync when you want to refresh.
+                  Cleanup runs {getCleanupFrequencyText(cleanupConfig.retentionDays)}
                 </p>
               </div>
-
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label
-                    htmlFor="cleanup-dry-run"
-                    className="text-sm font-normal cursor-pointer"
-                  >
-                    Dry run (log only)
-                  </Label>
-                  <p className="text-xs text-muted-foreground max-w-xl">
-                    When enabled, cleanup logs the planned action without modifying repositories.
-                  </p>
-                </div>
-                <Switch
-                  id="cleanup-dry-run"
-                  checked={Boolean(cleanupConfig.dryRun)}
-                  onCheckedChange={(checked) =>
-                    onCleanupChange({
-                      ...cleanupConfig,
-                      dryRun: Boolean(checked),
-                    })
-                  }
-                />
-              </div>
-            </div>
+            </CardSection>
           )}
-        </div>
+        </SettingsCard>
       </div>
+
+      {/* Repository Cleanup */}
+      <SettingsCard
+        icon={ArchiveRestore}
+        title="Repository Cleanup"
+        enabled={Boolean(cleanupConfig.deleteIfNotInGitHub)}
+        onEnabledChange={(checked) =>
+          onCleanupChange({ ...cleanupConfig, deleteIfNotInGitHub: checked })
+        }
+        headerAction={savingSpinner(isAutoSavingCleanup)}
+        footer={
+          <StatusFooterItem
+            icon={Info}
+            label="Runs as part of each scheduled sync"
+          />
+        }
+      >
+        {cleanupConfig.deleteIfNotInGitHub && (
+          <>
+            <CardSection>
+              <SectionTitle>When a GitHub repo is deleted</SectionTitle>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                {orphanActions.map((action) => (
+                  <OptionTile
+                    key={action.value}
+                    icon={action.icon}
+                    label={action.label}
+                    description={action.description}
+                    info={action.info}
+                    selected={
+                      (cleanupConfig.orphanedRepoAction ?? "archive") ===
+                      action.value
+                    }
+                    onSelect={() =>
+                      onCleanupChange({
+                        ...cleanupConfig,
+                        orphanedRepoAction: action.value,
+                      })
+                    }
+                  />
+                ))}
+              </div>
+            </CardSection>
+            <CardDivider />
+            <CardSection>
+              <SwitchRow
+                label="Dry run"
+                description="Log planned actions without changing anything"
+                checked={Boolean(cleanupConfig.dryRun)}
+                onCheckedChange={(checked) =>
+                  onCleanupChange({ ...cleanupConfig, dryRun: checked })
+                }
+              />
+            </CardSection>
+          </>
+        )}
+      </SettingsCard>
     </div>
-  </CardContent>
-    </Card>
+  );
+}
+
+function InfoNote({ text }: { text: string }) {
+  return (
+    <span className="max-w-[220px] text-right text-[11px] leading-snug text-muted-foreground/70">
+      {text}
+    </span>
   );
 }

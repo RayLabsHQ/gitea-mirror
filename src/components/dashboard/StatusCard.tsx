@@ -1,4 +1,3 @@
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 
 interface StatusCardProps {
@@ -17,17 +16,22 @@ export function StatusCard({
   className,
 }: StatusCardProps) {
   return (
-    <Card className={cn("overflow-hidden", className)}>
-      <CardHeader className="flex flex-row items-center justify-between pb-2 space-y-0">
-        <CardTitle className="text-sm font-medium">{title}</CardTitle>
-        <div className="h-4 w-4 text-muted-foreground">{icon}</div>
-      </CardHeader>
-      <CardContent>
-        <div className="text-2xl font-bold">{value}</div>
-        {description && (
-          <p className="text-xs text-muted-foreground mt-1">{description}</p>
-        )}
-      </CardContent>
-    </Card>
+    <div
+      className={cn(
+        "flex flex-col gap-2.5 rounded-xl border border-border bg-card p-5",
+        className
+      )}
+    >
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-medium text-muted-foreground">
+          {title}
+        </span>
+        <span className="text-muted-foreground/60">{icon}</span>
+      </div>
+      <div className="text-2xl font-semibold leading-none">{value}</div>
+      {description && (
+        <p className="text-xs text-muted-foreground/80">{description}</p>
+      )}
+    </div>
   );
 }

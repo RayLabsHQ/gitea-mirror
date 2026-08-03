@@ -17,9 +17,12 @@ export function RecentActivity({ activities }: RecentActivityProps) {
   return (
     <Card className="w-full">
       <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle>Recent Activity</CardTitle>
-        <Button variant="outline" asChild>
-          <a href={withBase("/activity")}>View All</a>
+        <CardTitle className="flex items-center gap-3 text-base font-semibold">
+          <Activity className="h-5 w-5 text-muted-foreground" />
+          Recent Activity
+        </CardTitle>
+        <Button variant="ghost" size="sm" asChild className="text-indigo-500 hover:text-indigo-600">
+          <a href={withBase("/activity")}>View all</a>
         </Button>
       </CardHeader>
       <CardContent>

@@ -50,16 +50,13 @@ export const OrganizationConfiguration: React.FC<OrganizationConfigurationProps>
 
   return (
     <div className="space-y-4">
-      <div>
-        <h4 className="text-sm font-medium mb-3 flex items-center gap-2">
-          <MonitorCog className="h-4 w-4" />
-          Organization Configuration
-        </h4>
-      </div>
+      <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+        Organization configuration
+      </span>
 
       <div className="space-y-2">
-        <Label className="text-sm font-normal flex items-center gap-2">
-          Starred Repository Destination
+        <Label className="text-xs font-medium text-muted-foreground flex items-center gap-2">
+          Starred repository destination
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger>
@@ -71,43 +68,43 @@ export const OrganizationConfiguration: React.FC<OrganizationConfigurationProps>
             </Tooltip>
           </TooltipProvider>
         </Label>
-        <div className="rounded-lg border bg-muted/20 p-2">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={() => onStarredReposModeChange("dedicated-org")}
-              aria-pressed={activeStarredMode === "dedicated-org"}
-              className={cn(
-                "text-left px-3 py-2 rounded-md border text-sm transition-all",
-                activeStarredMode === "dedicated-org"
-                  ? "bg-accent border-accent-foreground/30 ring-1 ring-accent-foreground/20 font-medium shadow-sm"
-                  : "bg-background hover:bg-accent/50 border-input"
-              )}
-            >
-              Dedicated Organization
-            </button>
-            <button
-              type="button"
-              onClick={() => onStarredReposModeChange("preserve-owner")}
-              aria-pressed={activeStarredMode === "preserve-owner"}
-              className={cn(
-                "text-left px-3 py-2 rounded-md border text-sm transition-all",
-                activeStarredMode === "preserve-owner"
-                  ? "bg-accent border-accent-foreground/30 ring-1 ring-accent-foreground/20 font-medium shadow-sm"
-                  : "bg-background hover:bg-accent/50 border-input"
-              )}
-            >
-              Preserve Source Owner/Org
-            </button>
-          </div>
-          <p className="mt-2 px-1 text-xs text-muted-foreground">
-            {
+        <div className="flex w-full gap-1 rounded-lg bg-muted p-1" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeStarredMode === "dedicated-org"}
+            onClick={() => onStarredReposModeChange("dedicated-org")}
+            className={cn(
+              "flex h-8 flex-1 items-center justify-center rounded-md text-xs transition-colors",
               activeStarredMode === "dedicated-org"
-                ? "All starred repositories go to a single destination organization."
-                : "Starred repositories keep their original GitHub Owner/Org destination."
-            }
-          </p>
+                ? "bg-background font-medium text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            Dedicated organization
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeStarredMode === "preserve-owner"}
+            onClick={() => onStarredReposModeChange("preserve-owner")}
+            className={cn(
+              "flex h-8 flex-1 items-center justify-center rounded-md text-xs transition-colors",
+              activeStarredMode === "preserve-owner"
+                ? "bg-background font-medium text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            Preserve source owner
+          </button>
         </div>
+        <p className="text-[11px] text-muted-foreground/80">
+          {
+            activeStarredMode === "dedicated-org"
+              ? "All starred repositories go to a single destination organization"
+              : "Starred repositories keep their original GitHub Owner/Org destination"
+          }
+        </p>
       </div>
 
       {/* First row - Organization inputs */}
@@ -199,7 +196,7 @@ export const OrganizationConfiguration: React.FC<OrganizationConfigurationProps>
             </Tooltip>
           </TooltipProvider>
         </Label>
-        <div className="grid grid-cols-3 gap-2">
+        <div className="flex w-full gap-1 rounded-lg bg-muted p-1" role="tablist">
           {visibilityOptions.map((option) => {
             const Icon = option.icon;
             const isSelected = visibility === option.value;
@@ -209,20 +206,18 @@ export const OrganizationConfiguration: React.FC<OrganizationConfigurationProps>
                   <TooltipTrigger asChild>
                     <button
                       type="button"
+                      role="tab"
+                      aria-selected={isSelected}
                       onClick={() => onVisibilityChange(option.value)}
                       className={cn(
-                        "flex items-center justify-between px-3 py-2 rounded-md text-sm transition-all",
-                        "border group",
+                        "flex h-8 flex-1 items-center justify-center gap-1.5 rounded-md text-xs transition-colors",
                         isSelected
-                          ? "bg-accent border-accent-foreground/20"
-                          : "bg-background hover:bg-accent/50 border-input"
+                          ? "bg-background font-medium text-foreground shadow-sm"
+                          : "text-muted-foreground hover:text-foreground"
                       )}
                     >
-                      <div className="flex items-center gap-2">
-                        <Icon className="h-3.5 w-3.5" />
-                        <span>{option.label}</span>
-                      </div>
-                      <Info className="h-3 w-3 text-muted-foreground opacity-50 group-hover:opacity-100 transition-opacity hidden sm:inline-block" />
+                      <Icon className="h-3 w-3" />
+                      {option.label}
                     </button>
                   </TooltipTrigger>
                   <TooltipContent>

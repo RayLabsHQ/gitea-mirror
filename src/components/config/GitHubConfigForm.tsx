@@ -1,24 +1,34 @@
 import React, { useState } from "react";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { githubApi } from "@/lib/api";
 import type { GitHubConfig, MirrorOptions, AdvancedOptions, GiteaConfig, BackupStrategy } from "@/types/config";
 import { Input } from "../ui/input";
+import { Label } from "../ui/label";
 import { toast } from "sonner";
-import { Info, ShieldAlert } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
-import { GitHubMirrorSettings } from "./GitHubMirrorSettings";
-import { Separator } from "../ui/separator";
 import {
-  HoverCard,
-  HoverCardContent,
-  HoverCardTrigger,
-} from "@/components/ui/hover-card";
+  Activity,
+  Archive,
+  CircleOff,
+  DatabaseBackup,
+  ExternalLink,
+  Hand,
+  KeyRound,
+  PlugZap,
+  ShieldAlert,
+  ShieldCheck,
+  Sparkles,
+} from "lucide-react";
+import { SiGithub } from "react-icons/si";
+import { GitHubMirrorSettings } from "./GitHubMirrorSettings";
+import {
+  SettingsCard,
+  SectionTitle,
+  SwitchRow,
+  OptionTile,
+  StatusFooterItem,
+  CardDivider,
+  CardSection,
+} from "./settings-ui";
 
 interface GitHubConfigFormProps {
   config: GitHubConfig;
@@ -36,7 +46,38 @@ interface GitHubConfigFormProps {
   isAutoSaving?: boolean;
 }
 
-export function GitHubConfigForm({ 
+const backupStrategies = [
+  {
+    value: "disabled" as const,
+    label: "Disabled",
+    description: "Force-pushes sync straight through",
+    icon: CircleOff,
+    info: "No detection or backups. Rewritten upstream history overwrites your mirror.",
+  },
+  {
+    value: "always" as const,
+    label: "Always Backup",
+    description: "Snapshot before every sync",
+    icon: DatabaseBackup,
+    info: "Maximum safety at the cost of disk usage.",
+  },
+  {
+    value: "on-force-push" as const,
+    label: "Smart",
+    description: "Snapshot only on history rewrites",
+    icon: Sparkles,
+    info: "Backs up only when a force-push is detected.",
+  },
+  {
+    value: "block-on-force-push" as const,
+    label: "Block & Approve",
+    description: "Hold sync until you approve",
+    icon: Hand,
+    info: "Force-pushed repos pause syncing until you approve the update.",
+  },
+];
+
+export function GitHubConfigForm({
   config,
   setConfig,
   mirrorOptions,
@@ -93,289 +134,254 @@ export function GitHubConfigForm({
     }
   };
 
+  const updateGitea = (newConfig: GiteaConfig) => {
+    if (!setGiteaConfig) return;
+    setGiteaConfig(newConfig);
+    if (onGiteaAutoSave) onGiteaAutoSave(newConfig);
+  };
+
+  const backupStrategy = giteaConfig?.backupStrategy ?? "on-force-push";
+
   return (
-    <Card className="w-full h-full flex flex-col">
-      <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <CardTitle className="text-lg font-semibold">
-          GitHub Configuration
-        </CardTitle>
-        {/* Desktop: Show button in header */}
-        <Button
-          type="button"
-          variant="default"
-          onClick={testConnection}
-          disabled={isLoading || !config.token}
-          className="hidden sm:inline-flex"
-        >
-          {isLoading ? "Testing..." : "Test Connection"}
-        </Button>
-      </CardHeader>
-
-      <CardContent className="flex flex-col gap-y-6 flex-1">
-        <div>
-          <label
-            htmlFor="github-username"
-            className="block text-sm font-medium mb-1.5"
-          >
-            GitHub Username
-          </label>
-          <Input
-            id="github-username"
-            name="username"
-            type="text"
-            value={config.username}
-            onChange={handleChange}
-            placeholder="Your GitHub username"
-            required
-            className="bg-background"
-          />
-        </div>
-
-        <div>
-          <div className="flex items-center gap-2 mb-1.5">
-            <label
-              htmlFor="github-token"
-              className="block text-sm font-medium"
+    <div className="flex flex-col gap-6">
+      {/* GitHub Connection */}
+      <SettingsCard
+        icon={SiGithub}
+        title="GitHub Connection"
+        headerAction={
+          <div className="flex items-center gap-3">
+            {isAutoSaving && (
+              <Activity className="h-4 w-4 animate-spin text-muted-foreground" />
+            )}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={testConnection}
+              disabled={isLoading || !config.token}
             >
-              GitHub Token
-            </label>
-            <HoverCard openDelay={200}>
-              <HoverCardTrigger asChild>
-                <span className="inline-flex p-0.5 hover:bg-muted rounded-sm transition-colors cursor-help">
-                  <Info className="h-3.5 w-3.5 text-muted-foreground" />
-                </span>
-              </HoverCardTrigger>
-              <HoverCardContent side="right" align="start" className="w-80">
-                <div className="space-y-2">
-                  <h4 className="font-medium text-sm">GitHub Token Requirements</h4>
-                  <div className="text-sm space-y-2">
-                    <p>
-                      You need to create a <span className="font-medium">Classic GitHub PAT Token</span> with the following scopes:
+              <PlugZap className="mr-1.5 h-3.5 w-3.5" />
+              {isLoading ? "Testing..." : "Test"}
+            </Button>
+          </div>
+        }
+        footer={
+          <StatusFooterItem
+            icon={ShieldCheck}
+            label="Required scopes:"
+            value="repo, admin:org"
+          />
+        }
+      >
+        <CardSection>
+          <div className="space-y-1.5">
+            <Label
+              htmlFor="github-username"
+              className="text-xs font-medium text-muted-foreground"
+            >
+              Username
+            </Label>
+            <Input
+              id="github-username"
+              name="username"
+              type="text"
+              value={config.username}
+              onChange={handleChange}
+              placeholder="Your GitHub username"
+              required
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label
+              htmlFor="github-token"
+              className="text-xs font-medium text-muted-foreground"
+            >
+              Personal access token
+            </Label>
+            <Input
+              id="github-token"
+              name="token"
+              type="password"
+              value={config.token}
+              onChange={handleChange}
+              placeholder="Your GitHub token (classic)"
+            />
+            <p className="text-[11px] text-muted-foreground/80">
+              Needed for private repos, organizations, and starred repositories
+            </p>
+          </div>
+
+          <div className="space-y-2.5 rounded-lg bg-muted/40 p-3.5">
+            <div className="flex items-center gap-2">
+              <KeyRound className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="text-xs font-semibold text-muted-foreground">
+                Creating your token
+              </span>
+            </div>
+            <ol className="list-decimal space-y-1 pl-4 text-[11px] leading-relaxed text-muted-foreground">
+              <li>GitHub → Settings → Developer settings</li>
+              <li>Personal access tokens → Generate new token (classic)</li>
+              <li>Select the scopes below and paste the token here</li>
+            </ol>
+            <div className="flex items-center gap-2">
+              <code className="rounded bg-muted px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
+                repo
+              </code>
+              <code className="rounded bg-muted px-2 py-0.5 font-mono text-[10px] text-muted-foreground">
+                admin:org
+              </code>
+            </div>
+            <a
+              href="https://github.com/settings/tokens"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-[11px] font-medium text-indigo-500 hover:underline"
+            >
+              <ExternalLink className="h-3 w-3" />
+              Open github.com/settings/tokens
+            </a>
+          </div>
+        </CardSection>
+      </SettingsCard>
+
+      <GitHubMirrorSettings
+        githubConfig={config}
+        mirrorOptions={mirrorOptions}
+        advancedOptions={advancedOptions}
+        onGitHubConfigChange={(newConfig) => {
+          setConfig(newConfig);
+          if (onAutoSave) onAutoSave(newConfig);
+        }}
+        onMirrorOptionsChange={(newOptions) => {
+          setMirrorOptions(newOptions);
+          if (onMirrorOptionsAutoSave) onMirrorOptionsAutoSave(newOptions);
+        }}
+        onAdvancedOptionsChange={(newOptions) => {
+          setAdvancedOptions(newOptions);
+          if (onAdvancedOptionsAutoSave) onAdvancedOptionsAutoSave(newOptions);
+        }}
+      />
+
+      {/* Destructive Update Protection */}
+      {giteaConfig && setGiteaConfig && (
+        <SettingsCard
+          icon={ShieldAlert}
+          title="Destructive Update Protection"
+          footer={
+            <StatusFooterItem
+              icon={ShieldCheck}
+              label="Applies to Always Backup and Smart modes"
+            />
+          }
+        >
+          <CardSection>
+            <SectionTitle>How to handle force-pushes on GitHub</SectionTitle>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              {backupStrategies.map((opt) => (
+                <OptionTile
+                  key={opt.value}
+                  icon={opt.icon}
+                  label={opt.label}
+                  description={opt.description}
+                  info={opt.info}
+                  selected={backupStrategy === opt.value}
+                  onSelect={() =>
+                    updateGitea({
+                      ...giteaConfig,
+                      backupStrategy: opt.value as BackupStrategy,
+                    })
+                  }
+                />
+              ))}
+            </div>
+          </CardSection>
+
+          {backupStrategy !== "disabled" && (
+            <>
+              <CardDivider />
+              <CardSection>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                  <div className="space-y-1.5">
+                    <Label
+                      htmlFor="backup-retention"
+                      className="text-xs font-medium text-muted-foreground"
+                    >
+                      Snapshot retention count
+                    </Label>
+                    <Input
+                      id="backup-retention"
+                      name="backupRetentionCount"
+                      type="number"
+                      min={1}
+                      value={giteaConfig.backupRetentionCount ?? 5}
+                      onChange={(e) =>
+                        updateGitea({
+                          ...giteaConfig,
+                          backupRetentionCount: Math.max(1, Number.parseInt(e.target.value, 10) || 5),
+                        })
+                      }
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label
+                      htmlFor="backup-retention-days"
+                      className="text-xs font-medium text-muted-foreground"
+                    >
+                      Snapshot retention days
+                    </Label>
+                    <Input
+                      id="backup-retention-days"
+                      name="backupRetentionDays"
+                      type="number"
+                      min={0}
+                      value={giteaConfig.backupRetentionDays ?? 30}
+                      onChange={(e) =>
+                        updateGitea({
+                          ...giteaConfig,
+                          backupRetentionDays: Math.max(0, Number.parseInt(e.target.value, 10) || 0),
+                        })
+                      }
+                    />
+                    <p className="text-[11px] text-muted-foreground/80">
+                      0 = no time-based limit
                     </p>
-                    <ul className="ml-4 space-y-1 list-disc">
-                      <li><code className="text-xs bg-muted px-1 py-0.5 rounded">repo</code></li>
-                      <li><code className="text-xs bg-muted px-1 py-0.5 rounded">admin:org</code></li>
-                    </ul>
-                    <p className="text-muted-foreground">
-                      The organization access is required for mirroring organization repositories.
-                    </p>
-                    <p>
-                      Generate tokens at{" "}
-                      <a
-                        href="https://github.com/settings/tokens"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-primary hover:underline font-medium"
-                      >
-                        github.com/settings/tokens
-                      </a>
-                    </p>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label
+                      htmlFor="backup-directory"
+                      className="text-xs font-medium text-muted-foreground"
+                    >
+                      Snapshot directory
+                    </Label>
+                    <Input
+                      id="backup-directory"
+                      name="backupDirectory"
+                      type="text"
+                      value={giteaConfig.backupDirectory || "data/repo-backups"}
+                      onChange={(e) =>
+                        updateGitea({ ...giteaConfig, backupDirectory: e.target.value })
+                      }
+                      placeholder="data/repo-backups"
+                    />
                   </div>
                 </div>
-              </HoverCardContent>
-            </HoverCard>
-          </div>
-          <Input
-            id="github-token"
-            name="token"
-            type="password"
-            value={config.token}
-            onChange={handleChange}
-            className="bg-background"
-            placeholder="Your GitHub token (classic) with repo and admin:org scopes"
-          />
-          <p className="text-xs text-muted-foreground mt-1">
-            Required for private repositories, organizations, and starred
-            repositories.
-          </p>
-        </div>
 
-        <Separator />
-
-        <GitHubMirrorSettings
-          githubConfig={config}
-          mirrorOptions={mirrorOptions}
-          advancedOptions={advancedOptions}
-          onGitHubConfigChange={(newConfig) => {
-            setConfig(newConfig);
-            if (onAutoSave) onAutoSave(newConfig);
-          }}
-          onMirrorOptionsChange={(newOptions) => {
-            setMirrorOptions(newOptions);
-            if (onMirrorOptionsAutoSave) onMirrorOptionsAutoSave(newOptions);
-          }}
-          onAdvancedOptionsChange={(newOptions) => {
-            setAdvancedOptions(newOptions);
-            if (onAdvancedOptionsAutoSave) onAdvancedOptionsAutoSave(newOptions);
-          }}
-        />
-
-        {giteaConfig && setGiteaConfig && (
-          <>
-            <Separator />
-
-            <div className="space-y-4">
-              <h3 className="text-sm font-medium flex items-center gap-2">
-                <ShieldAlert className="h-4 w-4 text-primary" />
-                Destructive Update Protection
-                <Badge variant="secondary" className="ml-2 text-[10px] px-1.5 py-0">BETA</Badge>
-              </h3>
-              <p className="text-xs text-muted-foreground">
-                Choose how to handle force-pushes or rewritten upstream history on GitHub.
-              </p>
-
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                {([
-                  {
-                    value: "disabled",
-                    label: "Disabled",
-                    desc: "No detection or backups",
-                  },
-                  {
-                    value: "always",
-                    label: "Always Backup",
-                    desc: "Snapshot before every sync (high disk usage)",
-                  },
-                  {
-                    value: "on-force-push",
-                    label: "Smart",
-                    desc: "Backup only on force-push",
-                  },
-                  {
-                    value: "block-on-force-push",
-                    label: "Block & Approve",
-                    desc: "Require approval on force-push",
-                  },
-                ] as const).map((opt) => {
-                  const isSelected = (giteaConfig.backupStrategy ?? "on-force-push") === opt.value;
-                  return (
-                    <button
-                      key={opt.value}
-                      type="button"
-                      onClick={() => {
-                        const newConfig = { ...giteaConfig, backupStrategy: opt.value as BackupStrategy };
-                        setGiteaConfig(newConfig);
-                        if (onGiteaAutoSave) onGiteaAutoSave(newConfig);
-                      }}
-                      className={`flex flex-col items-start gap-1 rounded-lg border p-3 text-left text-sm transition-colors ${
-                        isSelected
-                          ? "border-primary bg-primary/5 ring-1 ring-primary"
-                          : "border-input hover:bg-accent hover:text-accent-foreground"
-                      }`}
-                    >
-                      <span className="font-medium">{opt.label}</span>
-                      <span className="text-xs text-muted-foreground">{opt.desc}</span>
-                    </button>
-                  );
-                })}
-              </div>
-
-              {(giteaConfig.backupStrategy ?? "on-force-push") !== "disabled" && (
-                <>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div>
-                      <label htmlFor="backup-retention" className="block text-sm font-medium mb-1.5">
-                        Snapshot retention count
-                      </label>
-                      <input
-                        id="backup-retention"
-                        name="backupRetentionCount"
-                        type="number"
-                        min={1}
-                        value={giteaConfig.backupRetentionCount ?? 5}
-                        onChange={(e) => {
-                          const newConfig = {
-                            ...giteaConfig,
-                            backupRetentionCount: Math.max(1, Number.parseInt(e.target.value, 10) || 5),
-                          };
-                          setGiteaConfig(newConfig);
-                          if (onGiteaAutoSave) onGiteaAutoSave(newConfig);
-                        }}
-                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                      />
-                    </div>
-                    <div>
-                      <label htmlFor="backup-retention-days" className="block text-sm font-medium mb-1.5">
-                        Snapshot retention days
-                      </label>
-                      <input
-                        id="backup-retention-days"
-                        name="backupRetentionDays"
-                        type="number"
-                        min={0}
-                        value={giteaConfig.backupRetentionDays ?? 30}
-                        onChange={(e) => {
-                          const newConfig = {
-                            ...giteaConfig,
-                            backupRetentionDays: Math.max(0, Number.parseInt(e.target.value, 10) || 0),
-                          };
-                          setGiteaConfig(newConfig);
-                          if (onGiteaAutoSave) onGiteaAutoSave(newConfig);
-                        }}
-                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                      />
-                      <p className="text-xs text-muted-foreground mt-1">0 = no time-based limit</p>
-                    </div>
-                    <div>
-                      <label htmlFor="backup-directory" className="block text-sm font-medium mb-1.5">
-                        Snapshot directory
-                      </label>
-                      <input
-                        id="backup-directory"
-                        name="backupDirectory"
-                        type="text"
-                        value={giteaConfig.backupDirectory || "data/repo-backups"}
-                        onChange={(e) => {
-                          const newConfig = { ...giteaConfig, backupDirectory: e.target.value };
-                          setGiteaConfig(newConfig);
-                          if (onGiteaAutoSave) onGiteaAutoSave(newConfig);
-                        }}
-                        className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                        placeholder="data/repo-backups"
-                      />
-                    </div>
-                  </div>
-
-                  {((giteaConfig.backupStrategy ?? "on-force-push") === "always" ||
-                    (giteaConfig.backupStrategy ?? "on-force-push") === "on-force-push") && (
-                    <label className="flex items-start gap-3 text-sm">
-                      <input
-                        name="blockSyncOnBackupFailure"
-                        type="checkbox"
-                        checked={Boolean(giteaConfig.blockSyncOnBackupFailure)}
-                        onChange={(e) => {
-                          const newConfig = { ...giteaConfig, blockSyncOnBackupFailure: e.target.checked };
-                          setGiteaConfig(newConfig);
-                          if (onGiteaAutoSave) onGiteaAutoSave(newConfig);
-                        }}
-                        className="mt-0.5 rounded border-input"
-                      />
-                      <span>
-                        Block sync when snapshot fails
-                        <p className="text-xs text-muted-foreground">
-                          Recommended for backup-first behavior. If disabled, sync continues even when snapshot creation fails.
-                        </p>
-                      </span>
-                    </label>
-                  )}
-                </>
-              )}
-            </div>
-          </>
-        )}
-
-        {/* Mobile: Show button at bottom */}
-        <Button
-          type="button"
-          variant="default"
-          onClick={testConnection}
-          disabled={isLoading || !config.token}
-          className="sm:hidden w-full"
-        >
-          {isLoading ? "Testing..." : "Test Connection"}
-        </Button>
-    </CardContent>
-
-    </Card>
+                {(backupStrategy === "always" || backupStrategy === "on-force-push") && (
+                  <SwitchRow
+                    label="Block sync when snapshot fails"
+                    description="Recommended so a failed backup never lets a destructive sync through"
+                    checked={Boolean(giteaConfig.blockSyncOnBackupFailure)}
+                    onCheckedChange={(checked) =>
+                      updateGitea({ ...giteaConfig, blockSyncOnBackupFailure: checked })
+                    }
+                  />
+                )}
+              </CardSection>
+            </>
+          )}
+        </SettingsCard>
+      )}
+    </div>
   );
 }

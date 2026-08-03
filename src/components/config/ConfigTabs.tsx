@@ -713,7 +713,7 @@ export function ConfigTabs() {
         </TabsList>
 
         <TabsContent value="connections" className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:items-stretch">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:items-start">
             <GitHubConfigForm
               config={config.githubConfig}
               setConfig={update =>

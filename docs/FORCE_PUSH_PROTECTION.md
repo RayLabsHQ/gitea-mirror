@@ -38,7 +38,7 @@ If detection itself fails (GitHub rate limits, network errors, API outages), syn
 
 ## Backup Strategies
 
-Configure via **Settings → GitHub Configuration → Destructive Update Protection**.
+Configure via **Configuration → Connections → Destructive Update Protection**.
 
 | Strategy | What It Does | Storage Cost | Best For |
 |---|---|---|---|

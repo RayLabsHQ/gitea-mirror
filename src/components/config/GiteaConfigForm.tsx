@@ -1,19 +1,20 @@
 import React, { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { AlertTriangle } from "lucide-react";
+import { Activity, AlertTriangle, Building2, Info, PlugZap, Server } from "lucide-react";
 import { giteaApi, type GiteaServerInfo } from "@/lib/api";
 import type { GiteaConfig, MirrorStrategy } from "@/types/config";
 import { toast } from "sonner";
 import { OrganizationStrategy } from "./OrganizationStrategy";
 import { OrganizationConfiguration } from "./OrganizationConfiguration";
-import { Separator } from "../ui/separator";
+import { Input } from "../ui/input";
+import { Label } from "../ui/label";
+import {
+  SettingsCard,
+  StatusFooterItem,
+  CardDivider,
+  CardSection,
+} from "./settings-ui";
 
 interface GiteaConfigFormProps {
   config: GiteaConfig;
@@ -26,7 +27,7 @@ interface GiteaConfigFormProps {
 export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, githubUsername }: GiteaConfigFormProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [serverInfo, setServerInfo] = useState<GiteaServerInfo | null>(null);
-  
+
   // Derive the mirror strategy from existing config for backward compatibility
   const getMirrorStrategy = (): MirrorStrategy => {
     if (config.mirrorStrategy) return config.mirrorStrategy;
@@ -36,13 +37,13 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
     if (config.organization && config.organization !== config.username) return "single-org";
     return "flat-user";
   };
-  
+
   const [mirrorStrategy, setMirrorStrategy] = useState<MirrorStrategy>(getMirrorStrategy());
-  
+
   // Update config when strategy changes
   useEffect(() => {
     const newConfig = { ...config };
-    
+
     switch (mirrorStrategy) {
       case "preserve":
         newConfig.preserveOrgStructure = true;
@@ -75,7 +76,7 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
         }
         break;
     }
-    
+
     setConfig(newConfig);
     if (onAutoSave) {
       onAutoSave(newConfig);
@@ -150,190 +151,204 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
   };
 
   return (
-    <Card className="w-full h-full flex flex-col">
-      <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-        <CardTitle className="text-lg font-semibold">
-          Gitea Configuration
-        </CardTitle>
-        {/* Desktop: Show button in header */}
-        <Button
-          type="button"
-          variant="default"
-          onClick={testConnection}
-          disabled={isLoading || !config.url || !config.token}
-          className="hidden sm:inline-flex"
-        >
-          {isLoading ? "Testing..." : "Test Connection"}
-        </Button>
-      </CardHeader>
-
-      <CardContent className="flex flex-col gap-y-6 flex-1">
-        {serverInfo?.type === "forgejo" && serverInfo.hasMirrorCredBug && (
-          <Alert variant="warning">
-            <AlertTriangle className="h-4 w-4" />
-            <AlertTitle>
-              Forgejo {serverInfo.version} has a known mirror-credential bug
-            </AlertTitle>
-            <AlertDescription>
-              <p>
-                Pull-mirror credentials sent via Forgejo's migrate API aren't persisted on this version, so subsequent syncs of private repos fail with <code className="text-xs font-mono bg-amber-100 dark:bg-amber-900/40 px-1 py-0.5 rounded">terminal prompts disabled</code>. Fixed in Forgejo 15.0.0 (
-                <a
-                  href="https://codeberg.org/forgejo/forgejo/pulls/11909"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="underline underline-offset-2"
-                >
-                  PR #11909
-                </a>
-                ).
-              </p>
-              <p>
-                Upgrade Forgejo to 15.0.0 or later, then delete and re-mirror affected repos — or open each repo's Settings → Mirror Settings in Forgejo and re-enter the GitHub token once.
-              </p>
-            </AlertDescription>
-          </Alert>
-        )}
-        <div>
-          <label
-            htmlFor="gitea-username"
-            className="block text-sm font-medium mb-1.5"
-          >
-            Gitea Username
-          </label>
-          <input
-            id="gitea-username"
-            name="username"
-            type="text"
-            value={config.username}
-            onChange={handleChange}
-            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-            placeholder="Your Gitea username"
-            required
+    <div className="flex flex-col gap-6">
+      {/* Gitea Connection */}
+      <SettingsCard
+        icon={Server}
+        title="Gitea Connection"
+        headerAction={
+          <div className="flex items-center gap-3">
+            {isAutoSaving && (
+              <Activity className="h-4 w-4 animate-spin text-muted-foreground" />
+            )}
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={testConnection}
+              disabled={isLoading || !config.url || !config.token}
+            >
+              <PlugZap className="mr-1.5 h-3.5 w-3.5" />
+              {isLoading ? "Testing..." : "Test"}
+            </Button>
+          </div>
+        }
+        footer={
+          <StatusFooterItem
+            icon={Info}
+            label={
+              serverInfo
+                ? `${serverInfo.type === "forgejo" ? "Forgejo" : "Gitea"} ${serverInfo.version} detected`
+                : "Test the connection to detect your server version"
+            }
           />
-        </div>
+        }
+      >
+        <CardSection>
+          {serverInfo?.type === "forgejo" && serverInfo.hasMirrorCredBug && (
+            <Alert variant="warning">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertTitle>
+                Forgejo {serverInfo.version} has a known mirror-credential bug
+              </AlertTitle>
+              <AlertDescription>
+                <p>
+                  Pull-mirror credentials sent via Forgejo's migrate API aren't persisted on this version, so subsequent syncs of private repos fail with <code className="text-xs font-mono bg-amber-100 dark:bg-amber-900/40 px-1 py-0.5 rounded">terminal prompts disabled</code>. Fixed in Forgejo 15.0.0 (
+                  <a
+                    href="https://codeberg.org/forgejo/forgejo/pulls/11909"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="underline underline-offset-2"
+                  >
+                    PR #11909
+                  </a>
+                  ).
+                </p>
+                <p>
+                  Upgrade Forgejo to 15.0.0 or later, then delete and re-mirror affected repos — or open each repo's Settings → Mirror Settings in Forgejo and re-enter the GitHub token once.
+                </p>
+              </AlertDescription>
+            </Alert>
+          )}
 
-        <div>
-          <label
-            htmlFor="gitea-url"
-            className="block text-sm font-medium mb-1.5"
-          >
-            Gitea URL
-          </label>
-          <input
-            id="gitea-url"
-            name="url"
-            type="url"
-            value={config.url}
-            onChange={handleChange}
-            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-            placeholder="https://your-gitea-instance.com"
-            required
+          <div className="space-y-1.5">
+            <Label
+              htmlFor="gitea-username"
+              className="text-xs font-medium text-muted-foreground"
+            >
+              Username
+            </Label>
+            <Input
+              id="gitea-username"
+              name="username"
+              type="text"
+              value={config.username}
+              onChange={handleChange}
+              placeholder="Your Gitea username"
+              required
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label
+              htmlFor="gitea-url"
+              className="text-xs font-medium text-muted-foreground"
+            >
+              Server URL
+            </Label>
+            <Input
+              id="gitea-url"
+              name="url"
+              type="url"
+              value={config.url}
+              onChange={handleChange}
+              placeholder="https://your-gitea-instance.com"
+              required
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label
+              htmlFor="gitea-external-url"
+              className="text-xs font-medium text-muted-foreground"
+            >
+              External URL (optional)
+            </Label>
+            <Input
+              id="gitea-external-url"
+              name="externalUrl"
+              type="url"
+              value={config.externalUrl || ""}
+              onChange={handleChange}
+              placeholder="https://gitea.example.com"
+            />
+            <p className="text-[11px] text-muted-foreground/80">
+              Dashboard links only, syncing always uses the server URL
+            </p>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label
+              htmlFor="gitea-token"
+              className="text-xs font-medium text-muted-foreground"
+            >
+              Access token
+            </Label>
+            <Input
+              id="gitea-token"
+              name="token"
+              type="password"
+              value={config.token}
+              onChange={handleChange}
+              placeholder="Your Gitea access token"
+              required
+            />
+            <p className="text-[11px] text-muted-foreground/80">
+              Create one in Gitea under Settings → Applications
+            </p>
+          </div>
+        </CardSection>
+      </SettingsCard>
+
+      {/* Organization Structure */}
+      <SettingsCard
+        icon={Building2}
+        title="Organization Structure"
+        footer={
+          <StatusFooterItem
+            icon={Info}
+            label="Strategy applies to newly mirrored repositories"
           />
-        </div>
-
-        <div>
-          <label
-            htmlFor="gitea-external-url"
-            className="block text-sm font-medium mb-1.5"
-          >
-            Gitea External URL (optional)
-          </label>
-          <input
-            id="gitea-external-url"
-            name="externalUrl"
-            type="url"
-            value={config.externalUrl || ""}
-            onChange={handleChange}
-            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-            placeholder="https://gitea.example.com"
+        }
+      >
+        <CardSection>
+          <OrganizationStrategy
+            strategy={mirrorStrategy}
+            destinationOrg={config.organization}
+            starredReposOrg={config.starredReposOrg}
+            starredReposMode={config.starredReposMode}
+            onStrategyChange={setMirrorStrategy}
+            githubUsername={githubUsername}
+            giteaUsername={config.username}
           />
-          <p className="text-xs text-muted-foreground mt-1">
-            Used only for dashboard links. API sync still uses Gitea URL.
-          </p>
-        </div>
-
-        <div>
-          <label
-            htmlFor="gitea-token"
-            className="block text-sm font-medium mb-1.5"
-          >
-            Gitea Token
-          </label>
-          <input
-            id="gitea-token"
-            name="token"
-            type="password"
-            value={config.token}
-            onChange={handleChange}
-            className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-            placeholder="Your Gitea access token"
-            required
+        </CardSection>
+        <CardDivider />
+        <CardSection>
+          <OrganizationConfiguration
+            strategy={mirrorStrategy}
+            destinationOrg={config.organization}
+            starredReposOrg={config.starredReposOrg}
+            starredReposMode={config.starredReposMode}
+            personalReposOrg={config.personalReposOrg}
+            visibility={config.visibility}
+            onDestinationOrgChange={(org) => {
+              const newConfig = { ...config, organization: org };
+              setConfig(newConfig);
+              if (onAutoSave) onAutoSave(newConfig);
+            }}
+            onStarredReposOrgChange={(org) => {
+              const newConfig = { ...config, starredReposOrg: org };
+              setConfig(newConfig);
+              if (onAutoSave) onAutoSave(newConfig);
+            }}
+            onStarredReposModeChange={(mode) => {
+              const newConfig = { ...config, starredReposMode: mode };
+              setConfig(newConfig);
+              if (onAutoSave) onAutoSave(newConfig);
+            }}
+            onPersonalReposOrgChange={(org) => {
+              const newConfig = { ...config, personalReposOrg: org };
+              setConfig(newConfig);
+              if (onAutoSave) onAutoSave(newConfig);
+            }}
+            onVisibilityChange={(visibility) => {
+              const newConfig = { ...config, visibility };
+              setConfig(newConfig);
+              if (onAutoSave) onAutoSave(newConfig);
+            }}
           />
-          <p className="text-xs text-muted-foreground mt-1">
-            Create a token in your Gitea instance under Settings &gt;
-            Applications.
-          </p>
-        </div>
-
-        <Separator />
-        
-        <OrganizationStrategy
-          strategy={mirrorStrategy}
-          destinationOrg={config.organization}
-          starredReposOrg={config.starredReposOrg}
-          starredReposMode={config.starredReposMode}
-          onStrategyChange={setMirrorStrategy}
-          githubUsername={githubUsername}
-          giteaUsername={config.username}
-        />
-        
-        <Separator />
-        
-        <OrganizationConfiguration
-          strategy={mirrorStrategy}
-          destinationOrg={config.organization}
-          starredReposOrg={config.starredReposOrg}
-          starredReposMode={config.starredReposMode}
-          personalReposOrg={config.personalReposOrg}
-          visibility={config.visibility}
-          onDestinationOrgChange={(org) => {
-            const newConfig = { ...config, organization: org };
-            setConfig(newConfig);
-            if (onAutoSave) onAutoSave(newConfig);
-          }}
-          onStarredReposOrgChange={(org) => {
-            const newConfig = { ...config, starredReposOrg: org };
-            setConfig(newConfig);
-            if (onAutoSave) onAutoSave(newConfig);
-          }}
-          onStarredReposModeChange={(mode) => {
-            const newConfig = { ...config, starredReposMode: mode };
-            setConfig(newConfig);
-            if (onAutoSave) onAutoSave(newConfig);
-          }}
-          onPersonalReposOrgChange={(org) => {
-            const newConfig = { ...config, personalReposOrg: org };
-            setConfig(newConfig);
-            if (onAutoSave) onAutoSave(newConfig);
-          }}
-          onVisibilityChange={(visibility) => {
-            const newConfig = { ...config, visibility };
-            setConfig(newConfig);
-            if (onAutoSave) onAutoSave(newConfig);
-          }}
-        />
-
-        {/* Mobile: Show button at bottom */}
-        <Button
-          type="button"
-          variant="default"
-          onClick={testConnection}
-          disabled={isLoading || !config.url || !config.token}
-          className="sm:hidden w-full"
-        >
-          {isLoading ? "Testing..." : "Test Connection"}
-        </Button>
-      </CardContent>
-    </Card>
+        </CardSection>
+      </SettingsCard>
+    </div>
   );
 }

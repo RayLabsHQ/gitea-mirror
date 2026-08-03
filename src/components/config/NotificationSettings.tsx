@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import {
@@ -9,17 +8,61 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
-import { Bell, Activity, Send } from "lucide-react";
+import { Bell, Activity, Send, Info } from "lucide-react";
 import { toast } from "sonner";
 import type { NotificationConfig } from "@/types/config";
 import { withBase } from "@/lib/base-path";
+import {
+  SettingsCard,
+  SectionTitle,
+  SwitchRow,
+  SegmentedControl,
+  StatusFooterItem,
+  CardDivider,
+  CardSection,
+} from "./settings-ui";
 
 interface NotificationSettingsProps {
   notificationConfig: NotificationConfig;
   onNotificationChange: (config: NotificationConfig) => void;
   isAutoSaving?: boolean;
+}
+
+type Provider = "ntfy" | "apprise" | "gotify" | "webhook";
+
+const providerOptions: { value: Provider; label: string }[] = [
+  { value: "ntfy", label: "Ntfy.sh" },
+  { value: "apprise", label: "Apprise" },
+  { value: "gotify", label: "Gotify" },
+  { value: "webhook", label: "Webhook" },
+];
+
+function Field({
+  id,
+  label,
+  required,
+  helper,
+  children,
+}: {
+  id: string;
+  label: string;
+  required?: boolean;
+  helper?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={id} className="text-xs font-medium text-muted-foreground">
+        {label}
+        {required && <span className="text-destructive"> *</span>}
+      </Label>
+      {children}
+      {helper && (
+        <p className="text-[11px] text-muted-foreground/80">{helper}</p>
+      )}
+    </div>
+  );
 }
 
 export function NotificationSettings({
@@ -53,71 +96,71 @@ export function NotificationSettings({
   };
 
   return (
-    <Card className="w-full">
-      <CardHeader>
-        <CardTitle className="text-lg font-semibold flex items-center gap-2">
-          <Bell className="h-5 w-5" />
-          Notifications
-          {isAutoSaving && (
-            <Activity className="h-4 w-4 animate-spin text-muted-foreground ml-2" />
-          )}
-        </CardTitle>
-      </CardHeader>
-
-      <CardContent className="space-y-6">
-        {/* Enable/disable toggle */}
-        <div className="flex items-center justify-between">
-          <div className="space-y-0.5">
-            <Label htmlFor="notifications-enabled" className="text-sm font-medium cursor-pointer">
-              Enable notifications
-            </Label>
-            <p className="text-xs text-muted-foreground">
-              Receive alerts when mirror jobs complete or fail
-            </p>
-          </div>
-          <Switch
-            id="notifications-enabled"
-            checked={notificationConfig.enabled}
-            onCheckedChange={(checked) =>
-              onNotificationChange({ ...notificationConfig, enabled: checked })
-            }
-          />
-        </div>
-
-        {notificationConfig.enabled && (
-          <>
-            {/* Provider selector */}
-            <div className="space-y-2">
-              <Label htmlFor="notification-provider" className="text-sm font-medium">
-                Notification provider
-              </Label>
-              <Select
-                value={notificationConfig.provider}
-                onValueChange={(value: "ntfy" | "apprise" | "gotify" | "webhook") =>
-                  onNotificationChange({ ...notificationConfig, provider: value })
-                }
+    <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">
+      <SettingsCard
+        icon={Bell}
+        title="Notifications"
+        enabled={notificationConfig.enabled}
+        onEnabledChange={(checked) =>
+          onNotificationChange({ ...notificationConfig, enabled: checked })
+        }
+        headerAction={
+          isAutoSaving ? (
+            <Activity className="h-4 w-4 animate-spin text-muted-foreground" />
+          ) : undefined
+        }
+        footer={
+          notificationConfig.enabled ? (
+            <>
+              <StatusFooterItem
+                icon={Info}
+                label="Sends a test message with your current settings"
+              />
+              <Button
+                size="sm"
+                onClick={handleTestNotification}
+                disabled={isTesting}
+                className="bg-indigo-500 text-white hover:bg-indigo-600"
               >
-                <SelectTrigger id="notification-provider">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="ntfy">Ntfy.sh</SelectItem>
-                  <SelectItem value="apprise">Apprise API</SelectItem>
-                  <SelectItem value="gotify">Gotify</SelectItem>
-                  <SelectItem value="webhook">Webhook</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
+                {isTesting ? (
+                  <>
+                    <Activity className="mr-2 h-3.5 w-3.5 animate-spin" />
+                    Sending...
+                  </>
+                ) : (
+                  <>
+                    <Send className="mr-2 h-3.5 w-3.5" />
+                    Send test
+                  </>
+                )}
+              </Button>
+            </>
+          ) : (
+            <StatusFooterItem
+              icon={Info}
+              label="Get alerted when mirror jobs complete or fail"
+            />
+          )
+        }
+      >
+        {notificationConfig.enabled && (
+          <CardSection>
+            <SectionTitle>Provider</SectionTitle>
+            <SegmentedControl
+              options={providerOptions}
+              value={notificationConfig.provider}
+              onChange={(value) =>
+                onNotificationChange({ ...notificationConfig, provider: value })
+              }
+            />
 
-            {/* Ntfy configuration */}
             {notificationConfig.provider === "ntfy" && (
-              <div className="space-y-4 p-4 border border-border rounded-lg bg-card/50">
-                <h3 className="text-sm font-medium">Ntfy.sh Settings</h3>
-
-                <div className="space-y-2">
-                  <Label htmlFor="ntfy-url" className="text-sm">
-                    Server URL
-                  </Label>
+              <div className="space-y-4 pt-2">
+                <Field
+                  id="ntfy-url"
+                  label="Server URL"
+                  helper="Use https://ntfy.sh for the public server or your self-hosted instance URL"
+                >
                   <Input
                     id="ntfy-url"
                     type="url"
@@ -135,15 +178,13 @@ export function NotificationSettings({
                       })
                     }
                   />
-                  <p className="text-xs text-muted-foreground">
-                    Use https://ntfy.sh for the public server or your self-hosted instance URL
-                  </p>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="ntfy-topic" className="text-sm">
-                    Topic <span className="text-destructive">*</span>
-                  </Label>
+                </Field>
+                <Field
+                  id="ntfy-topic"
+                  label="Topic"
+                  required
+                  helper="Choose a unique topic name. Anyone with the topic name can subscribe."
+                >
                   <Input
                     id="ntfy-topic"
                     placeholder="gitea-mirror"
@@ -160,15 +201,12 @@ export function NotificationSettings({
                       })
                     }
                   />
-                  <p className="text-xs text-muted-foreground">
-                    Choose a unique topic name. Anyone with the topic name can subscribe.
-                  </p>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="ntfy-token" className="text-sm">
-                    Access token (optional)
-                  </Label>
+                </Field>
+                <Field
+                  id="ntfy-token"
+                  label="Access token (optional)"
+                  helper="Required if your ntfy server uses authentication"
+                >
                   <Input
                     id="ntfy-token"
                     type="password"
@@ -187,15 +225,12 @@ export function NotificationSettings({
                       })
                     }
                   />
-                  <p className="text-xs text-muted-foreground">
-                    Required if your ntfy server uses authentication
-                  </p>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="ntfy-priority" className="text-sm">
-                    Default priority
-                  </Label>
+                </Field>
+                <Field
+                  id="ntfy-priority"
+                  label="Default priority"
+                  helper='Error notifications always use "high" priority regardless of this setting'
+                >
                   <Select
                     value={notificationConfig.ntfy?.priority || "default"}
                     onValueChange={(value: "min" | "low" | "default" | "high" | "urgent") =>
@@ -221,22 +256,18 @@ export function NotificationSettings({
                       <SelectItem value="urgent">Urgent</SelectItem>
                     </SelectContent>
                   </Select>
-                  <p className="text-xs text-muted-foreground">
-                    Error notifications always use "high" priority regardless of this setting
-                  </p>
-                </div>
+                </Field>
               </div>
             )}
 
-            {/* Apprise configuration */}
             {notificationConfig.provider === "apprise" && (
-              <div className="space-y-4 p-4 border border-border rounded-lg bg-card/50">
-                <h3 className="text-sm font-medium">Apprise API Settings</h3>
-
-                <div className="space-y-2">
-                  <Label htmlFor="apprise-url" className="text-sm">
-                    Server URL <span className="text-destructive">*</span>
-                  </Label>
+              <div className="space-y-4 pt-2">
+                <Field
+                  id="apprise-url"
+                  label="Server URL"
+                  required
+                  helper="URL of your Apprise API server (e.g., http://apprise:8000)"
+                >
                   <Input
                     id="apprise-url"
                     type="url"
@@ -253,15 +284,13 @@ export function NotificationSettings({
                       })
                     }
                   />
-                  <p className="text-xs text-muted-foreground">
-                    URL of your Apprise API server (e.g., http://apprise:8000)
-                  </p>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="apprise-token" className="text-sm">
-                    Token / path <span className="text-destructive">*</span>
-                  </Label>
+                </Field>
+                <Field
+                  id="apprise-token"
+                  label="Token / path"
+                  required
+                  helper="The Apprise API configuration token or key"
+                >
                   <Input
                     id="apprise-token"
                     placeholder="gitea-mirror"
@@ -277,15 +306,12 @@ export function NotificationSettings({
                       })
                     }
                   />
-                  <p className="text-xs text-muted-foreground">
-                    The Apprise API configuration token or key
-                  </p>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="apprise-tag" className="text-sm">
-                    Tag filter (optional)
-                  </Label>
+                </Field>
+                <Field
+                  id="apprise-tag"
+                  label="Tag filter (optional)"
+                  helper="Optional tag to filter which Apprise services receive notifications"
+                >
                   <Input
                     id="apprise-tag"
                     placeholder="all"
@@ -302,22 +328,18 @@ export function NotificationSettings({
                       })
                     }
                   />
-                  <p className="text-xs text-muted-foreground">
-                    Optional tag to filter which Apprise services receive notifications
-                  </p>
-                </div>
+                </Field>
               </div>
             )}
 
-            {/* Gotify configuration */}
             {notificationConfig.provider === "gotify" && (
-              <div className="space-y-4 p-4 border border-border rounded-lg bg-card/50">
-                <h3 className="text-sm font-medium">Gotify Settings</h3>
-
-                <div className="space-y-2">
-                  <Label htmlFor="gotify-url" className="text-sm">
-                    Server URL <span className="text-destructive">*</span>
-                  </Label>
+              <div className="space-y-4 pt-2">
+                <Field
+                  id="gotify-url"
+                  label="Server URL"
+                  required
+                  helper="URL of your Gotify server"
+                >
                   <Input
                     id="gotify-url"
                     type="url"
@@ -335,15 +357,13 @@ export function NotificationSettings({
                       })
                     }
                   />
-                  <p className="text-xs text-muted-foreground">
-                    URL of your Gotify server
-                  </p>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="gotify-token" className="text-sm">
-                    Application token <span className="text-destructive">*</span>
-                  </Label>
+                </Field>
+                <Field
+                  id="gotify-token"
+                  label="Application token"
+                  required
+                  helper="Create an application in Gotify and paste its token here"
+                >
                   <Input
                     id="gotify-token"
                     type="password"
@@ -361,15 +381,12 @@ export function NotificationSettings({
                       })
                     }
                   />
-                  <p className="text-xs text-muted-foreground">
-                    Create an application in Gotify and paste its token here
-                  </p>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="gotify-priority" className="text-sm">
-                    Default priority (0-10)
-                  </Label>
+                </Field>
+                <Field
+                  id="gotify-priority"
+                  label="Default priority (0-10)"
+                  helper="Error notifications always use priority 8 regardless of this setting"
+                >
                   <Input
                     id="gotify-priority"
                     type="number"
@@ -388,22 +405,18 @@ export function NotificationSettings({
                       })
                     }
                   />
-                  <p className="text-xs text-muted-foreground">
-                    Error notifications always use priority 8 regardless of this setting
-                  </p>
-                </div>
+                </Field>
               </div>
             )}
 
-            {/* Webhook configuration */}
             {notificationConfig.provider === "webhook" && (
-              <div className="space-y-4 p-4 border border-border rounded-lg bg-card/50">
-                <h3 className="text-sm font-medium">Webhook Settings</h3>
-
-                <div className="space-y-2">
-                  <Label htmlFor="webhook-url" className="text-sm">
-                    Webhook URL <span className="text-destructive">*</span>
-                  </Label>
+              <div className="space-y-4 pt-2">
+                <Field
+                  id="webhook-url"
+                  label="Webhook URL"
+                  required
+                  helper="Notifications are sent as a JSON POST with title, message, type, and timestamp fields"
+                >
                   <Input
                     id="webhook-url"
                     type="url"
@@ -419,15 +432,12 @@ export function NotificationSettings({
                       })
                     }
                   />
-                  <p className="text-xs text-muted-foreground">
-                    Notifications are sent as a JSON POST with title, message, type, and timestamp fields
-                  </p>
-                </div>
-
-                <div className="space-y-2">
-                  <Label htmlFor="webhook-secret" className="text-sm">
-                    Signing secret (optional)
-                  </Label>
+                </Field>
+                <Field
+                  id="webhook-secret"
+                  label="Signing secret (optional)"
+                  helper="If set, requests include an X-Webhook-Signature header with an HMAC-SHA256 hex digest of the body (sha256=...)"
+                >
                   <Input
                     id="webhook-secret"
                     type="password"
@@ -444,96 +454,69 @@ export function NotificationSettings({
                       })
                     }
                   />
-                  <p className="text-xs text-muted-foreground">
-                    If set, requests include an X-Webhook-Signature header with an HMAC-SHA256 hex digest of the body (sha256=...)
-                  </p>
-                </div>
+                </Field>
               </div>
             )}
-
-            {/* Event toggles */}
-            <div className="space-y-4 p-4 border border-border rounded-lg bg-card/50">
-              <h3 className="text-sm font-medium">Notification Events</h3>
-
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label htmlFor="notify-sync-error" className="text-sm font-normal cursor-pointer">
-                    Sync errors
-                  </Label>
-                  <p className="text-xs text-muted-foreground">
-                    Notify when a mirror job fails
-                  </p>
-                </div>
-                <Switch
-                  id="notify-sync-error"
-                  checked={notificationConfig.notifyOnSyncError}
-                  onCheckedChange={(checked) =>
-                    onNotificationChange({ ...notificationConfig, notifyOnSyncError: checked })
-                  }
-                />
-              </div>
-
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label htmlFor="notify-sync-success" className="text-sm font-normal cursor-pointer">
-                    Sync success
-                  </Label>
-                  <p className="text-xs text-muted-foreground">
-                    Notify when a mirror job completes successfully
-                  </p>
-                </div>
-                <Switch
-                  id="notify-sync-success"
-                  checked={notificationConfig.notifyOnSyncSuccess}
-                  onCheckedChange={(checked) =>
-                    onNotificationChange({ ...notificationConfig, notifyOnSyncSuccess: checked })
-                  }
-                />
-              </div>
-
-              <div className="flex items-center justify-between">
-                <div className="space-y-0.5">
-                  <Label htmlFor="notify-new-repo" className="text-sm font-normal cursor-pointer text-muted-foreground">
-                    New repository discovered (coming soon)
-                  </Label>
-                  <p className="text-xs text-muted-foreground">
-                    Notify when a new GitHub repository is auto-imported
-                  </p>
-                </div>
-                <Switch
-                  id="notify-new-repo"
-                  checked={notificationConfig.notifyOnNewRepo}
-                  disabled
-                  onCheckedChange={(checked) =>
-                    onNotificationChange({ ...notificationConfig, notifyOnNewRepo: checked })
-                  }
-                />
-              </div>
-            </div>
-
-            {/* Test button */}
-            <div className="flex justify-end">
-              <Button
-                variant="outline"
-                onClick={handleTestNotification}
-                disabled={isTesting}
-              >
-                {isTesting ? (
-                  <>
-                    <Activity className="h-4 w-4 animate-spin mr-2" />
-                    Sending...
-                  </>
-                ) : (
-                  <>
-                    <Send className="h-4 w-4 mr-2" />
-                    Send Test Notification
-                  </>
-                )}
-              </Button>
-            </div>
-          </>
+          </CardSection>
         )}
-      </CardContent>
-    </Card>
+      </SettingsCard>
+
+      {notificationConfig.enabled && (
+        <SettingsCard
+          icon={Activity}
+          title="Notification Events"
+          footer={
+            <StatusFooterItem
+              icon={Info}
+              label="Error notifications are always sent at high priority"
+            />
+          }
+        >
+          <CardSection>
+            <SwitchRow
+              label="Sync errors"
+              description="Notify when a mirror job fails"
+              checked={notificationConfig.notifyOnSyncError}
+              onCheckedChange={(checked) =>
+                onNotificationChange({
+                  ...notificationConfig,
+                  notifyOnSyncError: checked,
+                })
+              }
+            />
+          </CardSection>
+          <CardDivider />
+          <CardSection>
+            <SwitchRow
+              label="Sync success"
+              description="Notify when a mirror job completes successfully"
+              checked={notificationConfig.notifyOnSyncSuccess}
+              onCheckedChange={(checked) =>
+                onNotificationChange({
+                  ...notificationConfig,
+                  notifyOnSyncSuccess: checked,
+                })
+              }
+            />
+          </CardSection>
+          <CardDivider />
+          <CardSection>
+            <SwitchRow
+              label="New repository discovered"
+              description="Notify when a new GitHub repository is auto-imported"
+              badge="SOON"
+              checked={notificationConfig.notifyOnNewRepo}
+              disabled
+              onCheckedChange={(checked) =>
+                onNotificationChange({
+                  ...notificationConfig,
+                  notifyOnNewRepo: checked,
+                })
+              }
+            />
+          </CardSection>
+        </SettingsCard>
+      )}
+    </div>
   );
 }

@@ -8,7 +8,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { apiRequest, showErrorToast } from '@/lib/utils';
 import { toast } from 'sonner';
-import { Plus, Trash2, Loader2, AlertCircle, Shield, Edit2 } from 'lucide-react';
+import { Plus, Trash2, Loader2, AlertCircle, KeyRound, Shield, ShieldCheck, Edit2 } from 'lucide-react';
 import { Skeleton } from '../ui/skeleton';
 import { Badge } from '../ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -307,73 +307,86 @@ export function SSOSettings() {
       </div>
 
       {/* Authentication Methods Overview */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg font-semibold">Active Authentication Methods</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-3">
-            {/* Email & Password - Always enabled */}
-            <div className="flex items-center justify-between">
+      <div className="flex flex-col overflow-hidden rounded-xl border border-border bg-card">
+        <div className="flex items-center gap-3 px-6 py-4">
+          <KeyRound className="h-5 w-5 text-muted-foreground" />
+          <h3 className="text-base font-semibold">Sign-in Methods</h3>
+        </div>
+        <div className="border-t border-border" />
+        <div className="space-y-4 p-6">
+          {/* Email & Password - Always enabled */}
+          <div className="flex items-center justify-between gap-4">
+            <div className="space-y-1">
               <div className="flex items-center gap-2">
-                <div className="h-2 w-2 rounded-full bg-green-500" />
-                <span className="text-sm font-medium">Email & Password</span>
+                <span className="text-sm font-medium leading-none">Email & Password</span>
                 <Badge variant="secondary" className="text-xs">Default</Badge>
               </div>
-              <span className="text-xs text-muted-foreground">Always enabled</span>
+              <p className="text-[13px] text-muted-foreground">Built-in accounts, always available</p>
             </div>
-            
-            {/* Header Authentication Status */}
-            {headerAuthEnabled && (
-              <div className="flex items-center justify-between">
+            <span className="flex items-center gap-2 text-xs font-medium text-green-500">
+              <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+              Active
+            </span>
+          </div>
+
+          {/* Header Authentication Status */}
+          {headerAuthEnabled && (
+            <div className="flex items-center justify-between gap-4">
+              <div className="space-y-1">
                 <div className="flex items-center gap-2">
-                  <div className="h-2 w-2 rounded-full bg-green-500" />
-                  <span className="text-sm font-medium">Header Authentication</span>
+                  <span className="text-sm font-medium leading-none">Header Authentication</span>
                   <Badge variant="secondary" className="text-xs">Auto-login</Badge>
                 </div>
-                <span className="text-xs text-muted-foreground">Via reverse proxy</span>
+                <p className="text-[13px] text-muted-foreground">Trusts identity headers from your reverse proxy</p>
               </div>
-            )}
-            
-            {/* SSO Providers Status */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className={`h-2 w-2 rounded-full ${providers.length > 0 ? 'bg-green-500' : 'bg-muted'}`} />
-                <span className="text-sm font-medium">SSO/OIDC Providers</span>
-              </div>
-              <span className="text-xs text-muted-foreground">
-                {providers.length > 0 ? `${providers.length} provider${providers.length !== 1 ? 's' : ''} configured` : 'Not configured'}
+              <span className="flex items-center gap-2 text-xs font-medium text-green-500">
+                <span className="h-1.5 w-1.5 rounded-full bg-green-500" />
+                Active
               </span>
             </div>
-          </div>
-          
-          {/* Header Auth Info */}
-          {headerAuthEnabled && (
-            <Alert className="mt-4">
-              <Shield className="h-4 w-4" />
-              <AlertDescription className="text-xs">
-                Header authentication is enabled. Users authenticated by your reverse proxy will be automatically logged in.
-              </AlertDescription>
-            </Alert>
           )}
-        </CardContent>
-      </Card>
+
+          {/* SSO Providers Status */}
+          <div className="flex items-center justify-between gap-4">
+            <div className="space-y-1">
+              <span className="text-sm font-medium leading-none">SSO / OIDC Providers</span>
+              <p className="text-[13px] text-muted-foreground">Sign in through an external identity provider</p>
+            </div>
+            <span className={`flex items-center gap-2 text-xs font-medium ${providers.length > 0 ? 'text-green-500' : 'text-muted-foreground'}`}>
+              <span className={`h-1.5 w-1.5 rounded-full ${providers.length > 0 ? 'bg-green-500' : 'bg-muted-foreground/40'}`} />
+              {providers.length > 0 ? `${providers.length} configured` : 'Not configured'}
+            </span>
+          </div>
+        </div>
+        {headerAuthEnabled && (
+          <>
+            <div className="border-t border-border" />
+            <div className="flex items-center gap-2 px-6 py-3.5 text-xs text-muted-foreground/70">
+              <Shield className="h-3.5 w-3.5" />
+              Header auth trusts your proxy — only run it behind a trusted network
+            </div>
+          </>
+        )}
+      </div>
 
       {/* SSO Providers */}
       <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="text-lg font-semibold">External Identity Providers</CardTitle>
-                  <CardDescription className="text-sm">
-                    Connect external OIDC/OAuth providers (Google, Azure AD, etc.) to allow users to sign in with their existing accounts
-                  </CardDescription>
+                <div className="flex items-center gap-3">
+                  <ShieldCheck className="h-5 w-5 text-muted-foreground" />
+                  <div>
+                    <CardTitle className="text-base font-semibold">Identity Providers</CardTitle>
+                    <CardDescription className="text-sm">
+                      Users sign in with their existing accounts (Google, Azure AD, Authentik...)
+                    </CardDescription>
+                  </div>
                 </div>
                 <Dialog open={showProviderDialog} onOpenChange={setShowProviderDialog}>
                   <DialogTrigger asChild>
-                    <Button>
+                    <Button size="sm" className="bg-indigo-500 text-white hover:bg-indigo-600">
                       <Plus className="h-4 w-4 mr-2" />
-                      Add Provider
+                      Add provider
                     </Button>
                   </DialogTrigger>
                   <DialogContent className="max-w-2xl max-h-[90vh] md:max-h-[85vh] lg:max-h-[90vh] overflow-hidden flex flex-col">

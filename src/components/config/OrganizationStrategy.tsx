@@ -1,7 +1,5 @@
 import React from "react";
-import { Card } from "@/components/ui/card";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Info, GitBranch, FolderTree, Star, Building2, User, Building } from "lucide-react";
+import { CircleCheck, Info, GitBranch, FolderTree, Star, Building2, User } from "lucide-react";
 import {
   HoverCard,
   HoverCardContent,
@@ -291,13 +289,9 @@ export const OrganizationStrategy: React.FC<OrganizationStrategyProps> = ({
     <div className="space-y-4">
       <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
         <div className="flex-1">
-          <h4 className="text-sm font-medium mb-3 flex items-center gap-2">
-            <Building className="h-4 w-4" />
-            Organization Strategy
-          </h4>
-          <p className="text-xs text-muted-foreground">
-            Choose how your repositories will be organized in Gitea
-          </p>
+          <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+            Organization strategy
+          </span>
         </div>
         
         <div className="flex-shrink-0">
@@ -363,84 +357,83 @@ export const OrganizationStrategy: React.FC<OrganizationStrategyProps> = ({
         </div>
       </div>
 
-      <RadioGroup value={strategy} onValueChange={onStrategyChange}>
-        <div className="grid grid-cols-1 2xl:grid-cols-2 gap-4">
-          {(Object.entries(strategyConfig) as [MirrorStrategy, typeof strategyConfig.preserve][]).map(([key, config]) => {
-            const isSelected = strategy === key;
-            const Icon = config.icon;
+      <div className="grid grid-cols-1 2xl:grid-cols-2 gap-3" role="radiogroup">
+        {(Object.entries(strategyConfig) as [MirrorStrategy, typeof strategyConfig.preserve][]).map(([key, config]) => {
+          const isSelected = strategy === key;
+          const Icon = config.icon;
 
-            return (
-              <div key={key}>
-                <label htmlFor={key} className="cursor-pointer">
-                  <Card 
+          return (
+            <button
+              key={key}
+              type="button"
+              role="radio"
+              aria-checked={isSelected}
+              onClick={() => onStrategyChange(key)}
+              className={cn(
+                "flex items-start gap-3 rounded-lg border p-3.5 text-left transition-colors",
+                isSelected
+                  ? "border-indigo-500 bg-indigo-500/10"
+                  : "border-border hover:border-muted-foreground/40"
+              )}
+            >
+              <span
+                className={cn(
+                  "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg",
+                  isSelected
+                    ? "bg-indigo-500/20 text-indigo-400"
+                    : "bg-muted text-muted-foreground"
+                )}
+              >
+                <Icon className="h-3.5 w-3.5" />
+              </span>
+
+              <span className="flex-1 min-w-0 space-y-1">
+                <span className="flex items-center gap-1.5">
+                  <span
                     className={cn(
-                      "relative",
-                      isSelected && `${config.borderColor} border-2`,
-                      !isSelected && "border-muted"
+                      "text-[13px] font-medium leading-none",
+                      isSelected ? "text-foreground" : "text-muted-foreground"
                     )}
                   >
-                    <div className="p-3 sm:p-4">
-                      <div className="flex items-start gap-3">
-                        <RadioGroupItem 
-                          value={key} 
-                          id={key} 
-                          className="mt-1"
+                    {config.title}
+                  </span>
+                  <HoverCard openDelay={200}>
+                    <HoverCardTrigger asChild>
+                      <span
+                        className="inline-flex cursor-help text-muted-foreground/50 hover:text-muted-foreground"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <Info className="h-3.5 w-3.5" />
+                      </span>
+                    </HoverCardTrigger>
+                    <HoverCardContent side="left" align="center" className="w-[500px]">
+                      <div className="space-y-3">
+                        <h4 className="font-medium text-sm">Repository Mapping Preview</h4>
+                        <MappingPreview
+                          strategy={key}
+                          config={config}
+                          destinationOrg={destinationOrg}
+                          starredReposOrg={starredReposOrg}
+                          starredReposMode={starredReposMode}
+                          githubUsername={githubUsername}
+                          giteaUsername={giteaUsername}
                         />
-                        
-                        <div className={cn(
-                          "rounded-lg p-2 flex-shrink-0",
-                          isSelected ? config.bgColor : "bg-muted dark:bg-muted/50"
-                        )}>
-                          <Icon className={cn(
-                            "h-4 w-4",
-                            isSelected ? config.color : "text-muted-foreground dark:text-muted-foreground/70"
-                          )} />
-                        </div>
-                        
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="flex-1">
-                              <h4 className="font-medium text-sm">{config.title}</h4>
-                              <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-                                {config.description}
-                              </p>
-                            </div>
-                            
-                            <HoverCard openDelay={200}>
-                              <HoverCardTrigger asChild>
-                                <span 
-                                  className="inline-flex p-1 sm:p-1.5 hover:bg-muted rounded-md transition-colors cursor-help flex-shrink-0 ml-2"
-                                  onClick={(e) => e.stopPropagation()}
-                                >
-                                  <Info className="h-3.5 w-3.5 sm:h-4 sm:w-4 text-muted-foreground" />
-                                </span>
-                              </HoverCardTrigger>
-                              <HoverCardContent side="left" align="center" className="w-[500px]">
-                                <div className="space-y-3">
-                                  <h4 className="font-medium text-sm">Repository Mapping Preview</h4>
-                                  <MappingPreview 
-                                    strategy={key}
-                                    config={config}
-                                    destinationOrg={destinationOrg}
-                                    starredReposOrg={starredReposOrg}
-                                    starredReposMode={starredReposMode}
-                                    githubUsername={githubUsername}
-                                    giteaUsername={giteaUsername}
-                                  />
-                                </div>
-                              </HoverCardContent>
-                            </HoverCard>
-                          </div>
-                        </div>
                       </div>
-                    </div>
-                  </Card>
-                </label>
-              </div>
-            );
-          })}
-        </div>
-      </RadioGroup>
+                    </HoverCardContent>
+                  </HoverCard>
+                </span>
+                <span className="block text-[11px] leading-relaxed text-muted-foreground">
+                  {config.description}
+                </span>
+              </span>
+
+              {isSelected && (
+                <CircleCheck className="h-4 w-4 shrink-0 text-indigo-500" />
+              )}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 };
