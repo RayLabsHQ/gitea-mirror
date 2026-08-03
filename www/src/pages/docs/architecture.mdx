@@ -1,0 +1,196 @@
+---
+layout: '../../layouts/DocsLayout.astro'
+title: Architecture
+description: How Gitea Mirror is put together, from the request path through the mirroring pipeline to the deployment options.
+---
+
+# Architecture
+
+Gitea Mirror is a single self-hosted process. It serves a web interface, talks to the GitHub and Gitea APIs, keeps state in a local SQLite file, and runs background schedulers in the same process. There is no separate worker, queue server, or external database to operate.
+
+## Stack
+
+The frontend is Astro 5 in server-side rendering mode, with React 19 islands for the interactive parts, Shadcn UI components, and Tailwind CSS 4.
+
+The backend is Astro API routes served through the `@astrojs/node` adapter in standalone mode. Everything runs on the Bun runtime, which requires version 1.2.9 or newer.
+
+Persistence is SQLite accessed through Drizzle ORM, using Bun's native SQLite driver. Authentication is Better Auth with session cookies. GitHub access goes through Octokit with the throttling plugin, and Gitea access goes through its REST API directly.
+
+## Request path
+
+A request arrives at `scripts/runtime-server.ts`, a thin Node HTTP server that exists to apply `BASE_URL` path rewriting before handing off to the Astro handler. This is why the same prebuilt image can be served at the root or under a path prefix without rebuilding.
+
+From there `src/middleware.ts` runs on every request. It does more than the name suggests: alongside session validation and header-authentication bridging, it is where background services are lazily started on first request. The recovery pass, the activity log cleanup service, the mirroring scheduler, the repository cleanup service, the shutdown manager, and the environment configuration loader are all initialized here, each guarded by a flag so they start exactly once.
+
+The request then reaches either a page under `src/pages/` or an API route under `src/pages/api/`.
+
+## Source layout
+
+```
+src/
+├── components/          React components
+│   ├── ui/              Shadcn UI primitives
+│   ├── config/          Configuration page forms and tabs
+│   ├── repositories/    Repository table and actions
+│   ├── organizations/   Organization cards and destination overrides
+│   ├── dashboard/       Dashboard widgets
+│   ├── activity/        Activity log views
+│   ├── auth/            Sign-in and sign-up
+│   ├── oauth/           OAuth provider flows
+│   ├── layout/          Shell, sidebar, navigation
+│   ├── theme/           Light and dark mode
+│   └── sponsors/        Sponsor display
+├── layouts/             Astro page layout
+├── pages/               Astro pages and API routes
+│   ├── api/             Server endpoints
+│   │   ├── auth/        Better Auth handlers
+│   │   ├── sso/         SSO and OIDC provider management
+│   │   ├── github/      GitHub operations and connection testing
+│   │   ├── gitea/       Gitea operations and connection testing
+│   │   ├── config/      Configuration read and write
+│   │   ├── repositories/ Repository listing and actions
+│   │   ├── organizations/ Organization listing and overrides
+│   │   ├── sync/        Mirror and sync triggers
+│   │   ├── job/         Job management
+│   │   ├── activities/  Activity log
+│   │   ├── dashboard/   Dashboard aggregates
+│   │   ├── cleanup/     Cleanup triggers
+│   │   ├── notifications/ Notification settings and test sends
+│   │   ├── rate-limit/  GitHub rate limit status
+│   │   ├── events/      Event stream plumbing
+│   │   ├── sse/         Server-sent events subscription
+│   │   └── health.ts    Health check
+│   ├── index.astro      Dashboard
+│   ├── repositories.astro
+│   ├── organizations.astro
+│   ├── activity.astro
+│   ├── config.astro
+│   ├── login.astro
+│   └── signup.astro
+├── lib/                 Business logic
+│   ├── db/              Drizzle schema, client, Better Auth adapter, migration repairs
+│   ├── utils/           Encryption, duration parsing, concurrency, config mapping
+│   ├── providers/       Notification providers: ntfy, Apprise, Gotify, webhook
+│   ├── sso/             OIDC configuration
+│   ├── events/          Real-time event fan-out
+│   ├── modules/         Module registry
+│   ├── polyfills/       Runtime shims
+│   ├── github.ts        GitHub client
+│   ├── gitea.ts         Gitea client
+│   ├── gitea-enhanced.ts Metadata mirroring
+│   ├── scheduler-service.ts
+│   ├── cleanup-service.ts
+│   ├── repository-cleanup-service.ts
+│   ├── auth.ts          Better Auth configuration
+│   ├── recovery.ts      Interrupted job recovery
+│   ├── shutdown-manager.ts
+│   └── signal-handlers.ts
+├── hooks/               React hooks: useAuth, useSyncRepo, useLiveRefresh, and others
+├── types/               Shared TypeScript types
+├── data/                Static data, currently the sidebar definition
+├── styles/              Global CSS
+├── tests/               Test setup and fetch mocking
+└── middleware.ts        Astro middleware, also the service bootstrap point
+```
+
+Outside `src/`:
+
+- `drizzle/` holds the generated SQL migrations and their journal. Migrations run automatically on startup.
+- `scripts/` holds the runtime server, database management CLI, recovery and repair scripts, and the environment configuration loader entry point.
+- `helm/gitea-mirror/` is the Kubernetes Helm chart.
+- `www/` is the marketing and documentation site, a separate Astro project with its own dependencies.
+- `flake.nix` and `bun.nix` define the Nix package and NixOS module.
+
+Tests are colocated with the code they cover, as `*.test.ts` files next to the implementation. They run on Bun's built-in test runner.
+
+## Data model
+
+Everything lives in one SQLite database. The tables that matter:
+
+`configs` holds per-user configuration as JSON columns validated by Zod schemas: `githubConfig`, `giteaConfig`, `scheduleConfig`, `cleanupConfig`, and `notificationConfig`. A user can have several configuration rows but one is marked active.
+
+`repositories` tracks every discovered repository with its GitHub metadata, its mirror status, its destination in Gitea, and any per-repository overrides.
+
+`organizations` tracks GitHub organizations, including destination overrides that let one organization go somewhere different from what the global strategy would choose.
+
+`mirrorJobs` is the job record and history. Jobs move through `pending`, `mirroring`, and then `success` or `failed`.
+
+`activities` is the activity log shown on the dashboard, trimmed by the cleanup service according to the configured retention.
+
+`user`, `session`, and `account` are Better Auth's tables, accessed through a custom SQLite adapter in `src/lib/db/adapter.ts`.
+
+### Token encryption
+
+GitHub and Gitea tokens are encrypted with AES-256-GCM before being written, using `ENCRYPTION_SECRET` as the key. This applies whether the token was entered through the UI or supplied through an environment variable. Reading a token back goes through helpers in `src/lib/utils/config-encryption.ts` rather than touching the column directly.
+
+## Mirroring pipeline
+
+A mirror operation runs in stages.
+
+Discovery queries GitHub for repositories matching the configured selection rules, filtered by visibility, fork status, archive status, collaborator affiliation, and organization allowlists and denylists. Results are written to the `repositories` table.
+
+Destination resolution decides where each repository goes, based on the mirror strategy plus any per-repository or per-organization override. The four strategies are `preserve`, `single-org`, `flat-user`, and `mixed`, described in the [configuration guide](./configuration.md).
+
+Repository creation calls Gitea's migration API to create a pull mirror, creating the destination organization first if it does not exist. Organization creation is sequential by default to avoid races when many repositories target the same new organization.
+
+Metadata mirroring, if enabled, follows separately. Issues are recreated with their comments, labels, assignees, and milestones. Releases are recreated with their assets. Wiki content is cloned as a separate repository.
+
+Throughout, job status updates are published as server-sent events so the dashboard reflects progress live without polling.
+
+### Pull requests become issues
+
+Gitea's API cannot create a pull request through the migration path, so mirrored pull requests are created as issues instead. Each one is tagged with a `pull-request` label, its title is prefixed with the original number and status, and its body includes the commit history, changed files, and merge outcome. This is a deliberate workaround for an API limitation, not a temporary gap.
+
+### Ordering and concurrency
+
+Gitea assigns issue numbers on creation, so processing issues in parallel can produce numbering that does not match GitHub's. The concurrency settings default to 3 for issues and 5 for pull requests, trading some ordering fidelity for speed. Set both to 1 if you need the numbering to line up.
+
+## Real-time updates
+
+The dashboard subscribes to `/api/sse` and receives job and repository events as they happen. The publishing side is `src/lib/events.ts` and `src/lib/events/realtime.ts`. This is what makes a running mirror visibly progress rather than requiring a refresh.
+
+## Background services
+
+Four services run inside the main process, started from the middleware on first request:
+
+The **scheduler** performs periodic mirroring, repository discovery, and auto-mirroring, on an interval or cron schedule.
+
+The **cleanup service** trims the activity log according to the configured retention period.
+
+The **repository cleanup service** handles repositories that have disappeared from GitHub, archiving or deleting them according to the configured action.
+
+The **shutdown manager** tracks running jobs and persists their state when a termination signal arrives, so an interrupted job can be resumed on the next boot instead of being lost.
+
+## Authentication
+
+Better Auth handles sessions, with three sign-in paths.
+
+Email and password authentication is always available. The first account to sign up becomes the admin.
+
+OIDC and SSO providers are registered through the Authentication tab rather than through configuration files, so adding a provider does not require a restart.
+
+Header authentication trusts identity headers set by an upstream reverse proxy, for deployments where something like Authentik or Authelia already handles login. It can auto-provision accounts, optionally restricted to an email domain allowlist.
+
+Sessions are cookie-based and validated in the middleware on every request.
+
+## Deployment options
+
+**Docker** is the primary path. A multi-architecture image is published to `ghcr.io/raylabshq/gitea-mirror`, built from a multi-stage `Dockerfile` on the official Bun base image, with a statically compiled `git-lfs` binary included for LFS mirroring. Three compose files ship with the repository: `docker-compose.alt.yml` for a minimal prebuilt deployment, `docker-compose.yml` for a full environment-driven one, and `docker-compose.dev.yml` for development with hot reload.
+
+**Kubernetes** is supported through the Helm chart in `helm/gitea-mirror`. It packages a Deployment, Service, ConfigMap, Secret, optional PersistentVolumeClaim, optional ServiceAccount, and a choice of Ingress or Gateway API HTTPRoute. It needs Kubernetes 1.23 or newer and Helm 3.8 or newer.
+
+**Nix** deployment works either as a flake package or as a NixOS module. `nix run github:RayLabsHQ/gitea-mirror` starts it with no setup, and the NixOS module handles secret generation and database initialization declaratively.
+
+**LXC** on Proxmox VE is available through the Proxmox VE Community Scripts project, which installs Gitea Mirror as a systemd service inside a container.
+
+**Bare metal** means installing Bun, running `bun run setup` and `bun run build`, and starting `bun run start`. This is also the development setup.
+
+## Design decisions worth knowing
+
+**SQLite, not Postgres.** The workload is a single writer with modest data volume, and SQLite removes an entire operational dependency. The tradeoff is that horizontal scaling is not on the table, which is the right trade for a self-hosted mirroring tool.
+
+**Services in-process, not separate workers.** There is no queue broker and no worker fleet. Job state lives in the database and recovery on startup handles interruption, which is simpler to operate than a distributed queue and sufficient for the concurrency this workload needs.
+
+**Configuration in the database, not in files.** Environment variables can seed configuration, but the source of truth is the database so that settings can be changed through the UI without a restart. The consequence is that seeded values overwrite UI changes on every startup, which is why you should manage any given setting through one mechanism or the other.
+
+**No memory or OS detail in the health response.** The health endpoint is unauthenticated by design so orchestrators can poll it, which means anything it returns is public. Host telemetry is deliberately left out.

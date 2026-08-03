@@ -1,0 +1,281 @@
+---
+import '../styles/global.css';
+import { Header } from '../components/Header';
+import Footer from '../components/Footer.astro';
+import { docsNav } from '../lib/docs-nav';
+
+const { frontmatter, headings = [] } = Astro.props;
+const title = frontmatter?.title ?? 'Documentation';
+const description =
+  frontmatter?.description ??
+  'Documentation for Gitea Mirror, the self-hosted GitHub to Gitea mirroring service.';
+
+const currentPath = Astro.url.pathname.endsWith('/')
+  ? Astro.url.pathname
+  : `${Astro.url.pathname}/`;
+const canonical = `https://gitea-mirror.raylabs.io${currentPath}`;
+const toc = headings.filter((h: { depth: number }) => h.depth === 2 || h.depth === 3);
+---
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title} · Gitea Mirror Docs</title>
+    <meta name="description" content={description} />
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+    <link rel="canonical" href={canonical} />
+    <meta property="og:title" content={`${title} · Gitea Mirror Docs`} />
+    <meta property="og:description" content={description} />
+    <meta property="og:type" content="article" />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:image" content="https://gitea-mirror.raylabs.io/og-image.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <script is:inline>
+      const theme = localStorage.getItem('theme') ||
+        (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+      document.documentElement.classList.toggle('dark', theme === 'dark');
+    </script>
+  </head>
+  <body class="min-h-screen bg-background text-foreground antialiased">
+    <Header client:load />
+    <div class="mx-auto max-w-7xl px-4 pt-24 pb-20 sm:px-6 lg:px-8">
+      <div class="flex gap-10">
+        <!-- Sidebar navigation -->
+        <aside class="hidden w-56 shrink-0 lg:block">
+          <nav class="sticky top-24 space-y-6" aria-label="Docs">
+            <a
+              href="/docs/"
+              class="block text-sm font-semibold text-foreground hover:text-indigo-500"
+            >
+              Documentation
+            </a>
+            {docsNav.map((section) => (
+              <div class="space-y-2">
+                <div class="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+                  {section.title}
+                </div>
+                <ul class="space-y-1">
+                  {section.items.map((item) => (
+                    <li>
+                      <a
+                        href={item.href}
+                        class:list={[
+                          'block rounded-md px-2.5 py-1.5 text-[13px] transition-colors',
+                          currentPath === item.href
+                            ? 'bg-indigo-500/10 font-medium text-indigo-500'
+                            : 'text-muted-foreground hover:bg-muted hover:text-foreground',
+                        ]}
+                      >
+                        {item.title}
+                      </a>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+          </nav>
+        </aside>
+
+        <!-- Content -->
+        <main class="min-w-0 flex-1">
+          <!-- Mobile section picker -->
+          <details class="mb-6 rounded-lg border border-border lg:hidden">
+            <summary class="cursor-pointer px-4 py-2.5 text-sm font-medium">
+              Docs navigation
+            </summary>
+            <div class="space-y-4 border-t border-border p-4">
+              {docsNav.map((section) => (
+                <div class="space-y-1.5">
+                  <div class="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+                    {section.title}
+                  </div>
+                  <ul class="space-y-1">
+                    {section.items.map((item) => (
+                      <li>
+                        <a href={item.href} class="block py-1 text-sm text-muted-foreground">
+                          {item.title}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          </details>
+
+          <article class="docs-content">
+            <slot />
+          </article>
+        </main>
+
+        <!-- Table of contents -->
+        {toc.length > 1 && (
+          <aside class="hidden w-52 shrink-0 xl:block">
+            <nav class="sticky top-24 space-y-2" aria-label="On this page">
+              <div class="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
+                On this page
+              </div>
+              <ul class="space-y-1 border-l border-border">
+                {toc.map((h: { depth: number; slug: string; text: string }) => (
+                  <li>
+                    <a
+                      href={`#${h.slug}`}
+                      class:list={[
+                        'block border-l-2 border-transparent py-0.5 text-[13px] text-muted-foreground transition-colors hover:border-indigo-500 hover:text-foreground',
+                        h.depth === 2 ? 'pl-3' : 'pl-6',
+                      ]}
+                    >
+                      {h.text}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </nav>
+          </aside>
+        )}
+      </div>
+    </div>
+    <Footer />
+  </body>
+</html>
+
+<style is:global>
+  .docs-content {
+    font-size: 1rem;
+    line-height: 1.75;
+    color: var(--muted-foreground);
+  }
+
+  .docs-content > * + * {
+    margin-top: 1.1rem;
+  }
+
+  .docs-content :is(h1, h2, h3, h4) {
+    font-weight: 700;
+    color: var(--foreground);
+    letter-spacing: -0.01em;
+    scroll-margin-top: 6rem;
+  }
+
+  .docs-content h1 {
+    font-size: clamp(1.9rem, 2.5vw + 1rem, 2.5rem);
+    line-height: 1.15;
+  }
+
+  .docs-content h2 {
+    font-size: 1.5rem;
+    margin-top: 2.75rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--border);
+  }
+
+  .docs-content h3 {
+    font-size: 1.15rem;
+    margin-top: 2rem;
+  }
+
+  .docs-content a {
+    color: var(--foreground);
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    text-decoration-color: color-mix(in srgb, currentColor 40%, transparent);
+  }
+
+  .docs-content a:hover {
+    text-decoration-color: currentColor;
+  }
+
+  .docs-content strong {
+    color: var(--foreground);
+  }
+
+  .docs-content :is(ul, ol) {
+    padding-left: 1.4rem;
+  }
+
+  .docs-content ul {
+    list-style: disc;
+  }
+
+  .docs-content ol {
+    list-style: decimal;
+  }
+
+  .docs-content li + li {
+    margin-top: 0.35rem;
+  }
+
+  .docs-content code {
+    font-size: 0.85em;
+    background: var(--muted);
+    color: var(--foreground);
+    border-radius: 0.3rem;
+    padding: 0.15rem 0.4rem;
+  }
+
+  .docs-content pre {
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: 0.6rem;
+    padding: 1rem 1.25rem;
+    font-size: 0.85rem;
+    line-height: 1.6;
+  }
+
+  .docs-content pre code {
+    background: transparent;
+    padding: 0;
+    font-size: inherit;
+  }
+
+  .docs-content blockquote {
+    border-left: 3px solid var(--border);
+    border-radius: 0.4rem;
+    background: var(--muted);
+    padding: 0.85rem 1.1rem;
+    font-size: 0.95rem;
+  }
+
+  .docs-content blockquote p {
+    margin: 0;
+  }
+
+  .docs-content table {
+    display: block;
+    overflow-x: auto;
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.9rem;
+  }
+
+  .docs-content th {
+    text-align: left;
+    color: var(--foreground);
+    border-bottom: 1px solid var(--border);
+    padding: 0.5rem 0.9rem 0.5rem 0;
+    white-space: nowrap;
+  }
+
+  .docs-content td {
+    border-bottom: 1px solid var(--border);
+    padding: 0.5rem 0.9rem 0.5rem 0;
+    vertical-align: top;
+  }
+
+  .docs-content td code {
+    white-space: nowrap;
+  }
+
+  .docs-content img {
+    max-width: 100%;
+    border-radius: 0.6rem;
+    border: 1px solid var(--border);
+  }
+
+  .docs-content hr {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 2.5rem 0;
+  }
+</style>

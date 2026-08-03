@@ -21,6 +21,8 @@ docker compose -f docker-compose.alt.yml up -d
 
 First user signup becomes admin. Configure GitHub and Gitea/Forgejo through the web interface!
 
+📖 **[Full documentation](https://gitea-mirror.raylabs.io/docs/)** - quickstart, deployment, configuration, notifications, SSO and more. Offline copies live in [`docs/`](docs/).
+
 <p align="center">
   <img src=".github/assets/dashboard.png" alt="Dashboard" width="600" />
   <img src=".github/assets/dashboard_mobile.png" alt="Dashboard Mobile" width="200" />
@@ -33,15 +35,16 @@ First user signup becomes admin. Configure GitHub and Gitea/Forgejo through the 
 - 🏢 Mirror entire organizations with flexible strategies
 - 🎯 Custom destination control for repos and organizations
 - 📦 **Git LFS support** - Mirror large files with Git LFS
-- 📝 **Metadata mirroring** - Issues, pull requests (as issues), labels, milestones, wiki
+- 📝 **Metadata mirroring** - Issues, pull requests (as issues), labels, milestones, releases, wiki
 - 🚫 **Repository ignore** - Mark specific repos to skip
-- 🔐 Secure authentication with Better Auth (email/password, SSO, OIDC)
+- 🔐 Secure authentication with Better Auth (email/password, SSO, OIDC, header auth)
+- 🔔 **[Notifications](docs/NOTIFICATIONS.md)** - ntfy, Apprise, Gotify, or any webhook with signed payloads
 - 📊 Real-time dashboard with activity logs
 - ⏱️ Scheduled automatic mirroring with configurable intervals
-- 🔄 **Auto-discovery** - Automatically import new GitHub repositories (v3.4.0+)
-- 🧹 **Repository cleanup** - Auto-remove repos deleted from GitHub (v3.4.0+)
-- 🎯 **Proper mirror intervals** - Respects configured sync intervals (v3.4.0+)
-- 🛡️ **[Force-push protection](docs/FORCE_PUSH_PROTECTION.md)** - Smart detection with backup-on-demand or block-and-approve modes (Beta)
+- 🔄 **Auto-discovery** - Automatically import new GitHub repositories
+- 🧹 **Repository cleanup** - Auto-remove repos deleted from GitHub
+- 🎯 **Proper mirror intervals** - Respects configured sync intervals
+- 🛡️ **[Force-push protection](docs/FORCE_PUSH_PROTECTION.md)** - Smart detection with backup-on-demand or block-and-approve modes
 - 🗑️ Automatic database cleanup with configurable retention
 - 🐳 Dockerized with multi-arch support (AMD64/ARM64)
 
@@ -49,7 +52,7 @@ First user signup becomes admin. Configure GitHub and Gitea/Forgejo through the 
 
 <div align="center">
   <img src=".github/assets/repositories.png" alt="Repositories" width="600" />
-  <img src=".github/assets/repositories_mobile.png" alt="Rrepositories Mobile" width="200" />
+  <img src=".github/assets/repositories_mobile.png" alt="Repositories Mobile" width="200" />
 </div>
 
 <div align="center">

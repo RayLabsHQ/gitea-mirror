@@ -54,6 +54,53 @@ Gitea Mirror supports push notifications for mirror events. You can be alerted w
 - Optionally set a **Tag** to only notify specific Apprise services
 - Leave empty to notify all configured services
 
+### 3. Gotify (Direct)
+
+[Gotify](https://gotify.net/) is a simple self-hosted push notification server.
+
+**Setup:**
+1. In Gotify, create an application and copy its token
+2. In Gitea Mirror, go to **Configuration > Notifications**
+3. Enable notifications and select **Gotify**
+4. Set the **Server URL** to your Gotify instance (e.g., `https://gotify.example.com`)
+5. Paste the **Application token**
+6. Pick a **Default priority** (0 to 10; error notifications are always sent at priority 8)
+
+The token is encrypted at rest like all other provider credentials.
+
+### 4. Webhook (Generic)
+
+Sends a plain JSON POST to any URL you control. Works with n8n, Home Assistant, or any service that accepts a generic webhook.
+
+**Setup:**
+1. In Gitea Mirror, go to **Configuration > Notifications**
+2. Enable notifications and select **Webhook**
+3. Set the **Webhook URL** to your endpoint
+4. Optionally set a **Signing secret**
+
+**Payload:**
+```json
+{
+  "title": "Mirror Failed: my-repo",
+  "message": "Repository my-repo failed to mirror",
+  "type": "sync_error",
+  "timestamp": "2026-08-03T02:33:29.707Z"
+}
+```
+
+**Signature verification:**
+When a signing secret is set, every request includes an `X-Webhook-Signature` header containing `sha256=<hex>`, an HMAC-SHA256 digest of the raw request body. Verify it on the receiving end:
+
+```js
+const crypto = require("node:crypto");
+const expected = "sha256=" +
+  crypto.createHmac("sha256", secret).update(rawBody).digest("hex");
+const valid = crypto.timingSafeEqual(
+  Buffer.from(signatureHeader), Buffer.from(expected));
+```
+
+The secret is encrypted at rest.
+
 ## Event Types
 
 | Event | Default | Description |

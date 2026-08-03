@@ -1,0 +1,187 @@
+---
+layout: '../../layouts/DocsLayout.astro'
+title: Force-Push Protection
+description: Detect rewritten history on GitHub before it overwrites your mirror, and snapshot or block the sync when it happens.
+---
+
+# Force-Push Protection
+
+A GitHub repository can be force-pushed at any time, rewriting history, dropping commits, or deleting branches. When Gitea Mirror syncs a repository after that happens, the old history in Gitea is replaced with no way to get it back. Force-push protection notices the rewrite before the sync runs and either snapshots the current mirror or stops the sync entirely.
+
+Configure it under **Configuration > Connections > Destructive Update Protection**.
+
+## How detection works
+
+Before each sync, Gitea Mirror compares branch tips on both sides.
+
+1. **Collect branches.** Fetch branch names and their latest commit SHAs from Gitea and from GitHub. These are cheap API calls.
+2. **Compare SHAs.** Branches whose SHAs match are unchanged and need no further work.
+3. **Check ancestry.** For each branch whose SHA differs, ask GitHub's compare API how the two commits relate:
+   - The new commit descends from the old one, so this is an ordinary push and the sync is safe.
+   - The histories have diverged, so this is a force-push.
+   - GitHub returns 404 because the old commit no longer exists, which also means history was rewritten.
+   - The branch is gone from GitHub entirely, which is flagged as a destructive change.
+
+Detection is fail-open. If the check itself cannot complete because of rate limits, network trouble, or an API outage, the sync proceeds as normal. A single branch that fails to check is skipped without affecting the others. Detection never blocks a sync because detection broke.
+
+> **Note:** A rebase is a force-push. If you rebase branches routinely, expect detection to fire routinely, which is worth keeping in mind when choosing between Smart and Block & Approve.
+
+## The four modes
+
+| Mode | Stored value | What it does | Storage cost |
+|---|---|---|---|
+| Disabled | `disabled` | No detection, no snapshots | None |
+| Always Backup | `always` | Snapshot before every sync | High |
+| Smart | `on-force-push` | Detect first, snapshot only when a rewrite is found | Near zero in normal operation |
+| Block & Approve | `block-on-force-push` | Detect first, halt the sync and wait for you | None |
+
+Smart is the default.
+
+### Disabled
+
+Syncs run with no checks at all. If GitHub history is rewritten, the mirror silently follows and the old history is gone. Reasonable only for repositories you would not mind losing.
+
+### Always Backup
+
+Creates a snapshot before every sync whether or not anything was rewritten. This is the safest option and the most expensive one. A large mirror set generates a full bundle per repository per sync, so storage grows quickly.
+
+### Smart
+
+Runs detection before each sync. On an ordinary day nothing is rewritten, so no snapshot is created and there is no overhead beyond two lightweight branch listings. When a force-push is detected, a snapshot is taken and then the sync proceeds.
+
+This is the recommended setting for most people: protection when it matters, close to free when it does not.
+
+### Block & Approve
+
+Runs detection and, when a rewrite is found, stops. The repository is marked `pending-approval` and is skipped by scheduled syncs until you decide what to do. Nothing is overwritten and nothing is snapshotted while it waits.
+
+Use this for repositories where a destructive change should never land without a human looking at it first.
+
+## Snapshot storage
+
+Snapshots are [git bundles](https://git-scm.com/docs/git-bundle), single files containing the complete repository. Gitea Mirror creates one by making a mirror clone of the **Gitea** side, the state that is about to be overwritten, and bundling all refs from it.
+
+Bundles are written to:
+
+```text
+<snapshot directory>/<user id>/<owner>/<repo>/<timestamp>.bundle
+```
+
+The default snapshot directory is `data/repo-backups` relative to the working directory, resolved to an absolute path before use. Path segments are sanitized, so characters outside letters, digits, dot, underscore, and hyphen become underscores.
+
+### Restoring from a bundle
+
+There is no restore button in the UI. A bundle is an ordinary git artifact, so you recover with git directly:
+
+```bash
+# Inspect what the bundle contains
+git bundle list-heads 2026-08-03T14-22-31-004Z.bundle
+
+# Clone it into a working directory
+git clone 2026-08-03T14-22-31-004Z.bundle recovered-repo
+
+# Push the recovered history back to Gitea
+cd recovered-repo
+git remote add gitea https://gitea.example.com/owner/repo.git
+git push --mirror gitea
+```
+
+> **Warning:** `git push --mirror` replaces the remote's refs with what you have locally. Confirm the bundle holds the history you want before pushing it over a live repository.
+
+## Retention settings
+
+These appear once you pick any mode other than Disabled.
+
+### Snapshot retention count
+
+How many bundles to keep per repository. Once the count is exceeded, the oldest bundles are deleted. Minimum 1, default **5**.
+
+### Snapshot retention days
+
+Maximum age for a bundle. Anything older is deleted when retention runs. Set it to `0` to turn off age-based pruning. Default **30**.
+
+At least one bundle is always kept, even when every bundle is older than the retention window. You never end up with an empty snapshot directory just because a repository went quiet.
+
+### Snapshot directory
+
+Where bundles are stored. Default `data/repo-backups`.
+
+> **Note:** In Docker, keep this inside `/app/data` so snapshots land on your persistent volume. A path outside it disappears when the container is replaced.
+
+### Block sync on snapshot failure
+
+Available for Always Backup and Smart. When enabled, a snapshot that fails, because the disk is full or permissions are wrong, also stops the sync. When disabled, the sync runs anyway and you get an unprotected overwrite.
+
+Default is enabled, and leaving it enabled is the right call if you actually rely on these snapshots.
+
+Retention is enforced right after a new bundle is written, so pruning only happens for repositories that are actively being snapshotted.
+
+## Approving a blocked repository
+
+In Block & Approve mode, a detected force-push leaves the repository with status `pending-approval`. Scheduled syncs skip it until you act. The repository table shows a badge along with **Approve** and **Dismiss** buttons.
+
+- **Approve** creates a snapshot first, then runs the sync. The rewritten history lands in Gitea and the previous state is preserved in a bundle.
+- **Dismiss** clears the flag and resumes normal syncing without creating a snapshot. Use this when you already know the rewrite is fine.
+
+Both actions are also available through the API:
+
+```bash
+# Approve: snapshot, then sync
+curl -X POST https://your-domain.com/api/job/approve-sync \
+  -H "Content-Type: application/json" \
+  -H "Cookie: <session cookie>" \
+  -d '{"repositoryIds": ["<repository-id>"], "action": "approve"}'
+
+# Dismiss: clear the block without a snapshot
+curl -X POST https://your-domain.com/api/job/approve-sync \
+  -H "Content-Type: application/json" \
+  -H "Cookie: <session cookie>" \
+  -d '{"repositoryIds": ["<repository-id>"], "action": "dismiss"}'
+```
+
+Both accept multiple repository IDs in one call.
+
+## Environment variables
+
+The mode is normally set in the UI and stored in the database. Environment variables act as a fallback for instances that have never had a strategy saved, which makes them useful for provisioning a new deployment.
+
+| Variable | Purpose | Default |
+|---|---|---|
+| `PRE_SYNC_BACKUP_STRATEGY` | Initial strategy: `disabled`, `always`, `on-force-push`, or `block-on-force-push` | unset |
+| `PRE_SYNC_BACKUP_ENABLED` | Legacy switch. `true` maps to `always`, `false` maps to `disabled` | unset |
+| `PRE_SYNC_BACKUP_DIR` | Snapshot directory when the config field is empty | `data/repo-backups` |
+| `PRE_SYNC_BACKUP_KEEP_COUNT` | Retention count when the config field is unset | `5` |
+| `PRE_SYNC_BACKUP_RETENTION_DAYS` | Retention days when the config field is unset | `30` |
+| `PRE_SYNC_BACKUP_GIT_USERNAME` | Username paired with the Gitea token when cloning for a snapshot | `oauth2` |
+
+> **Note:** Saved configuration always wins over the environment. Once a strategy has been chosen in the UI, changing `PRE_SYNC_BACKUP_STRATEGY` has no effect, so change the mode in the UI instead of wondering why the variable is ignored.
+
+The strategy is resolved in this order, stopping at the first match:
+
+1. The `backupStrategy` field in the saved configuration.
+2. The deprecated `backupBeforeSync` boolean, where `true` maps to Smart and `false` maps to Disabled.
+3. `PRE_SYNC_BACKUP_STRATEGY`.
+4. `PRE_SYNC_BACKUP_ENABLED`.
+5. The default, Smart.
+
+## Upgrading from backupBeforeSync
+
+The older `backupBeforeSync` boolean still works and is mapped automatically:
+
+| Old setting | Current equivalent |
+|---|---|
+| `backupBeforeSync: true` | Smart (`on-force-push`) |
+| `backupBeforeSync: false` | Disabled |
+| Neither set | Smart (`on-force-push`) |
+
+Note that `true` maps to Smart rather than Always Backup. Older configurations defaulted this field to true, so mapping it to Always Backup would have quietly turned on full bundles before every sync for everyone who upgraded.
+
+## Troubleshooting
+
+**A repository is stuck in pending-approval.** That is the mode working as designed. Use Approve or Dismiss in the repository table, or call the approve-sync endpoint.
+
+**Detection is always skipped.** Check the activity log for the reason. Common causes are a repository that has not been mirrored to Gitea yet, so there is nothing to compare, along with GitHub rate limits and network errors. All of these fail open by design.
+
+**Snapshots are eating disk.** Lower the retention count or the retention days, and switch from Always Backup to Smart if you are not already on it. Smart only writes a bundle when history is actually rewritten.
+
+**Snapshots fail with a git error.** The Gitea token needs read access to the repository being cloned. Token values are masked in error messages, so check the token's scopes in Gitea rather than looking for it in the log.

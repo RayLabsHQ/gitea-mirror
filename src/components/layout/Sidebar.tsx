@@ -165,7 +165,7 @@ export function Sidebar({ className, onNavigate, isOpen, isCollapsed = false, on
                   Check out the documentation for help with setup and configuration.
                 </p>
                 <a
-                  href={withBase("/docs")}
+                  href="https://gitea-mirror.raylabs.io/docs/"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-1.5 text-xs md:text-xs text-primary hover:underline py-2 md:py-0"
@@ -179,7 +179,7 @@ export function Sidebar({ className, onNavigate, isOpen, isCollapsed = false, on
                 <Tooltip delayDuration={0}>
                   <TooltipTrigger asChild>
                     <a
-                      href={withBase("/docs")}
+                      href="https://gitea-mirror.raylabs.io/docs/"
                       target="_blank"
                       rel="noopener noreferrer"
                       className={cn(

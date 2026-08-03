@@ -1,0 +1,396 @@
+---
+layout: '../../layouts/DocsLayout.astro'
+title: Deployment
+description: Install Gitea Mirror with Docker, Kubernetes, Nix, a Proxmox LXC container, or directly on a host with Bun.
+---
+
+# Deployment
+
+Gitea Mirror is a single service with a SQLite database. It listens on port 4321, keeps everything it needs in one data directory, and needs no external database, cache, or queue. Every deployment method below comes down to the same three things: run the app, give it a persistent data directory, and set two secrets.
+
+Docker with the prebuilt image is the fastest way in.
+
+## What every deployment needs
+
+| Requirement | Detail |
+|---|---|
+| Port | `4321` by default, override with `PORT`. |
+| Data directory | Holds the SQLite database, generated secrets, and repository snapshots. Must persist across restarts. |
+| `BETTER_AUTH_SECRET` | Signs session tokens. Use at least 32 characters. |
+| `ENCRYPTION_SECRET` | Encrypts GitHub, Gitea, and notification tokens at rest. |
+| Health endpoint | `GET /api/health`, used by container and Kubernetes probes. |
+
+Both secrets are generated automatically on first start if you do not provide them, and are written into the data directory as `.better_auth_secret` and `.encryption_secret`.
+
+> **Warning:** Losing the data directory loses those generated secrets. Session cookies stop working, and every stored GitHub and Gitea token becomes undecryptable, so you would have to re-enter them. Back the directory up, or set both secrets explicitly so they live somewhere you control.
+
+## Docker
+
+The published image is `ghcr.io/raylabshq/gitea-mirror:latest`, built for `linux/amd64` and `linux/arm64`. It declares a volume at `/app/data`, exposes port 4321, and runs as a non-root user.
+
+### Prebuilt image with compose
+
+This is the quick start path, matching `docker-compose.alt.yml` in the repository. It only sets what cannot be configured through the web UI.
+
+```yaml
+services:
+  gitea-mirror:
+    image: ghcr.io/raylabshq/gitea-mirror:latest
+    container_name: gitea-mirror
+    restart: unless-stopped
+    ports:
+      - "4321:4321"
+    user: "1000:1000"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}
+      - BETTER_AUTH_URL=http://localhost:4321
+      - PUBLIC_BETTER_AUTH_URL=http://localhost:4321
+      - BETTER_AUTH_TRUSTED_ORIGINS=http://localhost:4321
+```
+
+Create a `.env` file next to it:
+
+```bash
+BETTER_AUTH_SECRET=$(openssl rand -base64 32)
+```
+
+Then start it:
+
+```bash
+docker compose up -d
+```
+
+Open `http://localhost:4321`, create the first account, and configure GitHub and Gitea credentials through the UI.
+
+The `user` line controls ownership of the bind-mounted `./data` directory. Set it to your own UID and GID, which `id -u` and `id -g` will tell you, if you hit permission errors on the mount.
+
+### Running from the repository
+
+If you clone the repository, both compose files are ready to use:
+
+```bash
+git clone https://github.com/RayLabsHQ/gitea-mirror.git
+cd gitea-mirror
+
+# Quick start, prebuilt image, data in ./data
+docker compose -f docker-compose.alt.yml up -d
+
+# Full setup, builds from source, named volume, every env var wired up
+docker compose up -d
+```
+
+`docker-compose.yml` is the one to use when you want to configure everything through environment variables rather than the UI. It covers GitHub and Gitea credentials, mirror options, scheduling, cleanup behaviour, header authentication, and custom CA certificates, and it can build the image locally instead of pulling it.
+
+> **Note:** Environment variables pre-fill the configuration on first start. You can still change any of it later in the web UI, and your changes are stored in the database.
+
+### Plain docker run
+
+```bash
+docker run -d \
+  --name gitea-mirror \
+  --restart unless-stopped \
+  -p 4321:4321 \
+  -v gitea-mirror-data:/app/data \
+  -e BETTER_AUTH_SECRET="$(openssl rand -base64 32)" \
+  -e BETTER_AUTH_URL=https://mirror.example.com \
+  -e PUBLIC_BETTER_AUTH_URL=https://mirror.example.com \
+  ghcr.io/raylabshq/gitea-mirror:latest
+```
+
+### Upgrading
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+Database migrations run automatically at startup. Keep the data volume attached and nothing else is required.
+
+## Kubernetes with Helm
+
+A Helm chart lives in the repository at `helm/gitea-mirror`. It is not published to a chart repository, so install it from a clone.
+
+The chart deploys a Deployment, a Service, a ConfigMap, a Secret, an optional PVC, and optionally an Ingress or Gateway API HTTPRoutes. It needs Kubernetes 1.23 or newer and Helm 3.8 or newer.
+
+### Installing
+
+```bash
+git clone https://github.com/RayLabsHQ/gitea-mirror.git
+cd gitea-mirror
+
+kubectl create namespace gitea-mirror
+
+helm upgrade --install gitea-mirror ./helm/gitea-mirror \
+  --namespace gitea-mirror \
+  --values my-values.yaml
+```
+
+A minimal `my-values.yaml`:
+
+```yaml
+image:
+  tag: "3.24.0"
+
+gitea-mirror:
+  core:
+    betterAuthSecret: "your-32-character-minimum-secret"
+    encryptionSecret: "your-encryption-secret"
+    betterAuthUrl: "https://mirror.example.com"
+    betterAuthTrustedOrigins: "https://mirror.example.com"
+  github:
+    username: "your-github-username"
+    token: "ghp_..."
+  gitea:
+    url: "https://gitea.example.com"
+    token: "your-gitea-token"
+
+persistence:
+  enabled: true
+  size: 5Gi
+  storageClass: "longhorn"
+
+ingress:
+  enabled: true
+  className: "nginx"
+  hosts:
+    - host: mirror.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: mirror-tls
+      hosts:
+        - mirror.example.com
+```
+
+> **Note:** The chart's `appVersion` trails the application, so leaving `image.tag` empty pins an older image than you probably want. Set `image.tag` explicitly to the release you intend to run.
+
+### Values that matter
+
+| Value | Default | Why it matters |
+|---|---|---|
+| `image.tag` | `""` | Falls back to the chart `appVersion`. Set it explicitly. |
+| `gitea-mirror.core.betterAuthSecret` | `""` | Session signing secret. |
+| `gitea-mirror.core.encryptionSecret` | `""` | Token encryption secret, stored in the chart's Secret. |
+| `gitea-mirror.core.betterAuthUrl` | `http://localhost:4321` | Must be the external URL users reach. |
+| `gitea-mirror.core.betterAuthTrustedOrigins` | `http://localhost:4321` | Comma-separated allowed origins. |
+| `gitea-mirror.existingSecret` | `""` | Name of a Secret you manage yourself. When set, the chart creates no Secret of its own. |
+| `persistence.enabled` | `true` | Turning this off gives you an `emptyDir`, and the database vanishes on restart. |
+| `persistence.size` | `1Gi` | Raise it if you enable repository snapshots. |
+| `deployment.strategy.type` | `Recreate` | Keep this. SQLite on a `ReadWriteOnce` volume cannot support two running pods. |
+| `service.port` | `4321` | Service and container port. |
+| `ingress.*` / `route.*` | disabled | Ingress or Gateway API HTTPRoutes, pick one. |
+
+> **Warning:** Do not scale the Deployment past one replica. The database is a single SQLite file on a `ReadWriteOnce` volume, and a second pod cannot mount or safely share it.
+
+### Bringing your own Secret
+
+Set `gitea-mirror.existingSecret` to the name of a Secret containing `GITHUB_TOKEN`, `GITEA_TOKEN`, and `ENCRYPTION_SECRET`. The chart then skips creating its own and references yours, which keeps credentials out of your values file and out of version control.
+
+```yaml
+gitea-mirror:
+  existingSecret: "gitea-mirror-secrets"
+```
+
+### Probes and storage
+
+The chart mounts a volume at `/app/data` and points the liveness, readiness, and startup probes at `/api/health`. All three default to a 60 second initial delay, which is generous enough for first-run database initialization.
+
+## Nix and NixOS
+
+The repository is a flake. Nothing needs configuring for a first run: secrets are generated, the database is initialized, and the server starts.
+
+### Running it
+
+```bash
+# Straight from GitHub, no clone
+nix run github:RayLabsHQ/gitea-mirror
+
+# Pin to a release
+nix run github:RayLabsHQ/gitea-mirror/vX.Y.Z
+
+# Install into your profile
+nix profile install github:RayLabsHQ/gitea-mirror
+gitea-mirror
+```
+
+If you have not enabled flakes globally, add `--extra-experimental-features 'nix-command flakes'` to each command, or enable them permanently in `~/.config/nix/nix.conf`:
+
+```text
+experimental-features = nix-command flakes
+```
+
+Run this way, data lands in `~/.local/share/gitea-mirror` unless you override `DATA_DIR`.
+
+### NixOS module
+
+The flake exposes a NixOS module that runs Gitea Mirror as a hardened systemd service:
+
+```nix
+{
+  inputs.gitea-mirror.url = "github:RayLabsHQ/gitea-mirror";
+
+  services.gitea-mirror = {
+    enable = true;
+    betterAuthUrl = "https://mirror.example.com";
+    betterAuthTrustedOrigins = "https://mirror.example.com";
+    openFirewall = true;
+  };
+}
+```
+
+Available options:
+
+| Option | Default | Description |
+|---|---|---|
+| `enable` | `false` | Turn the service on. |
+| `package` | flake default | Override the package. |
+| `dataDir` | `/var/lib/gitea-mirror` | Data and database location. |
+| `user` / `group` | `gitea-mirror` | Service account. |
+| `host` | `0.0.0.0` | Bind address. |
+| `port` | `4321` | Listen port. |
+| `betterAuthUrl` | `http://localhost:4321` | External URL of the service. |
+| `betterAuthTrustedOrigins` | `http://localhost:4321` | Comma-separated trusted origins. |
+| `mirrorIssueConcurrency` | `3` | Concurrent issue mirror operations. |
+| `mirrorPullRequestConcurrency` | `5` | Concurrent pull request mirror operations. |
+| `environmentFile` | `null` | File holding `BETTER_AUTH_SECRET` and `ENCRYPTION_SECRET` if you want to set them yourself. |
+| `openFirewall` | `false` | Open the configured port in the firewall. |
+
+Without an `environmentFile`, both secrets are generated on first start and stored in `dataDir`.
+
+Database helpers ship alongside the main binary:
+
+```bash
+gitea-mirror-db init
+gitea-mirror-db check
+gitea-mirror-db fix
+```
+
+## LXC on Proxmox
+
+The Proxmox VE Community Scripts project maintains an installer that creates an LXC container and sets everything up:
+
+```bash
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/gitea-mirror.sh)"
+```
+
+Run it from a Proxmox VE shell. See the [Proxmox VE Community Scripts page](https://community-scripts.github.io/ProxmoxVE/scripts?id=gitea-mirror) for options and update instructions.
+
+> **Note:** This script is maintained by the Community Scripts project rather than by Gitea Mirror, so its behaviour and its update cadence are theirs.
+
+## Bare metal with Bun
+
+Gitea Mirror runs on the [Bun](https://bun.sh) runtime, version 1.2.9 or newer. There is no Node.js build.
+
+```bash
+# Install Bun
+curl -fsSL https://bun.sh/install | bash
+
+# Get the source
+git clone https://github.com/RayLabsHQ/gitea-mirror.git
+cd gitea-mirror
+
+# Install dependencies and initialize the database
+bun run setup
+
+# Build the production bundle
+bun run build
+
+# Run it
+BETTER_AUTH_SECRET="$(openssl rand -base64 32)" bun run start
+```
+
+The server listens on `http://localhost:4321`. Data goes to `data/gitea-mirror.db` relative to the working directory, following `DATABASE_URL`.
+
+For development with hot reload, use `bun run dev` instead of building.
+
+### Running under systemd
+
+```ini
+[Unit]
+Description=Gitea Mirror
+After=network.target
+
+[Service]
+Type=simple
+User=gitea-mirror
+WorkingDirectory=/opt/gitea-mirror
+EnvironmentFile=/etc/gitea-mirror/env
+ExecStart=/usr/local/bin/bun run start
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+With `/etc/gitea-mirror/env` holding:
+
+```bash
+NODE_ENV=production
+HOST=0.0.0.0
+PORT=4321
+DATABASE_URL=file:data/gitea-mirror.db
+BETTER_AUTH_SECRET=your-32-character-minimum-secret
+ENCRYPTION_SECRET=your-encryption-secret
+BETTER_AUTH_URL=https://mirror.example.com
+PUBLIC_BETTER_AUTH_URL=https://mirror.example.com
+```
+
+## Data and persistence
+
+Everything that must survive a restart lives in one directory, `/app/data` in Docker and `dataDir` elsewhere:
+
+| Path | Contents |
+|---|---|
+| `gitea-mirror.db` | SQLite database: configuration, repositories, jobs, activity, users, sessions. |
+| `.better_auth_secret` | Generated session secret, if you did not supply one. |
+| `.encryption_secret` | Generated encryption secret, if you did not supply one. |
+| `repo-backups/` | Git bundle snapshots, when force-push protection is set to create them. |
+
+Back up the whole directory. Snapshots in `repo-backups/` are the part that grows, so size the volume with your retention settings in mind.
+
+## Reverse proxy
+
+Behind a proxy, tell the app its public URL or session cookies and CSRF checks will not line up:
+
+```bash
+BETTER_AUTH_URL=https://mirror.example.com
+PUBLIC_BETTER_AUTH_URL=https://mirror.example.com
+BETTER_AUTH_TRUSTED_ORIGINS=https://mirror.example.com
+```
+
+Serving from a subpath additionally needs `BASE_URL`, while the auth URLs stay origin-only:
+
+```bash
+BASE_URL=/mirror
+BETTER_AUTH_URL=https://git.example.com
+PUBLIC_BETTER_AUTH_URL=https://git.example.com
+BETTER_AUTH_TRUSTED_ORIGINS=https://git.example.com
+```
+
+Forward `X-Forwarded-Host` and `X-Forwarded-Proto` from your proxy. The app reads them to detect its own origin, which covers many setups even before you set the variables above.
+
+## Verifying a deployment
+
+```bash
+curl http://localhost:4321/api/health
+```
+
+A healthy instance reports its status along with the running version, whether an update is available, database connectivity, and the state of the crash recovery system:
+
+```json
+{
+  "status": "ok",
+  "timestamp": "2026-08-03T14:22:31.004Z",
+  "version": "3.24.0",
+  "latestVersion": "3.24.0",
+  "updateAvailable": false,
+  "database": { "connected": true },
+  "recovery": { "status": "healthy", "jobsNeedingRecovery": 0 }
+}
+```
+
+`status` is `error` when the database is unreachable, and `degraded` when jobs are waiting on recovery after an unclean shutdown. This is the same endpoint the Docker health check and the Kubernetes probes use, so a container stuck unhealthy usually means the app failed to start rather than that the check is wrong. Check the logs first.

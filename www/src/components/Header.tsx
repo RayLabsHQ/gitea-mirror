@@ -18,7 +18,8 @@ export function Header() {
     { href: '/#features', label: 'Features' },
     { href: '/#use-cases', label: 'Use Cases' },
     { href: '/#screenshots', label: 'Screenshots' },
-    { href: '/#installation', label: 'Installation' }
+    { href: '/#installation', label: 'Installation' },
+    { href: '/docs/', label: 'Docs' }
   ];
 
   return (

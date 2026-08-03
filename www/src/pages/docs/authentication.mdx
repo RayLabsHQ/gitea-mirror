@@ -1,0 +1,260 @@
+---
+layout: '../../layouts/DocsLayout.astro'
+title: Authentication
+description: Sign in with email and password, an external OIDC or SAML identity provider, or trusted headers from a reverse proxy.
+---
+
+# Authentication
+
+Gitea Mirror handles sign-in through [Better Auth](https://better-auth.com) with session cookies. Three methods can get a user into the app: email and password, single sign-on against an external identity provider, and header authentication behind a reverse proxy. Email and password is always available. The other two are additive, so turning on SSO does not switch off the local login.
+
+Gitea Mirror can also act as an OIDC provider for other applications, which is covered at the end of this page.
+
+## Email and password
+
+This method is always enabled and needs no configuration.
+
+### Creating the first account
+
+Visit `/signup` on a fresh instance and create an account. That account owns the instance configuration, which is what "first user becomes admin" means in practice.
+
+Once one account exists, `/signup` redirects to `/login`. There is no open registration, so a public instance cannot accumulate accounts on its own. Additional users are created through header auth provisioning or SSO, not through the signup form.
+
+### Sessions
+
+Sessions are cookie based. The cookie is named `better-auth-session` and lasts 30 days, refreshed as the user stays active.
+
+### Resetting a password
+
+There is no email-driven password reset flow, because Gitea Mirror does not send email. Reset from the command line instead:
+
+```bash
+bun run reset-password -- --email=user@example.com --new-password='new-secure-password'
+```
+
+> **Note:** Accounts in Gitea Mirror are never email-verified, since no verification flow exists. This matters for SSO account linking, described below.
+
+### Required secret
+
+Set `BETTER_AUTH_SECRET` to a random string of at least 32 characters. It signs session tokens.
+
+```bash
+openssl rand -base64 32
+```
+
+If you leave it unset, the Docker entrypoint generates one and stores it in `/app/data/.better_auth_secret` so sessions survive a restart. Losing that file logs everyone out.
+
+### URL configuration
+
+Better Auth validates the origin of every request, so it needs to know your real external URL.
+
+| Variable | Purpose |
+|---|---|
+| `BETTER_AUTH_URL` | The external origin of the instance, for example `https://mirror.example.com`. |
+| `PUBLIC_BETTER_AUTH_URL` | The same value, exposed to the browser bundle. |
+| `BETTER_AUTH_TRUSTED_ORIGINS` | Comma-separated extra origins allowed to submit auth requests. |
+| `BASE_URL` | Path prefix when the app is served under a subpath, for example `/mirror`. |
+
+> **Warning:** Behind a reverse proxy, set `BETTER_AUTH_URL`, `PUBLIC_BETTER_AUTH_URL`, and `BETTER_AUTH_TRUSTED_ORIGINS` to your external HTTPS URL. A mismatch usually shows up as a 500 error or an invalid origin message right after login.
+
+The app also auto-detects the origin from the incoming `X-Forwarded-Host` and `X-Forwarded-Proto` headers, which covers many proxy setups without extra configuration. Setting the variables explicitly is still the reliable path.
+
+## Single sign-on
+
+SSO lets users authenticate against an external identity provider such as Google, Okta, Authentik, or Azure AD. Providers are managed in the UI under **Configuration > Authentication > SSO Providers**.
+
+Both OIDC and SAML 2.0 providers are supported. You choose the protocol on a tab when adding a provider.
+
+### Shared fields
+
+Every provider, regardless of protocol, needs these:
+
+| Field | Description |
+|---|---|
+| Issuer URL | The identity provider's issuer, for example `https://accounts.google.com`. Keep any trailing slash your provider shows. |
+| Domain | The email domain this provider serves. Multi-domain providers take a comma-separated list. This field controls account linking, see below. |
+| Provider ID | A short unique slug such as `google-sso`. It appears in the callback URL, so pick it before configuring the upstream provider. |
+
+### OIDC providers
+
+Add these on top of the shared fields:
+
+| Field | Description |
+|---|---|
+| Client ID | OAuth client ID issued by your provider. |
+| Client Secret | OAuth client secret. |
+| Scopes | Defaults to `openid`, `email`, `profile`. |
+| PKCE | Enabled by default. Leave it on unless your provider cannot handle it. |
+
+Enter the Issuer URL and click **Discover** to fetch the authorization, token, JWKS, and userinfo endpoints automatically. For providers without a discovery document, fill those four endpoints in by hand.
+
+> **Warning:** Google rejects the `offline_access` scope. Remove it from the scope list for Google providers or the sign-in fails.
+
+The redirect URL to register with your provider is:
+
+```text
+https://your-domain.com/api/auth/sso/callback/{provider-id}
+```
+
+Replace `{provider-id}` with the Provider ID you chose. The UI shows the exact URL as you type, so you can copy it straight into the provider console.
+
+#### Example: Google
+
+1. In Google Cloud Console, create an OAuth 2.0 Client ID.
+2. Add `https://your-domain.com/api/auth/sso/callback/google-sso` as an authorized redirect URI.
+3. In Gitea Mirror, set Issuer URL to `https://accounts.google.com`, Provider ID to `google-sso`, Domain to your company email domain, then paste the client ID and secret.
+4. Click **Discover**, then save.
+
+#### Example: Authentik
+
+1. Create an Application and an OIDC Provider in Authentik.
+2. Start adding the provider in Gitea Mirror so you can copy the redirect URL it displays.
+3. Paste that redirect URL into the Authentik provider, then finish creating it.
+4. Back in Gitea Mirror, paste the issuer URL, client ID, and client secret, click **Discover**, and set Domain to the email domain your Authentik users actually have.
+
+### SAML 2.0 providers
+
+Switch to the **SAML 2.0** tab when adding a provider, then supply:
+
+| Field | Description |
+|---|---|
+| SAML Entry Point | Your identity provider's SSO URL, where authentication requests are sent. |
+| X.509 Certificate | The signing certificate from your identity provider, used to validate assertions. |
+| Callback URL | Optional. Defaults to the URL below if you leave it blank. |
+
+The assertion consumer service URL is:
+
+```text
+https://your-domain.com/api/auth/sso/saml2/callback/{provider-id}
+```
+
+Gitea Mirror also publishes service provider metadata, which many identity providers can import directly:
+
+```text
+https://your-domain.com/api/auth/sso/saml2/sp/metadata?providerId={provider-id}
+```
+
+The default name ID format is `urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress`, which keeps identities aligned with the email-based account matching described next.
+
+### Account linking
+
+When someone signs in through SSO with an email that already has a local account, Gitea Mirror links the two so they land on the same data instead of getting a duplicate account or an error page. Matching is by email address.
+
+The trust model is scoped to the Domain field you set on the provider:
+
+- Registering a provider marks it as verified for the domains you listed.
+- A sign-in is auto-linked only when the user's email actually belongs to one of those domains. A cross-domain email is refused even though the provider is registered.
+- Local accounts are never email-verified in this app, so the linker deliberately does not require local verification. Otherwise linking could never happen.
+
+> **Warning:** Set Domain to the email domains your identity provider genuinely issues. If that provider lets users self-register or claim arbitrary addresses within the domain, someone there can claim an address matching a local account and take it over. Registering a provider means vouching for its identity model for those domains.
+
+### Signing in
+
+When at least one provider is configured, the login page shows **Email** and **SSO** tabs. On the SSO tab a user either clicks a provider button or enters their work email, which routes them to the provider matching that email domain.
+
+## Header authentication
+
+Header authentication trusts an upstream reverse proxy such as Authentik, Authelia, oauth2-proxy, or Traefik forward-auth to authenticate the user and pass identity along in HTTP headers. There is no login form and no callback: Gitea Mirror reads the headers and resolves the user.
+
+This method is configured through environment variables only, never in the UI. Trusting a header means trusting whoever can set it, and that is a decision for whoever controls the proxy, not for a user logged into the app.
+
+### Environment variables
+
+| Variable | Description | Default |
+|---|---|---|
+| `HEADER_AUTH_ENABLED` | Master switch, must be `true` to enable | `false` |
+| `HEADER_AUTH_USER_HEADER` | Header carrying the username | `X-Authentik-Username` |
+| `HEADER_AUTH_EMAIL_HEADER` | Header carrying the email address | `X-Authentik-Email` |
+| `HEADER_AUTH_NAME_HEADER` | Header carrying the display name | `X-Authentik-Name` |
+| `HEADER_AUTH_AUTO_PROVISION` | Create an account when an unknown username arrives | `false` |
+| `HEADER_AUTH_ALLOWED_DOMAINS` | Comma-separated email domain allowlist, empty allows any | empty |
+
+The defaults are Authentik shaped. For an Authentik proxy provider you usually only need to set `HEADER_AUTH_ENABLED=true`, plus `HEADER_AUTH_AUTO_PROVISION=true` if you want first-login self-registration.
+
+### Example: Authentik
+
+```yaml
+services:
+  gitea-mirror:
+    image: ghcr.io/raylabshq/gitea-mirror:latest
+    environment:
+      HEADER_AUTH_ENABLED: "true"
+      HEADER_AUTH_AUTO_PROVISION: "true"
+      HEADER_AUTH_ALLOWED_DOMAINS: "example.com,example.org"
+```
+
+### Example: Authelia
+
+Authelia uses different header names, so override all three:
+
+```yaml
+services:
+  gitea-mirror:
+    image: ghcr.io/raylabshq/gitea-mirror:latest
+    environment:
+      HEADER_AUTH_ENABLED: "true"
+      HEADER_AUTH_USER_HEADER: "Remote-User"
+      HEADER_AUTH_EMAIL_HEADER: "Remote-Email"
+      HEADER_AUTH_NAME_HEADER: "Remote-Name"
+      HEADER_AUTH_AUTO_PROVISION: "true"
+```
+
+Then configure Authelia's authorization rules to protect the Gitea Mirror route and inject the `Remote-*` headers.
+
+### How a user is resolved
+
+1. An existing session cookie wins. Header auth only fires when there is no session, so users who signed in with a password or through SSO are unaffected.
+2. The username header is matched against the `username` column.
+3. If that finds nothing and an email header is present, the email is matched against the `email` column.
+4. If neither matches and `HEADER_AUTH_AUTO_PROVISION` is `true`, a new account is created. When no email header is present the address falls back to `<username>@header-auth.local`.
+5. If neither matches and auto-provisioning is off, the request is rejected and a warning is logged.
+
+When `HEADER_AUTH_ALLOWED_DOMAINS` is set and an email header arrives, the email's domain must appear in the list or the request is rejected before any lookup happens.
+
+### Security requirements
+
+> **Warning:** Your reverse proxy must strip inbound copies of the configured headers from client requests before injecting its own. Without that, anyone who can reach the app can send `X-Authentik-Username: admin` and walk straight in.
+
+Beyond stripping headers:
+
+1. **Do not expose the port directly.** When header auth is on, only the trusted proxy should be able to reach Gitea Mirror. Bind it to an internal network.
+2. **Terminate TLS at the proxy.** Headers travel in plaintext over whatever link carries them.
+3. **Be conservative with auto-provisioning.** With it off you create accounts once, and the proxy just fills in sessions afterwards. That is the safer default for shared deployments.
+
+### Confirming it is active
+
+The Authentication settings page shows a green "Header Authentication / Via reverse proxy" badge when the feature is live. You can also check the API:
+
+```bash
+curl https://your-domain.com/api/auth/header-status
+```
+
+It returns `{"enabled": true, ...}` once the variables are set.
+
+## Gitea Mirror as an OIDC provider
+
+Gitea Mirror can also issue identities to other applications. Create an OAuth application under **Configuration > Authentication > OAuth Applications** and share the resulting client ID and secret with the relying application.
+
+Standard endpoints:
+
+| Purpose | URL |
+|---|---|
+| Discovery | `https://your-domain.com/.well-known/openid-configuration` |
+| Authorization | `https://your-domain.com/api/auth/oauth2/authorize` |
+| Token | `https://your-domain.com/api/auth/oauth2/token` |
+| UserInfo | `https://your-domain.com/api/auth/oauth2/userinfo` |
+| JWKS | `https://your-domain.com/api/auth/jwks` |
+
+Supported scopes are `openid` for the user ID, `profile` for name and username, and `email` for the address and its verification status. Users see a consent screen the first time an application asks for access.
+
+## Troubleshooting
+
+**Invalid origin errors.** `BETTER_AUTH_URL` does not match the URL users actually visit. Set it, `PUBLIC_BETTER_AUTH_URL`, and `BETTER_AUTH_TRUSTED_ORIGINS` to the external origin.
+
+**Redirected to the homepage with `?error=UNKNOWN` after a successful SSO login.** The upstream login worked but linking to the existing local account was refused. The usual cause is a Domain field that does not match the user's real email domain. Set `BETTER_AUTH_LOG_LEVEL=debug` to see the full callback trace, and look for a message about an account not being linked.
+
+**`TypeError: undefined is not an object (evaluating 'url.startsWith')`.** The stored provider record is missing its OIDC endpoints. Delete the provider and add it again using the **Discover** button so the endpoints are saved.
+
+**Redirect loop on SSO.** The redirect URI registered upstream does not exactly match `/api/auth/sso/callback/{provider-id}`. Trailing slashes and http versus https both count as a mismatch.
+
+**Header auth does nothing.** Confirm `HEADER_AUTH_ENABLED` is the string `"true"`, then check `/api/auth/header-status`. Also confirm the proxy is actually setting the header names you configured, since the defaults are Authentik specific.

@@ -1,0 +1,54 @@
+---
+import DocsLayout from '../../layouts/DocsLayout.astro';
+import { docsNav } from '../../lib/docs-nav';
+
+const frontmatter = {
+  title: 'Documentation',
+  description:
+    'Everything you need to install, configure and run Gitea Mirror: quickstart, deployment, configuration, notifications, authentication and more.',
+};
+
+const sectionBlurbs: Record<string, string> = {
+  'Getting Started': 'Install Gitea Mirror and get your first mirror running.',
+  'Configuration': 'Connect GitHub and Gitea, tune mirroring, and pre-configure with environment variables.',
+  'Features': 'Notifications, single sign-on, and protection against destructive updates.',
+  'Reference': 'How it all fits together, plus advanced operations.',
+};
+---
+
+<DocsLayout frontmatter={frontmatter}>
+  <h1>Gitea Mirror Documentation</h1>
+  <p>
+    Gitea Mirror is a self-hosted service that automatically mirrors your GitHub
+    repositories to a Gitea instance: code, releases, issues, wikis and more.
+    These docs cover installation, configuration and every feature in the app.
+  </p>
+
+  {docsNav.map((section) => (
+    <section>
+      <h2>{section.title}</h2>
+      <p>{sectionBlurbs[section.title]}</p>
+      <ul>
+        {section.items.map((item) => (
+          <li>
+            <a href={item.href}>{item.title}</a>
+          </li>
+        ))}
+      </ul>
+    </section>
+  ))}
+
+  <h2>Offline reference</h2>
+  <p>
+    Running air-gapped? The same information ships as plain markdown in the
+    repository under
+    <a
+      href="https://github.com/RayLabsHQ/gitea-mirror/tree/main/docs"
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      the docs directory
+    </a>
+    , versioned with the release you installed.
+  </p>
+</DocsLayout>

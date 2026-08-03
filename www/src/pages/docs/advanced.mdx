@@ -1,0 +1,212 @@
+---
+layout: '../../layouts/DocsLayout.astro'
+title: Advanced Topics
+description: Health checks, database management, crash recovery, graceful shutdown, and how the scheduler actually behaves.
+---
+
+# Advanced Topics
+
+Operational detail for people running Gitea Mirror seriously: monitoring it, maintaining its database, and understanding what happens when it restarts mid-job.
+
+## Health endpoint
+
+`GET /api/health` returns a JSON summary of application health. It requires no authentication, which is what lets container orchestrators and uptime monitors poll it.
+
+```bash
+curl http://localhost:4321/api/health
+```
+
+A healthy instance responds with HTTP 200 and a body like this:
+
+```json
+{
+  "status": "ok",
+  "timestamp": "2026-08-03T12:00:00.000Z",
+  "version": "3.24.0",
+  "latestVersion": "3.24.0",
+  "updateAvailable": false,
+  "database": {
+    "connected": true
+  },
+  "recovery": {
+    "status": "healthy",
+    "jobsNeedingRecovery": 0
+  }
+}
+```
+
+### Fields
+
+`status` is the overall verdict and is one of three values. `ok` means everything is fine. `degraded` means the database is reachable but there are interrupted jobs waiting to be recovered and no recovery pass is currently running. `error` means the database connectivity check failed.
+
+`timestamp` is when the check ran, in ISO 8601.
+
+`version` is the running version, read from `npm_package_version`. It is the string `unknown` if that variable is not set, which happens when the process is started without the Docker entrypoint, since the entrypoint is what extracts it from `package.json`.
+
+`latestVersion` is the newest published release, fetched from the GitHub releases API and cached in memory for one hour. It is `unknown` if the lookup fails, for example on an instance with no outbound internet access.
+
+`updateAvailable` is `true` only when both versions are known and the running one compares as older.
+
+`database.connected` is the result of a trivial query against `sqlite_master`.
+
+`recovery.status` is `healthy` when nothing needs recovering, `jobs-pending` when interrupted jobs were found, or `error` if the check itself failed. `recovery.jobsNeedingRecovery` is a simplified flag rather than a true count: it is `1` when any job needs recovery, `0` when none do, and `-1` when the check errored.
+
+If the handler throws, the endpoint returns HTTP 503 with a sanitized error body instead of the structure above.
+
+> **Note:** The response deliberately contains no memory, CPU, uptime, or operating system details. The endpoint is unauthenticated, and exposing host telemetry on an unauthenticated route is an information disclosure risk. If you need those metrics, collect them from the container runtime rather than from the application.
+
+### Container health checks
+
+Both the `Dockerfile` and the compose files already wire this up, so `docker ps` reports health without any extra configuration. The check accounts for `BASE_URL`, polling `http://localhost:4321${BASE_URL}/api/health`. The image-level check runs every 30 seconds with a 5 second timeout, a 5 second start period, and 3 retries.
+
+For Kubernetes, point both a readiness and a liveness probe at the same path:
+
+```yaml
+readinessProbe:
+  httpGet:
+    path: /api/health
+    port: 4321
+  initialDelaySeconds: 15
+  periodSeconds: 30
+livenessProbe:
+  httpGet:
+    path: /api/health
+    port: 4321
+  initialDelaySeconds: 30
+  periodSeconds: 30
+```
+
+> **Note:** A `degraded` status still returns HTTP 200, so a liveness probe will not restart the pod over pending job recovery, which is the behavior you want since recovery resolves itself. Alert on the `status` field if you want visibility into `degraded`.
+
+## Database management
+
+Gitea Mirror uses SQLite through Drizzle ORM. Migrations live in the `drizzle/` directory and run automatically on startup, so a normal upgrade requires nothing from you.
+
+### Schema and migrations
+
+```bash
+# Generate a migration from changes to src/lib/db/schema.ts
+bun run db:generate
+
+# Apply pending migrations
+bun run db:migrate
+
+# Push schema changes directly, skipping migration files (development only)
+bun run db:push
+
+# Verify schema consistency
+bun run db:check
+
+# Pull the schema from an existing database
+bun run db:pull
+
+# Open Drizzle Studio, a browser-based database explorer
+bun run db:studio
+```
+
+> **Warning:** `db:push` writes schema changes without producing a migration file. It is convenient during development and wrong for anything shared, because the next person to run `db:migrate` will not get your change. Use `db:generate` followed by `db:migrate` for anything that ships.
+
+### Maintenance commands
+
+The `manage-db` script handles operational tasks:
+
+```bash
+bun run manage-db init            # Initialize a fresh database
+bun run manage-db check           # Report on database health
+bun run manage-db fix             # Repair common integrity problems
+bun run manage-db cleanup         # Remove old events and stale records
+bun run manage-db auto            # Initialize if missing, otherwise check
+bun run manage-db reset-users     # Delete all user accounts
+bun run manage-db reset-password  # Reset a user's password
+```
+
+Several of these have shorthand aliases in `package.json`: `bun run init-db`, `bun run check-db`, `bun run fix-db`, `bun run reset-users`, and `bun run reset-password`.
+
+To delete the database file entirely and start over:
+
+```bash
+bun run cleanup-db
+```
+
+> **Warning:** `cleanup-db` removes `data/gitea-mirror.db` outright, and `manage-db reset-users` deletes every account including the admin. Neither asks for confirmation. Back up the `data` directory first.
+
+### Backups
+
+The entire application state is one SQLite file plus the two generated secret files, all inside `data/`. Backing up that directory backs up everything: configuration, repository records, job history, and the keys needed to decrypt stored tokens.
+
+Stop the container before copying the file, or use SQLite's own backup mechanism, so you do not capture a partially written page.
+
+## Crash recovery
+
+Mirroring a large repository with metadata can take a long time, and a restart in the middle of it would otherwise leave jobs stranded in a `mirroring` state forever. Gitea Mirror handles this in two places.
+
+On startup, a recovery pass finds jobs that were interrupted and resumes or fails them cleanly. In Docker this runs automatically from the entrypoint with a 30 second timeout, before the server starts accepting requests. You can run it manually:
+
+```bash
+bun run startup-recovery         # Normal recovery pass
+bun run startup-recovery-force   # Force recovery of all interrupted jobs
+```
+
+The entrypoint also runs a repository status repair pass, which reconciles repositories whose recorded state disagrees with what actually exists in Gitea.
+
+To exercise the recovery path without waiting for a real crash:
+
+```bash
+bun run test-recovery
+bun run test-recovery-cleanup    # Remove the test artifacts afterwards
+```
+
+## Graceful shutdown
+
+Gitea Mirror installs handlers for `SIGTERM`, `SIGINT`, and `SIGHUP`, plus uncaught exceptions and unhandled promise rejections. When any of these fires, a shutdown manager coordinates termination: it tracks running jobs, persists their progress to the database, runs cleanup callbacks that services have registered, and only then exits.
+
+Two timeouts bound the process: 30 seconds for the shutdown overall, and 10 seconds per job to save its state. These prevent a hung job from blocking termination indefinitely.
+
+The Docker entrypoint traps signals and forwards them to the application process rather than letting the shell absorb them, so `docker stop` and Kubernetes pod termination both produce a clean shutdown instead of a kill.
+
+Jobs interrupted this way are marked as interrupted rather than failed, which is what the startup recovery pass looks for on the next boot.
+
+To test it:
+
+```bash
+bun run test-shutdown
+bun run test-shutdown-cleanup
+```
+
+## Scheduling behavior
+
+The scheduler is more than a timer, and a few of its behaviors are worth knowing.
+
+### Interval formats
+
+Any interval setting accepts a duration string (`30m`, `8h`, `7d`), a five-field cron expression (`0 2 * * *`), or a plain number interpreted as seconds. The parser tries cron first when the value has five whitespace-separated fields, then falls back to duration parsing, then to a bare seconds value.
+
+Recognized duration units are `ms`, `s`, `m`, `h`, `d`, and `w`, in both short and long spellings.
+
+### What a scheduled run does
+
+A run proceeds in stages, each gated by its own setting. First, if auto-import is enabled, it queries GitHub for repositories that are not yet tracked and adds them. Then, if auto-mirror is enabled, it mirrors repositories that need mirroring.
+
+Auto-mirroring of starred repositories is governed separately from auto-mirroring of your own repositories, by the `AUTO_MIRROR_STARRED` setting. This exists because starred repositories are often imported purely for browsing, and mirroring hundreds of other people's projects is usually not what you want by default.
+
+Existing mirrors are re-synced according to the configured interval, and optionally skipped when they were mirrored very recently or have no upstream changes.
+
+### Auto-start
+
+Setting `SCHEDULE_ENABLED=true`, or any of `SCHEDULE_INTERVAL`, `GITEA_MIRROR_INTERVAL`, or `DELAY`, enables the scheduler. When enabled, the first run happens shortly after boot rather than waiting a full interval, so a fresh container populates itself without anyone clicking a button.
+
+### Mirror intervals versus sync intervals
+
+There are two independent intervals and they are easy to confuse.
+
+`GITEA_MIRROR_INTERVAL` is stored on each repository in Gitea and controls how often Gitea itself pulls from GitHub. Gitea's own default is 8 hours, and Gitea Mirror sets this value explicitly rather than leaving it to the server default.
+
+The scheduler interval controls how often Gitea Mirror wakes up to discover new repositories, mirror pending ones, and run cleanup. It does not pull code itself.
+
+You generally want the scheduler interval to be no shorter than the mirror interval, since running it more often will not make Gitea fetch any sooner.
+
+## Rate limits
+
+GitHub allows 5,000 authenticated API requests per hour on a personal access token. Gitea Mirror uses Octokit with the throttling plugin, which backs off automatically when it approaches the limit, and tracks remaining quota so the dashboard can show it.
+
+The batch size and concurrency settings are the main levers if you are hitting limits: lower `SCHEDULE_BATCH_SIZE`, `MIRROR_ISSUE_CONCURRENCY`, and `MIRROR_PULL_REQUEST_CONCURRENCY`, or raise `SCHEDULE_PAUSE_BETWEEN_BATCHES`. Metadata mirroring is by far the most request-hungry operation, since it walks every issue, comment, and label individually.

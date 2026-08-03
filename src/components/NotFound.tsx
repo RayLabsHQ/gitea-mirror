@@ -60,7 +60,7 @@ export function NotFound() {
               <span className="text-xs">Config</span>
             </a>
             <a 
-              href={withBase("/docs")} 
+              href="https://gitea-mirror.raylabs.io/docs/" 
               className="flex flex-col items-center gap-2 p-3 rounded-md hover:bg-muted transition-colors"
             >
               <BookOpen className="h-5 w-5 text-muted-foreground" />

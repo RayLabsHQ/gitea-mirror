@@ -1,0 +1,278 @@
+---
+layout: '../../layouts/DocsLayout.astro'
+title: Notifications
+description: Send mirror job alerts to ntfy, Apprise, Gotify, or your own webhook endpoint.
+---
+
+# Notifications
+
+Gitea Mirror can push an alert whenever a mirror job finishes, so you find out about a broken sync without opening the dashboard. Four providers are supported: ntfy, Apprise, Gotify, and a plain HTTP webhook. You pick one provider at a time.
+
+All notification settings live in the web UI under **Configuration > Notifications**. There are no environment variables for notifications, the configuration is stored per user in the database.
+
+## Enabling notifications
+
+1. Open **Configuration > Notifications**.
+2. Turn on the **Notifications** switch.
+3. Pick a provider from the segmented control: Ntfy.sh, Apprise, Gotify, or Webhook.
+4. Fill in the provider fields described below.
+5. Click **Send test** to confirm the setup works.
+
+Settings save automatically as you edit them.
+
+## Event types
+
+The **Notification Events** card controls which job outcomes produce a notification.
+
+| Event | Fires when | Default |
+|---|---|---|
+| Sync errors | A mirror job ends with status `failed` | On |
+| Sync success | A mirror job ends with status `mirrored` or `synced` | Off |
+| New repository discovered | Not yet implemented, the switch is disabled and marked SOON | Off |
+
+Only terminal job statuses trigger notifications. Jobs that are still queued or in progress produce nothing.
+
+Errors are always escalated by the provider that supports priorities, regardless of the default priority you configure. For ntfy that means `high`, for Gotify it means priority `8`.
+
+## Ntfy
+
+[ntfy](https://ntfy.sh) is a lightweight HTTP pub-sub service. Use the public server at `https://ntfy.sh` or run your own.
+
+### Settings
+
+| Field | Required | Notes |
+|---|---|---|
+| Server URL | No | Defaults to `https://ntfy.sh`. Point it at your own instance if self-hosting. |
+| Topic | Yes | The topic your clients subscribe to. |
+| Access token | No | Needed only if your ntfy server requires authentication. Sent as `Authorization: Bearer <token>`. |
+| Default priority | No | One of `min`, `low`, `default`, `high`, `urgent`. Defaults to `default`. |
+
+> **Warning:** On the public ntfy server anyone who knows your topic name can read your notifications. Pick a long, unguessable topic such as `gitea-mirror-7f3a91c2b8`, or self-host with authentication.
+
+### What gets sent
+
+Gitea Mirror sends a plain text POST to `<server url>/<topic>`. The message body is the notification text, and the metadata travels in headers:
+
+```http
+POST /gitea-mirror HTTP/1.1
+Host: ntfy.sh
+Title: Mirror Failed: acme/website
+Priority: high
+Tags: warning
+Authorization: Bearer tk_...
+
+Repository acme/website failed to mirror
+Details: remote: repository not found
+```
+
+Successful jobs use the `white_check_mark` tag and your configured default priority. Failures use the `warning` tag and `high` priority.
+
+### Self-hosting quick start
+
+```bash
+docker run -p 8080:80 binwiederhier/ntfy serve
+```
+
+Then set the Server URL to `http://ntfy:8080` if Gitea Mirror runs in the same Docker network, or to the host address otherwise.
+
+## Apprise
+
+[Apprise](https://github.com/caronc/apprise-api) is an aggregator that fans a single notification out to more than 100 services, including Slack, Discord, Telegram, email, and Pushover. Run the Apprise API server, configure your destinations there, and point Gitea Mirror at it.
+
+### Settings
+
+| Field | Required | Notes |
+|---|---|---|
+| Server URL | Yes | Base URL of your Apprise API server, for example `http://apprise:8000`. |
+| Token / path | Yes | The Apprise configuration key you created. |
+| Tag filter | No | Restricts delivery to Apprise services carrying this tag. Leave blank to notify everything in that configuration. |
+
+### Running the Apprise API server
+
+```yaml
+services:
+  apprise:
+    image: caronc/apprise:latest
+    ports:
+      - "8000:8000"
+    volumes:
+      - apprise-config:/config
+
+volumes:
+  apprise-config:
+```
+
+Add your notification URLs through the Apprise web UI at `http://localhost:8000`, save them under a configuration key, then use that key as the token in Gitea Mirror.
+
+### What gets sent
+
+A JSON POST to `<server url>/notify/<token>`:
+
+```json
+{
+  "title": "Mirror Success: acme/website",
+  "body": "Repository acme/website mirrored successfully",
+  "type": "success",
+  "tag": "homelab"
+}
+```
+
+The `type` field is `failure` for sync errors and `success` otherwise, which is what Apprise uses to colour the message. The `tag` field is omitted when you leave the tag filter empty.
+
+## Gotify
+
+[Gotify](https://gotify.net) is a self-hosted push server with its own Android client. Create an application inside Gotify, then paste its token here.
+
+### Settings
+
+| Field | Required | Notes |
+|---|---|---|
+| Server URL | Yes | Base URL of your Gotify server. |
+| Application token | Yes | Created under Apps in the Gotify UI. Sent as the `X-Gotify-Key` header. |
+| Default priority | No | Integer from 0 to 10, defaults to 5. Values outside that range are clamped. |
+
+> **Note:** Use an application token, not a client token. Client tokens can read messages but cannot post them, and Gotify will reject the request.
+
+### What gets sent
+
+A JSON POST to `<server url>/message`:
+
+```json
+{
+  "title": "Mirror Failed: acme/website",
+  "message": "Repository acme/website failed to mirror\nDetails: remote: repository not found",
+  "priority": 8
+}
+```
+
+Failures always use priority 8. Everything else uses your configured default. Gotify's Android client only vibrates and pops a heads-up notification above priority 4, which is why the error priority is fixed higher than the default.
+
+## Webhook
+
+The webhook provider posts JSON to any URL you control. Use it to drive a chat bot, an incident tool, a home automation flow, or anything else that can accept an HTTP request.
+
+### Settings
+
+| Field | Required | Notes |
+|---|---|---|
+| Webhook URL | Yes | The full URL to POST to. |
+| Signing secret | No | When set, requests carry an HMAC signature header so your receiver can verify authenticity. |
+
+### Payload
+
+Every notification is a `POST` with `Content-Type: application/json` and this body:
+
+```json
+{
+  "title": "Mirror Failed: acme/website",
+  "message": "Repository acme/website failed to mirror\nDetails: remote: repository not found",
+  "type": "sync_error",
+  "timestamp": "2026-08-03T14:22:31.004Z"
+}
+```
+
+| Field | Type | Description |
+|---|---|---|
+| `title` | string | Short summary line, includes the repository or organization name. |
+| `message` | string | Full text, may contain newlines and a `Details:` section. |
+| `type` | string | `sync_error` or `sync_success`. |
+| `timestamp` | string | ISO 8601 timestamp generated when the request is built. |
+
+### Verifying the signature
+
+If you set a signing secret, Gitea Mirror adds a header:
+
+```http
+X-Webhook-Signature: sha256=<hex digest>
+```
+
+The digest is an HMAC-SHA256 of the exact request body, keyed with your secret, hex encoded and prefixed with `sha256=`.
+
+> **Warning:** Verify against the raw request body, not a re-serialized object. Most JSON frameworks reorder keys or change whitespace when they parse and re-encode, which produces a different digest and makes every request look invalid.
+
+Node with Express:
+
+```javascript
+import express from "express";
+import { createHmac, timingSafeEqual } from "node:crypto";
+
+const secret = process.env.WEBHOOK_SECRET;
+const app = express();
+
+// express.raw keeps the untouched bytes so the digest matches
+app.post("/hooks/gitea-mirror", express.raw({ type: "application/json" }), (req, res) => {
+  const received = req.get("X-Webhook-Signature") ?? "";
+  const expected = "sha256=" + createHmac("sha256", secret).update(req.body).digest("hex");
+
+  const a = Buffer.from(received);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length || !timingSafeEqual(a, b)) {
+    return res.status(401).send("invalid signature");
+  }
+
+  const event = JSON.parse(req.body.toString("utf8"));
+  console.log(event.type, event.title, event.timestamp);
+  res.sendStatus(204);
+});
+
+app.listen(3000);
+```
+
+Python with Flask:
+
+```python
+import hashlib
+import hmac
+import os
+
+from flask import Flask, abort, request
+
+SECRET = os.environ["WEBHOOK_SECRET"].encode()
+app = Flask(__name__)
+
+
+@app.post("/hooks/gitea-mirror")
+def receive():
+    raw = request.get_data()  # bytes, exactly as received
+    expected = "sha256=" + hmac.new(SECRET, raw, hashlib.sha256).hexdigest()
+    received = request.headers.get("X-Webhook-Signature", "")
+
+    if not hmac.compare_digest(expected, received):
+        abort(401)
+
+    event = request.get_json()
+    print(event["type"], event["title"], event["timestamp"])
+    return "", 204
+```
+
+Both examples use a constant time comparison. A plain `==` leaks timing information that can help an attacker forge a signature byte by byte.
+
+## Testing your configuration
+
+The **Send test** button appears in the Notifications card footer once notifications are enabled. It sends a message titled "Gitea Mirror - Test Notification" through the provider currently shown in the form, using the values on screen rather than the last saved ones. The test is typed as a success event, so it uses your default priority rather than the escalated error priority.
+
+A toast reports the outcome. Failures show a sanitized reason such as "Ntfy topic is required" or an upstream status like unauthorized or not found. Detailed errors go to the server log under the `[NotificationService]` prefix.
+
+## Security
+
+Notification credentials are encrypted at rest with AES-256-GCM, the same scheme used for GitHub and Gitea tokens. This covers the ntfy access token, the Apprise token, the Gotify application token, and the webhook signing secret.
+
+Only the active provider's credential is decrypted when a notification fires. A stale or corrupted credential left behind on a provider you no longer use will not break delivery through the provider you do use.
+
+Notification delivery never breaks a mirror job. Failures are caught and logged, and the job result is unaffected.
+
+## Troubleshooting
+
+**Nothing arrives at all.** Check that the Notifications switch is on and that the event type you expect is enabled. Sync success is off by default, so a healthy instance is silent unless you turn it on.
+
+**The test works but real jobs are quiet.** The test always sends, real notifications are filtered by the event switches. Confirm that **Sync errors** or **Sync success** matches the job outcome you are waiting on.
+
+**ntfy returns 401 or 403.** Your server requires authentication. Add an access token, and make sure it grants publish rights on that specific topic.
+
+**Apprise connection refused.** Confirm the Apprise container is reachable from the Gitea Mirror container. Inside Docker they need to share a network, and the URL should use the service name rather than `localhost`.
+
+**Gotify returns 401.** The token is either a client token instead of an application token, or it belongs to a deleted application.
+
+**Webhook signatures never match.** Your receiver is almost certainly hashing a re-serialized body. Capture the raw bytes before any JSON parsing happens.
+
+For anything else, check the server logs for lines beginning with `[NotificationService]`.

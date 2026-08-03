@@ -1,0 +1,196 @@
+---
+layout: '../../layouts/DocsLayout.astro'
+title: Configuration
+description: How Gitea Mirror is configured through the web interface, and how environment variables can pre-populate that configuration.
+---
+
+# Configuration
+
+Gitea Mirror has two configuration layers. Almost everything lives in the web interface and is stored in the database per user. A smaller set of environment variables covers the things that have to be known before the app can serve a request, such as the session secret and the public URL, and can additionally seed the database configuration on first boot.
+
+Start with the web interface. Reach for environment variables when you want a deployment that comes up fully configured without anyone clicking through a form.
+
+## The Configuration page
+
+![The Configuration page showing the Connections tab](/assets/configuration.png)
+
+The Configuration page is organized into four tabs.
+
+### Connections
+
+This is where the two ends of the mirror are set up. It contains two cards:
+
+**GitHub Connection** holds your GitHub username, personal access token, and account type (personal or organization). The token needs the `repo` scope for private repositories and `admin:org` to read organization data. This card also carries the repository selection options: whether to include private repositories, public repositories, archived repositories, forks, repositories where you are only a collaborator, and starred repositories.
+
+**Gitea Connection** holds the Gitea or Forgejo instance URL, an access token, and the default owner. It also carries the destination settings: the mirror strategy, default organization, organization visibility, and the per-repository mirror interval that Gitea itself uses to re-pull from GitHub.
+
+Both cards have a test button that performs a live authenticated call, so you can confirm credentials before saving.
+
+If your Gitea instance is reachable at one URL from the Gitea Mirror process and at a different URL from your browser, for example an internal service name versus a public hostname, set the external URL as well. Dashboard links use the external URL while all API and mirroring traffic keeps using the primary URL.
+
+### Automation
+
+This tab controls scheduled mirroring and cleanup.
+
+Scheduled syncing runs on an interval or a cron schedule. When enabled it re-syncs existing mirrors, and optionally discovers newly created GitHub repositories and mirrors them without any manual action. Two separate switches govern that: auto-import decides whether new repositories are discovered and added to the database, and auto-mirror decides whether they are then actually mirrored to Gitea.
+
+The same tab holds repository cleanup, which handles repositories that have disappeared from GitHub. The action for an orphaned repository is one of `skip`, `archive`, or `delete`, and `archive` is the default because it preserves the mirrored data. There is a dry-run mode that logs what would happen without touching anything, and a list of protected repository names that cleanup will never act on.
+
+### Notifications
+
+Gitea Mirror can send a notification on sync failure, on sync success, and when a new repository is discovered. Four providers are supported: ntfy, Apprise, Gotify, and a generic webhook. Each has its own settings, and only one provider is active at a time.
+
+The generic webhook sends a JSON POST containing `title`, `message`, `type`, and `timestamp` fields, which makes it straightforward to wire into anything that accepts an inbound hook.
+
+### Authentication
+
+This tab configures how people sign in. Email and password authentication is always available. On top of that you can register OIDC or SSO providers, and enable header authentication for deployments sitting behind a reverse proxy that already handles identity, such as Authentik or Authelia.
+
+Header authentication reads the username, email, and display name from configurable request headers. It can optionally auto-provision accounts on first sight of a new user, restricted to an allowlist of email domains.
+
+> **Warning:** Only enable header authentication when the app is genuinely behind a trusted proxy that strips those headers from inbound client requests. If clients can set the headers themselves, anyone can sign in as anyone.
+
+## Mirror strategies
+
+The mirror strategy decides where each repository lands on the Gitea side. There are four, and they are set on the Gitea Connection card.
+
+### preserve
+
+Keeps the same organization structure as GitHub. A repository at `acme/api` on GitHub becomes `acme/api` in Gitea, with the organization created if it does not exist. This is the default and the right choice when you want the mirror to be recognizable to anyone who knows the GitHub side.
+
+### single-org
+
+Consolidates every repository into one Gitea organization, regardless of where it came from on GitHub. The target organization defaults to `github-mirrors`. Useful when you want all mirrored content in one clearly separated namespace.
+
+### flat-user
+
+Places every repository directly under your Gitea user account, with no organizations involved. The simplest layout, and a reasonable fit for a personal instance with a modest number of repositories.
+
+### mixed
+
+Splits the difference. Your personal GitHub repositories go into a single named organization, while repositories owned by GitHub organizations preserve their original structure. This keeps organization repositories where people expect them while corralling your personal ones.
+
+> **Note:** Repositories mirrored because you starred them are handled separately from the strategy above. They can either go into a dedicated organization, which is named `starred` by default, or preserve their original owner's path. When two starred repositories from different owners share a name, a duplicate strategy setting decides whether the name gets a suffix, a prefix, or is placed in an owner-named organization.
+
+## Schedule intervals
+
+Anywhere Gitea Mirror asks for an interval, it accepts several formats:
+
+- A duration string with a unit: `30m`, `8h`, `7d`. The recognized units are `ms`, `s`, `m`, `h`, `d`, and `w`, and both short and long spellings work, so `8h` and `8 hours` are equivalent.
+- A five-field cron expression: `0 2 * * *` for daily at 2 AM, `0 */6 * * *` for every six hours, `0 0 * * 0` for weekly on Sunday at midnight.
+- A plain number, interpreted as seconds. `3600` means one hour.
+
+Cron expressions are useful when you want syncing to happen during a specific low-traffic window rather than at a fixed offset from whenever the service last restarted.
+
+## Configuring through environment variables
+
+Environment variables serve two distinct purposes, and it is worth keeping them apart.
+
+The first group is read directly by the running process at startup and has no equivalent in the UI: the port, the host, the session secret, the encryption secret, and the public URLs. These must be set as environment variables.
+
+The second group seeds the database configuration. On startup, if any of `GITHUB_USERNAME`, `GITHUB_TOKEN`, `GITEA_URL`, `GITEA_USERNAME`, or `GITEA_TOKEN` is set, Gitea Mirror loads the whole environment configuration and writes it into the first user's config row. If no user exists yet, it does nothing and tries again on the next start.
+
+> **Note:** Values written from the environment overwrite the corresponding fields in the database on every start. If you set `GITEA_ORGANIZATION` in your compose file and then change the organization through the UI, the next restart puts the environment value back. Either manage a setting through the UI or through the environment, not both.
+
+Tokens supplied through the environment are encrypted with AES-256-GCM before they are stored, the same as tokens entered through the UI.
+
+## Core environment variables
+
+These are the ones that matter for nearly every deployment. The [environment variables reference](./environment-variables.md) has the complete list.
+
+### Server
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `NODE_ENV` | `development` | Runtime environment. The container image sets `production`. |
+| `HOST` | `localhost` | Interface to bind. The container image sets `0.0.0.0`. |
+| `PORT` | `4321` | Port to listen on. |
+| `BASE_URL` | `/` | Path prefix when the app is served under a subpath, for example `/mirror`. |
+| `DATABASE_URL` | `sqlite://data/gitea-mirror.db` | SQLite database location. The container image sets `file:data/gitea-mirror.db`. |
+
+> **Note:** The database file is always created at `data/gitea-mirror.db` relative to the process working directory, and the directory is created if it is missing. `DATABASE_URL` is accepted and reported but the SQLite driver does not currently resolve an alternative path from it. To relocate the database, mount or symlink the `data` directory rather than changing this variable.
+
+### Authentication and secrets
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `BETTER_AUTH_SECRET` | none | Signs session cookies. Generate with `openssl rand -base64 32`. Required. |
+| `BETTER_AUTH_URL` | `http://localhost:4321` | The origin the auth server runs on. Scheme and host only, no path. |
+| `PUBLIC_BETTER_AUTH_URL` | none | The origin the browser should send auth requests to. Set this when the app is reachable at more than one origin. Scheme and host only. |
+| `BETTER_AUTH_TRUSTED_ORIGINS` | none | Comma-separated list of additional origins allowed to make auth requests. |
+| `ENCRYPTION_SECRET` | none | Key for AES-256-GCM encryption of stored GitHub and Gitea tokens. Generate with `openssl rand -base64 48`. |
+
+`BETTER_AUTH_SECRET` and `ENCRYPTION_SECRET` are both auto-generated by the Docker entrypoint if you leave them unset, and persisted inside the data volume so they survive restarts. Outside Docker there is no such fallback, and a missing `BETTER_AUTH_SECRET` in production logs a security warning and uses a known insecure development value.
+
+The origin of `BETTER_AUTH_URL` is trusted automatically, so `BETTER_AUTH_TRUSTED_ORIGINS` is only for additional origins. Common reasons to add one: reaching the app by local IP as well as by domain name, an external SSO provider, or a reverse proxy on a different hostname.
+
+### Multiple access URLs
+
+To reach the app at both a local IP and a public domain:
+
+```bash
+BETTER_AUTH_URL=https://gitea-mirror.example.com
+PUBLIC_BETTER_AUTH_URL=https://gitea-mirror.example.com
+BETTER_AUTH_TRUSTED_ORIGINS=http://10.10.20.45:4321,http://192.168.1.100:4321
+```
+
+Browsers isolate cookies per origin, so you will need to sign in separately on each origin. That is a browser security rule, not something the application can work around.
+
+### Path prefix deployments
+
+To serve the app at `https://git.example.com/mirror`:
+
+```bash
+BASE_URL=/mirror
+BETTER_AUTH_URL=https://git.example.com
+PUBLIC_BETTER_AUTH_URL=https://git.example.com
+BETTER_AUTH_TRUSTED_ORIGINS=https://git.example.com
+```
+
+The auth variables stay as bare origins. The prefix comes from `BASE_URL` and is applied when auth endpoints are built, so they resolve to `https://git.example.com/mirror/api/auth/*`. Any path accidentally included in the auth URLs is stripped. `BASE_URL` is read at runtime rather than baked in at build time, so the same prebuilt image works under any prefix.
+
+## Example: fully declared deployment
+
+A compose file that comes up ready to mirror, with no UI interaction required:
+
+```yaml
+services:
+  gitea-mirror:
+    image: ghcr.io/raylabshq/gitea-mirror:latest
+    container_name: gitea-mirror
+    restart: unless-stopped
+    ports:
+      - "4321:4321"
+    volumes:
+      - ./data:/app/data
+    environment:
+      - NODE_ENV=production
+      - HOST=0.0.0.0
+      - PORT=4321
+      - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}
+      - BETTER_AUTH_URL=https://gitea-mirror.example.com
+      - PUBLIC_BETTER_AUTH_URL=https://gitea-mirror.example.com
+      - BETTER_AUTH_TRUSTED_ORIGINS=https://gitea-mirror.example.com
+      - ENCRYPTION_SECRET=${ENCRYPTION_SECRET}
+
+      - GITHUB_USERNAME=your-username
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - PRIVATE_REPOSITORIES=true
+      - MIRROR_STARRED=true
+
+      - GITEA_URL=https://gitea.example.com
+      - GITEA_USERNAME=admin
+      - GITEA_TOKEN=${GITEA_TOKEN}
+      - MIRROR_STRATEGY=preserve
+
+      - MIRROR_METADATA=true
+      - MIRROR_ISSUES=true
+      - MIRROR_RELEASES=true
+
+      - SCHEDULE_ENABLED=true
+      - SCHEDULE_INTERVAL=8h
+      - AUTO_IMPORT_REPOS=true
+      - AUTO_MIRROR_REPOS=true
+```
+
+Remember that the configuration is only written once an admin account exists. Sign up first, then restart the container, or simply let the next scheduled restart pick it up.

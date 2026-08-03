@@ -1,0 +1,250 @@
+---
+layout: '../../layouts/DocsLayout.astro'
+title: Environment Variables
+description: Complete reference for every environment variable Gitea Mirror reads, grouped by what it controls.
+---
+
+# Environment Variables
+
+This is the full reference. Most of these variables have an equivalent control in the web interface, and for a typical deployment you only need the handful in [Core](#core) and [Authentication and secrets](#authentication-and-secrets). See [Configuration](./configuration.md) for how the two layers relate.
+
+## How environment configuration is applied
+
+Variables fall into two groups.
+
+**Process variables** are read directly by the running server: the host, port, base path, secrets, and auth URLs. They take effect immediately and have no UI equivalent.
+
+**Seeded variables** are copied into the database. On startup, if any of `GITHUB_USERNAME`, `GITHUB_TOKEN`, `GITEA_URL`, `GITEA_USERNAME`, or `GITEA_TOKEN` is set, Gitea Mirror parses the whole environment configuration and writes it to the first user's configuration row. If no user account exists yet, nothing is written and it tries again on the next start.
+
+> **Warning:** Seeded values are rewritten on every startup, so they win over changes you make in the UI. Manage a given setting either through the environment or through the UI, not both.
+
+> **Note:** Boolean seeded variables are matched against the exact string `true`. Any other value, including an unset variable, is written as `false`, which means the schema defaults listed below only apply when the environment loader is not running. The one exception is `INCLUDE_COLLABORATOR_REPOS`, which distinguishes unset from `false`, and `AUTO_IMPORT_REPOS` and `SEQUENTIAL_ORG_CREATION`, which are matched against `false` instead so unset means enabled.
+
+## Core
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `NODE_ENV` | `development` | Runtime environment. The container image sets `production`. |
+| `HOST` | `localhost` | Interface to bind. The container image sets `0.0.0.0`. |
+| `PORT` | `4321` | Port to listen on. |
+| `BASE_URL` | `/` | Path prefix for subpath deployments, for example `/mirror`. Applied at runtime, so one prebuilt image works under any prefix. |
+| `DATABASE_URL` | `sqlite://data/gitea-mirror.db` | SQLite database location. The container image sets `file:data/gitea-mirror.db`. |
+
+> **Note:** The SQLite file is always created at `data/gitea-mirror.db` relative to the process working directory, and the `data` directory is created if missing. `DATABASE_URL` is accepted but the driver does not currently resolve an alternative path from it. Relocate the database by mounting or symlinking the `data` directory.
+
+## Authentication and secrets
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `BETTER_AUTH_SECRET` | none | Signs session cookies. Required. Generate with `openssl rand -base64 32`. |
+| `BETTER_AUTH_URL` | `http://localhost:4321` | Origin the auth server runs on. Scheme and host only, any path is stripped. |
+| `PUBLIC_BETTER_AUTH_URL` | none | Origin the browser sends auth requests to. Set when the app is reachable at more than one origin. Scheme and host only. |
+| `BETTER_AUTH_TRUSTED_ORIGINS` | none | Comma-separated additional origins allowed to make auth requests. The origin of `BETTER_AUTH_URL` is always trusted. |
+| `BETTER_AUTH_LOG_LEVEL` | `warn` | Better Auth logger verbosity: `debug`, `info`, `warn`, or `error`. Use `debug` to trace SSO and OIDC sign-in problems. Better Auth does not read the `DEBUG` variable. |
+| `ENCRYPTION_SECRET` | none | Key for AES-256-GCM encryption of stored tokens. Generate with `openssl rand -base64 48`. |
+
+In Docker, `BETTER_AUTH_SECRET` and `ENCRYPTION_SECRET` are generated on first boot if unset and saved to `/app/data/.better_auth_secret` and `/app/data/.encryption_secret` so they persist across restarts. Outside Docker there is no fallback: a missing `BETTER_AUTH_SECRET` logs a security warning in production and uses a known insecure development value.
+
+### Header authentication
+
+For deployments behind a reverse proxy that already authenticates users.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `HEADER_AUTH_ENABLED` | `false` | Enable header-based authentication. |
+| `HEADER_AUTH_USER_HEADER` | `X-Authentik-Username` | Request header carrying the username. |
+| `HEADER_AUTH_EMAIL_HEADER` | `X-Authentik-Email` | Request header carrying the email address. |
+| `HEADER_AUTH_NAME_HEADER` | `X-Authentik-Name` | Request header carrying the display name. |
+| `HEADER_AUTH_AUTO_PROVISION` | `false` | Create accounts automatically for unrecognized users. |
+| `HEADER_AUTH_ALLOWED_DOMAINS` | none | Comma-separated email domains allowed to auto-provision. |
+
+> **Warning:** Enable this only when a trusted proxy strips these headers from inbound client requests. Otherwise any client can set them and sign in as any user.
+
+## GitHub
+
+### Connection
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `GITHUB_USERNAME` | none | Your GitHub username. |
+| `GITHUB_TOKEN` | none | Personal access token. Needs `repo` for private repositories and `admin:org` to read organization data. |
+| `GITHUB_TYPE` | `personal` | Account type: `personal` or `organization`. |
+| `GH_API_URL` | `https://api.github.com` | GitHub API base URL. Point this at GitHub Enterprise Server (`https://ghe.example.com/api/v3`) or Enterprise Cloud with data residency (`https://api.TENANT.ghe.com`). |
+| `GITHUB_API_URL` | none | Alternate name for `GH_API_URL`, checked second. Prefer `GH_API_URL`, since `GITHUB_API_URL` is set automatically inside GitHub Actions and can collide. |
+
+Standard GitHub Enterprise Cloud on `github.com` needs no override. Use a token issued by the target Enterprise instance.
+
+### Repository selection
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `PRIVATE_REPOSITORIES` | `false` | Include private repositories. |
+| `PUBLIC_REPOSITORIES` | `true` | Include public repositories. |
+| `INCLUDE_ARCHIVED` | `false` | Include archived repositories. |
+| `INCLUDE_COLLABORATOR_REPOS` | `true` | Include repositories where you are a collaborator rather than the owner. Set to `false` to limit imports to repositories you own. |
+| `SKIP_FORKS` | `false` | Skip forked repositories. |
+| `MIRROR_STARRED` | `false` | Mirror repositories you have starred. |
+| `MIRROR_STARRED_LISTS` | none | Comma-separated GitHub Star List names to restrict starred mirroring to. Only used when `MIRROR_STARRED=true`. Empty means all starred repositories. |
+| `STARRED_REPOS_ORG` | `starred` | Gitea organization that receives starred repositories. |
+| `STARRED_REPOS_MODE` | `dedicated-org` | `dedicated-org` puts starred repositories in one organization, `preserve-owner` keeps the original owner path. |
+| `STARRED_DUPLICATE_STRATEGY` | `suffix` | Name collision handling when two starred repositories share a name. `suffix` gives `repo-owner`, `prefix` gives `owner-repo`, `owner-org` places them in an owner-named organization. |
+| `SKIP_STARRED_ISSUES` | `false` | Lightweight mode for starred repositories: mirror code but skip issues. |
+| `AUTO_MIRROR_STARRED` | `false` | Mirror starred repositories during scheduled syncs and "Mirror All". When `false`, they are imported for browsing but must be mirrored individually. |
+
+### Organizations
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `MIRROR_ORGANIZATIONS` | `false` | Mirror repositories owned by GitHub organizations. |
+| `INCLUDE_ORGANIZATIONS` | none | Comma-separated allowlist. When set, only these organizations are mirrored. Empty means all organizations you belong to. |
+| `GITHUB_EXCLUDED_ORGS` | none | Comma-separated denylist. These organizations are skipped during discovery, matched case-insensitively. |
+| `ONLY_MIRROR_ORGS` | `false` | Skip your personal repositories and mirror only organization repositories. |
+| `PRESERVE_ORG_STRUCTURE` | `false` | Keep the GitHub organization structure in Gitea. Shorthand for the `preserve` strategy. |
+| `MIRROR_STRATEGY` | `preserve` | Destination layout: `preserve`, `single-org`, `flat-user`, or `mixed`. Takes precedence over `PRESERVE_ORG_STRUCTURE`. |
+
+## Gitea
+
+### Connection
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `GITEA_URL` | none | Gitea or Forgejo instance URL used for all API and mirroring traffic. |
+| `GITEA_EXTERNAL_URL` | none | Browser-facing URL used for dashboard links, when it differs from `GITEA_URL`. |
+| `GITEA_TOKEN` | none | Gitea access token. |
+| `GITEA_USERNAME` | none | Gitea username, used as the default owner. |
+| `GITEA_ORGANIZATION` | `github-mirrors` | Default destination organization for the `single-org` strategy. |
+| `GITEA_SKIP_TLS_VERIFY` | `false` | Disable TLS certificate verification. Sets `NODE_TLS_REJECT_UNAUTHORIZED=0` process-wide. |
+
+> **Warning:** `GITEA_SKIP_TLS_VERIFY=true` disables certificate checking for every outbound HTTPS request the process makes, not just to Gitea. Use [CA certificates](./ca-certificates.md) instead for self-signed or privately signed instances.
+
+### Repository settings
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `GITEA_ORG_VISIBILITY` | `public` | Visibility for organizations Gitea Mirror creates: `public`, `private`, `limited`, or `default`. |
+| `GITEA_MIRROR_INTERVAL` | `8h` | How often Gitea itself re-pulls each mirror. Setting this also enables the scheduler. Accepts a duration string or seconds. |
+| `GITEA_LFS` | `false` | Mirror Git LFS objects. Requires LFS enabled on the Gitea server. |
+| `GITEA_CREATE_ORG` | `true` | Create destination organizations automatically when they do not exist. |
+| `GITEA_PRESERVE_VISIBILITY` | `false` | Match each mirror's visibility to the source repository instead of using the organization default. |
+| `GITEA_FORK_STRATEGY` | `reference` | How forks are handled: `skip`, `reference`, or `full-copy`. |
+| `GITEA_ADD_TOPICS` | `true` | Copy repository topics to the mirror. |
+| `GITEA_TOPIC_PREFIX` | none | Prefix applied to copied topics. |
+| `GITEA_TEMPLATE_OWNER` | none | Owner of a Gitea template repository to apply to new mirrors. |
+| `GITEA_TEMPLATE_REPO` | none | Name of that template repository. |
+
+## Mirror content
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `MIRROR_METADATA` | `false` | Master switch for metadata mirroring. Enabled implicitly if any of the four options below are `true`. |
+| `MIRROR_ISSUES` | `false` | Mirror issues with their comments and labels. |
+| `MIRROR_PULL_REQUESTS` | `false` | Mirror pull requests. Gitea's API cannot create pull requests, so they are created as issues tagged with a `pull-request` label. |
+| `MIRROR_LABELS` | `false` | Mirror repository labels. |
+| `MIRROR_MILESTONES` | `false` | Mirror milestones. |
+| `MIRROR_RELEASES` | `false` | Mirror GitHub releases along with their assets. |
+| `RELEASE_LIMIT` | `10` | Maximum releases mirrored per repository. |
+| `MIRROR_WIKI` | `false` | Clone wiki content. |
+| `MIRROR_ISSUE_CONCURRENCY` | `3` | Issues processed in parallel. |
+| `MIRROR_PULL_REQUEST_CONCURRENCY` | `5` | Pull requests processed in parallel. |
+
+> **Note:** Concurrency above `1` speeds up metadata mirroring but issues and pull requests may be created out of chronological order, since Gitea assigns numbers on creation. Set both to `1` if exact ordering matters more than throughput.
+
+## Scheduling
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `SCHEDULE_ENABLED` | `false` | Enable automatic mirroring. Also enabled implicitly whenever `SCHEDULE_INTERVAL`, `GITEA_MIRROR_INTERVAL`, or `DELAY` is set. |
+| `SCHEDULE_INTERVAL` | `3600` | Interval between syncs. Accepts a duration string (`30m`, `8h`, `7d`), a five-field cron expression (`0 2 * * *`), or a plain number of seconds. |
+| `DELAY` | none | Legacy alias for `SCHEDULE_INTERVAL`, in seconds. `SCHEDULE_INTERVAL` takes precedence. |
+| `SCHEDULE_TIMEZONE` | `UTC` | Timezone used to evaluate cron expressions. |
+| `SCHEDULE_CONCURRENT` | `false` | Allow a scheduled run to start while another is still in progress. |
+| `SCHEDULE_BATCH_SIZE` | `10` | Repositories processed per batch. |
+| `SCHEDULE_PAUSE_BETWEEN_BATCHES` | `5000` | Pause between batches, in milliseconds. |
+| `SCHEDULE_TIMEOUT` | `3600000` | Maximum duration of one mirror operation, in milliseconds. |
+| `SCHEDULE_LOG_LEVEL` | `info` | Scheduler log verbosity: `error`, `warn`, `info`, or `debug`. |
+
+### Retries
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `SCHEDULE_AUTO_RETRY` | `true` | Retry failed operations automatically. |
+| `SCHEDULE_RETRY_ATTEMPTS` | `3` | Number of retry attempts. |
+| `SCHEDULE_RETRY_DELAY` | `60000` | Delay between retries, in milliseconds. |
+
+### Discovery and update detection
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `AUTO_IMPORT_REPOS` | `true` | Discover and import newly created GitHub repositories during scheduled syncs. Set to `false` to disable. |
+| `AUTO_MIRROR_REPOS` | `false` | Mirror newly imported repositories automatically, without a manual "Mirror All". |
+| `SCHEDULE_ONLY_MIRROR_UPDATED` | `false` | Only mirror repositories that have changed since the last run. |
+| `SCHEDULE_UPDATE_INTERVAL` | `86400000` | How often to check for updates, in milliseconds. |
+| `SCHEDULE_SKIP_RECENTLY_MIRRORED` | `true` | Skip repositories mirrored very recently. |
+| `SCHEDULE_RECENT_THRESHOLD` | `3600000` | What counts as recent, in milliseconds. |
+
+### Maintenance and notifications
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `SCHEDULE_CLEANUP_BEFORE_MIRROR` | `false` | Run repository cleanup before each mirroring pass. |
+| `SCHEDULE_NOTIFY_ON_FAILURE` | `true` | Send a notification when a scheduled run fails. |
+| `SCHEDULE_NOTIFY_ON_SUCCESS` | `false` | Send a notification when a scheduled run succeeds. |
+
+Notification providers themselves (ntfy, Apprise, Gotify, and generic webhook) are configured on the Notifications tab of the Configuration page, not through environment variables.
+
+## Cleanup
+
+Cleanup covers both trimming the activity log and handling repositories that no longer exist on GitHub.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `CLEANUP_ENABLED` | `false` | Enable automatic cleanup. Also enabled implicitly when `CLEANUP_DELETE_IF_NOT_IN_GITHUB=true`. |
+| `CLEANUP_RETENTION_DAYS` | `7` | How long activity events are kept, in days. |
+| `CLEANUP_DELETE_IF_NOT_IN_GITHUB` | `true` | Act on repositories that no longer exist on GitHub. |
+| `CLEANUP_ORPHANED_REPO_ACTION` | `archive` | What to do with an orphaned repository: `skip`, `archive`, or `delete`. |
+| `CLEANUP_DELETE_FROM_GITEA` | `false` | Permit deletion of the repository from Gitea, not just from the local database. |
+| `CLEANUP_PROTECTED_REPOS` | none | Comma-separated repository names cleanup will never touch. |
+| `CLEANUP_DRY_RUN` | `false` | Log what cleanup would do without doing it. |
+| `CLEANUP_BATCH_SIZE` | `10` | Items processed per batch. |
+| `CLEANUP_PAUSE_BETWEEN_DELETES` | `2000` | Pause between deletions, in milliseconds. |
+
+Cleanup has several safety behaviors worth knowing:
+
+- If the GitHub API returns an error, cleanup is skipped for that run. A 404 or a rate limit never causes a mirror to be treated as orphaned.
+- The `archive` action never deletes. Regular repositories use Gitea's native archive flag, which makes them read-only while preserving all data. Mirror repositories cannot be archived through the Gitea API, so they are renamed with an `archived-` prefix, given a description noting the preservation, and have their mirror interval pushed out to a year to stop sync attempts. They remain fully cloneable.
+- If archiving fails for any reason, the repository is left alone and stays accessible.
+
+## Advanced mirror behavior
+
+These control lower-level mirroring mechanics and are rarely worth changing.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `NON_MIRROR_STRATEGY` | `delete` | What to do when the destination name in Gitea is taken by a repository that is not a mirror: `skip`, `delete`, or `rename`. |
+| `ORG_CREATION_RETRIES` | `3` | Retry attempts when creating an organization. Must be between 1 and 10. |
+| `ORG_CREATION_RETRY_DELAY` | `100` | Base delay for exponential backoff on organization creation, in milliseconds. Must be between 10 and 5000. |
+| `SEQUENTIAL_ORG_CREATION` | `true` | Create organizations one at a time to avoid races. Set to `false` to parallelize. |
+| `REPO_BATCH_SIZE` | `3` | Repositories processed in parallel during a sync. Must be between 1 and 50. |
+| `SYNC_TIMEOUT` | `30000` | Timeout for a single sync operation, in milliseconds. Must be between 5000 and 300000. |
+
+## TLS
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `NODE_EXTRA_CA_CERTS` | none | Path to a PEM certificate or bundle to add to the trusted CA set. See [CA certificates](./ca-certificates.md). |
+| `SERVER_CERT_PATH` | none | Path to a TLS certificate for direct HTTPS. |
+| `SERVER_KEY_PATH` | none | Path to the matching private key. |
+
+> **Warning:** `SERVER_CERT_PATH` and `SERVER_KEY_PATH` are read by the Astro Node standalone adapter, which only runs when you launch `dist/server/entry.mjs` directly. The default startup path, used by `bun run start` and by the Docker image, runs `scripts/runtime-server.ts` instead, which serves plain HTTP so it can apply `BASE_URL` path rewriting. In those setups these two variables have no effect and you should terminate TLS at a reverse proxy.
+
+## Docker Compose substitution
+
+These are not read by the application. They are substituted into the repository's `docker-compose.yml` when it resolves which image to pull or build.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `DOCKER_REGISTRY` | `ghcr.io` | Registry hostname. |
+| `DOCKER_IMAGE` | `raylabshq/gitea-mirror` | Image repository. |
+| `DOCKER_TAG` | `latest` | Image tag. |
+| `PUID` | `1000` | User ID the container runs as. Used by `docker-compose.alt.yml`. |
+| `PGID` | `1000` | Group ID the container runs as. Used by `docker-compose.alt.yml`. |
