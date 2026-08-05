@@ -3,6 +3,7 @@ import type { GitRepo, RepoStatus } from "@/types/Repository";
 import { Octokit } from "@octokit/rest";
 import { throttling } from "@octokit/plugin-throttling";
 import type { Config } from "@/types/config";
+import { applyConditionalRequests } from "@/lib/github-conditional-requests";
 // Conditionally import rate limit manager (not available in test environment)
 let RateLimitManager: any = null;
 let publishEvent: any = null;
@@ -201,6 +202,10 @@ export function createGitHubClient(
       throw error;
     });
   }
+
+  // Reuse ETags across syncs so unchanged lists (e.g. pull requests) come back
+  // as rate-limit-free 304s instead of full downloads on every scheduled poll.
+  applyConditionalRequests(octokit, { scope: userId ?? username });
 
   return octokit;
 }
