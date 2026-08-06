@@ -86,7 +86,19 @@ export function applyConditionalRequests(
       return request(requestOptions);
     }
 
-    const key = conditionalRequestCacheKey(scope, method, requestOptions.url);
+    // Build the key from the expanded absolute URL, not the route template.
+    // Inside the hook `requestOptions.url` is still `/repos/{owner}/{repo}/...`,
+    // so keying on it would collapse every repo into a single entry per user +
+    // endpoint and stop the 304 path from firing once more than one repo syncs.
+    // `octokit.request.endpoint.parse` expands the route (owner/repo + query);
+    // the chained `request` argument has no `.endpoint`, so it must come from
+    // `octokit.request`.
+    const parseEndpoint = (octokit as any)?.request?.endpoint?.parse;
+    const expandedUrl =
+      typeof parseEndpoint === "function"
+        ? parseEndpoint(requestOptions).url
+        : requestOptions.url;
+    const key = conditionalRequestCacheKey(scope, method, expandedUrl);
     const cached = store.get(key);
     if (cached?.etag) {
       requestOptions.headers = {
@@ -113,7 +125,7 @@ export function applyConditionalRequests(
       if (error?.status === 304 && cached) {
         return {
           status: 200,
-          url: requestOptions.url,
+          url: expandedUrl,
           headers: {
             ...(error.response?.headers ?? {}),
             etag: cached.etag,

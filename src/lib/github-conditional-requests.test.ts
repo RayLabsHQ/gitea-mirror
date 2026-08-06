@@ -116,6 +116,50 @@ describe("applyConditionalRequests", () => {
     expect(second.status).toBe(200);
   });
 
+  test("keys cache entries per expanded URL so repos do not collide", async () => {
+    // Each resource gets its own ETag; the stub returns 304 only when the
+    // presented If-None-Match matches the ETag issued for that exact URL.
+    const etagByUrl = new Map<string, string>();
+    let notModifiedCount = 0;
+
+    const octokit = clientWithFetch(async (url, init) => {
+      const ifNoneMatch = init?.headers?.["if-none-match"] as
+        | string
+        | undefined;
+      let etag = etagByUrl.get(url);
+      if (!etag) {
+        etag = `W/"etag-${etagByUrl.size + 1}"`;
+        etagByUrl.set(url, etag);
+      }
+      if (ifNoneMatch && ifNoneMatch === etag) {
+        notModifiedCount += 1;
+        return jsonResponse(null, { status: 304, etag });
+      }
+      return jsonResponse([{ url }], { status: 200, etag });
+    });
+    applyConditionalRequests(octokit, {
+      store: new InMemoryConditionalRequestStore(),
+      scope: "user-1",
+    });
+
+    const get = (owner: string, repo: string) =>
+      octokit.request("GET /repos/{owner}/{repo}/pulls", {
+        owner,
+        repo,
+        state: "all",
+      });
+
+    const first = await get("alpha", "one");
+    await get("beta", "two");
+    const third = await get("alpha", "one");
+
+    // The repeated first request must revalidate against its OWN ETag and come
+    // back as a 304 cache hit, not be clobbered by the second repo's entry.
+    expect(notModifiedCount).toBe(1);
+    expect(third.status).toBe(200);
+    expect(third.data).toEqual(first.data);
+  });
+
   test("isolates cached entries by scope", () => {
     const store = new InMemoryConditionalRequestStore();
     store.set(conditionalRequestCacheKey("user-1", "GET", "/x"), {
