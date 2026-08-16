@@ -521,12 +521,12 @@ GNU Affero General Public License v3.0 (AGPL-3.0) - see [LICENSE](LICENSE) file 
 
 ## Star History
 
-<a href="https://www.star-history.com/#RayLabsHQ/gitea-mirror&type=date&legend=bottom-right">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=RayLabsHQ/gitea-mirror&type=date&theme=dark&legend=bottom-right" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=RayLabsHQ/gitea-mirror&type=date&legend=bottom-right" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=RayLabsHQ/gitea-mirror&type=date&legend=bottom-right" />
- </picture>
+<a href="https://star-history.dera.page/#RayLabsHQ/gitea-mirror&type=date&legend=bottom-right">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://star-history.dera.page/svg?repos=RayLabsHQ/gitea-mirror&type=date&theme=dark&legend=bottom-right" />
+    <source media="(prefers-color-scheme: light)" srcset="https://star-history.dera.page/svg?repos=RayLabsHQ/gitea-mirror&type=date&legend=bottom-right" />
+    <img alt="Star History Chart" src="https://star-history.dera.page/svg?repos=RayLabsHQ/gitea-mirror&type=date&legend=bottom-right" />
+  </picture>
 </a>
 
 ## Support
