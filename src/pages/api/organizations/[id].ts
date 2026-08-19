@@ -1,8 +1,20 @@
 import type { APIRoute } from "astro";
 import { db, organizations, repositories } from "@/lib/db";
 import { eq, and } from "drizzle-orm";
+import { z } from "zod";
 import { createSecureErrorResponse } from "@/lib/utils";
 import { requireAuth } from "@/lib/utils/auth-helpers";
+import { mirrorOverridesSchema } from "@/lib/db/schema";
+import { normalizeMirrorOverrides } from "@/lib/utils/mirror-overrides";
+
+/**
+ * Partial update. Each field is optional and only written when present in the
+ * body, so updating mirror overrides does not clobber destinationOrg.
+ */
+const patchBodySchema = z.object({
+  destinationOrg: z.string().nullable().optional(),
+  mirrorOverrides: mirrorOverridesSchema.nullable().optional(),
+});
 
 export const PATCH: APIRoute = async (context) => {
   try {
@@ -20,8 +32,21 @@ export const PATCH: APIRoute = async (context) => {
       });
     }
 
-    const body = await context.request.json();
-    const { destinationOrg } = body;
+    const parsed = patchBodySchema.safeParse(await context.request.json());
+    if (!parsed.success) {
+      return new Response(
+        JSON.stringify({
+          error: "Invalid request body",
+          details: parsed.error.issues.map((issue) => ({
+            path: issue.path.join("."),
+            message: issue.message,
+          })),
+        }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    const body = parsed.data;
 
     // Validate that the organization belongs to the user
     const [existingOrg] = await db
@@ -37,20 +62,36 @@ export const PATCH: APIRoute = async (context) => {
       });
     }
 
-    // Update the organization's destination override
+    const updates: Record<string, unknown> = { updatedAt: new Date() };
+
+    if ("destinationOrg" in body) {
+      updates.destinationOrg = body.destinationOrg || null;
+    }
+
+    if ("mirrorOverrides" in body) {
+      updates.mirrorOverrides = normalizeMirrorOverrides(body.mirrorOverrides);
+    }
+
     await db
       .update(organizations)
-      .set({
-        destinationOrg: destinationOrg || null,
-        updatedAt: new Date(),
-      })
+      .set(updates)
       .where(eq(organizations.id, orgId));
+
+    const [updated] = await db
+      .select({
+        destinationOrg: organizations.destinationOrg,
+        mirrorOverrides: organizations.mirrorOverrides,
+      })
+      .from(organizations)
+      .where(eq(organizations.id, orgId))
+      .limit(1);
 
     return new Response(
       JSON.stringify({
         success: true,
-        message: "Organization destination updated successfully",
-        destinationOrg: destinationOrg || null,
+        message: "Organization updated successfully",
+        destinationOrg: updated?.destinationOrg ?? null,
+        mirrorOverrides: updated?.mirrorOverrides ?? null,
       }),
       {
         status: 200,
@@ -58,7 +99,7 @@ export const PATCH: APIRoute = async (context) => {
       }
     );
   } catch (error) {
-    return createSecureErrorResponse(error, "Update organization destination", 500);
+    return createSecureErrorResponse(error, "Update organization", 500);
   }
 };
 

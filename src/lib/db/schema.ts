@@ -44,6 +44,28 @@ export const backupStrategyEnum = z.enum([
   "block-on-force-push",
 ]);
 
+/**
+ * Per-object overrides for the global mirror options in `giteaConfigSchema`.
+ *
+ * Every flag is nullable, and `null`/absent means "inherit from the next tier
+ * out". Resolution order is global config -> organization -> repository, and it
+ * is applied per flag, so a repository can override LFS while still inheriting
+ * the org's issue setting. See `resolveMirrorOptions` in
+ * `src/lib/utils/mirror-overrides.ts`.
+ */
+export const mirrorOverridesSchema = z.object({
+  lfs: z.boolean().nullable().optional(),
+  wiki: z.boolean().nullable().optional(),
+  mirrorReleases: z.boolean().nullable().optional(),
+  mirrorMetadata: z.boolean().nullable().optional(),
+  mirrorIssues: z.boolean().nullable().optional(),
+  mirrorPullRequests: z.boolean().nullable().optional(),
+  mirrorLabels: z.boolean().nullable().optional(),
+  mirrorMilestones: z.boolean().nullable().optional(),
+});
+
+export type MirrorOverrides = z.infer<typeof mirrorOverridesSchema>;
+
 export const giteaConfigSchema = z.object({
   url: z.url(),
   externalUrl: z.url().optional(),
@@ -224,6 +246,7 @@ export const repositorySchema = z.object({
   lastMirrored: z.coerce.date().optional().nullable(),
   errorMessage: z.string().optional().nullable(),
   destinationOrg: z.string().optional().nullable(),
+  mirrorOverrides: mirrorOverridesSchema.optional().nullable(),
   metadata: z.string().optional().nullable(), // JSON string for metadata sync state
   importedAt: z.coerce.date(),
   createdAt: z.coerce.date(),
@@ -278,6 +301,7 @@ export const organizationSchema = z.object({
   membershipRole: z.enum(["member", "admin", "owner", "billing_manager"]).default("member"),
   isIncluded: z.boolean().default(true),
   destinationOrg: z.string().optional().nullable(),
+  mirrorOverrides: mirrorOverridesSchema.optional().nullable(),
   status: z
     .enum([
       "imported",
@@ -444,6 +468,10 @@ export const repositories = sqliteTable("repositories", {
   
   destinationOrg: text("destination_org"),
 
+  // Per-repository mirror option overrides. NULL means "inherit" (from the
+  // organization, then the global config). See mirrorOverridesSchema.
+  mirrorOverrides: text("mirror_overrides", { mode: "json" }).$type<MirrorOverrides>(),
+
   metadata: text("metadata"), // JSON string storing metadata sync state (issues, PRs, releases, etc.)
   importedAt: integer("imported_at", { mode: "timestamp" })
     .notNull()
@@ -528,6 +556,10 @@ export const organizations = sqliteTable("organizations", {
     .default(true),
 
   destinationOrg: text("destination_org"),
+
+  // Per-organization mirror option overrides. NULL means "inherit" from the
+  // global config; repository-level overrides win over these.
+  mirrorOverrides: text("mirror_overrides", { mode: "json" }).$type<MirrorOverrides>(),
 
   status: text("status").notNull().default("imported"),
   lastMirrored: integer("last_mirrored", { mode: "timestamp" }),

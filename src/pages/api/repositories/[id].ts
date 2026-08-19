@@ -1,8 +1,21 @@
 import type { APIRoute } from "astro";
 import { db, repositories } from "@/lib/db";
 import { eq, and } from "drizzle-orm";
+import { z } from "zod";
 import { createSecureErrorResponse } from "@/lib/utils";
 import { requireAuth } from "@/lib/utils/auth-helpers";
+import { mirrorOverridesSchema } from "@/lib/db/schema";
+import { normalizeMirrorOverrides } from "@/lib/utils/mirror-overrides";
+
+/**
+ * Partial update. Each field is optional and only written when present in the
+ * body, so updating mirror overrides does not clobber destinationOrg (and vice
+ * versa).
+ */
+const patchBodySchema = z.object({
+  destinationOrg: z.string().nullable().optional(),
+  mirrorOverrides: mirrorOverridesSchema.nullable().optional(),
+});
 
 export const PATCH: APIRoute = async (context) => {
   try {
@@ -20,8 +33,21 @@ export const PATCH: APIRoute = async (context) => {
       });
     }
 
-    const body = await context.request.json();
-    const { destinationOrg } = body;
+    const parsed = patchBodySchema.safeParse(await context.request.json());
+    if (!parsed.success) {
+      return new Response(
+        JSON.stringify({
+          error: "Invalid request body",
+          details: parsed.error.issues.map((issue) => ({
+            path: issue.path.join("."),
+            message: issue.message,
+          })),
+        }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+
+    const body = parsed.data;
 
     // Validate that the repository belongs to the user
     const [existingRepo] = await db
@@ -37,20 +63,38 @@ export const PATCH: APIRoute = async (context) => {
       });
     }
 
-    // Update the repository's destination override
+    const updates: Record<string, unknown> = { updatedAt: new Date() };
+
+    if ("destinationOrg" in body) {
+      updates.destinationOrg = body.destinationOrg || null;
+    }
+
+    if ("mirrorOverrides" in body) {
+      // normalize drops null-valued flags so "no overrides" is stored as NULL
+      // rather than an empty object.
+      updates.mirrorOverrides = normalizeMirrorOverrides(body.mirrorOverrides);
+    }
+
     await db
       .update(repositories)
-      .set({
-        destinationOrg: destinationOrg || null,
-        updatedAt: new Date(),
-      })
+      .set(updates)
       .where(eq(repositories.id, repoId));
+
+    const [updated] = await db
+      .select({
+        destinationOrg: repositories.destinationOrg,
+        mirrorOverrides: repositories.mirrorOverrides,
+      })
+      .from(repositories)
+      .where(eq(repositories.id, repoId))
+      .limit(1);
 
     return new Response(
       JSON.stringify({
         success: true,
-        message: "Repository destination updated successfully",
-        destinationOrg: destinationOrg || null,
+        message: "Repository updated successfully",
+        destinationOrg: updated?.destinationOrg ?? null,
+        mirrorOverrides: updated?.mirrorOverrides ?? null,
       }),
       {
         status: 200,
@@ -58,7 +102,6 @@ export const PATCH: APIRoute = async (context) => {
       }
     );
   } catch (error) {
-    return createSecureErrorResponse(error, "Update repository destination", 500);
+    return createSecureErrorResponse(error, "Update repository", 500);
   }
 };
-

@@ -294,6 +294,66 @@ function verify0013Migration(db: any) {
   assert(normName.dflt_value === null, `Expected normalized_name to have no default, got ${normName.dflt_value}`);
 }
 
+function seedPre0014Database(db: any) {
+  // Migrations 0000-0013 have run, so repositories/organizations exist but
+  // lack mirror_overrides. Seed one of each so the column-add can be verified
+  // against pre-existing rows (they must come out NULL = "inherit").
+  db.run("INSERT INTO users (id, email, username, name) VALUES ('u-ovr', 'ovr@example.com', 'ovr', 'Override User')");
+  db.run("INSERT INTO configs (id, user_id, name, is_active, github_config, gitea_config, schedule_config, cleanup_config) VALUES ('cfg-pre14', 'u-ovr', 'Default', 1, '{}', '{}', '{}', '{}')");
+  db.run("INSERT INTO organizations (id, user_id, config_id, name, avatar_url, normalized_name) VALUES ('org-pre14', 'u-ovr', 'cfg-pre14', 'ExampleOrg', 'https://example.com/a.png', 'exampleorg')");
+  db.run(
+    "INSERT INTO repositories (id, user_id, config_id, name, full_name, normalized_full_name, url, clone_url, owner, default_branch) " +
+      "VALUES ('repo-pre14', 'u-ovr', 'cfg-pre14', 'browser-use', 'ExampleOrg/browser-use', 'exampleorg/browser-use', 'https://github.com/ExampleOrg/browser-use', 'https://github.com/ExampleOrg/browser-use.git', 'ExampleOrg', 'main')",
+  );
+}
+
+function verify0014Migration(db: any) {
+  // Both tables gained a nullable mirror_overrides column with no default.
+  for (const table of ["repositories", "organizations"]) {
+    const cols = db
+      .query(`PRAGMA table_info(${table})`)
+      .all() as Array<{ name: string; type: string; notnull: number; dflt_value: string | null }>;
+    const col = cols.find((c) => c.name === "mirror_overrides");
+    assert(col, `Expected ${table}.mirror_overrides column to exist`);
+    assert(col.notnull === 0, `Expected ${table}.mirror_overrides to be nullable`);
+    assert(
+      col.dflt_value === null,
+      `Expected ${table}.mirror_overrides to have no default, got ${col.dflt_value}`,
+    );
+  }
+
+  // Pre-existing rows inherit (NULL), rather than being backfilled with {}.
+  const repoRow = db
+    .query("SELECT id, mirror_overrides FROM repositories WHERE id = 'repo-pre14'")
+    .get() as { id: string; mirror_overrides: string | null } | null;
+  assert(repoRow, "Expected pre-existing repository row to survive migration");
+  assert(
+    repoRow.mirror_overrides === null,
+    `Expected existing repository to inherit (NULL mirror_overrides), got ${repoRow.mirror_overrides}`,
+  );
+
+  const orgRow = db
+    .query("SELECT id, mirror_overrides FROM organizations WHERE id = 'org-pre14'")
+    .get() as { id: string; mirror_overrides: string | null } | null;
+  assert(orgRow, "Expected pre-existing organization row to survive migration");
+  assert(
+    orgRow.mirror_overrides === null,
+    `Expected existing organization to inherit (NULL mirror_overrides), got ${orgRow.mirror_overrides}`,
+  );
+
+  // The new column round-trips a JSON overrides payload (the #361 case:
+  // mirror this repo but skip its LFS objects).
+  db.run(
+    "UPDATE repositories SET mirror_overrides = '{\"lfs\":false}' WHERE id = 'repo-pre14'",
+  );
+  const updated = db
+    .query("SELECT mirror_overrides FROM repositories WHERE id = 'repo-pre14'")
+    .get() as { mirror_overrides: string } | null;
+  assert(updated, "Expected repository row after override update");
+  const parsed = JSON.parse(updated.mirror_overrides);
+  assert(parsed.lfs === false, `Expected persisted lfs override false, got ${updated.mirror_overrides}`);
+}
+
 const MIGRATION_0012_TIMESTAMP = 1774062000000;
 const MIGRATION_0013_TIMESTAMP = 1780377747526;
 
@@ -408,6 +468,10 @@ const latestUpgradeFixtures: Record<string, UpgradeFixture> = {
   "0013_slim_galactus": {
     seed: seedPre0013Database,
     verify: verify0013Migration,
+  },
+  "0014_needy_white_tiger": {
+    seed: seedPre0014Database,
+    verify: verify0014Migration,
   },
 };
 

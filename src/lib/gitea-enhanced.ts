@@ -16,6 +16,7 @@ import { httpPost, httpGet, httpPatch, HttpError } from "./http-client";
 import { db, repositories } from "./db";
 import { eq } from "drizzle-orm";
 import { repoStatusEnum } from "@/types/Repository";
+import { resolveMirrorOptionsForRepository } from "./utils/mirror-overrides";
 import {
   createPreSyncBundleBackup,
   shouldCreatePreSyncBackup,
@@ -733,8 +734,14 @@ export async function syncGiteaRepoEnhanced({
       // metadataState + metadataUpdated are hoisted above the backup
       // strategy block so force-push detection can read/write the
       // acknowledged-deletions list. Don't shadow them here.
-      const skipMetadataForStarred =
-        repository.isStarred && config.githubConfig?.starredCodeOnly;
+      // Same resolution as the initial mirror path in gitea.ts: global config,
+      // then organization override, then repository override, with the
+      // starredCodeOnly clamp folded in. Without this, a repository's overrides
+      // would be honored on first mirror and then ignored on every later sync.
+      const mirrorOptions = await resolveMirrorOptionsForRepository({
+        config,
+        repository,
+      });
       let metadataOctokit: Octokit | null = null;
 
       const ensureOctokit = (): Octokit | null => {
@@ -752,19 +759,13 @@ export async function syncGiteaRepoEnhanced({
       // The underlying mirror* functions are idempotent: issues/PRs are
       // matched via [GH-ISSUE #N] / [GH-PR #N] markers and PATCHed in
       // place, labels are deduped by name, milestones by title.
-      const shouldMirrorReleases =
-        !!config.giteaConfig?.mirrorReleases && !skipMetadataForStarred;
-      const shouldMirrorIssuesThisRun =
-        !!config.giteaConfig?.mirrorIssues && !skipMetadataForStarred;
-      const shouldMirrorPullRequests =
-        !!config.giteaConfig?.mirrorPullRequests && !skipMetadataForStarred;
+      const shouldMirrorReleases = mirrorOptions.mirrorReleases;
+      const shouldMirrorIssuesThisRun = mirrorOptions.mirrorIssues;
+      const shouldMirrorPullRequests = mirrorOptions.mirrorPullRequests;
       // Labels-only path; issues run already creates/reconciles labels.
       const shouldMirrorLabels =
-        !!config.giteaConfig?.mirrorLabels &&
-        !skipMetadataForStarred &&
-        !shouldMirrorIssuesThisRun;
-      const shouldMirrorMilestones =
-        !!config.giteaConfig?.mirrorMilestones && !skipMetadataForStarred;
+        mirrorOptions.mirrorLabels && !shouldMirrorIssuesThisRun;
+      const shouldMirrorMilestones = mirrorOptions.mirrorMilestones;
 
       if (shouldMirrorReleases) {
         const octokit = ensureOctokit();

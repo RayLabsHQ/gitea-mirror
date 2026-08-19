@@ -1,16 +1,18 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Plus, RefreshCw, Building2, Check, AlertCircle, Clock, MoreVertical, Ban, Trash2 } from "lucide-react";
+import { Plus, RefreshCw, Building2, Check, AlertCircle, Clock, MoreVertical, Ban, SlidersHorizontal, Trash2 } from "lucide-react";
 import { SiGithub, SiGitea } from "react-icons/si";
-import type { Organization } from "@/lib/db/schema";
+import type { MirrorOverrides, Organization } from "@/lib/db/schema";
 import type { FilterParams } from "@/types/filter";
 import Fuse from "fuse.js";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { buildGiteaWebUrl } from "@/lib/gitea-url";
 import { MirrorDestinationEditor } from "./MirrorDestinationEditor";
+import { MirrorOverridesDialog } from "@/components/config/MirrorOverridesDialog";
+import { hasMirrorOverrides } from "@/lib/utils/mirror-overrides";
 import { useGiteaConfig } from "@/hooks/useGiteaConfig";
 import { withBase } from "@/lib/base-path";
 import {
@@ -66,6 +68,27 @@ export function OrganizationList({
   onDelete,
 }: OrganizationListProps) {
   const { giteaConfig } = useGiteaConfig();
+  const [overridesTarget, setOverridesTarget] = useState<Organization | null>(null);
+
+  const handleUpdateMirrorOverrides = async (
+    orgId: string,
+    overrides: MirrorOverrides | null
+  ) => {
+    const response = await fetch(`${withBase("/api/organizations")}/${orgId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mirrorOverrides: overrides }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || "Failed to update mirror options");
+    }
+
+    if (onRefresh) {
+      await onRefresh();
+    }
+  };
 
   // Helper function to construct Gitea organization URL
   const getGiteaOrgUrl = (organization: Organization): string | null => {
@@ -281,13 +304,24 @@ export function OrganizationList({
                 </div>
                 
                 {/* Status badge */}
-                <Badge variant={statusBadge.variant} className="flex items-center gap-1">
-                  {StatusIcon && <StatusIcon className={cn(
-                    "h-3.5 w-3.5",
-                    org.status === "mirroring" && "animate-pulse"
-                  )} />}
-                  {statusBadge.label}
-                </Badge>
+                <div className="flex items-center gap-2">
+                  {hasMirrorOverrides(org.mirrorOverrides) && (
+                    <Badge
+                      variant="outline"
+                      className="text-amber-600 dark:text-amber-400 border-amber-500/40"
+                      title="This organization overrides the global mirror options"
+                    >
+                      Custom options
+                    </Badge>
+                  )}
+                  <Badge variant={statusBadge.variant} className="flex items-center gap-1">
+                    {StatusIcon && <StatusIcon className={cn(
+                      "h-3.5 w-3.5",
+                      org.status === "mirroring" && "animate-pulse"
+                    )} />}
+                    {statusBadge.label}
+                  </Badge>
+                </div>
               </div>
 
               {/* Destination override section */}
@@ -429,6 +463,10 @@ export function OrganizationList({
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => setOverridesTarget(org)}>
+                        <SlidersHorizontal className="h-4 w-4 mr-2" />
+                        Mirror Options
+                      </DropdownMenuItem>
                       {org.status !== "ignored" && (
                         <DropdownMenuItem
                           onClick={() => org.id && onIgnore && onIgnore({ orgId: org.id, ignore: true })}
@@ -685,6 +723,29 @@ export function OrganizationList({
           </Card>
         );
       })}
+
+      <MirrorOverridesDialog
+        open={!!overridesTarget}
+        onOpenChange={(open) => {
+          if (!open) setOverridesTarget(null);
+        }}
+        targetKind="organization"
+        targetName={overridesTarget?.name ?? ""}
+        value={overridesTarget?.mirrorOverrides ?? null}
+        inheritedFrom={{
+          lfs: !!giteaConfig?.lfs,
+          wiki: !!giteaConfig?.wiki,
+          mirrorIssues: !!giteaConfig?.mirrorIssues,
+          mirrorPullRequests: !!giteaConfig?.mirrorPullRequests,
+          mirrorReleases: !!giteaConfig?.mirrorReleases,
+        }}
+        inheritedLabel="global settings"
+        onSave={async (overrides) => {
+          if (overridesTarget?.id) {
+            await handleUpdateMirrorOverrides(overridesTarget.id, overrides);
+          }
+        }}
+      />
     </div>
   );
 }
