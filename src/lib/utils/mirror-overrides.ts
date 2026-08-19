@@ -24,9 +24,32 @@ export type MirrorOverrideKey = (typeof MIRROR_OVERRIDE_KEYS)[number];
 export type ResolvedMirrorOptions = Record<MirrorOverrideKey, boolean>;
 
 /**
- * The five flags surfaced in the override UI. The resolver handles all eight,
- * but metadata/labels/milestones are derived or niche enough that exposing
- * them as per-repo toggles would be more confusing than useful.
+ * Flags the starred-code-only clamp forces off.
+ *
+ * Shared by the resolver and the UI gating helper so the two cannot drift.
+ * `lfs` is deliberately absent: LFS is repository content, not metadata, and
+ * turning it off per repository is the entire point of issue #361. It must
+ * stay editable for starred repos.
+ */
+export const STARRED_CLAMPED_KEYS = [
+  "wiki",
+  "mirrorReleases",
+  "mirrorMetadata",
+  "mirrorIssues",
+  "mirrorPullRequests",
+  "mirrorLabels",
+  "mirrorMilestones",
+] as const satisfies readonly MirrorOverrideKey[];
+
+/**
+ * Flags surfaced in the override UI.
+ *
+ * `mirrorMetadata` is intentionally excluded. It is a write-time master switch
+ * in the global settings UI (config-mapper ANDs it into the individual flags
+ * when the config is saved) and is never read by the mirror paths in gitea.ts
+ * or gitea-enhanced.ts. A per-object override for it would resolve correctly
+ * and then change nothing, which is exactly the silent no-op this UI is meant
+ * to avoid.
  */
 export const UI_MIRROR_OVERRIDE_KEYS: MirrorOverrideKey[] = [
   "lfs",
@@ -34,7 +57,67 @@ export const UI_MIRROR_OVERRIDE_KEYS: MirrorOverrideKey[] = [
   "mirrorIssues",
   "mirrorPullRequests",
   "mirrorReleases",
+  "mirrorLabels",
+  "mirrorMilestones",
 ];
+
+/** Reasons a toggle is disabled. Shown verbatim in the dialog. */
+export const MIRROR_GATING_REASONS = {
+  starredCodeOnly:
+    "Starred repos mirror code only (Advanced Options > starred code only)",
+  labelsFollowIssues: "Issues mirroring already syncs labels",
+} as const;
+
+/** key -> reason it cannot take effect. Absent key means editable. */
+export type MirrorOverrideGating = Partial<Record<MirrorOverrideKey, string>>;
+
+/**
+ * Decide which toggles cannot take effect, and why.
+ *
+ * This is the single source of truth behind the rule that a toggle which
+ * cannot take effect is disabled with a reason rather than silently ignored.
+ * It mirrors the real runtime behavior:
+ *
+ *  - the starred clamp in `resolveMirrorOptions` forces STARRED_CLAMPED_KEYS
+ *    off for starred repos when starredCodeOnly is set, outranking any override
+ *  - `shouldMirrorLabels` in gitea.ts / gitea-enhanced.ts is
+ *    `mirrorLabels && !mirrorIssues`, so labels cannot take effect while issues
+ *    are being mirrored (the issue path already reconciles labels)
+ *
+ * `effective` is the value each flag currently resolves to including the
+ * in-progress edit, so the labels gate reacts live as issues is toggled.
+ */
+export function getMirrorOverrideGating({
+  targetKind,
+  isStarred,
+  starredCodeOnly,
+  effective,
+}: {
+  targetKind: "repository" | "organization";
+  isStarred?: boolean;
+  starredCodeOnly?: boolean;
+  effective: Partial<Record<MirrorOverrideKey, boolean>>;
+}): MirrorOverrideGating {
+  const gating: MirrorOverrideGating = {};
+
+  // Organizations are never starred, so the clamp cannot apply to them.
+  const starredClampApplies =
+    targetKind === "repository" && !!isStarred && !!starredCodeOnly;
+
+  if (starredClampApplies) {
+    for (const key of STARRED_CLAMPED_KEYS) {
+      gating[key] = MIRROR_GATING_REASONS.starredCodeOnly;
+    }
+  }
+
+  // Labels ride along with issues. Only report this when the more fundamental
+  // starred clamp has not already disabled the toggle.
+  if (!gating.mirrorLabels && effective.mirrorIssues) {
+    gating.mirrorLabels = MIRROR_GATING_REASONS.labelsFollowIssues;
+  }
+
+  return gating;
+}
 
 export const MIRROR_OVERRIDE_LABELS: Record<MirrorOverrideKey, string> = {
   lfs: "Git LFS files",
@@ -163,13 +246,12 @@ export function resolveMirrorOptions({
     !!repository.isStarred && !!config.githubConfig?.starredCodeOnly;
 
   if (skipMetadataForStarred) {
-    resolved.wiki = false;
-    resolved.mirrorReleases = false;
-    resolved.mirrorMetadata = false;
-    resolved.mirrorIssues = false;
-    resolved.mirrorPullRequests = false;
-    resolved.mirrorLabels = false;
-    resolved.mirrorMilestones = false;
+    // STARRED_CLAMPED_KEYS is shared with getMirrorOverrideGating so the set of
+    // flags the UI disables always matches the set the runtime forces off.
+    // Note it excludes `lfs` by design.
+    for (const key of STARRED_CLAMPED_KEYS) {
+      resolved[key] = false;
+    }
   }
 
   return resolved;

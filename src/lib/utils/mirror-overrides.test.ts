@@ -1,10 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import {
+  getMirrorOverrideGating,
   hasMirrorOverrides,
   listOverriddenKeys,
+  MIRROR_GATING_REASONS,
   normalizeMirrorOverrides,
   parseMirrorOverrides,
   resolveMirrorOptions,
+  STARRED_CLAMPED_KEYS,
+  UI_MIRROR_OVERRIDE_KEYS,
 } from "./mirror-overrides";
 import type { Config } from "@/types/config";
 import type { Repository } from "@/lib/db/schema";
@@ -256,5 +260,178 @@ describe("override helpers", () => {
     expect(normalizeMirrorOverrides({ lfs: false, wiki: null })).toEqual({
       lfs: false,
     });
+  });
+});
+
+describe("getMirrorOverrideGating - starred clamp", () => {
+  const starredRepo = {
+    targetKind: "repository" as const,
+    isStarred: true,
+    starredCodeOnly: true,
+    effective: {},
+  };
+
+  test("disables every metadata flag with the starred reason", () => {
+    const gating = getMirrorOverrideGating(starredRepo);
+
+    for (const key of STARRED_CLAMPED_KEYS) {
+      expect(gating[key]).toBe(MIRROR_GATING_REASONS.starredCodeOnly);
+    }
+  });
+
+  test("LFS stays editable for starred repos", () => {
+    // Regression guard for issue #361: LFS is repository content, not
+    // metadata. The clamp must never sweep it up, or the whole feature breaks
+    // for exactly the repos it was built for.
+    const gating = getMirrorOverrideGating(starredRepo);
+
+    expect(gating.lfs).toBeUndefined();
+  });
+
+  test("STARRED_CLAMPED_KEYS never contains lfs", () => {
+    expect(STARRED_CLAMPED_KEYS).not.toContain("lfs");
+  });
+
+  test("no clamp when the repo is starred but starredCodeOnly is off", () => {
+    const gating = getMirrorOverrideGating({
+      targetKind: "repository",
+      isStarred: true,
+      starredCodeOnly: false,
+      effective: {},
+    });
+
+    expect(Object.keys(gating)).toHaveLength(0);
+  });
+
+  test("no clamp when starredCodeOnly is on but the repo is not starred", () => {
+    const gating = getMirrorOverrideGating({
+      targetKind: "repository",
+      isStarred: false,
+      starredCodeOnly: true,
+      effective: {},
+    });
+
+    expect(Object.keys(gating)).toHaveLength(0);
+  });
+
+  test("organizations never get the starred clamp", () => {
+    // Orgs cannot be starred, so the org dialog must not show this at all.
+    const gating = getMirrorOverrideGating({
+      targetKind: "organization",
+      isStarred: true,
+      starredCodeOnly: true,
+      effective: {},
+    });
+
+    expect(gating.mirrorIssues).toBeUndefined();
+    expect(gating.wiki).toBeUndefined();
+  });
+
+  test("the clamp set matches what the resolver actually forces off", () => {
+    // Guards against the UI disabling a different set of flags than the
+    // runtime clamps, which would put the two out of sync silently.
+    const resolved = resolveMirrorOptions({
+      config: makeConfig(
+        {
+          lfs: true,
+          wiki: true,
+          mirrorReleases: true,
+          mirrorMetadata: true,
+          mirrorIssues: true,
+          mirrorPullRequests: true,
+          mirrorLabels: true,
+          mirrorMilestones: true,
+        },
+        { starredCodeOnly: true }
+      ),
+      repository: makeRepo({ isStarred: true }),
+    });
+
+    for (const key of STARRED_CLAMPED_KEYS) {
+      expect(resolved[key]).toBe(false);
+    }
+    expect(resolved.lfs).toBe(true);
+  });
+});
+
+describe("getMirrorOverrideGating - labels follow issues", () => {
+  test("labels are disabled while issues resolve to on", () => {
+    const gating = getMirrorOverrideGating({
+      targetKind: "repository",
+      effective: { mirrorIssues: true },
+    });
+
+    expect(gating.mirrorLabels).toBe(MIRROR_GATING_REASONS.labelsFollowIssues);
+  });
+
+  test("labels are editable when issues resolve to off", () => {
+    const gating = getMirrorOverrideGating({
+      targetKind: "repository",
+      effective: { mirrorIssues: false },
+    });
+
+    expect(gating.mirrorLabels).toBeUndefined();
+  });
+
+  test("applies to organizations too", () => {
+    const gating = getMirrorOverrideGating({
+      targetKind: "organization",
+      effective: { mirrorIssues: true },
+    });
+
+    expect(gating.mirrorLabels).toBe(MIRROR_GATING_REASONS.labelsFollowIssues);
+  });
+
+  test("the starred reason wins over the labels reason", () => {
+    // Both rules apply; the more fundamental one should be the one explained.
+    const gating = getMirrorOverrideGating({
+      targetKind: "repository",
+      isStarred: true,
+      starredCodeOnly: true,
+      effective: { mirrorIssues: true },
+    });
+
+    expect(gating.mirrorLabels).toBe(MIRROR_GATING_REASONS.starredCodeOnly);
+  });
+
+  test("gating matches the runtime rule for labels", () => {
+    // Runtime is `mirrorLabels && !mirrorIssues` in gitea.ts and
+    // gitea-enhanced.ts, so labels genuinely cannot take effect while issues
+    // are on. Confirm the resolver agrees with what the UI claims.
+    const resolved = resolveMirrorOptions({
+      config: makeConfig({ mirrorIssues: true, mirrorLabels: true }),
+      repository: makeRepo(),
+    });
+
+    expect(resolved.mirrorIssues).toBe(true);
+    expect(resolved.mirrorLabels).toBe(true);
+    // The runtime then suppresses the labels-only pass; the UI says so up front.
+    const gating = getMirrorOverrideGating({
+      targetKind: "repository",
+      effective: resolved,
+    });
+    expect(gating.mirrorLabels).toBe(MIRROR_GATING_REASONS.labelsFollowIssues);
+  });
+});
+
+describe("UI_MIRROR_OVERRIDE_KEYS", () => {
+  test("exposes lfs plus the flags the runtime actually reads", () => {
+    expect(UI_MIRROR_OVERRIDE_KEYS).toEqual([
+      "lfs",
+      "wiki",
+      "mirrorIssues",
+      "mirrorPullRequests",
+      "mirrorReleases",
+      "mirrorLabels",
+      "mirrorMilestones",
+    ]);
+  });
+
+  test("excludes mirrorMetadata, which no mirror path reads", () => {
+    // mirrorMetadata is a write-time master switch in the global settings UI
+    // (config-mapper ANDs it into the individual flags on save). Neither
+    // gitea.ts nor gitea-enhanced.ts reads it, so a per-object override would
+    // resolve fine and then do nothing.
+    expect(UI_MIRROR_OVERRIDE_KEYS).not.toContain("mirrorMetadata");
   });
 });

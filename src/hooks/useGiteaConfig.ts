@@ -1,11 +1,16 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from './useAuth';
 import { apiRequest } from '@/lib/utils';
-import type { ConfigApiResponse, GiteaConfig } from '@/types/config';
+import type { AdvancedOptions, ConfigApiResponse, GiteaConfig } from '@/types/config';
 import { getCachedConfig } from './useConfigStatus';
 
 interface GiteaConfigHook {
   giteaConfig: GiteaConfig | null;
+  /**
+   * Advanced options from the same config payload. Exposed so callers can read
+   * starredCodeOnly without a second request.
+   */
+  advancedOptions: AdvancedOptions | null;
   isLoading: boolean;
   error: string | null;
 }
@@ -18,6 +23,7 @@ export function useGiteaConfig(): GiteaConfigHook {
   const { user } = useAuth();
   const [giteaConfigState, setGiteaConfigState] = useState<GiteaConfigHook>({
     giteaConfig: null,
+    advancedOptions: null,
     isLoading: true,
     error: null,
   });
@@ -26,6 +32,7 @@ export function useGiteaConfig(): GiteaConfigHook {
     if (!user?.id) {
       setGiteaConfigState({
         giteaConfig: null,
+        advancedOptions: null,
         isLoading: false,
         error: 'User not authenticated',
       });
@@ -37,6 +44,7 @@ export function useGiteaConfig(): GiteaConfigHook {
     if (cachedConfig) {
       setGiteaConfigState({
         giteaConfig: cachedConfig.giteaConfig || null,
+        advancedOptions: cachedConfig.advancedOptions || null,
         isLoading: false,
         error: null,
       });
@@ -53,12 +61,14 @@ export function useGiteaConfig(): GiteaConfigHook {
 
       setGiteaConfigState({
         giteaConfig: configResponse?.giteaConfig || null,
+        advancedOptions: configResponse?.advancedOptions || null,
         isLoading: false,
         error: null,
       });
     } catch (error) {
       setGiteaConfigState({
         giteaConfig: null,
+        advancedOptions: null,
         isLoading: false,
         error: error instanceof Error ? error.message : 'Failed to fetch Gitea configuration',
       });

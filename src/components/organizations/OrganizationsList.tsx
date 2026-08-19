@@ -738,6 +738,8 @@ export function OrganizationList({
           mirrorIssues: !!giteaConfig?.mirrorIssues,
           mirrorPullRequests: !!giteaConfig?.mirrorPullRequests,
           mirrorReleases: !!giteaConfig?.mirrorReleases,
+          mirrorLabels: !!giteaConfig?.mirrorLabels,
+          mirrorMilestones: !!giteaConfig?.mirrorMilestones,
         }}
         inheritedLabel="global settings"
         onSave={async (overrides) => {

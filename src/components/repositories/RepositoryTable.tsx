@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   getCoreRowModel,
   getFilteredRowModel,
@@ -28,7 +28,7 @@ import {
 import { InlineDestinationEditor } from "./InlineDestinationEditor";
 import { MarqueeText, MarqueeTrigger } from "@/components/ui/marquee-text";
 import { MirrorOverridesDialog } from "@/components/config/MirrorOverridesDialog";
-import { hasMirrorOverrides } from "@/lib/utils/mirror-overrides";
+import { hasMirrorOverrides, type MirrorOverrideKey } from "@/lib/utils/mirror-overrides";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { withBase } from "@/lib/base-path";
@@ -103,8 +103,69 @@ export default function RepositoryTable({
 }: RepositoryTableProps) {
   const tableParentRef = useRef<HTMLDivElement>(null);
   const lastSelectedIndexRef = useRef<number | null>(null);
-  const { giteaConfig } = useGiteaConfig();
+  const { giteaConfig, advancedOptions } = useGiteaConfig();
   const [overridesTarget, setOverridesTarget] = useState<Repository | null>(null);
+  // Organization-tier overrides for the repo being edited, so the dialog's
+  // "Inherit" hint reflects global -> org rather than global alone.
+  const [orgOverrides, setOrgOverrides] = useState<MirrorOverrides | null>(null);
+  const [orgOverridesLoading, setOrgOverridesLoading] = useState(false);
+
+  useEffect(() => {
+    const orgName = overridesTarget?.organization;
+
+    // Personal repos have no org tier to fetch.
+    if (!overridesTarget || !orgName) {
+      setOrgOverrides(null);
+      setOrgOverridesLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setOrgOverridesLoading(true);
+    setOrgOverrides(null);
+
+    (async () => {
+      try {
+        const response = await fetch(
+          `${withBase("/api/organizations/mirror-overrides")}?name=${encodeURIComponent(orgName)}`
+        );
+        if (!response.ok) throw new Error("Failed to load organization overrides");
+        const data = await response.json();
+        if (!cancelled) setOrgOverrides(data.mirrorOverrides ?? null);
+      } catch {
+        // Degrade to the global values rather than blocking the dialog.
+        if (!cancelled) setOrgOverrides(null);
+      } finally {
+        if (!cancelled) setOrgOverridesLoading(false);
+      }
+    })();
+
+    // Ignore a late response for a repo the user already navigated away from.
+    return () => {
+      cancelled = true;
+    };
+  }, [overridesTarget]);
+
+  // Global defaults with the organization tier layered on top.
+  const inheritedMirrorOptions = useMemo(() => {
+    const globals: Partial<Record<MirrorOverrideKey, boolean>> = {
+      lfs: !!giteaConfig?.lfs,
+      wiki: !!giteaConfig?.wiki,
+      mirrorIssues: !!giteaConfig?.mirrorIssues,
+      mirrorPullRequests: !!giteaConfig?.mirrorPullRequests,
+      mirrorReleases: !!giteaConfig?.mirrorReleases,
+      mirrorLabels: !!giteaConfig?.mirrorLabels,
+      mirrorMilestones: !!giteaConfig?.mirrorMilestones,
+    };
+
+    if (!orgOverrides) return globals;
+
+    for (const key of Object.keys(globals) as MirrorOverrideKey[]) {
+      const orgValue = orgOverrides[key];
+      if (typeof orgValue === "boolean") globals[key] = orgValue;
+    }
+    return globals;
+  }, [giteaConfig, orgOverrides]);
 
   const handleUpdateMirrorOverrides = async (
     repoId: string,
@@ -1007,14 +1068,15 @@ export default function RepositoryTable({
         targetKind="repository"
         targetName={overridesTarget?.fullName ?? ""}
         value={overridesTarget?.mirrorOverrides ?? null}
-        inheritedFrom={{
-          lfs: !!giteaConfig?.lfs,
-          wiki: !!giteaConfig?.wiki,
-          mirrorIssues: !!giteaConfig?.mirrorIssues,
-          mirrorPullRequests: !!giteaConfig?.mirrorPullRequests,
-          mirrorReleases: !!giteaConfig?.mirrorReleases,
-        }}
-        inheritedLabel="organization or global settings"
+        inheritedFrom={inheritedMirrorOptions}
+        inheritedLoading={orgOverridesLoading}
+        isStarred={!!overridesTarget?.isStarred}
+        starredCodeOnly={!!advancedOptions?.starredCodeOnly}
+        inheritedLabel={
+          overridesTarget?.organization
+            ? "organization or global settings"
+            : "global settings"
+        }
         onSave={async (overrides) => {
           if (overridesTarget?.id) {
             await handleUpdateMirrorOverrides(overridesTarget.id, overrides);
