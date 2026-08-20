@@ -475,7 +475,7 @@ export function Organization() {
 
   // Check if any filters are active
   const hasActiveFilters = !!(filter.membershipRole || filter.status);
-  const activeFilterCount = [filter.membershipRole, filter.status].filter(Boolean).length;
+  const activeFilterCount = [filter.membershipRole, filter.status, filter.hasOverrides].filter(Boolean).length;
 
   // Clear all filters
   const clearFilters = () => {
@@ -483,6 +483,7 @@ export function Organization() {
       searchTerm: filter.searchTerm,
       membershipRole: "",
       status: "",
+      hasOverrides: "",
     });
   };
 
@@ -653,6 +654,37 @@ export function Organization() {
                     </SelectContent>
                   </Select>
                 </div>
+
+                {/* Mirror Options Filter */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium flex items-center gap-2">
+                    <span className="text-muted-foreground">By</span> Mirror options
+                    {filter.hasOverrides && (
+                      <span className="ml-auto text-xs text-muted-foreground">
+                        {filter.hasOverrides === "overridden" ? "Custom" : "Default"}
+                      </span>
+                    )}
+                  </label>
+                  <Select
+                    value={filter.hasOverrides || "all"}
+                    onValueChange={(value) =>
+                      setFilter((prev) => ({
+                        ...prev,
+                        hasOverrides:
+                          value === "all" ? "" : (value as "overridden" | "default"),
+                      }))
+                    }
+                  >
+                    <SelectTrigger className="w-full h-10">
+                      <SelectValue placeholder="All organizations" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All organizations</SelectItem>
+                      <SelectItem value="overridden">Custom options</SelectItem>
+                      <SelectItem value="default">Using defaults</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
               
               <DrawerFooter className="gap-2 px-4 pt-2 pb-4 border-t">
@@ -791,6 +823,27 @@ export function Organization() {
                     </span>
                   </SelectItem>
                 ))}
+              </SelectContent>
+            </Select>
+
+            {/* Mirror Options Filter */}
+            <Select
+              value={filter.hasOverrides || "all"}
+              onValueChange={(value) =>
+                setFilter((prev) => ({
+                  ...prev,
+                  hasOverrides:
+                    value === "all" ? "" : (value as "overridden" | "default"),
+                }))
+              }
+            >
+              <SelectTrigger className="w-[170px] h-10">
+                <SelectValue placeholder="All mirror options" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All mirror options</SelectItem>
+                <SelectItem value="overridden">Custom options</SelectItem>
+                <SelectItem value="default">Using defaults</SelectItem>
               </SelectContent>
             </Select>
           </div>

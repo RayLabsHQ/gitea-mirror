@@ -1028,7 +1028,7 @@ export default function Repository() {
 
   // Check if any filters are active
   const hasActiveFilters = !!(filter.owner || filter.organization || filter.status);
-  const activeFilterCount = [filter.owner, filter.organization, filter.status].filter(Boolean).length;
+  const activeFilterCount = [filter.owner, filter.organization, filter.status, filter.hasOverrides].filter(Boolean).length;
 
   // Clear all filters
   const clearFilters = () => {
@@ -1338,6 +1338,26 @@ export default function Repository() {
                     </span>
                   </SelectItem>
                 ))}
+              </SelectContent>
+            </Select>
+
+            <Select
+              value={filter.hasOverrides || "all"}
+              onValueChange={(value) =>
+                setFilter((prev) => ({
+                  ...prev,
+                  hasOverrides:
+                    value === "all" ? "" : (value as "overridden" | "default"),
+                }))
+              }
+            >
+              <SelectTrigger className="w-[170px] h-10">
+                <SelectValue placeholder="All mirror options" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All mirror options</SelectItem>
+                <SelectItem value="overridden">Custom options</SelectItem>
+                <SelectItem value="default">Using defaults</SelectItem>
               </SelectContent>
             </Select>
 

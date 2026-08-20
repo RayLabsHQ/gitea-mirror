@@ -145,6 +145,13 @@ export function OrganizationList({
       result = result.filter((org) => org.status === filter.status);
     }
 
+    if (filter.hasOverrides) {
+      const wantOverridden = filter.hasOverrides === "overridden";
+      result = result.filter(
+        (org) => hasMirrorOverrides(org.mirrorOverrides) === wantOverridden
+      );
+    }
+
     if (filter.searchTerm) {
       const fuse = new Fuse(result, {
         keys: ["name", "type"],
