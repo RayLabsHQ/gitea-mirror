@@ -535,46 +535,68 @@ describe("mirrorOptionsToFlags - client/server shape contract", () => {
     expect(gating.mirrorLabels).toBe(MIRROR_GATING_REASONS.labelsFollowIssues);
   });
 
-  test("mirrorMetadata off forces the metadata components off", async () => {
+  test("derived flags equal the stored DB flags the runtime reads", async () => {
+    // The property that actually matters: what the dialog shows must equal
+    // what the mirror paths will do. Both read the same stored fields, so
+    // pushing DB state out through the API mapping and back must be lossless.
+    //
+    // This replaces an earlier assertion that compared against
+    // mapUiToDbConfig's *write* derivation. That was the wrong reference: it
+    // pinned the write-path mirrorMetadata AND into the read path and so
+    // enshrined the bug it was meant to guard.
     const { mapDbToUiConfig } = await import("./config-mapper");
-    const apiShape = mapDbToUiConfig(
-      makeDbConfig({ mirrorMetadata: false })
+    const dbConfig = makeDbConfig();
+    const flags = mirrorOptionsToFlags(
+      mapDbToUiConfig(dbConfig).mirrorOptions
     );
-    const flags = mirrorOptionsToFlags(apiShape.mirrorOptions);
 
-    expect(flags.mirrorIssues).toBe(false);
-    expect(flags.mirrorLabels).toBe(false);
-    expect(flags.wiki).toBe(false);
-    // lfs and releases sit outside the master switch.
-    expect(flags.lfs).toBe(true);
-    expect(flags.mirrorReleases).toBe(true);
+    const stored = dbConfig.giteaConfig as Record<string, boolean>;
+    expect(flags.lfs).toBe(stored.lfs);
+    expect(flags.wiki).toBe(stored.wiki);
+    expect(flags.mirrorIssues).toBe(stored.mirrorIssues);
+    expect(flags.mirrorPullRequests).toBe(stored.mirrorPullRequests);
+    expect(flags.mirrorReleases).toBe(stored.mirrorReleases);
+    expect(flags.mirrorLabels).toBe(stored.mirrorLabels);
+    expect(flags.mirrorMilestones).toBe(stored.mirrorMilestones);
   });
 
-  test("matches what config-mapper would write back to the DB", async () => {
-    // Strongest form of the contract: the flags this derives must equal the
-    // flags mapUiToDbConfig would persist from the same mirrorOptions.
-    const { mapDbToUiConfig, mapUiToDbConfig } = await import("./config-mapper");
-    const apiShape = mapDbToUiConfig(makeDbConfig());
+  test("mirrorMetadata does not gate the components on read", async () => {
+    // Reachable via env vars: MIRROR_METADATA=false with MIRROR_ISSUES=true
+    // stores an inconsistent pair. The runtime reads mirrorIssues directly and
+    // mirrors issues, so the dialog must say so too. ANDing with
+    // mirrorMetadata here would double-apply a write-path rule and report off.
+    const { mapDbToUiConfig } = await import("./config-mapper");
+    const dbConfig = makeDbConfig({
+      mirrorMetadata: false,
+      mirrorIssues: true,
+      mirrorLabels: true,
+      wiki: true,
+    });
+    const flags = mirrorOptionsToFlags(
+      mapDbToUiConfig(dbConfig).mirrorOptions
+    );
 
-    const roundTripped = mapUiToDbConfig(
-      apiShape.githubConfig,
-      apiShape.giteaConfig,
-      apiShape.mirrorOptions,
-      apiShape.advancedOptions
-    ).giteaConfig;
+    expect(flags.mirrorIssues).toBe(true);
+    expect(flags.mirrorLabels).toBe(true);
+    expect(flags.wiki).toBe(true);
+  });
 
-    const flags = mirrorOptionsToFlags(apiShape.mirrorOptions);
+  test("the dialog agrees with the resolver on an inconsistent config", async () => {
+    // Same state, checked against the resolver the mirror paths actually use,
+    // rather than against the raw DB object.
+    const { mapDbToUiConfig } = await import("./config-mapper");
+    const dbConfig = makeDbConfig({ mirrorMetadata: false, mirrorIssues: true });
 
-    for (const key of [
-      "lfs",
-      "wiki",
-      "mirrorIssues",
-      "mirrorPullRequests",
-      "mirrorReleases",
-      "mirrorLabels",
-      "mirrorMilestones",
-    ] as const) {
-      expect(flags[key]).toBe(!!(roundTripped as any)[key]);
+    const runtime = resolveMirrorOptions({
+      config: makeConfig(dbConfig.giteaConfig as any, {}),
+      repository: makeRepo(),
+    });
+    const client = mirrorOptionsToFlags(
+      mapDbToUiConfig(dbConfig).mirrorOptions
+    );
+
+    for (const key of UI_MIRROR_OVERRIDE_KEYS) {
+      expect(client[key]).toBe(runtime[key]);
     }
   });
 

@@ -72,10 +72,19 @@ export const UI_MIRROR_OVERRIDE_KEYS: MirrorOverrideKey[] = [
  * code reading `giteaConfig.lfs` therefore gets `undefined`, not `false`, which
  * is indistinguishable from "off" once coerced.
  *
- * This mirrors the derivation in `mapUiToDbConfig` exactly, including that
- * `mirrorMetadata` acts as a master switch over the metadata components, while
- * `lfs` and `mirrorReleases` sit outside it. A round-trip test pins this
- * against config-mapper so it fails if that mapping changes again.
+ * The mapping is 1:1 with the fields the runtime reads. `metadataComponents.*`
+ * carries the raw stored values (`issues` is `giteaConfig.mirrorIssues`
+ * untouched), so passing them straight through reproduces exactly what
+ * gitea.ts and gitea-enhanced.ts will do.
+ *
+ * Deliberately does NOT AND the components with `mirrorMetadata`. That switch
+ * is a write-path concern: `mapUiToDbConfig` already applies it when
+ * persisting, so a config saved through the settings UI has it baked into the
+ * stored flag. Applying it again on read double-applies it. That is invisible
+ * while the stored state is self-consistent, and wrong when it is not, which
+ * is reachable via env vars: MIRROR_METADATA=false with MIRROR_ISSUES=true
+ * stores `mirrorMetadata:false, mirrorIssues:true`, and the runtime mirrors
+ * issues. A second AND here would report "off" for something that is on.
  */
 export function mirrorOptionsToFlags(
   mirrorOptions:
@@ -94,19 +103,17 @@ export function mirrorOptionsToFlags(
     | null
     | undefined
 ): Partial<Record<MirrorOverrideKey, boolean>> {
-  const metadataOn = !!mirrorOptions?.mirrorMetadata;
   const components = mirrorOptions?.metadataComponents;
 
+  // Straight through: each field is the raw stored value the runtime reads.
   return {
-    // Not gated by mirrorMetadata.
     lfs: !!mirrorOptions?.mirrorLFS,
     mirrorReleases: !!mirrorOptions?.mirrorReleases,
-    // Gated by mirrorMetadata, matching mapUiToDbConfig.
-    wiki: metadataOn && !!components?.wiki,
-    mirrorIssues: metadataOn && !!components?.issues,
-    mirrorPullRequests: metadataOn && !!components?.pullRequests,
-    mirrorLabels: metadataOn && !!components?.labels,
-    mirrorMilestones: metadataOn && !!components?.milestones,
+    wiki: !!components?.wiki,
+    mirrorIssues: !!components?.issues,
+    mirrorPullRequests: !!components?.pullRequests,
+    mirrorLabels: !!components?.labels,
+    mirrorMilestones: !!components?.milestones,
   };
 }
 
