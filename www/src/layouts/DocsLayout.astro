@@ -15,6 +15,20 @@ const currentPath = Astro.url.pathname.endsWith('/')
   : `${Astro.url.pathname}/`;
 const canonical = `https://gitea-mirror.raylabs.io${currentPath}`;
 const toc = headings.filter((h: { depth: number }) => h.depth === 2 || h.depth === 3);
+
+const jsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'TechArticle',
+  headline: title,
+  description,
+  url: canonical,
+  image: 'https://gitea-mirror.raylabs.io/og-image.png',
+  publisher: {
+    '@type': 'Organization',
+    name: 'RayLabsHQ',
+    url: 'https://github.com/RayLabsHQ',
+  },
+};
 ---
 
 <html lang="en">
@@ -31,6 +45,7 @@ const toc = headings.filter((h: { depth: number }) => h.depth === 2 || h.depth =
     <meta property="og:url" content={canonical} />
     <meta property="og:image" content="https://gitea-mirror.raylabs.io/og-image.png" />
     <meta name="twitter:card" content="summary_large_image" />
+    <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} />
     <script is:inline>
       const theme = localStorage.getItem('theme') ||
         (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');

@@ -1,5 +1,5 @@
 ---
-import { Book, MessageSquare, Bug } from 'lucide-react';
+import { Book, MessageSquare, Bug, Scale } from 'lucide-react';
 import { GithubIcon } from './icons/GithubIcon';
 
 const links = [
@@ -10,8 +10,13 @@ const links = [
   },
   {
     title: "Documentation",
-    href: "https://github.com/RayLabsHQ/gitea-mirror/tree/main/docs",
+    href: "/docs/",
     icon: Book
+  },
+  {
+    title: "Compare Tools",
+    href: "/comparison/github-backup-tools/",
+    icon: Scale
   },
   {
     title: "Discussions",
@@ -50,11 +55,12 @@ const currentYear = new Date().getFullYear();
       <nav class="grid grid-cols-2 sm:flex items-center justify-center gap-4 sm:gap-6 text-center">
         {links.map((link) => {
           const Icon = link.icon;
+          const external = link.href.startsWith('http');
           return (
             <a
               href={link.href}
-              target="_blank"
-              rel="noopener noreferrer"
+              target={external ? '_blank' : undefined}
+              rel={external ? 'noopener noreferrer' : undefined}
               class="flex items-center justify-center gap-2 text-xs sm:text-sm text-muted-foreground hover:text-foreground transition-colors py-2 sm:py-0"
             >
               <Icon className="w-3 h-3 sm:w-4 sm:h-4" />

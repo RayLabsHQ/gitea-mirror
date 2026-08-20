@@ -19,6 +19,7 @@ export function Header() {
     { href: '/#use-cases', label: 'Use Cases' },
     { href: '/#screenshots', label: 'Screenshots' },
     { href: '/#installation', label: 'Installation' },
+    { href: '/comparison/github-backup-tools/', label: 'Compare' },
     { href: '/docs/', label: 'Docs' }
   ];
 
