@@ -4,6 +4,7 @@ import {
   hasMirrorOverrides,
   listOverriddenKeys,
   MIRROR_GATING_REASONS,
+  mirrorOptionsToFlags,
   normalizeMirrorOverrides,
   parseMirrorOverrides,
   resolveMirrorOptions,
@@ -433,5 +434,155 @@ describe("UI_MIRROR_OVERRIDE_KEYS", () => {
     // gitea.ts nor gitea-enhanced.ts reads it, so a per-object override would
     // resolve fine and then do nothing.
     expect(UI_MIRROR_OVERRIDE_KEYS).not.toContain("mirrorMetadata");
+  });
+});
+
+describe("mirrorOptionsToFlags - client/server shape contract", () => {
+  // These tests deliberately go through config-mapper rather than hand-writing
+  // an API payload. The original bug was that the dialog read
+  // `giteaConfig.lfs`, which /api/config never returns: mapDbToUiConfig
+  // reshapes the flags into `mirrorOptions` with different names and nesting.
+  // A synthetic DB-shaped config cannot expose that mismatch, so the flags are
+  // pushed through the real mapping in both directions here. If config-mapper
+  // changes shape again, these fail.
+
+  /** A DB-shaped config row, as the mirror runtime actually sees it. */
+  function makeDbConfig(giteaOverrides: Record<string, unknown> = {}) {
+    return {
+      githubConfig: {
+        owner: "acme",
+        includeForks: true,
+        starredCodeOnly: false,
+      },
+      giteaConfig: {
+        url: "https://gitea.example.com",
+        token: "t",
+        defaultOwner: "acme",
+        lfs: true,
+        wiki: false,
+        mirrorMetadata: true,
+        mirrorIssues: true,
+        mirrorPullRequests: false,
+        mirrorLabels: true,
+        mirrorMilestones: false,
+        mirrorReleases: true,
+        releaseLimit: 10,
+        ...giteaOverrides,
+      },
+    };
+  }
+
+  test("flags survive the DB -> API -> flags round trip", async () => {
+    const { mapDbToUiConfig } = await import("./config-mapper");
+    const dbConfig = makeDbConfig();
+
+    // This is exactly what /api/config sends to the browser.
+    const apiShape = mapDbToUiConfig(dbConfig);
+    const flags = mirrorOptionsToFlags(apiShape.mirrorOptions);
+
+    expect(flags.lfs).toBe(true);
+    expect(flags.mirrorIssues).toBe(true);
+    expect(flags.mirrorReleases).toBe(true);
+    expect(flags.mirrorLabels).toBe(true);
+    expect(flags.mirrorPullRequests).toBe(false);
+    expect(flags.mirrorMilestones).toBe(false);
+    expect(flags.wiki).toBe(false);
+  });
+
+  test("the API payload really does not carry flags on giteaConfig", async () => {
+    // Pins the root cause. If someone later makes /api/config also return the
+    // flags on giteaConfig, this fails and the client mapping can be revisited.
+    const { mapDbToUiConfig } = await import("./config-mapper");
+    const apiShape = mapDbToUiConfig(makeDbConfig());
+
+    expect((apiShape.giteaConfig as any).lfs).toBeUndefined();
+    expect((apiShape.giteaConfig as any).mirrorIssues).toBeUndefined();
+    // ...while mirrorOptions does, under different names.
+    expect(apiShape.mirrorOptions.mirrorLFS).toBe(true);
+    expect(apiShape.mirrorOptions.metadataComponents.issues).toBe(true);
+  });
+
+  test("reading giteaConfig directly yields the all-off bug", async () => {
+    // Reproduces the reported symptom: every hint read "currently off" because
+    // undefined coerces to false and is indistinguishable from a real off.
+    const { mapDbToUiConfig } = await import("./config-mapper");
+    const apiShape = mapDbToUiConfig(makeDbConfig());
+    const buggy = {
+      lfs: !!(apiShape.giteaConfig as any).lfs,
+      mirrorIssues: !!(apiShape.giteaConfig as any).mirrorIssues,
+    };
+
+    expect(buggy.lfs).toBe(false); // DB says true
+    expect(buggy.mirrorIssues).toBe(false); // DB says true
+
+    const fixed = mirrorOptionsToFlags(apiShape.mirrorOptions);
+    expect(fixed.lfs).toBe(true);
+    expect(fixed.mirrorIssues).toBe(true);
+  });
+
+  test("the labels gate fires on a real API payload", async () => {
+    // The gate itself was correct but was being fed undefined, so it never
+    // fired. Drive it from a genuine payload instead.
+    const { mapDbToUiConfig } = await import("./config-mapper");
+    const apiShape = mapDbToUiConfig(makeDbConfig());
+    const effective = mirrorOptionsToFlags(apiShape.mirrorOptions);
+
+    expect(effective.mirrorIssues).toBe(true);
+    const gating = getMirrorOverrideGating({
+      targetKind: "repository",
+      effective,
+    });
+    expect(gating.mirrorLabels).toBe(MIRROR_GATING_REASONS.labelsFollowIssues);
+  });
+
+  test("mirrorMetadata off forces the metadata components off", async () => {
+    const { mapDbToUiConfig } = await import("./config-mapper");
+    const apiShape = mapDbToUiConfig(
+      makeDbConfig({ mirrorMetadata: false })
+    );
+    const flags = mirrorOptionsToFlags(apiShape.mirrorOptions);
+
+    expect(flags.mirrorIssues).toBe(false);
+    expect(flags.mirrorLabels).toBe(false);
+    expect(flags.wiki).toBe(false);
+    // lfs and releases sit outside the master switch.
+    expect(flags.lfs).toBe(true);
+    expect(flags.mirrorReleases).toBe(true);
+  });
+
+  test("matches what config-mapper would write back to the DB", async () => {
+    // Strongest form of the contract: the flags this derives must equal the
+    // flags mapUiToDbConfig would persist from the same mirrorOptions.
+    const { mapDbToUiConfig, mapUiToDbConfig } = await import("./config-mapper");
+    const apiShape = mapDbToUiConfig(makeDbConfig());
+
+    const roundTripped = mapUiToDbConfig(
+      apiShape.githubConfig,
+      apiShape.giteaConfig,
+      apiShape.mirrorOptions,
+      apiShape.advancedOptions
+    ).giteaConfig;
+
+    const flags = mirrorOptionsToFlags(apiShape.mirrorOptions);
+
+    for (const key of [
+      "lfs",
+      "wiki",
+      "mirrorIssues",
+      "mirrorPullRequests",
+      "mirrorReleases",
+      "mirrorLabels",
+      "mirrorMilestones",
+    ] as const) {
+      expect(flags[key]).toBe(!!(roundTripped as any)[key]);
+    }
+  });
+
+  test("handles a missing or empty payload without throwing", () => {
+    for (const value of [null, undefined, {}]) {
+      const flags = mirrorOptionsToFlags(value as any);
+      expect(flags.lfs).toBe(false);
+      expect(flags.mirrorIssues).toBe(false);
+    }
   });
 });

@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils";
 import { buildGiteaWebUrl } from "@/lib/gitea-url";
 import { MirrorDestinationEditor } from "./MirrorDestinationEditor";
 import { MirrorOverridesDialog } from "@/components/config/MirrorOverridesDialog";
-import { hasMirrorOverrides } from "@/lib/utils/mirror-overrides";
+import { hasMirrorOverrides, mirrorOptionsToFlags } from "@/lib/utils/mirror-overrides";
 import { useGiteaConfig } from "@/hooks/useGiteaConfig";
 import { withBase } from "@/lib/base-path";
 import {
@@ -67,7 +67,7 @@ export function OrganizationList({
   onRefresh,
   onDelete,
 }: OrganizationListProps) {
-  const { giteaConfig } = useGiteaConfig();
+  const { giteaConfig, mirrorOptions } = useGiteaConfig();
   const [overridesTarget, setOverridesTarget] = useState<Organization | null>(null);
 
   const handleUpdateMirrorOverrides = async (
@@ -732,15 +732,7 @@ export function OrganizationList({
         targetKind="organization"
         targetName={overridesTarget?.name ?? ""}
         value={overridesTarget?.mirrorOverrides ?? null}
-        inheritedFrom={{
-          lfs: !!giteaConfig?.lfs,
-          wiki: !!giteaConfig?.wiki,
-          mirrorIssues: !!giteaConfig?.mirrorIssues,
-          mirrorPullRequests: !!giteaConfig?.mirrorPullRequests,
-          mirrorReleases: !!giteaConfig?.mirrorReleases,
-          mirrorLabels: !!giteaConfig?.mirrorLabels,
-          mirrorMilestones: !!giteaConfig?.mirrorMilestones,
-        }}
+        inheritedFrom={mirrorOptionsToFlags(mirrorOptions)}
         inheritedLabel="global settings"
         onSave={async (overrides) => {
           if (overridesTarget?.id) {

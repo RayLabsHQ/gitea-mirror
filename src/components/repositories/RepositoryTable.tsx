@@ -28,7 +28,11 @@ import {
 import { InlineDestinationEditor } from "./InlineDestinationEditor";
 import { MarqueeText, MarqueeTrigger } from "@/components/ui/marquee-text";
 import { MirrorOverridesDialog } from "@/components/config/MirrorOverridesDialog";
-import { hasMirrorOverrides, type MirrorOverrideKey } from "@/lib/utils/mirror-overrides";
+import {
+  hasMirrorOverrides,
+  mirrorOptionsToFlags,
+  type MirrorOverrideKey,
+} from "@/lib/utils/mirror-overrides";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { withBase } from "@/lib/base-path";
@@ -103,7 +107,7 @@ export default function RepositoryTable({
 }: RepositoryTableProps) {
   const tableParentRef = useRef<HTMLDivElement>(null);
   const lastSelectedIndexRef = useRef<number | null>(null);
-  const { giteaConfig, advancedOptions } = useGiteaConfig();
+  const { giteaConfig, advancedOptions, mirrorOptions } = useGiteaConfig();
   const [overridesTarget, setOverridesTarget] = useState<Repository | null>(null);
   // Organization-tier overrides for the repo being edited, so the dialog's
   // "Inherit" hint reflects global -> org rather than global alone.
@@ -147,16 +151,10 @@ export default function RepositoryTable({
   }, [overridesTarget]);
 
   // Global defaults with the organization tier layered on top.
+  // The globals come from mirrorOptions, not giteaConfig: /api/config reshapes
+  // the mirror flags on the way out and does not put them on giteaConfig.
   const inheritedMirrorOptions = useMemo(() => {
-    const globals: Partial<Record<MirrorOverrideKey, boolean>> = {
-      lfs: !!giteaConfig?.lfs,
-      wiki: !!giteaConfig?.wiki,
-      mirrorIssues: !!giteaConfig?.mirrorIssues,
-      mirrorPullRequests: !!giteaConfig?.mirrorPullRequests,
-      mirrorReleases: !!giteaConfig?.mirrorReleases,
-      mirrorLabels: !!giteaConfig?.mirrorLabels,
-      mirrorMilestones: !!giteaConfig?.mirrorMilestones,
-    };
+    const globals = mirrorOptionsToFlags(mirrorOptions);
 
     if (!orgOverrides) return globals;
 
@@ -165,7 +163,7 @@ export default function RepositoryTable({
       if (typeof orgValue === "boolean") globals[key] = orgValue;
     }
     return globals;
-  }, [giteaConfig, orgOverrides]);
+  }, [mirrorOptions, orgOverrides]);
 
   const handleUpdateMirrorOverrides = async (
     repoId: string,

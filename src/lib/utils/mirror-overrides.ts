@@ -61,6 +61,55 @@ export const UI_MIRROR_OVERRIDE_KEYS: MirrorOverrideKey[] = [
   "mirrorMilestones",
 ];
 
+/**
+ * Convert the API's `mirrorOptions` shape into the flag keys used everywhere
+ * else.
+ *
+ * `/api/config` does not return the mirror flags on `giteaConfig`. On the way
+ * out, `mapDbToUiConfig` reshapes them into `mirrorOptions`, which uses
+ * different names (`mirrorLFS`, not `lfs`) and nests the metadata flags under
+ * `metadataComponents` with short names (`issues`, not `mirrorIssues`). Client
+ * code reading `giteaConfig.lfs` therefore gets `undefined`, not `false`, which
+ * is indistinguishable from "off" once coerced.
+ *
+ * This mirrors the derivation in `mapUiToDbConfig` exactly, including that
+ * `mirrorMetadata` acts as a master switch over the metadata components, while
+ * `lfs` and `mirrorReleases` sit outside it. A round-trip test pins this
+ * against config-mapper so it fails if that mapping changes again.
+ */
+export function mirrorOptionsToFlags(
+  mirrorOptions:
+    | {
+        mirrorLFS?: boolean;
+        mirrorReleases?: boolean;
+        mirrorMetadata?: boolean;
+        metadataComponents?: {
+          issues?: boolean;
+          pullRequests?: boolean;
+          labels?: boolean;
+          milestones?: boolean;
+          wiki?: boolean;
+        };
+      }
+    | null
+    | undefined
+): Partial<Record<MirrorOverrideKey, boolean>> {
+  const metadataOn = !!mirrorOptions?.mirrorMetadata;
+  const components = mirrorOptions?.metadataComponents;
+
+  return {
+    // Not gated by mirrorMetadata.
+    lfs: !!mirrorOptions?.mirrorLFS,
+    mirrorReleases: !!mirrorOptions?.mirrorReleases,
+    // Gated by mirrorMetadata, matching mapUiToDbConfig.
+    wiki: metadataOn && !!components?.wiki,
+    mirrorIssues: metadataOn && !!components?.issues,
+    mirrorPullRequests: metadataOn && !!components?.pullRequests,
+    mirrorLabels: metadataOn && !!components?.labels,
+    mirrorMilestones: metadataOn && !!components?.milestones,
+  };
+}
+
 /** Reasons a toggle is disabled. Shown verbatim in the dialog. */
 export const MIRROR_GATING_REASONS = {
   starredCodeOnly:
