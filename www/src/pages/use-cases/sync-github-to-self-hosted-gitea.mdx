@@ -25,7 +25,7 @@ You may still collaborate on GitHub every day, yet want a LAN Gitea copy you con
 1. Sign in at `http://<mirror-host>:4321`.
 2. Open **Configuration → Connections**.
 3. Paste the GitHub PAT and choose the owners (user + orgs) you want mirrored.
-4. Add your self-hosted Gitea URL and token; pick the destination org structure (typically **Preserve structure**).
+4. Add your self-hosted Gitea URL and token; pick the destination org structure (typically **Preserve Structure**).
 
 ### 2. Import the repository inventory
 
@@ -51,11 +51,11 @@ You may still collaborate on GitHub every day, yet want a LAN Gitea copy you con
   </figcaption>
 </figure>
 
-### 4. Mirror metadata and LFS
+### 4. Metadata and LFS
 
-In **Configuration → Connections → Content & Data**:
+In **Configuration → Connections → Mirror Content**:
 
-- Enable **Mirror metadata** so issues, pull requests (as enriched issues), labels, milestones, and wikis stay in sync.
+- Enable **Repository metadata** so issues, pull requests (as enriched issues), labels, milestones, and wikis stay in sync.
 - Enable **Mirror LFS** if your repos store binaries; confirm your Gitea instance has LFS enabled.
 - If you want deleted GitHub repos archived or removed locally, enable **Handle orphaned repositories automatically** in the Automation tab and choose the action (Archive or Delete) that matches your retention policy.
 
@@ -90,7 +90,7 @@ Intervals of 15–30 minutes keep most orgs near real-time. You can shorten for 
 
 ### Can I mirror multiple GitHub users and organizations?
 
-Yes. Add each owner in Configuration → Connections, then choose a destination strategy (Preserve structure or a specific org) for Gitea.
+Yes. Add each owner in Configuration → Connections, then choose a destination strategy (Preserve Structure or a specific org) for Gitea.
 
 ### Is it safe to store tokens in Gitea Mirror?
 

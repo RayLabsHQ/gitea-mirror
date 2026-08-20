@@ -55,9 +55,9 @@ On the dashboard:
 
 1. Click **Mirror Repository** for a small test project.
 2. Open Gitea and confirm the mirror appears with the right owner/org.
-3. In **Configuration → Connections**, open the **Content & Data** section to enable **Mirror metadata** and **Git LFS** if you rely on issues, wikis, or large assets. Metadata brings [issues and pull requests](/use-cases/mirror-github-issues-pull-requests/) along; LFS has [its own guide](/use-cases/mirror-git-lfs-repositories/) worth reading before you enable it account-wide.
+3. In **Configuration → Connections**, open the **Mirror Content** section to enable **Repository metadata** and **Git LFS** if you rely on issues, wikis, or large assets. Metadata brings [issues and pull requests](/use-cases/mirror-github-issues-pull-requests/) along; LFS has [its own guide](/use-cases/mirror-git-lfs-repositories/) worth reading before you enable it account-wide.
 
-For broader coverage, switch the organization strategy to **Preserve structure** so Gitea mirrors your GitHub org layout automatically.
+For broader coverage, switch the organization strategy to **Preserve Structure** so Gitea mirrors your GitHub org layout automatically.
 
 ### 4. Turn on automatic syncs and cleanup
 
@@ -109,7 +109,7 @@ Treat the mirror like any other DR asset:
 
 ### Does Gitea Mirror copy issues, pull requests, releases, and LFS?
 
-Yes. Enable Mirror metadata, Mirror releases, and Git LFS from **Configuration → Connections → Content & Data**. Pull requests are mirrored as enriched issues with linked branches and metadata.
+Yes. Enable Repository metadata, Releases & tags, and Git LFS objects from **Configuration → Connections → Mirror Content**. Pull requests are mirrored as enriched issues with linked branches and metadata.
 
 ### How often should I sync GitHub backups?
 

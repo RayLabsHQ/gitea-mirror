@@ -22,16 +22,16 @@ GitHub accounts get banned, repos go private, and owners rage-delete history. If
 
 ### 1. Set archival-friendly defaults
 
-In **Configuration → Connections**, open **Content & Data**:
+In **Configuration → Connections**, open **Mirror Content**:
 
-- Enable **Mirror metadata** and choose the components you care about (issues, pull requests, labels, milestones, wiki). See [how each piece transfers](/use-cases/mirror-github-issues-pull-requests/), including the shape pull requests arrive in.
+- Enable **Repository metadata** and choose the components you care about (issues, pull requests, labels, milestones, wiki). See [how each piece transfers](/use-cases/mirror-github-issues-pull-requests/), including the shape pull requests arrive in.
 - Enable **Mirror releases** and raise the **Latest releases** limit if you need a deeper history of release assets.
-- Toggle **Git LFS (Large File Storage)** so binaries follow the repository, assuming LFS is enabled in your Gitea instance. Old repositories sometimes have [broken LFS stores that fail the whole migration](/use-cases/mirror-git-lfs-repositories/); turn LFS off per repository when that happens.
+- Toggle **Git LFS objects** so binaries follow the repository, assuming LFS is enabled in your Gitea instance. Old repositories sometimes have [broken LFS stores that fail the whole migration](/use-cases/mirror-git-lfs-repositories/); turn LFS off per repository when that happens.
 
 ### 2. Create an "Archive" organization in Gitea
 
 1. In Gitea, create an org like `github-archive` and grant read-only access to everyone who needs the history.
-2. Back in Gitea Mirror under **Configuration → Connections**, pick the **Preserve structure** strategy (or set a destination organization) so repos land in that archive org.
+2. Back in Gitea Mirror under **Configuration → Connections**, pick the **Preserve Structure** strategy (or set a destination organization) so repos land in that archive org.
 3. Tighten permissions in Gitea—disable pushes for regular users so the archive stays immutable while the service updates it via its token.
 
 <figure class="mt-8 flex flex-col items-center">
@@ -86,7 +86,7 @@ In **Configuration → Connections**, open **Content & Data**:
 
 ### Does this preserve issues, pull requests, and releases?
 
-Yes—enable Mirror metadata and Mirror releases from **Configuration → Connections → Content & Data**. Pull requests copy as enriched issues, keeping discussion and labels.
+Yes. Enable Repository metadata and Releases & tags from **Configuration → Connections → Mirror Content**. Pull requests copy as enriched issues, keeping discussion and labels.
 
 ### What happens if a GitHub repo is deleted or goes private?
 
