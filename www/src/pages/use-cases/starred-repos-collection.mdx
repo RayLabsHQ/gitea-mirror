@@ -24,7 +24,7 @@ Stars are a personal library—but they vanish when creators delete repos or you
 
 1. In the onboarding wizard—or later under **Configuration → Connections**—add your GitHub username as an owner.
 2. Enable **Mirror starred repositories** and set the **Starred repos organization** to a dedicated space such as `stars-jamie`.
-3. Use the starred content selector to choose whether you want full metadata (issues, releases, PRs, wiki) or the lightweight code-only mode.
+3. Use the starred content selector to choose whether you want full metadata (issues, releases, PRs, wiki) or the lightweight code-only mode. Code-only is usually right for stars: [you rarely need a private copy of someone else's issue tracker](/use-cases/mirror-github-issues-pull-requests/), and it saves a lot of [API budget](/use-cases/github-api-rate-limits/).
 
 ### 2. Categorize the collection
 
@@ -87,3 +87,7 @@ Enable Handle orphaned repositories automatically and choose Archive (recommende
 ### Can others browse my collection safely?
 
 Create a read-only Gitea user or org members with no write permissions, then share the organization URL behind HTTPS.
+
+## Related guides
+
+- [Preserve GitHub history](/use-cases/preserve-github-history/) for the archival version of this workflow

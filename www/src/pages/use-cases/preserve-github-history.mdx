@@ -24,9 +24,9 @@ GitHub accounts get banned, repos go private, and owners rage-delete history. If
 
 In **Configuration → Connections**, open **Content & Data**:
 
-- Enable **Mirror metadata** and choose the components you care about (issues, pull requests, labels, milestones, wiki).
+- Enable **Mirror metadata** and choose the components you care about (issues, pull requests, labels, milestones, wiki). See [how each piece transfers](/use-cases/mirror-github-issues-pull-requests/), including the shape pull requests arrive in.
 - Enable **Mirror releases** and raise the **Latest releases** limit if you need a deeper history of release assets.
-- Toggle **Git LFS (Large File Storage)** so binaries follow the repository, assuming LFS is enabled in your Gitea instance.
+- Toggle **Git LFS (Large File Storage)** so binaries follow the repository, assuming LFS is enabled in your Gitea instance. Old repositories sometimes have [broken LFS stores that fail the whole migration](/use-cases/mirror-git-lfs-repositories/); turn LFS off per repository when that happens.
 
 ### 2. Create an "Archive" organization in Gitea
 
@@ -95,3 +95,8 @@ Turn on Handle orphaned repositories automatically and use Archive to keep a rea
 ### How much storage will I need long-term?
 
 Plan for repo size plus attachments and LFS. Monitor the mirror’s `data/` volume growth and consider ZFS/BTRFS snapshots or object storage for older archives.
+
+## Related guides
+
+- [Backup GitHub repositories](/use-cases/backup-github-repositories/) for the day-to-day version of this
+- [Build a starred repo collection](/use-cases/starred-repos-collection/) to archive other people's work too

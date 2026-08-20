@@ -13,7 +13,7 @@ You may still collaborate on GitHub every day, yet want a LAN Gitea copy you con
 
 ## Requirements
 
-- Gitea Mirror deployed (Docker, Proxmox LXC, or Helm)
+- Gitea Mirror deployed (Docker, [Proxmox LXC](/use-cases/proxmox-lxc-homelab/), [Unraid](/use-cases/unraid-github-backup/), or [Helm](/use-cases/deploy-with-helm-chart/))
 - GitHub PAT with `repo` enabled (add the `read:org` checkbox under `admin:org` to mirror organizations; leave write/admin unchecked)
 - Gitea API token for the target account/org
 - Stable connectivity between the mirror host and both GitHub + Gitea
@@ -36,7 +36,7 @@ You may still collaborate on GitHub every day, yet want a LAN Gitea copy you con
 ### 3. Configure sync cadence
 
 - Head to **Configuration → Automation** and enable **Automatic syncing**.
-- Pick an interval that matches your recovery point objective; `15–30 minutes` keeps an active GitHub org nearly live, while `2–4 hours` is fine for quieter repos.
+- Pick an interval that matches your recovery point objective; `15–30 minutes` keeps an active GitHub org nearly live, while `2–4 hours` is fine for quieter repos. Short intervals cost less than you would expect, because [conditional requests make unchanged checks nearly free](/use-cases/github-api-rate-limits/).
 - Leave the scheduler running so auto-discovery and repository cleanup keep working in the background.
 
 <figure class="mt-8 flex flex-col items-center">
@@ -95,3 +95,9 @@ Yes. Add each owner in Configuration → Connections, then choose a destination 
 ### Is it safe to store tokens in Gitea Mirror?
 
 Tokens saved via the Configuration UI are encrypted at rest. Rotate them regularly and monitor dashboard alerts for expirations.
+
+## Related guides
+
+- [How issues and PRs transfer](/use-cases/mirror-github-issues-pull-requests/) when metadata is enabled
+- [Git LFS mirroring](/use-cases/mirror-git-lfs-repositories/) and the one failure mode to know about
+- [Make Gitea primary](/use-cases/migrate-github-to-gitea/) when lockstep becomes a migration

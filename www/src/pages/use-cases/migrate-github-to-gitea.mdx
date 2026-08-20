@@ -1,0 +1,93 @@
+---
+layout: ../../layouts/UseCaseLayout.astro
+title: "Migrate from GitHub to Gitea: The Complete Guide"
+description: "Move your repositories, issues, pull requests, releases, and wikis from GitHub to a self-hosted Gitea instance. Covers org structure, LFS, and keeping both in sync during the transition."
+canonical: "https://gitea-mirror.raylabs.io/use-cases/migrate-github-to-gitea/"
+---
+
+# Migrate from GitHub to Gitea: The Complete Guide
+
+## Migration is not a one-day event
+
+Most GitHub-to-Gitea migrations fail in the same way: someone clones every repo over a weekend, declares victory, and three weeks later the team is still pushing to GitHub because the issues, releases, and muscle memory never moved. The code was migrated. The project wasn't.
+
+A migration that sticks runs both platforms in parallel for a while. Gitea Mirror is built for exactly that window: it keeps a complete, continuously updated copy of your GitHub repositories on your Gitea instance, metadata included, until you are ready to flip the default. And if you decide to keep GitHub for collaboration permanently, the same setup simply becomes your [backup strategy](/use-cases/backup-github-repositories/).
+
+## What actually needs to move
+
+An honest inventory is the first step. For each repository you have:
+
+- **Git data**: branches, tags, full history. Easy, `git clone --mirror` handles it.
+- **Issues**: titles, bodies, comments, labels, milestones, assignees. Not in git at all.
+- **Pull requests**: discussion history and review context you will want to search later.
+- **Releases**: tags are in git, but release notes and uploaded assets are not.
+- **Wikis**: a separate git repository per project that most manual migrations forget.
+- **LFS objects**: binary files stored outside the normal git object database.
+
+Gitea's built-in migration tool can pull most of this once. The problem is the word "once": anything that changes on GitHub after that import is lost unless you re-import from scratch. That is workable for archived projects and unusable for active ones.
+
+## Step 1: Stand up the mirror
+
+Install Gitea Mirror next to your Gitea instance ([Docker](/docs/quickstart/), [Helm](/use-cases/deploy-with-helm-chart/), [Proxmox LXC](/use-cases/proxmox-lxc-homelab/), or [Unraid](/use-cases/unraid-github-backup/)), then connect both sides:
+
+1. Create a GitHub personal access token with `repo` scope (read access to everything you are migrating).
+2. Create a Gitea access token with permission to create repositories and organizations.
+3. Enter both in the setup wizard. Tokens are encrypted at rest with AES-256-GCM.
+
+Pick a mirror strategy before importing anything, because it decides your Gitea namespace layout:
+
+- **Preserve**: GitHub orgs become Gitea orgs with the same names. The right default for a full migration.
+- **Single org**: everything lands in one Gitea organization.
+- **Flat user**: all repos under your user account.
+- **Mixed**: personal repos in one org, organization repos keep their structure.
+
+## Step 2: Import and mirror everything
+
+Enable the metadata options in Configuration: issues, pull requests, labels, milestones, releases, and wiki. Then import your repositories and let the first mirror run complete.
+
+Two things to know about how the metadata lands:
+
+- Issues arrive as real Gitea issues with comments, labels, and original author attribution preserved in the body.
+- Pull requests become Gitea issues tagged with a `pull-request` label, titled `[PR #123]` with their status. Gitea's API cannot create real pull requests from external repos, so this is the honest representation: the discussion and review history stays searchable next to the code it belongs to. The details are in [mirroring issues and pull requests](/use-cases/mirror-github-issues-pull-requests/).
+
+If some repositories use Git LFS, read the [LFS guide](/use-cases/mirror-git-lfs-repositories/) before enabling it globally. A repository whose LFS objects cannot be fetched will fail its entire migration, and since v3.27.0 you can turn LFS off for just that repository instead of losing it.
+
+## Step 3: Live in parallel
+
+This is the phase that makes the migration real. Set a sync interval (`8h` works for most teams, `30m` if you want the mirror hot) and keep working on GitHub as usual. Auto-discovery picks up new repositories as they appear, so nobody has to remember to add them.
+
+Meanwhile, move the team's read traffic to Gitea: point CI checkouts, dependency references, and documentation links at the mirror. Reads are the easy 80 percent of the switch, and every read you move builds confidence that the mirror is complete.
+
+## Step 4: Flip the default
+
+When you are ready to make Gitea primary:
+
+1. Freeze pushes to GitHub (branch protection on all branches is the simple way).
+2. Let one final sync run.
+3. In Gitea, convert the mirrored repositories to normal repositories (Settings, then "Convert to regular repository"). Mirrors are read-only until you do this.
+4. Update remotes: `git remote set-url origin https://gitea.example.com/org/repo.git`.
+5. Move CI, webhooks, and deploy keys.
+
+Keep the GitHub repos around in archived state for a quarter. They cost nothing and answer every "wait, where did X go" question.
+
+## What about the reverse direction?
+
+Teams that migrate off GitHub sometimes need to keep a public presence there. Gitea has built-in push mirroring for that: your Gitea repo pushes to a GitHub remote on every change. Gitea Mirror handles the pull direction, GitHub to Gitea; the push direction is native Gitea functionality and the two work fine together.
+
+## FAQ
+
+### Can I migrate without downtime?
+
+Yes. That is the point of the parallel phase: GitHub stays fully usable while the mirror stays current. The only freeze is the minutes between the last sync and updating remotes.
+
+### Do I lose pull request history?
+
+No, but it changes shape. PR discussions are preserved as labeled, searchable Gitea issues with commit lists and merge status. Open PRs you want to keep working on should be merged or closed on GitHub before the flip.
+
+### How long does the first import take?
+
+Depends on repo count and metadata volume. Git data is fast; issue-heavy repositories take longer because issues are mirrored one at a time to keep their order and numbering sane. Expect hours, not days, for a typical organization. GitHub's [API rate limits](/use-cases/github-api-rate-limits/) are respected automatically, so a large first import throttles itself rather than failing.
+
+### What if I only want some repositories?
+
+Import selectively, or set include/exclude patterns in the configuration. You can also mirror [just your starred repositories](/use-cases/starred-repos-collection/).

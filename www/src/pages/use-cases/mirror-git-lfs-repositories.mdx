@@ -1,0 +1,66 @@
+---
+layout: ../../layouts/UseCaseLayout.astro
+title: "Mirroring Git LFS Repositories to Gitea (and Fixing LFS Failures)"
+description: "How Git LFS mirroring works in Gitea, why one bad LFS repo can fail its whole migration, and how per-repository overrides let you mirror the code anyway."
+canonical: "https://gitea-mirror.raylabs.io/use-cases/mirror-git-lfs-repositories/"
+---
+
+# Mirroring Git LFS Repositories to Gitea
+
+## LFS changes what "a copy of the repo" means
+
+Git LFS stores large files outside the normal git object database. The repository itself only holds small pointer files; the real content lives on an LFS server, which for GitHub-hosted repos is GitHub's LFS storage.
+
+That split has a direct consequence for mirroring: a `git clone --mirror` of an LFS repository gives you every commit and every pointer, but none of the actual file content. If GitHub disappeared tomorrow, your "backup" would contain three-line text files where your datasets, binaries, and media used to be. For a [backup strategy](/use-cases/backup-github-repositories/) to be complete, the LFS objects have to come along.
+
+## How Gitea Mirror handles LFS
+
+When LFS is enabled, Gitea Mirror passes `lfs: true` to Gitea's migration API. Gitea then fetches the LFS objects itself during the migration and stores them in its own LFS storage. From that point on, a clone from your Gitea mirror delivers real content, not pointers.
+
+This design has one sharp edge worth understanding: **the LFS fetch happens inside Gitea's migration, not in Gitea Mirror**. If the fetch fails partway through, Gitea abandons the entire migration. There is no partial result to keep, no "code succeeded, LFS failed" state. The repository simply fails to mirror, and it will fail the same way on every retry.
+
+## Why LFS fetches fail
+
+The failures are usually on the source side, not yours:
+
+- **Missing objects**: the repository's history references LFS objects that no longer exist on GitHub's LFS server. Common in old repos and forks, where the fork's LFS storage never had the parent's objects.
+- **LFS bandwidth quotas**: GitHub meters LFS bandwidth. A large repository can exhaust the source owner's quota mid-fetch.
+- **Size**: multi-gigabyte LFS stores can hit timeouts on slow links.
+
+You can verify whether a repository is affected by migrating it manually in Gitea's UI with LFS unchecked. If that succeeds where the mirrored migration fails, the LFS fetch is your problem.
+
+## The fix: turn LFS off for just that repository
+
+Until v3.27.0, the LFS switch was global. That forced a bad trade: disable LFS everywhere and lose LFS content from the repositories where it matters, or keep it enabled and permanently lose the repositories whose LFS fetch fails.
+
+Now the option is per-repository. Open the three-dot menu on any repository row, choose **Mirror Options**, and set Git LFS to **Off** for the repository that keeps failing. Your global default stays on, every other repository keeps its LFS objects, and the problem repository mirrors its full git history with pointer files in place of the unfetchable content.
+
+The same override exists at the organization level, so "everything under this org skips LFS" is one setting rather than fifty. Overrides resolve per option: repository first, then organization, then your global default. Anything left on "Inherit" falls through.
+
+The other mirror options (issues, pull requests, releases, wiki) can be overridden the same way, which is useful beyond LFS: a repository with enormous release assets can skip releases, a repository whose [issue history matters more than its binaries](/use-cases/mirror-github-issues-pull-requests/) can mirror metadata only.
+
+## Storage planning
+
+LFS objects live twice in a mirrored setup: once on GitHub and once in your Gitea instance's LFS storage. Before enabling LFS across a large account:
+
+- Check Gitea's storage backend configuration. Local disk is the default; MinIO or S3-compatible storage scales better for large LFS stores.
+- Expect the first sync of an LFS-heavy repository to take significantly longer than its git-only size suggests.
+- Gitea deduplicates LFS objects by content hash within a repository, but mirrored forks each store their own copies.
+
+## FAQ
+
+### How do I know which of my repositories use LFS?
+
+The repository table in Gitea Mirror tracks this. Repositories detected with LFS content are flagged during discovery, so you can decide before the first mirror whether to enable the fetch.
+
+### A repository fails to mirror with LFS enabled. What is the fastest fix?
+
+Set Git LFS to Off in that repository's Mirror Options and retry. The migration will complete without the LFS content. If you later fix the source problem, flip it back to Inherit and re-mirror.
+
+### Do LFS objects sync continuously like commits do?
+
+Yes. Once the initial migration succeeds, Gitea's periodic mirror sync fetches new LFS objects along with new commits at your configured [sync interval](/use-cases/sync-github-to-self-hosted-gitea/).
+
+### Does mirroring LFS count against my GitHub API rate limit?
+
+No. LFS transfers use GitHub's LFS endpoints, not the REST API, so they are metered by LFS bandwidth rather than [API request limits](/use-cases/github-api-rate-limits/). The two quotas are independent.

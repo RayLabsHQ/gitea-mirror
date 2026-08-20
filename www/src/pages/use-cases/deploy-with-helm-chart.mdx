@@ -145,3 +145,8 @@ Yes. Leave `existingSecret` empty and the chart will create a secret with the va
 ### How do I throttle syncs to fit my quota?
 
 Adjust `gitea-mirror.automation.schedule_interval` in your values file (default: 3600 seconds = 1 hour). Lower values mean more frequent syncs; higher values create quieter schedules. You can also change the interval later from **Configuration → Automation** in the web UI.
+
+## Related guides
+
+- [Proxmox LXC](/use-cases/proxmox-lxc-homelab/) or [Unraid](/use-cases/unraid-github-backup/) for single-node homelabs
+- [Automate the backup schedule](/use-cases/github-backup-automation/) once the chart is up

@@ -1,0 +1,74 @@
+---
+layout: ../../layouts/UseCaseLayout.astro
+title: "Mirror GitHub Issues and Pull Requests to Gitea"
+description: "How issue and PR mirroring actually works: what transfers cleanly, how pull requests become searchable Gitea issues, and why everything is processed in order."
+canonical: "https://gitea-mirror.raylabs.io/use-cases/mirror-github-issues-pull-requests/"
+---
+
+# Mirror GitHub Issues and Pull Requests to Gitea
+
+## The code is the smallest part of the project
+
+Clone any mature repository and you have maybe a tenth of the project's real knowledge. The rest lives in issues: why a decision was made, which bug reports turned out to be the same bug, what the maintainer said in 2021 about the exact edge case you just hit. Pull request discussions carry the review reasoning that the commit message compressed into one line.
+
+None of that is in git. A mirror that only copies commits [preserves the code and loses the history around it](/use-cases/preserve-github-history/). This page explains what Gitea Mirror transfers and, just as importantly, the shape it arrives in.
+
+## Issues: near-native transfer
+
+Issues map cleanly onto Gitea's issue model, so they arrive as real, native issues:
+
+- Title and body, with the original author and timestamps noted in the body (the mirror runs under your Gitea account, so attribution is preserved in content rather than forged).
+- Every comment, in order.
+- Labels, with colors, created on the Gitea side as needed.
+- Milestones, matched by title.
+- Open and closed state.
+
+Mirroring is idempotent: each mirrored issue carries a marker tying it to its GitHub counterpart, so re-syncs update existing issues in place instead of duplicating them. New comments on GitHub arrive on the next sync.
+
+### Order matters more than speed
+
+Issues are mirrored sequentially, one at a time, rather than blasted in parallel. That choice is deliberate. Creating issues concurrently means they arrive out of order, and Gitea numbers issues by arrival. Sequential processing keeps the mirror's issue ordering coherent with the source, at the cost of a slower first import. Combined with [ETag-based conditional requests](/use-cases/github-api-rate-limits/), later syncs only touch what changed, so the slow part happens exactly once.
+
+## Pull requests: honest conversion, not imitation
+
+Gitea's API cannot create real pull requests that reference an external repository's branches. A PR is a live object wired to branch state, and a mirror's branches belong to GitHub. Any tool that claims to "mirror PRs" into Gitea is converting them into something else; the only question is whether the conversion is honest.
+
+Gitea Mirror converts each pull request into a Gitea issue with a consistent, searchable shape:
+
+- Tagged with a `pull-request` label, so they are one filter away and never mixed into your real issue list by accident.
+- Title prefixed with the PR number and status: `[PR #482] [MERGED] Add retry logic to sync jobs`.
+- Body carries the PR description, the commit list, file change summary, and merge status.
+- The discussion thread follows as comments, same as issues.
+
+What you get is the full review history, searchable next to the code it describes. What you do not get is a clickable diff or a mergeable object, and no mirroring tool can honestly give you that. During a [migration to Gitea](/use-cases/migrate-github-to-gitea/), merge or close active PRs on GitHub before switching; the converted record is for history, not for continuing the review.
+
+## Releases and wikis round it out
+
+Two more pieces of non-git project state come along when enabled:
+
+- **Releases**: notes and uploaded assets, mirrored with a configurable limit on how many recent releases to keep (default 10, because release assets are often the bulkiest part of a repository).
+- **Wikis**: each GitHub wiki is its own git repository, and it is cloned into the Gitea project's wiki.
+
+## Choosing what to mirror, and where
+
+All of this is opt-in per option: issues, pull requests, labels, milestones, releases, and wiki each have their own switch. Since v3.27.0 those switches also exist per repository and per organization, resolving repository first, then organization, then your global default. That enables the practical mixes: metadata everywhere except the org with 40,000 issues, releases only for the repositories whose assets you deploy from, [LFS off for the one repository whose LFS storage is broken](/use-cases/mirror-git-lfs-repositories/).
+
+For starred repositories there is a coarser and very useful switch: "starred code only", which mirrors the code of [everything you have starred](/use-cases/starred-repos-collection/) and skips the metadata, since you rarely need a private copy of someone else's issue tracker.
+
+## FAQ
+
+### Are mirrored issues editable on the Gitea side?
+
+They are normal Gitea issues, so nothing stops you, but edits will be overwritten when the next sync updates that issue from GitHub. Treat the mirror as read-only until you [convert it to a regular repository](/use-cases/migrate-github-to-gitea/).
+
+### Do issue numbers match between GitHub and Gitea?
+
+Sequential processing keeps ordering consistent, and each mirrored issue records its source number. On a fresh mirror of a repository whose issues were all mirrorable, numbers typically line up; the recorded marker is the reliable link either way.
+
+### How fast do new comments appear on the mirror?
+
+On the next scheduled sync. With conditional requests making quiet checks nearly free, short intervals like `30m` are affordable, so the mirror can stay minutes-to-hours behind at your discretion.
+
+### Can I mirror issues but not pull requests?
+
+Yes, they are independent switches, globally and per repository.

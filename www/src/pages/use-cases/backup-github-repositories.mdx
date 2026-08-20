@@ -55,7 +55,7 @@ On the dashboard:
 
 1. Click **Mirror Repository** for a small test project.
 2. Open Gitea and confirm the mirror appears with the right owner/org.
-3. In **Configuration → Connections**, open the **Content & Data** section to enable **Mirror metadata** and **Git LFS** if you rely on issues, wikis, or large assets.
+3. In **Configuration → Connections**, open the **Content & Data** section to enable **Mirror metadata** and **Git LFS** if you rely on issues, wikis, or large assets. Metadata brings [issues and pull requests](/use-cases/mirror-github-issues-pull-requests/) along; LFS has [its own guide](/use-cases/mirror-git-lfs-repositories/) worth reading before you enable it account-wide.
 
 For broader coverage, switch the organization strategy to **Preserve structure** so Gitea mirrors your GitHub org layout automatically.
 
@@ -118,3 +118,10 @@ Most homelabs pick 30–120 minutes. Faster schedules improve RPO but use more G
 ### Where are backups stored and how do I restore?
 
 The mirrored repositories live in your Gitea instance's storage—Gitea does the actual mirroring. Gitea Mirror's `data/` directory holds its SQLite database (configuration, job history) and optional pre-sync backup bundles. Restore code by cloning from Gitea; restore the mirror service by moving the `data/` volume to a fresh deployment and signing back in.
+
+## Related guides
+
+- [Automate the schedule](/use-cases/github-backup-automation/) so backups run without you
+- [GitHub API rate limits](/use-cases/github-api-rate-limits/) and why frequent syncs stay cheap
+- [Migrate to Gitea entirely](/use-cases/migrate-github-to-gitea/) when a backup grows into an exit
+- [Compare backup tools](/comparison/github-backup-tools/) if you are still choosing an approach

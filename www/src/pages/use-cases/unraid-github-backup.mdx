@@ -1,0 +1,78 @@
+---
+layout: ../../layouts/UseCaseLayout.astro
+title: "GitHub Backup on Unraid with Gitea Mirror"
+description: "Install Gitea Mirror on Unraid from Community Applications, connect it to your Gitea container, and get scheduled GitHub backups on the server you already run."
+canonical: "https://gitea-mirror.raylabs.io/use-cases/unraid-github-backup/"
+---
+
+# GitHub Backup on Unraid with Gitea Mirror
+
+## Your NAS is the right place for this
+
+If you run Unraid, you already have the two things a GitHub backup needs: always-on hardware and storage you control. Most Unraid homelabs also already run a Gitea container. Gitea Mirror is the piece that connects them to GitHub, with scheduled syncs, auto-discovery of new repositories, and [metadata mirroring](/use-cases/mirror-github-issues-pull-requests/) so issues and releases come along with the code.
+
+The result is the same appliance the [Proxmox LXC guide](/use-cases/proxmox-lxc-homelab/) builds, on the platform you already manage through a web UI.
+
+## Requirements
+
+- Unraid with Docker enabled and the Community Applications plugin installed
+- A running Gitea instance (the official `gitea/gitea` container from CA works fine)
+- A GitHub personal access token with `repo` scope
+- A Gitea access token that can create repositories and organizations
+
+## Step-by-step
+
+### 1. Install from Community Applications
+
+Search **Gitea Mirror** in the Apps tab (template maintained by RayLabsHQ) and click install. The template pulls `ghcr.io/raylabshq/gitea-mirror` and pre-wires the important settings:
+
+- **Port**: `4321` for the web UI.
+- **App Data**: `/mnt/user/appdata/gitea-mirror` mapped to `/app/data`. This holds the SQLite database and configuration, so it is the only path you need to back up.
+- **Custom CA Certificates** (advanced, optional): mount a folder of `.crt` files at `/app/certs` if your Gitea runs behind a private certificate authority.
+
+### 2. Set the secrets
+
+The template exposes the environment variables that matter:
+
+- `BETTER_AUTH_SECRET`: session signing secret. Set a long random value.
+- `BETTER_AUTH_URL`: the URL you will actually browse to, e.g. `http://tower.local:4321`.
+- `ENCRYPTION_SECRET`: encrypts your GitHub and Gitea tokens at rest (AES-256-GCM). Set it once and do not rotate it casually, because stored tokens are only readable with it.
+
+Generate secrets with `openssl rand -hex 32` from the Unraid terminal.
+
+### 3. First login
+
+Browse to `http://<unraid-ip>:4321`. The first account created becomes the admin. The setup wizard asks for your GitHub token and your Gitea URL and token.
+
+One Unraid-specific note: if Gitea runs on the same box, use the LAN address (`http://<unraid-ip>:3000`) rather than `localhost`, because `localhost` inside the Gitea Mirror container is the container itself, not your Gitea.
+
+### 4. Import and schedule
+
+Select the owners and organizations to mirror, run the first sync, then enable scheduling. An interval of `8h` suits backup use; [shorter intervals are cheap](/use-cases/github-api-rate-limits/) thanks to conditional API requests. Enable auto-discovery so new GitHub repositories start mirroring without you touching the UI. The full option set is covered in the [automation guide](/use-cases/github-backup-automation/).
+
+### 5. Fold it into your Unraid backup routine
+
+- Add `/mnt/user/appdata/gitea-mirror` to your appdata backup (CA Appdata Backup covers it by default).
+- The mirrored repositories themselves live in your Gitea container's data share, which should already be in that routine.
+- Watchtower-style auto-updates work normally; the container migrates its database on startup after an update.
+
+## Troubleshooting
+
+- **Web UI unreachable**: check for a port clash on 4321 and remap in the template if needed.
+- **Sign-in loops or 403s**: `BETTER_AUTH_URL` must match the address in your browser exactly, scheme and port included.
+- **Gitea connection refused**: use the LAN IP, not `localhost`, and confirm the Gitea container is on a network the Gitea Mirror container can reach (bridge mode on the same host is fine).
+- **A repository fails to mirror repeatedly at the LFS stage**: turn LFS off for that repository in its Mirror Options. The [LFS guide](/use-cases/mirror-git-lfs-repositories/) explains why this happens.
+
+## FAQ
+
+### Does this replace backing up my Gitea container?
+
+No, it feeds it. Gitea Mirror keeps Gitea current with GitHub; your existing appdata and share backups protect Gitea itself. Together they give you GitHub, a live local copy, and cold backups of that copy.
+
+### How much storage do I need?
+
+Roughly the sum of your repositories' sizes, plus LFS objects where enabled, plus release assets if you mirror them. The release limit (default: last 10 per repository) keeps asset growth bounded.
+
+### Can multiple family members or teammates use one instance?
+
+Yes, Gitea Mirror is multi-user. Each user connects their own GitHub and Gitea tokens, and each token is encrypted at rest.

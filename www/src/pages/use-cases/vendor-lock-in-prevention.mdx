@@ -24,7 +24,7 @@ GitHub can change pricing, authentication rules, or terms without notice. With G
 
 - In **Configuration → Connections**, add every GitHub organization you care about as an owner. Auto-discovery pulls new repositories on the next scheduler run.
 - Set the organization strategy to **Preserve structure** so Gitea mirrors the GitHub org layout.
-- Open **Content & Data** to enable metadata, releases, and Git LFS, ensuring issues, pull requests, and binaries survive the switchover.
+- Open **Content & Data** to enable metadata, releases, and Git LFS, ensuring [issues, pull requests](/use-cases/mirror-github-issues-pull-requests/), and [binaries](/use-cases/mirror-git-lfs-repositories/) survive the switchover.
 
 ### 2. Simulate a cutover
 
@@ -75,3 +75,8 @@ Keep `Automatic syncing` at 15–30 minutes for active organizations. That keeps
 ### Can I script the cutover?
 
 Yes. Use the `/api/export` configuration JSON and the repositories CSV export to generate runbooks, then pair them with infrastructure-as-code (DNS, reverse proxy, CI) so flipping endpoints becomes repeatable.
+
+## Related guides
+
+- [The full migration guide](/use-cases/migrate-github-to-gitea/) for when the exit hatch gets used
+- [Compare backup tools](/comparison/github-backup-tools/) to sanity-check this approach against the alternatives

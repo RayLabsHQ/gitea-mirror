@@ -1,0 +1,62 @@
+---
+layout: ../../layouts/UseCaseLayout.astro
+title: "GitHub API Rate Limits and Repository Mirroring"
+description: "What GitHub's 5,000 requests per hour actually means for mirroring, how conditional requests with ETags make 304s free, and how to configure sync intervals that never hit the wall."
+canonical: "https://gitea-mirror.raylabs.io/use-cases/github-api-rate-limits/"
+---
+
+# GitHub API Rate Limits and Repository Mirroring
+
+## The budget: 5,000 requests per hour
+
+Every authenticated GitHub token gets 5,000 REST API requests per hour. That sounds like a lot until you do mirroring math. Keeping a mirror current means repeatedly asking GitHub "what changed?": listing repositories, reading issues, fetching comments, checking releases. A sync pass over an account with a few hundred repositories and active issue trackers can burn thousands of requests, and a short sync interval multiplies that by every pass.
+
+Hit the limit and GitHub answers `403` until the window resets. A naive mirroring tool either fails its sync or, worse, retries in a loop and keeps the token pinned at zero.
+
+## What actually consumes requests
+
+For a mirroring workload, the spend breaks down roughly like this:
+
+- **Discovery**: listing your repositories, organizations, and starred repos. Cheap, paginated, a handful of requests per sync.
+- **Metadata**: issues, comments, pull requests, labels, milestones, releases. This is where the volume is. An issue-heavy repository can cost dozens of requests to check thoroughly.
+- **Git data**: essentially free. The actual `git fetch` traffic goes over the git protocol, which is not metered by the REST API limit at all. The same is true of [LFS transfers](/use-cases/mirror-git-lfs-repositories/).
+
+So the rate limit problem is really a metadata problem. The repositories themselves would sync happily forever; it is the "did any of 400 issue trackers change" question that gets expensive.
+
+## Conditional requests: how 304s become free
+
+GitHub's API supports conditional requests. Every response carries an `ETag` header, a fingerprint of the response body. Send it back on your next request as `If-None-Match`, and if nothing changed GitHub replies `304 Not Modified` with an empty body.
+
+The part that matters for mirroring: **for authenticated requests, a 304 does not count against your rate limit.**
+
+Gitea Mirror uses this on every GET. Each response's ETag is cached; every subsequent sync replays it. On a quiet account, a full metadata sweep costs almost nothing, because nearly every answer is a 304. You pay full price only for the things that actually changed, which is exactly the data you wanted anyway.
+
+The practical effect is that sync frequency mostly stops mattering. A `30m` interval on a stable account costs barely more than a `24h` one, because 47 of the 48 daily sweeps are nearly all cache hits. The requests you spend scale with how much changed, not how often you look.
+
+## Configuration that stays inside the budget
+
+A few settings still matter for large or busy accounts:
+
+- **Sync interval**: `8h` is the default and fine for backup use. If you want the mirror hot, `30m` or `1h` is safe on most accounts thanks to conditional requests. See the [scheduling guide](/use-cases/github-backup-automation/) for interval syntax.
+- **Concurrency**: issue and pull request mirroring concurrency are configurable. The defaults (3 issues, 5 PRs in flight) balance speed against burst spend. Raising them speeds up the first import but makes rate limiting more likely on very large accounts.
+- **Metadata selection**: only enable what you need. If you [mirror starred repositories](/use-cases/starred-repos-collection/), the "starred code only" option skips their metadata entirely, which is usually right for repos you do not own.
+
+The first import is the one place you can still feel the limit, because nothing is cached yet and every issue is new. Gitea Mirror tracks the remaining budget from GitHub's rate limit headers and throttles rather than failing, so a large first import stretches over time instead of erroring at request 5,001. This matters most during a [full migration](/use-cases/migrate-github-to-gitea/), where the first pass is by far the biggest.
+
+## FAQ
+
+### How do I see my current rate limit status?
+
+`curl -H "Authorization: Bearer <token>" https://api.github.com/rate_limit` shows the remaining budget and reset time per category. The `core` bucket is the one mirroring spends from.
+
+### Does using multiple tokens help?
+
+Rate limits are per token for personal access tokens, so separate tokens for separate Gitea Mirror users each get their own 5,000. Within one user, one token is the honest setup; rotating tokens to dodge limits is against GitHub's terms.
+
+### Do git clone and fetch operations count?
+
+No. Git protocol traffic and LFS transfers are not REST API requests. Only the metadata work (issues, releases, discovery) spends from the hourly budget.
+
+### What happens if the limit is hit anyway?
+
+Syncs pause and resume after the window resets. Mirror jobs track their progress, so an interrupted metadata pass continues where it stopped rather than starting over.
