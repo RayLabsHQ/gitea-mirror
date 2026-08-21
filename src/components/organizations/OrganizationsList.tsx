@@ -635,8 +635,12 @@ export function OrganizationList({
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => setOverridesTarget(org)}>
+                        <SlidersHorizontal className="h-4 w-4 mr-2" />
+                        Mirror Options
+                      </DropdownMenuItem>
                       {org.status !== "ignored" && (
-                        <DropdownMenuItem 
+                        <DropdownMenuItem
                           onClick={() => org.id && onIgnore && onIgnore({ orgId: org.id, ignore: true })}
                         >
                           <Ban className="h-4 w-4 mr-2" />
@@ -645,7 +649,7 @@ export function OrganizationList({
                       )}
                       {onDelete && (
                         <>
-                          {org.status !== "ignored" && <DropdownMenuSeparator />}
+                          <DropdownMenuSeparator />
                           <DropdownMenuItem
                             className="text-destructive focus:text-destructive"
                             onClick={() => org.id && onDelete(org.id)}

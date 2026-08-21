@@ -9,7 +9,7 @@ import {
   type SortingState,
 } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { FlipHorizontal, GitFork, RefreshCw, RotateCcw, Star, Lock, Ban, Check, ChevronDown, SlidersHorizontal, Trash2, X } from "lucide-react";
+import { FlipHorizontal, GitFork, MoreVertical, RefreshCw, RotateCcw, Star, Lock, Ban, Check, ChevronDown, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { SiGithub, SiGitea } from "react-icons/si";
 import type { MirrorOverrides, Repository } from "@/lib/db/schema";
 import { Button } from "@/components/ui/button";
@@ -418,8 +418,22 @@ export default function RepositoryTable({
                   {repo.isPrivate && <Badge variant="secondary" className="text-xs h-5"><Lock className="h-3 w-3 mr-1" />Private</Badge>}
                   {repo.isForked && <Badge variant="secondary" className="text-xs h-5"><GitFork className="h-3 w-3 mr-1" />Fork</Badge>}
                   {repo.isStarred && <Badge variant="secondary" className="text-xs h-5"><Star className="h-3 w-3 mr-1" />Starred</Badge>}
+                  {hasMirrorOverrides(repo.mirrorOverrides) && <Badge variant="outline" className="text-xs h-5"><SlidersHorizontal className="h-3 w-3 mr-1" />Custom</Badge>}
                 </div>
               </div>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" disabled={isLoading}>
+                    <MoreVertical className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => setOverridesTarget(repo)}>
+                    <SlidersHorizontal className="h-4 w-4 mr-2" />
+                    Mirror Options
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
 
             {/* Repository details */}
