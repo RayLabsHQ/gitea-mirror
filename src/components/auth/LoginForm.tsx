@@ -69,13 +69,22 @@ export function LoginForm() {
         typeof window !== 'undefined'
           ? new URL(withBase('/'), window.location.origin).toString()
           : `http://localhost:4321${withBase('/')}`;
-      await authClient.signIn.sso({
+      const result = await authClient.signIn.sso({
         email: ssoEmail || undefined,
         domain: domain,
         providerId: providerId,
         callbackURL,
         scopes: ['openid', 'email', 'profile'], // TODO: This is not being respected by the SSO plugin.
       });
+      // The auth client resolves with { data, error } instead of throwing, so
+      // a server-side rejection (e.g. the SSO plugin refusing an IdP whose
+      // hostname resolves to a private address) never reaches the catch below.
+      if (result?.error) {
+        showErrorToast(
+          new Error(result.error.message || `SSO sign-in failed (HTTP ${result.error.status})`),
+          toast
+        );
+      }
     } catch (error) {
       showErrorToast(error, toast);
     } finally {

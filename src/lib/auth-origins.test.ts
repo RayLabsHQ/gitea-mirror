@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from "bun:test";
-import { resolveTrustedOrigins } from "./auth";
+import { resolveTrustedOrigins, extractSsoProviderOrigins } from "./auth";
 
 // Helper to create a mock Request with specific headers
 function mockRequest(headers: Record<string, string>): Request {
@@ -115,5 +115,60 @@ describe("resolveTrustedOrigins", () => {
     });
     const origins = await resolveTrustedOrigins(req);
     expect(origins).toContain("http://gitea.internal");
+  });
+});
+
+/**
+ * Regression coverage for issue #366: better-auth 1.6.23's SSO plugin
+ * refuses OIDC discovery from untrusted origins and rejects endpoints whose
+ * hostnames resolve to private addresses unless the origin is in
+ * trustedOrigins. Operator-registered providers are trusted automatically;
+ * extractSsoProviderOrigins is the pure extraction step feeding that.
+ */
+describe("extractSsoProviderOrigins", () => {
+  test("extracts the issuer origin, stripping any path", () => {
+    const origins = extractSsoProviderOrigins([
+      { issuer: "https://auth.example.dev/application/o/gitea-mirror/", oidcConfig: null },
+    ]);
+    expect(origins).toContain("https://auth.example.dev");
+    expect(origins).not.toContain("https://auth.example.dev/application/o/gitea-mirror/");
+  });
+
+  test("extracts endpoint origins from oidcConfig, including hosts that differ from the issuer", () => {
+    const origins = extractSsoProviderOrigins([
+      {
+        issuer: "https://auth.example.dev",
+        oidcConfig: JSON.stringify({
+          discoveryEndpoint: "https://auth.example.dev/.well-known/openid-configuration",
+          authorizationEndpoint: "https://auth.example.dev/authorize",
+          tokenEndpoint: "https://token.internal.example:8443/oauth/token",
+          userInfoEndpoint: "https://auth.example.dev/userinfo",
+          jwksEndpoint: "https://keys.example.dev/jwks",
+        }),
+      },
+    ]);
+    expect(origins).toContain("https://auth.example.dev");
+    expect(origins).toContain("https://token.internal.example:8443");
+    expect(origins).toContain("https://keys.example.dev");
+  });
+
+  test("malformed oidcConfig JSON still yields the issuer origin without throwing", () => {
+    const origins = extractSsoProviderOrigins([
+      { issuer: "https://auth.example.dev", oidcConfig: "{not json" },
+    ]);
+    expect(origins).toContain("https://auth.example.dev");
+  });
+
+  test("skips non-URL values such as SAML entity IDs", () => {
+    const origins = extractSsoProviderOrigins([
+      { issuer: "urn:example:idp", oidcConfig: null },
+    ]);
+    expect(origins).toEqual([]);
+  });
+
+  test("handles empty and null fields without throwing", () => {
+    expect(extractSsoProviderOrigins([])).toEqual([]);
+    expect(extractSsoProviderOrigins([{ issuer: null, oidcConfig: null }])).toEqual([]);
+    expect(extractSsoProviderOrigins([{ issuer: "", oidcConfig: "" }])).toEqual([]);
   });
 });

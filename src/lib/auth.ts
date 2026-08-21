@@ -3,11 +3,71 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { jwt } from "better-auth/plugins";
 import { oauthProvider } from "@better-auth/oauth-provider";
 import { sso } from "@better-auth/sso";
-import { db, users } from "./db";
+import { db, users, ssoProviders } from "./db";
 import * as schema from "./db/schema";
 import { eq } from "drizzle-orm";
 import { withBase } from "./base-path";
 import { headerAuthPlugin } from "./auth-header-plugin";
+
+/**
+ * Extracts the origins implied by registered SSO identity providers.
+ *
+ * The SSO plugin (since better-auth 1.6.23, shipped in v3.21.0) hardens
+ * sign-in against SSRF: it refuses to fetch OIDC discovery documents from
+ * untrusted origins and rejects token/userinfo/jwks endpoints whose
+ * hostnames resolve to private addresses — unless the origin is listed in
+ * `trustedOrigins`, the documented escape hatch for internal IdPs. Homelab
+ * deployments with split-horizon DNS (auth.example.com resolving to a LAN
+ * IP from inside the container) hit this on every sign-in, which the login
+ * UI used to swallow silently (#366).
+ *
+ * Registering a provider is an explicit operator action — the same trust
+ * model behind the `domainVerified` flag we set at registration — so the
+ * provider's issuer and endpoint origins are trusted automatically instead
+ * of requiring BETTER_AUTH_TRUSTED_ORIGINS to be set by hand. Note this
+ * also lets those origins pass Better Auth's CSRF/redirect-target checks,
+ * which is acceptable for operator-registered IdP infrastructure.
+ *
+ * Exported for testing.
+ */
+export function extractSsoProviderOrigins(
+  rows: Array<{ issuer?: string | null; oidcConfig?: string | null }>
+): string[] {
+  const origins: string[] = [];
+  for (const row of rows) {
+    const candidates: unknown[] = [row?.issuer];
+    if (typeof row?.oidcConfig === "string" && row.oidcConfig.trim() !== "") {
+      try {
+        const cfg = JSON.parse(row.oidcConfig);
+        candidates.push(
+          cfg?.discoveryEndpoint,
+          cfg?.authorizationEndpoint,
+          cfg?.tokenEndpoint,
+          cfg?.userInfoEndpoint,
+          cfg?.jwksEndpoint,
+        );
+      } catch {
+        // A malformed provider row must not break auth for everyone;
+        // the issuer candidate above still applies.
+      }
+    }
+    for (const candidate of candidates) {
+      if (typeof candidate !== "string" || candidate.trim() === "") continue;
+      try {
+        const url = new URL(candidate);
+        // Only http(s) URLs have a meaningful origin — new URL() accepts
+        // values like SAML entity IDs ("urn:...") without throwing, but
+        // their .origin is the literal string "null".
+        if (url.protocol === "http:" || url.protocol === "https:") {
+          origins.push(url.origin);
+        }
+      } catch {
+        // Skip values that aren't URLs at all.
+      }
+    }
+  }
+  return origins;
+}
 
 /**
  * Resolves the list of trusted origins for Better Auth CSRF validation.
@@ -46,6 +106,21 @@ export async function resolveTrustedOrigins(request?: Request): Promise<string[]
         console.warn(`Invalid trusted origin: ${origin}, skipping`);
       }
     }
+  }
+
+  // Trust the origins of operator-registered SSO identity providers so the
+  // SSO plugin's SSRF checks accept them without manual env configuration.
+  // See extractSsoProviderOrigins for the rationale.
+  try {
+    const providerRows = await db
+      .select({ issuer: ssoProviders.issuer, oidcConfig: ssoProviders.oidcConfig })
+      .from(ssoProviders);
+    if (Array.isArray(providerRows)) {
+      origins.push(...extractSsoProviderOrigins(providerRows));
+    }
+  } catch {
+    // Fresh DB before migration or DB briefly unavailable — fall back to
+    // env-configured origins rather than failing auth outright.
   }
 
   // Auto-detect origin from the incoming request's Host header when running

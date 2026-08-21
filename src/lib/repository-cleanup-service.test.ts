@@ -17,7 +17,7 @@
  */
 
 import { describe, test, expect } from "bun:test";
-import { resolveOrphanVerdict } from "./repository-cleanup-service";
+import { resolveOrphanVerdict, planOrphanedRepoAction } from "./repository-cleanup-service";
 
 describe("resolveOrphanVerdict", () => {
   test("repo present in the bulk fetch is never orphaned, regardless of the direct check", () => {
@@ -48,5 +48,37 @@ describe("resolveOrphanVerdict", () => {
     expect(
       resolveOrphanVerdict({ fullNameFoundInBulkList: false, directCheckConfirmsGone: false })
     ).toBe(false);
+  });
+});
+
+/**
+ * Regression coverage for issue #366: `deleteFromGitea`
+ * (CLEANUP_DELETE_FROM_GITEA) was documented as "Delete repositories from
+ * Gitea" with a `false` default, but the cleanup service never read it —
+ * orphaned repos were archived/deleted on the Gitea side unconditionally.
+ * planOrphanedRepoAction is the pure decision function that now gates the
+ * Gitea-side operation on that flag while the local-database bookkeeping
+ * always happens.
+ */
+describe("planOrphanedRepoAction", () => {
+  test("skip does nothing anywhere, regardless of deleteFromGitea", () => {
+    expect(planOrphanedRepoAction("skip", false)).toEqual({ gitea: "none", db: "none" });
+    expect(planOrphanedRepoAction("skip", true)).toEqual({ gitea: "none", db: "none" });
+  });
+
+  test("archive with deleteFromGitea disabled only marks the local record archived", () => {
+    expect(planOrphanedRepoAction("archive", false)).toEqual({ gitea: "none", db: "archive" });
+  });
+
+  test("archive with deleteFromGitea enabled archives on Gitea too", () => {
+    expect(planOrphanedRepoAction("archive", true)).toEqual({ gitea: "archive", db: "archive" });
+  });
+
+  test("delete with deleteFromGitea disabled removes only the local record (the #366 ask)", () => {
+    expect(planOrphanedRepoAction("delete", false)).toEqual({ gitea: "none", db: "delete" });
+  });
+
+  test("delete with deleteFromGitea enabled deletes from Gitea and the local database", () => {
+    expect(planOrphanedRepoAction("delete", true)).toEqual({ gitea: "delete", db: "delete" });
   });
 });

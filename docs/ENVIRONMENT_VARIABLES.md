@@ -279,7 +279,7 @@ Configure automatic cleanup of old events and data.
 
 | Variable | Description | Default | Options |
 |----------|-------------|---------|---------|
-| `CLEANUP_DELETE_FROM_GITEA` | Delete repositories from Gitea | `false` | `true`, `false` |
+| `CLEANUP_DELETE_FROM_GITEA` | Apply the orphaned-repo action on the Gitea side too. When `false` (default), cleanup only updates gitea-mirror's own database (orphans are marked archived or removed from the repo list) and the Gitea/Forgejo copies are left untouched | `false` | `true`, `false` |
 | `CLEANUP_DELETE_IF_NOT_IN_GITHUB` | Delete repos not found in GitHub (automatically enables cleanup) | `true` | `true`, `false` |
 | `CLEANUP_ORPHANED_REPO_ACTION` | Action for orphaned repositories. **Note**: `archive` is recommended to preserve backups | `archive` | `skip`, `archive`, `delete` |
 | `CLEANUP_DRY_RUN` | Test mode without actual deletion | `false` | `true`, `false` |

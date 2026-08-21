@@ -47,6 +47,34 @@ export function resolveOrphanVerdict({
 }
 
 /**
+ * Decide what an orphaned-repo cleanup action actually does, split into the
+ * Gitea-side operation and the local-database operation.
+ *
+ * `deleteFromGitea` (CLEANUP_DELETE_FROM_GITEA) gates the Gitea side: it has
+ * always been documented as "Delete repositories from Gitea" with a `false`
+ * default, but until #366 the code never read it and archived/deleted on
+ * Gitea unconditionally. With it disabled (the default), cleanup only
+ * updates gitea-mirror's own records — orphans are marked archived or
+ * removed from the local database, and the Gitea/Forgejo copy is left
+ * untouched.
+ *
+ * Pure/exported so the decision logic is unit-testable (see
+ * repository-cleanup-service.test.ts).
+ */
+export function planOrphanedRepoAction(
+  action: "skip" | "archive" | "delete",
+  deleteFromGitea: boolean
+): { gitea: "archive" | "delete" | "none"; db: "archive" | "delete" | "none" } {
+  if (action === "skip") {
+    return { gitea: "none", db: "none" };
+  }
+  if (action === "archive") {
+    return { gitea: deleteFromGitea ? "archive" : "none", db: "archive" };
+  }
+  return { gitea: deleteFromGitea ? "delete" : "none", db: "delete" };
+}
+
+/**
  * Identify orphaned repositories for a user
  * These are repositories that exist in our database (and likely in Gitea)
  * but are no longer in GitHub based on current criteria
@@ -240,6 +268,40 @@ async function identifyOrphanedRepositories(config: any): Promise<any[]> {
 }
 
 /**
+ * Resolve the Gitea client and the owner/name the repo lives under on the
+ * Gitea side. Only called when the cleanup plan actually touches Gitea, so
+ * a database-only cleanup never needs a decryptable Gitea token.
+ */
+async function resolveGiteaTarget(config: any, repo: any): Promise<{
+  giteaClient: ReturnType<typeof createGiteaClient>;
+  giteaOwner: string;
+  giteaRepoName: string;
+}> {
+  const giteaToken = getDecryptedGiteaToken(config);
+  const giteaClient = createGiteaClient(config.giteaConfig.url, giteaToken);
+
+  // Determine the Gitea owner and repo name more robustly
+  const mirroredLocation = (repo.mirroredLocation || '').trim();
+  let giteaOwner: string;
+  let giteaRepoName: string;
+
+  if (mirroredLocation && mirroredLocation.includes('/')) {
+    const [ownerPart, namePart] = mirroredLocation.split('/');
+    giteaOwner = ownerPart;
+    giteaRepoName = namePart;
+  } else {
+    // Fall back to expected owner based on config and repo flags (starred/org overrides)
+    giteaOwner = await getGiteaRepoOwnerAsync({ config, repository: repo });
+    giteaRepoName = repo.name;
+  }
+
+  // Normalize owner casing to avoid GetUserByName issues on some Gitea setups
+  giteaOwner = giteaOwner.trim();
+
+  return { giteaClient, giteaOwner, giteaRepoName };
+}
+
+/**
  * Handle an orphaned repository based on configuration
  */
 async function handleOrphanedRepository(
@@ -260,82 +322,74 @@ async function handleOrphanedRepository(
     return;
   }
 
+  const plan = planOrphanedRepoAction(action, config.cleanupConfig?.deleteFromGitea === true);
+
   if (dryRun) {
-    console.log(`[Repository Cleanup] DRY RUN: Would ${action} orphaned repository ${repoFullName}`);
+    console.log(`[Repository Cleanup] DRY RUN: Would ${action} orphaned repository ${repoFullName}${plan.gitea === 'none' ? ' (database only; deleteFromGitea is disabled)' : ' (including the Gitea copy)'}`);
     return;
   }
-  
+
   try {
-    // Get Gitea client
-    const giteaToken = getDecryptedGiteaToken(config);
-    const giteaClient = createGiteaClient(config.giteaConfig.url, giteaToken);
-    
-    // Determine the Gitea owner and repo name more robustly
-    const mirroredLocation = (repo.mirroredLocation || '').trim();
-    let giteaOwner: string;
-    let giteaRepoName: string;
-
-    if (mirroredLocation && mirroredLocation.includes('/')) {
-      const [ownerPart, namePart] = mirroredLocation.split('/');
-      giteaOwner = ownerPart;
-      giteaRepoName = namePart;
-    } else {
-      // Fall back to expected owner based on config and repo flags (starred/org overrides)
-      giteaOwner = await getGiteaRepoOwnerAsync({ config, repository: repo });
-      giteaRepoName = repo.name;
-    }
-
-    // Normalize owner casing to avoid GetUserByName issues on some Gitea setups
-    giteaOwner = giteaOwner.trim();
-    
     if (action === 'archive') {
-      console.log(`[Repository Cleanup] Archiving orphaned repository ${repoFullName} in Gitea`);
-      // Best-effort check to validate actual location; falls back gracefully
-      try {
-        const { present, actualOwner } = await checkRepoLocation({
-          config,
-          repository: repo,
-          expectedOwner: giteaOwner,
-        });
-        if (present) {
-          giteaOwner = actualOwner;
-        }
-      } catch {
-        // Non-fatal; continue with best guess
-      }
-
-      const { archivedName } = await archiveGiteaRepo(giteaClient, giteaOwner, giteaRepoName);
-
-      // Update database status. If the archive call renamed the repo in Gitea
-      // (mirror path), persist the new location so a subsequent "Manual Sync"
-      // (the UI's documented path for refreshing an archived mirror) can find
-      // it by its actual current name instead of the stale pre-rename one —
-      // otherwise syncGiteaRepoEnhanced looks up a name that no longer exists
-      // and Gitea returns HTTP 405 ("not a pull mirror").
-      //
-      // Only mirroredLocation gets the Gitea-side `archived-{name}` value.
-      // Do NOT write it into `name`: repositories.name is consumed as the
-      // GITHUB repo name elsewhere (release listing, force-push detection),
-      // and mirroredLocation alone is what syncGiteaRepoEnhanced resolves
-      // first when locating the Gitea mirror.
       const dbUpdate: Record<string, any> = {
         status: 'archived',
         isArchived: true,
-        errorMessage: 'Repository archived - no longer in GitHub',
+        errorMessage: plan.gitea === 'archive'
+          ? 'Repository archived - no longer in GitHub'
+          : 'Repository archived in gitea-mirror - no longer in GitHub (Gitea copy untouched)',
         updatedAt: new Date(),
       };
-      if (archivedName && archivedName !== giteaRepoName) {
-        dbUpdate.mirroredLocation = `${giteaOwner}/${archivedName}`;
+
+      if (plan.gitea === 'archive') {
+        console.log(`[Repository Cleanup] Archiving orphaned repository ${repoFullName} in Gitea`);
+        const { giteaClient, giteaRepoName, giteaOwner: expectedOwner } = await resolveGiteaTarget(config, repo);
+        let giteaOwner = expectedOwner;
+        // Best-effort check to validate actual location; falls back gracefully
+        try {
+          const { present, actualOwner } = await checkRepoLocation({
+            config,
+            repository: repo,
+            expectedOwner: giteaOwner,
+          });
+          if (present) {
+            giteaOwner = actualOwner;
+          }
+        } catch {
+          // Non-fatal; continue with best guess
+        }
+
+        const { archivedName } = await archiveGiteaRepo(giteaClient, giteaOwner, giteaRepoName);
+
+        // If the archive call renamed the repo in Gitea (mirror path), persist
+        // the new location so a subsequent "Manual Sync" (the UI's documented
+        // path for refreshing an archived mirror) can find it by its actual
+        // current name instead of the stale pre-rename one — otherwise
+        // syncGiteaRepoEnhanced looks up a name that no longer exists and
+        // Gitea returns HTTP 405 ("not a pull mirror").
+        //
+        // Only mirroredLocation gets the Gitea-side `archived-{name}` value.
+        // Do NOT write it into `name`: repositories.name is consumed as the
+        // GITHUB repo name elsewhere (release listing, force-push detection),
+        // and mirroredLocation alone is what syncGiteaRepoEnhanced resolves
+        // first when locating the Gitea mirror.
+        if (archivedName && archivedName !== giteaRepoName) {
+          dbUpdate.mirroredLocation = `${giteaOwner}/${archivedName}`;
+        }
+      } else {
+        console.log(`[Repository Cleanup] Marking orphaned repository ${repoFullName} archived in gitea-mirror (deleteFromGitea disabled; Gitea copy untouched)`);
       }
+
       await db.update(repositories).set(dbUpdate).where(eq(repositories.id, repo.id));
-      
+
       // Create event
       await publishEvent({
         userId: config.userId,
         channel: 'repository',
         payload: {
           type: 'repository.archived',
-          message: `Repository ${repoFullName} archived (no longer in GitHub)`,
+          message: plan.gitea === 'archive'
+            ? `Repository ${repoFullName} archived (no longer in GitHub)`
+            : `Repository ${repoFullName} marked archived in gitea-mirror (no longer in GitHub; Gitea copy untouched)`,
           metadata: {
             repositoryId: repo.id,
             repositoryName: repo.name,
@@ -345,19 +399,26 @@ async function handleOrphanedRepository(
         },
       });
     } else if (action === 'delete') {
-      console.log(`[Repository Cleanup] Deleting orphaned repository ${repoFullName} from Gitea`);
-      await deleteGiteaRepo(giteaClient, giteaOwner, giteaRepoName);
-      
+      if (plan.gitea === 'delete') {
+        console.log(`[Repository Cleanup] Deleting orphaned repository ${repoFullName} from Gitea`);
+        const { giteaClient, giteaOwner, giteaRepoName } = await resolveGiteaTarget(config, repo);
+        await deleteGiteaRepo(giteaClient, giteaOwner, giteaRepoName);
+      } else {
+        console.log(`[Repository Cleanup] Removing orphaned repository ${repoFullName} from gitea-mirror (deleteFromGitea disabled; Gitea copy untouched)`);
+      }
+
       // Delete from database
       await db.delete(repositories).where(eq(repositories.id, repo.id));
-      
+
       // Create event
       await publishEvent({
         userId: config.userId,
         channel: 'repository',
         payload: {
           type: 'repository.deleted',
-          message: `Repository ${repoFullName} deleted (no longer in GitHub)`,
+          message: plan.gitea === 'delete'
+            ? `Repository ${repoFullName} deleted (no longer in GitHub)`
+            : `Repository ${repoFullName} removed from gitea-mirror (no longer in GitHub; Gitea copy untouched)`,
           metadata: {
             repositoryId: repo.id,
             repositoryName: repo.name,
@@ -415,9 +476,10 @@ async function runRepositoryCleanup(config: any): Promise<{
       return results;
     }
     
-    // Warn if deleteFromGitea is explicitly disabled but deleteIfNotInGitHub is enabled
-    if (cleanupConfig.deleteFromGitea === false && cleanupConfig.deleteIfNotInGitHub) {
-      console.warn(`[Repository Cleanup] Warning: CLEANUP_DELETE_FROM_GITEA is false but CLEANUP_DELETE_IF_NOT_IN_GITHUB is true. Proceeding with cleanup.`);
+    // deleteFromGitea gates whether the orphaned-repo action also touches the
+    // Gitea/Forgejo side (see planOrphanedRepoAction).
+    if (cleanupConfig.deleteFromGitea !== true) {
+      console.log(`[Repository Cleanup] deleteFromGitea is disabled: orphaned repositories will only be updated in gitea-mirror's database; the Gitea copies stay untouched. Set CLEANUP_DELETE_FROM_GITEA=true to also apply the '${cleanupConfig.orphanedRepoAction || 'archive'}' action on Gitea.`);
     }
     
     // Identify orphaned repositories

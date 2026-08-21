@@ -115,6 +115,7 @@ Working Authentik deployments (see [#134](https://github.com/RayLabsHQ/gitea-mir
 
 Notes:
 - Make sure `BETTER_AUTH_URL` and (if you serve the UI from multiple origins) `BETTER_AUTH_TRUSTED_ORIGINS` point at the public URL users reach. A mismatch can surface as 500 errors after redirect.
+- **Internal / split-DNS IdPs**: since v3.21.0 the SSO sign-in refuses identity providers whose hostnames resolve to private addresses (SSRF hardening in the auth library) unless the IdP's origin is trusted. Providers you register through the UI are trusted automatically, but if you register a *new* provider whose hostname resolves to a LAN IP from inside the container (common with split-horizon DNS), add its origin to `BETTER_AUTH_TRUSTED_ORIGINS` first, e.g. `BETTER_AUTH_TRUSTED_ORIGINS=https://auth.example.com`.
 - Set the **Domain** field to the email domain your Authentik users actually have. Auto-linking to an existing local admin only happens for emails in that domain — see [Account Linking](#account-linking) for the trust model. (Authentik's default email scope mapping returns `email_verified: False` for OIDC clients, which is why account linking is gated on the domain match here rather than the IdP's verified-email claim.)
 - If you created an Authentik provider before v3.8.10 you should delete it and re-add it after upgrading; older versions saved incomplete endpoint data which leads to the `url.startsWith` error explained in the Troubleshooting section.
 
