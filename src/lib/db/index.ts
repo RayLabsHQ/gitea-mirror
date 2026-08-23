@@ -3,7 +3,7 @@ import { drizzle } from "drizzle-orm/bun-sqlite";
 import fs from "fs";
 import path from "path";
 import { migrate } from "drizzle-orm/bun-sqlite/migrator";
-import { repairDuplicateSsoColumns, restoreSsoDataAfter0013 } from "./migration-repairs";
+import { repairDuplicateSsoColumns, restoreSsoDataAfter0013, migrateLegacyConnectionsToServers } from "./migration-repairs";
 
 // Skip database initialization in test environment
 let db: ReturnType<typeof drizzle>;
@@ -124,6 +124,10 @@ if (process.env.NODE_ENV !== "test") {
       // Re-apply any SSO provider data preserved by the repair above.
       restoreSsoDataAfter0013(sqlite, preservedSsoData);
 
+      // Convert legacy configs connections into servers/mirror_pairs rows so
+      // existing installations keep working under the switchboard model.
+      migrateLegacyConnectionsToServers(sqlite);
+
       console.log("✅ Database migrations completed successfully");
     } catch (error) {
       console.error("❌ Error running migrations:", error);
@@ -155,5 +159,7 @@ export {
   oauthConsents,
   jwkss,
   ssoProviders,
-  rateLimits
+  rateLimits,
+  servers,
+  mirrorPairs
 } from "./schema";

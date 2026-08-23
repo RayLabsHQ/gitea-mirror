@@ -55,6 +55,7 @@ export function Sidebar({ className, onNavigate, isOpen, isCollapsed = false, on
       '/': 'dashboard',
       '/repositories': 'repositories',
       '/organizations': 'organizations',
+      '/servers': 'servers',
       '/config': 'configuration',
       '/activity': 'activity-log'
     };

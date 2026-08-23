@@ -115,3 +115,102 @@ export function restoreSsoDataAfter0013(sqlite: Database, preserved: PreservedSs
     console.warn("⚠️ Failed to restore preserved SSO data (non-fatal):", error);
   }
 }
+
+/**
+ * One-time data migration for the switchboard (mirror matrix) feature: convert
+ * each user's existing `configs` GitHub/Gitea connection into `servers` rows
+ * plus a one-way `mirror_pairs` row, so current installations keep working
+ * under the new model. Tokens are copied as stored (still encrypted with the
+ * same scheme the config API uses).
+ *
+ * Runs AFTER `migrate()` so the new tables exist. Idempotent: a user that
+ * already has any `servers` rows is skipped. Deliberately defensive — any
+ * failure is logged and swallowed.
+ */
+export function migrateLegacyConnectionsToServers(sqlite: Database): void {
+  try {
+    const serversTableExists = sqlite
+      .query("SELECT name FROM sqlite_master WHERE type='table' AND name='servers'")
+      .get();
+    if (!serversTableExists) return;
+
+    const configsTableExists = sqlite
+      .query("SELECT name FROM sqlite_master WHERE type='table' AND name='configs'")
+      .get();
+    if (!configsTableExists) return;
+
+    const configRows = sqlite
+      .query("SELECT user_id, github_config, gitea_config FROM configs")
+      .all() as { user_id: string; github_config: string; gitea_config: string }[];
+
+    // Prefer the most recently touched config per user.
+    const seenUsers = new Set<string>();
+    const insertServer = sqlite.prepare(
+      "INSERT INTO servers (id, user_id, name, type, username, token, url, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, unixepoch(), unixepoch())",
+    );
+    const insertPair = sqlite.prepare(
+      "INSERT INTO mirror_pairs (id, user_id, source_server_id, target_server_id, mirror_type, username, enabled, created_at, updated_at) VALUES (?, ?, ?, ?, 'one-way', ?, 1, unixepoch(), unixepoch())",
+    );
+    const userHasServers = sqlite.prepare("SELECT 1 FROM servers WHERE user_id = ? LIMIT 1");
+
+    for (const row of configRows) {
+      if (seenUsers.has(row.user_id)) continue;
+      seenUsers.add(row.user_id);
+      if (userHasServers.get(row.user_id)) continue;
+
+      let githubConfig: Record<string, any>;
+      let giteaConfig: Record<string, any>;
+      try {
+        githubConfig = JSON.parse(row.github_config);
+        giteaConfig = JSON.parse(row.gitea_config);
+      } catch {
+        continue;
+      }
+
+      const githubOwner = githubConfig?.owner;
+      const giteaUrl = giteaConfig?.url;
+      const giteaOwner = giteaConfig?.defaultOwner;
+      if (!githubOwner || !giteaUrl || !giteaOwner) continue;
+
+      const githubServerId = crypto.randomUUID();
+      insertServer.run(
+        githubServerId,
+        row.user_id,
+        "GitHub",
+        "github",
+        String(githubOwner),
+        String(githubConfig.token ?? ""),
+        "https://github.com",
+      );
+
+      let giteaName = "Gitea";
+      try {
+        giteaName = `Gitea (${new URL(giteaUrl).host})`;
+      } catch {
+        // Keep the plain label when the URL is not parseable.
+      }
+      const giteaServerId = crypto.randomUUID();
+      insertServer.run(
+        giteaServerId,
+        row.user_id,
+        giteaName,
+        "gitea",
+        String(giteaOwner),
+        String(giteaConfig.token ?? ""),
+        String(giteaUrl),
+      );
+
+      insertPair.run(
+        crypto.randomUUID(),
+        row.user_id,
+        githubServerId,
+        giteaServerId,
+        String(githubOwner),
+      );
+
+      console.log(`🔀 Migrated legacy GitHub→Gitea config into servers/mirror pair for user ${row.user_id}.`);
+    }
+  } catch (error) {
+    console.warn("⚠️ Legacy connection migration failed (non-fatal):", error);
+  }
+}

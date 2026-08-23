@@ -813,6 +813,116 @@ export const ssoProviders = sqliteTable("sso_providers", {
   index("idx_sso_providers_issuer").on(table.issuer),
 ]);
 
+// ===== Servers & Mirror Matrix (switchboard) =====
+
+export const serverTypeEnum = z.enum([
+  "github",
+  "gitlab",
+  "gitea",
+  "forgejo",
+  "git",
+]);
+
+export type ServerType = z.infer<typeof serverTypeEnum>;
+
+export const serverSchema = z.object({
+  id: z.string(),
+  userId: z.string(),
+  name: z.string(),
+  type: serverTypeEnum,
+  username: z.string(),
+  token: z.string(),
+  url: z.url(),
+  externalUrl: z.url().optional().nullable(),
+  lfsEndpoint: z.url().optional().nullable(),
+  createdAt: z.coerce.date(),
+  updatedAt: z.coerce.date(),
+});
+
+export type Server = z.infer<typeof serverSchema>;
+
+/** Payload accepted when creating a server via POST /api/servers. */
+export const insertServerSchema = serverSchema.omit({
+  id: true,
+  userId: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+/** Payload accepted when updating a server via PUT /api/servers/[id]. */
+export const updateServerSchema = insertServerSchema.partial();
+
+export const mirrorTypeEnum = z.enum(["one-way", "two-way"]);
+
+export type MirrorType = z.infer<typeof mirrorTypeEnum>;
+
+export const mirrorPairRepositorySelectionSchema = z.object({
+  mode: z.enum(["all", "selected", "patterns"]).default("all"),
+  selectedRepos: z.array(z.string()).default([]),
+  includePatterns: z.array(z.string()).default([]),
+  excludePatterns: z.array(z.string()).default([]),
+  includeForks: z.boolean().default(false),
+  includeArchived: z.boolean().default(false),
+  includePrivate: z.boolean().default(true),
+});
+
+export const mirrorPairOrgStructureSchema = z.object({
+  strategy: z.enum(["preserve", "single-org", "flat-user"]).default("preserve"),
+  singleOrg: z.string().optional(),
+});
+
+export const mirrorPairDestructiveProtectionSchema = z.object({
+  detectForcePush: z.boolean().default(true),
+  backupStrategy: backupStrategyEnum.default("on-force-push"),
+  backupRetentionCount: z.number().int().min(1).default(5),
+  backupRetentionDays: z.number().int().min(0).default(30),
+});
+
+export const mirrorPairContentSchema = z.object({
+  releases: z.boolean().default(false),
+  lfs: z.boolean().default(false),
+  issues: z.boolean().default(false),
+  pullRequests: z.boolean().default(false),
+  labels: z.boolean().default(false),
+  milestones: z.boolean().default(false),
+  wiki: z.boolean().default(false),
+});
+
+export const mirrorPairOptionsSchema = z.object({
+  repositorySelection: mirrorPairRepositorySelectionSchema.prefault({}),
+  organizationStructure: mirrorPairOrgStructureSchema.prefault({}),
+  destructiveProtection: mirrorPairDestructiveProtectionSchema.prefault({}),
+  mirrorContent: mirrorPairContentSchema.prefault({}),
+});
+
+export type MirrorPairOptions = z.infer<typeof mirrorPairOptionsSchema>;
+
+export const mirrorPairSchema = z.object({
+  id: z.string(),
+  userId: z.string(),
+  sourceServerId: z.string(),
+  targetServerId: z.string(),
+  mirrorType: mirrorTypeEnum.default("one-way"),
+  username: z.string(),
+  enabled: z.boolean().default(true),
+  options: mirrorPairOptionsSchema.prefault({}),
+  createdAt: z.coerce.date(),
+  updatedAt: z.coerce.date(),
+});
+
+export type MirrorPair = z.infer<typeof mirrorPairSchema>;
+
+/** Payload accepted when creating a pair via POST /api/matrix. */
+export const insertMirrorPairSchema = mirrorPairSchema.omit({
+  id: true,
+  userId: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+/** Payload accepted when updating a pair via PUT /api/matrix/[id]. */
+export const updateMirrorPairSchema = insertMirrorPairSchema.partial();
+
 // ===== Rate Limit Tracking =====
 
 export const rateLimitSchema = z.object({
@@ -852,6 +962,62 @@ export const rateLimits = sqliteTable("rate_limits", {
 }, (table) => [
   index("idx_rate_limits_user_provider").on(table.userId, table.provider),
   index("idx_rate_limits_status").on(table.status),
+]);
+
+// ===== Servers & Mirror Matrix Tables =====
+
+export const servers = sqliteTable("servers", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id),
+  name: text("name").notNull(),
+  type: text("type").notNull().$type<ServerType>(),
+  username: text("username").notNull(),
+  token: text("token").notNull(),
+  url: text("url").notNull(),
+  externalUrl: text("external_url"),
+  lfsEndpoint: text("lfs_endpoint"),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .default(sql`(unixepoch())`),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
+    .notNull()
+    .default(sql`(unixepoch())`),
+}, (table) => [
+  index("idx_servers_user_id").on(table.userId),
+  index("idx_servers_type").on(table.type),
+]);
+
+export const mirrorPairs = sqliteTable("mirror_pairs", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id),
+  sourceServerId: text("source_server_id")
+    .notNull()
+    .references(() => servers.id),
+  targetServerId: text("target_server_id")
+    .notNull()
+    .references(() => servers.id),
+  mirrorType: text("mirror_type").notNull().default("one-way").$type<MirrorType>(),
+  username: text("username").notNull(),
+  enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+  options: text("options", { mode: "json" })
+    .$type<MirrorPairOptions>()
+    .notNull()
+    .default(sql`'{"repositorySelection":{"mode":"all","selectedRepos":[],"includePatterns":[],"excludePatterns":[],"includeForks":false,"includeArchived":false,"includePrivate":true},"organizationStructure":{"strategy":"preserve"},"destructiveProtection":{"detectForcePush":true,"backupStrategy":"on-force-push","backupRetentionCount":5,"backupRetentionDays":30},"mirrorContent":{"releases":false,"lfs":false,"issues":false,"pullRequests":false,"labels":false,"milestones":false,"wiki":false}}'`),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .default(sql`(unixepoch())`),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
+    .notNull()
+    .default(sql`(unixepoch())`),
+}, (table) => [
+  index("idx_mirror_pairs_user_id").on(table.userId),
+  index("idx_mirror_pairs_source_server_id").on(table.sourceServerId),
+  index("idx_mirror_pairs_target_server_id").on(table.targetServerId),
+  index("idx_mirror_pairs_enabled").on(table.enabled),
 ]);
 
 // Export type definitions

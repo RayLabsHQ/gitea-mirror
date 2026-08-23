@@ -10,7 +10,7 @@ import { AccountMenu } from "@/components/auth/AccountMenu";
 import { withBase } from "@/lib/base-path";
 
 interface HeaderProps {
-  currentPage?: "dashboard" | "repositories" | "organizations" | "configuration" | "activity-log";
+  currentPage?: "dashboard" | "repositories" | "organizations" | "servers" | "configuration" | "activity-log";
   onNavigate?: (page: string) => void;
   onMenuClick: () => void;
   onToggleCollapse?: () => void;

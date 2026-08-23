@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Mirror Matrix / Switchboard: sync repositories between arbitrary source and target servers
+  - New **Servers** sidebar section with server settings (GitHub, GitLab, Gitea, Forgejo, plain Git) and connection testing
+  - New **Flow / Matrix** view for defining source → target mirror pairs (one-way `=>` and two-way `<=>`) with per-pair enable toggle
+  - Pair settings modal: repository selection, organization structure, destructive update protection, and capability-gated mirror content options
+  - New `servers` and `mirror_pairs` tables with automatic migration of existing GitHub/Gitea configs
+  - New API routes: `/api/servers` (CRUD + connection test) and `/api/matrix` (CRUD + enabled toggle)
 - Git LFS (Large File Storage) support for mirroring (#74)
   - New UI checkbox "Mirror LFS" in Mirror Options
   - Automatic LFS object transfer when enabled

@@ -354,6 +354,61 @@ function verify0014Migration(db: any) {
   assert(parsed.lfs === false, `Expected persisted lfs override false, got ${updated.mirror_overrides}`);
 }
 
+function seedPre0015Database(db: any) {
+  // Migrations 0000-0014 have run; servers/mirror_pairs do not exist yet.
+  // Seed a user + config so the new tables are created against a populated DB.
+  db.run("INSERT INTO users (id, email, username, name) VALUES ('u-matrix', 'matrix@example.com', 'matrix', 'Matrix User')");
+  db.run("INSERT INTO configs (id, user_id, name, is_active, github_config, gitea_config, schedule_config, cleanup_config) VALUES ('cfg-pre15', 'u-matrix', 'Default', 1, '{}', '{}', '{}', '{}')");
+}
+
+function verify0015Migration(db: any) {
+  for (const table of ["servers", "mirror_pairs"]) {
+    const row = db
+      .query("SELECT name FROM sqlite_master WHERE type='table' AND name = ?")
+      .get(table) as { name: string } | null;
+    assert(row, `Expected ${table} table to exist after migration`);
+  }
+
+  const serverCols = (db.query("PRAGMA table_info(servers)").all() as TableInfoRow[]).map((c) => c.name);
+  for (const col of ["id", "user_id", "name", "type", "username", "token", "url", "external_url", "lfs_endpoint", "created_at", "updated_at"]) {
+    assert(serverCols.includes(col), `Expected servers.${col} column to exist`);
+  }
+
+  const pairCols = (db.query("PRAGMA table_info(mirror_pairs)").all() as TableInfoRow[]).map((c) => c.name);
+  for (const col of ["id", "user_id", "source_server_id", "target_server_id", "mirror_type", "username", "enabled", "options", "created_at", "updated_at"]) {
+    assert(pairCols.includes(col), `Expected mirror_pairs.${col} column to exist`);
+  }
+
+  // Column defaults: enabled defaults to true, mirror_type to 'one-way',
+  // options to a full default JSON payload.
+  const enabledCol = (db.query("PRAGMA table_info(mirror_pairs)").all() as TableInfoRow[]).find((c) => c.name === "enabled");
+  assert(enabledCol?.dflt_value === "true", `Expected mirror_pairs.enabled DEFAULT true, got ${enabledCol?.dflt_value}`);
+
+  // Round-trip: insert a server + pair using only required columns.
+  db.run("INSERT INTO servers (id, user_id, name, type, username, token, url) VALUES ('srv-pre15', 'u-matrix', 'GitHub', 'github', 'octo', 'tok', 'https://github.com')");
+  db.run("INSERT INTO mirror_pairs (id, user_id, source_server_id, target_server_id, username) VALUES ('pair-pre15', 'u-matrix', 'srv-pre15', 'srv-pre15', 'octo')");
+
+  const pair = db
+    .query("SELECT mirror_type, enabled, options FROM mirror_pairs WHERE id = 'pair-pre15'")
+    .get() as { mirror_type: string; enabled: number; options: string } | null;
+  assert(pair, "Expected inserted mirror pair to exist");
+  assert(pair.mirror_type === "one-way", `Expected default mirror_type 'one-way', got ${pair.mirror_type}`);
+  assert(pair.enabled === 1, `Expected default enabled=1, got ${pair.enabled}`);
+  const options = JSON.parse(pair.options);
+  assert(options.repositorySelection?.mode === "all", "Expected default options.repositorySelection.mode 'all'");
+  assert(options.mirrorContent?.issues === false, "Expected default options.mirrorContent.issues false");
+
+  // FK enforcement: a pair referencing a missing server must be rejected.
+  db.run("PRAGMA foreign_keys = ON");
+  let fkRejected = false;
+  try {
+    db.run("INSERT INTO mirror_pairs (id, user_id, source_server_id, target_server_id, username) VALUES ('pair-bad', 'u-matrix', 'missing-src', 'missing-tgt', 'octo')");
+  } catch {
+    fkRejected = true;
+  }
+  assert(fkRejected, "Expected mirror_pairs foreign keys to reject unknown server ids");
+}
+
 const MIGRATION_0012_TIMESTAMP = 1774062000000;
 const MIGRATION_0013_TIMESTAMP = 1780377747526;
 
@@ -472,6 +527,10 @@ const latestUpgradeFixtures: Record<string, UpgradeFixture> = {
   "0014_needy_white_tiger": {
     seed: seedPre0014Database,
     verify: verify0014Migration,
+  },
+  "0015_soft_dragon_man": {
+    seed: seedPre0015Database,
+    verify: verify0015Migration,
   },
 };
 
