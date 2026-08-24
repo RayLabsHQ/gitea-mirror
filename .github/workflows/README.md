@@ -7,8 +7,7 @@ This directory contains GitHub Actions workflows that automate the build, test, 
 | Workflow | File | Purpose |
 |----------|------|---------|
 | Astro Build and Test | `astro-build-test.yml` | Builds and tests the Astro application for all branches and PRs |
-| Docker Build and Push | `docker-build.yml` | Builds and pushes Docker images only for the main branch |
-| Docker Security Scan | `docker-scan.yml` | Scans Docker images for security vulnerabilities |
+| Docker Build, Push & Security Scan | `docker-build.yml` | Builds, scans, and pushes Docker images |
 
 ## Workflow Details
 
@@ -28,14 +27,15 @@ This workflow runs on all branches and pull requests. It:
 - Caches dependencies to speed up builds
 - Uploads build artifacts for 7 days
 
-### Docker Build and Push (`docker-build.yml`)
+### Docker Build, Push & Security Scan (`docker-build.yml`)
 
-This workflow builds Docker images on pushes and pull requests, and pushes to GitHub Container Registry (ghcr.io) when permissions allow (main/tags and same-repo PRs).
+This workflow builds Docker images on pushes and pull requests, scans them, and pushes to GitHub Container Registry (ghcr.io) when permissions allow (main/tags and same-repo PRs).
 
 **When it runs:**
 - On push to the main branch
 - On tag creation (v*)
 - On pull requests (build + scan; push only for same-repo PRs)
+- Weekly on Sunday at midnight (scheduled security scan)
 
 **Key features:**
 - Builds multi-architecture images (amd64 and arm64)
@@ -47,25 +47,18 @@ This workflow builds Docker images on pushes and pull requests, and pushes to Gi
 - Validates release tags use semver format before building
 - After tag builds succeed, writes the same version back to `main/package.json`
 
-### Docker Security Scan (`docker-scan.yml`)
-
-This workflow scans Docker images for security vulnerabilities using Trivy.
-
-**When it runs:**
-- On push to the main branch that affects Docker-related files
-- Weekly on Sunday at midnight (scheduled)
-
-**Key features:**
-- Scans for critical and high severity vulnerabilities
-- Fails the build if vulnerabilities are found
-- Ignores unfixed vulnerabilities
+**Security scanning:**
+- Docker Scout runs on main/tag pushes, the weekly schedule, and same-repo PRs. It needs the `DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN` secrets, posts a PR comment, and uploads SARIF to the Security tab.
+- Trivy runs on every PR, including forks. It needs no credentials and writes critical/high (fixable) findings to the job summary.
+- Fork PRs cannot use Docker Scout because GitHub never exposes repository secrets to them. Do not "fix" that with `pull_request_target`; it would run untrusted PR code with the secrets available.
+- Both scanners are informational and do not fail the build.
 
 ## CI/CD Pipeline Philosophy
 
 Our CI/CD pipeline follows these principles:
 
 1. **Fast feedback for developers**: The Astro build and test workflow runs on all branches and PRs to provide quick feedback.
-2. **Efficient resource usage**: Docker images are only built when changes are merged to main, not for every PR.
+2. **Efficient resource usage**: Docker images are built for every PR so they can be scanned, but only pushed for main, tags, and same-repo PRs.
 3. **Security first**: Regular security scanning ensures our Docker images are free from known vulnerabilities.
 4. **Multi-architecture support**: All Docker images are built for both amd64 and arm64 architectures.
 
