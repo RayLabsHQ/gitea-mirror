@@ -1,11 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import {
+  DEFAULT_RELEASE_LIMIT,
   getMirrorOverrideGating,
   hasMirrorOverrides,
   listOverriddenKeys,
   MIRROR_GATING_REASONS,
+  MIRROR_OVERRIDE_KEYS,
   mirrorOptionsToFlags,
   normalizeMirrorOverrides,
+  normalizeReleaseLimit,
   parseMirrorOverrides,
   resolveMirrorOptions,
   STARRED_CLAMPED_KEYS,
@@ -53,10 +56,11 @@ describe("resolveMirrorOptions precedence", () => {
       repository: makeRepo(),
     });
 
-    for (const value of Object.values(resolved)) {
-      expect(typeof value).toBe("boolean");
+    for (const key of MIRROR_OVERRIDE_KEYS) {
+      expect(typeof resolved[key]).toBe("boolean");
     }
     expect(resolved.lfs).toBe(false);
+    expect(resolved.releaseLimit).toBe(DEFAULT_RELEASE_LIMIT);
   });
 
   test("organization override beats global config", () => {
@@ -606,5 +610,204 @@ describe("mirrorOptionsToFlags - client/server shape contract", () => {
       expect(flags.lfs).toBe(false);
       expect(flags.mirrorIssues).toBe(false);
     }
+  });
+});
+
+describe("releaseLimit override", () => {
+  test("falls back to the global release limit, then the default", () => {
+    expect(
+      resolveMirrorOptions({
+        config: makeConfig({ releaseLimit: 25 }),
+        repository: makeRepo(),
+      }).releaseLimit
+    ).toBe(25);
+    expect(
+      resolveMirrorOptions({ config: makeConfig({}), repository: makeRepo() })
+        .releaseLimit
+    ).toBe(DEFAULT_RELEASE_LIMIT);
+  });
+
+  test("organization override beats global, repository override beats organization", () => {
+    const config = makeConfig({ releaseLimit: 25 });
+
+    expect(
+      resolveMirrorOptions({
+        config,
+        repository: makeRepo(),
+        orgOverrides: { releaseLimit: 5 },
+      }).releaseLimit
+    ).toBe(5);
+    expect(
+      resolveMirrorOptions({
+        config,
+        repository: makeRepo({ mirrorOverrides: { releaseLimit: 2 } }),
+        orgOverrides: { releaseLimit: 5 },
+      }).releaseLimit
+    ).toBe(2);
+  });
+
+  test("an unusable limit at one tier falls through instead of clamping to 1", () => {
+    const config = makeConfig({ releaseLimit: 25 });
+
+    expect(
+      resolveMirrorOptions({
+        config,
+        repository: makeRepo({ mirrorOverrides: { releaseLimit: 0 } }),
+        orgOverrides: { releaseLimit: 5 },
+      }).releaseLimit
+    ).toBe(5);
+    expect(
+      resolveMirrorOptions({
+        config,
+        repository: makeRepo({ mirrorOverrides: { releaseLimit: -3 } }),
+      }).releaseLimit
+    ).toBe(25);
+    expect(
+      resolveMirrorOptions({
+        config: makeConfig({ releaseLimit: 0 }),
+        repository: makeRepo(),
+      }).releaseLimit
+    ).toBe(DEFAULT_RELEASE_LIMIT);
+  });
+
+  test("fractional limits are floored", () => {
+    expect(
+      resolveMirrorOptions({
+        config: makeConfig({}),
+        repository: makeRepo({ mirrorOverrides: { releaseLimit: 3.9 } }),
+      }).releaseLimit
+    ).toBe(3);
+  });
+
+  test("null means inherit and does not disturb the boolean flags", () => {
+    const resolved = resolveMirrorOptions({
+      config: makeConfig({ releaseLimit: 7, lfs: true }),
+      repository: makeRepo({
+        mirrorOverrides: { releaseLimit: null, lfs: false },
+      }),
+    });
+
+    expect(resolved.releaseLimit).toBe(7);
+    expect(resolved.lfs).toBe(false);
+  });
+
+  test("a bad limit does not take the other overrides down with it", () => {
+    // The schema accepts any number precisely so that a stored out-of-range
+    // limit degrades to inherit for that field alone. The #361 LFS opt-out
+    // stored next to it must survive.
+    const resolved = resolveMirrorOptions({
+      config: makeConfig({ lfs: true, releaseLimit: 25 }),
+      repository: makeRepo({
+        mirrorOverrides: { lfs: false, releaseLimit: -1 },
+      }),
+    });
+
+    expect(resolved.lfs).toBe(false);
+    expect(resolved.releaseLimit).toBe(25);
+  });
+
+  test("the starred clamp leaves the limit alone; releases are already forced off", () => {
+    const resolved = resolveMirrorOptions({
+      config: makeConfig(
+        { mirrorReleases: true, releaseLimit: 7 },
+        { starredCodeOnly: true }
+      ),
+      repository: makeRepo({
+        isStarred: true,
+        mirrorOverrides: { releaseLimit: 3 },
+      }),
+    });
+
+    expect(resolved.mirrorReleases).toBe(false);
+    expect(resolved.releaseLimit).toBe(3);
+  });
+
+  test("helpers treat a usable limit as a pinned override", () => {
+    expect(hasMirrorOverrides({ releaseLimit: 5 })).toBe(true);
+    expect(hasMirrorOverrides({ releaseLimit: 0 })).toBe(false);
+    expect(hasMirrorOverrides({ releaseLimit: null })).toBe(false);
+    expect(listOverriddenKeys({ lfs: false, releaseLimit: 5 })).toEqual([
+      "lfs",
+      "releaseLimit",
+    ]);
+    expect(normalizeMirrorOverrides({ releaseLimit: 5.7 })).toEqual({
+      releaseLimit: 5,
+    });
+    expect(normalizeMirrorOverrides({ releaseLimit: 0 })).toBeNull();
+    expect(normalizeMirrorOverrides({ lfs: false, releaseLimit: 0 })).toEqual({
+      lfs: false,
+    });
+  });
+
+  test("normalizeReleaseLimit accepts positive finite numbers only", () => {
+    expect(normalizeReleaseLimit(10)).toBe(10);
+    expect(normalizeReleaseLimit(2.5)).toBe(2);
+    expect(normalizeReleaseLimit(0)).toBeUndefined();
+    expect(normalizeReleaseLimit(0.4)).toBeUndefined();
+    expect(normalizeReleaseLimit(-1)).toBeUndefined();
+    expect(normalizeReleaseLimit(NaN)).toBeUndefined();
+    expect(normalizeReleaseLimit(Infinity)).toBeUndefined();
+    expect(normalizeReleaseLimit("5")).toBeUndefined();
+    expect(normalizeReleaseLimit(null)).toBeUndefined();
+    expect(normalizeReleaseLimit(undefined)).toBeUndefined();
+  });
+
+  test("mirrorOptionsToFlags carries the global limit for the Inherit hint", () => {
+    expect(
+      mirrorOptionsToFlags({ mirrorReleases: true, releaseLimit: 42 }).releaseLimit
+    ).toBe(42);
+    expect(mirrorOptionsToFlags(null).releaseLimit).toBe(DEFAULT_RELEASE_LIMIT);
+  });
+
+  test("the global limit survives the DB -> API -> flags round trip", async () => {
+    const { mapDbToUiConfig } = await import("./config-mapper");
+    const apiShape = mapDbToUiConfig({
+      githubConfig: { owner: "acme" },
+      giteaConfig: {
+        url: "https://gitea.example.com",
+        token: "t",
+        defaultOwner: "acme",
+        mirrorReleases: true,
+        releaseLimit: 33,
+      },
+    } as any);
+
+    expect(mirrorOptionsToFlags(apiShape.mirrorOptions).releaseLimit).toBe(33);
+  });
+});
+
+describe("getMirrorOverrideGating - release limit follows releases", () => {
+  test("limit is disabled while releases resolve to off", () => {
+    const gating = getMirrorOverrideGating({
+      targetKind: "repository",
+      effective: { mirrorReleases: false },
+    });
+    expect(gating.releaseLimit).toBe(MIRROR_GATING_REASONS.releasesOff);
+  });
+
+  test("limit is editable while releases resolve to on", () => {
+    const gating = getMirrorOverrideGating({
+      targetKind: "repository",
+      effective: { mirrorReleases: true },
+    });
+    expect(gating.releaseLimit).toBeUndefined();
+  });
+
+  test("the starred reason wins when that is what disabled releases", () => {
+    const gating = getMirrorOverrideGating({
+      targetKind: "repository",
+      isStarred: true,
+      starredCodeOnly: true,
+      effective: { mirrorReleases: true },
+    });
+    expect(gating.releaseLimit).toBe(MIRROR_GATING_REASONS.starredCodeOnly);
+  });
+
+  test("applies to organizations too", () => {
+    const gating = getMirrorOverrideGating({
+      targetKind: "organization",
+      effective: { mirrorReleases: false },
+    });
+    expect(gating.releaseLimit).toBe(MIRROR_GATING_REASONS.releasesOff);
   });
 });

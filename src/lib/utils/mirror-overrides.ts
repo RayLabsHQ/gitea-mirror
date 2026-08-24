@@ -20,8 +20,43 @@ export const MIRROR_OVERRIDE_KEYS = [
 
 export type MirrorOverrideKey = (typeof MIRROR_OVERRIDE_KEYS)[number];
 
-/** Fully resolved mirror options: every flag has a definite boolean value. */
-export type ResolvedMirrorOptions = Record<MirrorOverrideKey, boolean>;
+/**
+ * The numeric mirror options that can be overridden per organization and per
+ * repository. Kept apart from the boolean flags because every consumer of
+ * MIRROR_OVERRIDE_KEYS (resolver, gating, dialog tri-states) assumes booleans.
+ */
+export const MIRROR_OVERRIDE_LIMIT_KEYS = ["releaseLimit"] as const;
+
+export type MirrorOverrideLimitKey = (typeof MIRROR_OVERRIDE_LIMIT_KEYS)[number];
+
+/** Matches `giteaConfigSchema.releaseLimit`'s default. */
+export const DEFAULT_RELEASE_LIMIT = 10;
+
+/**
+ * Fully resolved mirror options: every flag has a definite boolean value and
+ * every limit a definite positive integer.
+ */
+export type ResolvedMirrorOptions = Record<MirrorOverrideKey, boolean> &
+  Record<MirrorOverrideLimitKey, number>;
+
+/**
+ * The values the tiers above an override resolve to right now. Used by the
+ * dialog to label what "Inherit" means for each row.
+ */
+export type InheritedMirrorOptions = Partial<Record<MirrorOverrideKey, boolean>> &
+  Partial<Record<MirrorOverrideLimitKey, number>>;
+
+/**
+ * Sanitize a release limit from any tier into a positive integer, or
+ * `undefined` when the value is absent or unusable (so the next tier out is
+ * consulted). Floors fractional input rather than rejecting it, matching what
+ * `mirrorGitHubReleasesToGitea` has always done with the global value.
+ */
+export function normalizeReleaseLimit(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  const limit = Math.floor(value);
+  return limit >= 1 ? limit : undefined;
+}
 
 /**
  * Flags the starred-code-only clamp forces off.
@@ -91,6 +126,7 @@ export function mirrorOptionsToFlags(
     | {
         mirrorLFS?: boolean;
         mirrorReleases?: boolean;
+        releaseLimit?: number;
         mirrorMetadata?: boolean;
         metadataComponents?: {
           issues?: boolean;
@@ -102,7 +138,7 @@ export function mirrorOptionsToFlags(
       }
     | null
     | undefined
-): Partial<Record<MirrorOverrideKey, boolean>> {
+): InheritedMirrorOptions {
   const components = mirrorOptions?.metadataComponents;
 
   // Straight through: each field is the raw stored value the runtime reads.
@@ -114,6 +150,8 @@ export function mirrorOptionsToFlags(
     mirrorPullRequests: !!components?.pullRequests,
     mirrorLabels: !!components?.labels,
     mirrorMilestones: !!components?.milestones,
+    releaseLimit:
+      normalizeReleaseLimit(mirrorOptions?.releaseLimit) ?? DEFAULT_RELEASE_LIMIT,
   };
 }
 
@@ -122,10 +160,13 @@ export const MIRROR_GATING_REASONS = {
   starredCodeOnly:
     "Starred repos mirror code only (Advanced Options > starred code only)",
   labelsFollowIssues: "Issues mirroring already syncs labels",
+  releasesOff: "Releases are not being mirrored",
 } as const;
 
 /** key -> reason it cannot take effect. Absent key means editable. */
-export type MirrorOverrideGating = Partial<Record<MirrorOverrideKey, string>>;
+export type MirrorOverrideGating = Partial<
+  Record<MirrorOverrideKey | MirrorOverrideLimitKey, string>
+>;
 
 /**
  * Decide which toggles cannot take effect, and why.
@@ -139,9 +180,12 @@ export type MirrorOverrideGating = Partial<Record<MirrorOverrideKey, string>>;
  *  - `shouldMirrorLabels` in gitea.ts / gitea-enhanced.ts is
  *    `mirrorLabels && !mirrorIssues`, so labels cannot take effect while issues
  *    are being mirrored (the issue path already reconciles labels)
+ *  - `releaseLimit` is only read inside the release mirror, so it cannot take
+ *    effect while `mirrorReleases` resolves to off
  *
  * `effective` is the value each flag currently resolves to including the
- * in-progress edit, so the labels gate reacts live as issues is toggled.
+ * in-progress edit, so the labels and release-limit gates react live as
+ * issues / releases are toggled.
  */
 export function getMirrorOverrideGating({
   targetKind,
@@ -152,7 +196,7 @@ export function getMirrorOverrideGating({
   targetKind: "repository" | "organization";
   isStarred?: boolean;
   starredCodeOnly?: boolean;
-  effective: Partial<Record<MirrorOverrideKey, boolean>>;
+  effective: InheritedMirrorOptions;
 }): MirrorOverrideGating {
   const gating: MirrorOverrideGating = {};
 
@@ -172,10 +216,22 @@ export function getMirrorOverrideGating({
     gating.mirrorLabels = MIRROR_GATING_REASONS.labelsFollowIssues;
   }
 
+  // The release limit rides along with releases: inherit the starred reason
+  // when that is what disabled releases, otherwise report releases being off.
+  // Only an explicit `false` counts; an unknown value leaves the field open.
+  if (gating.mirrorReleases) {
+    gating.releaseLimit = gating.mirrorReleases;
+  } else if (effective.mirrorReleases === false) {
+    gating.releaseLimit = MIRROR_GATING_REASONS.releasesOff;
+  }
+
   return gating;
 }
 
-export const MIRROR_OVERRIDE_LABELS: Record<MirrorOverrideKey, string> = {
+export const MIRROR_OVERRIDE_LABELS: Record<
+  MirrorOverrideKey | MirrorOverrideLimitKey,
+  string
+> = {
   lfs: "Git LFS files",
   wiki: "Wiki",
   mirrorReleases: "Releases",
@@ -184,6 +240,7 @@ export const MIRROR_OVERRIDE_LABELS: Record<MirrorOverrideKey, string> = {
   mirrorPullRequests: "Pull requests",
   mirrorLabels: "Labels",
   mirrorMilestones: "Milestones",
+  releaseLimit: "Release limit",
 };
 
 /**
@@ -218,24 +275,30 @@ export function parseMirrorOverrides(
   return parsed.data;
 }
 
-/** True when the overrides object actually pins at least one flag. */
+/** True when the overrides object actually pins at least one field. */
 export function hasMirrorOverrides(value: unknown): boolean {
-  const overrides = parseMirrorOverrides(value);
-  if (!overrides) return false;
-  return MIRROR_OVERRIDE_KEYS.some((key) => overrides[key] != null);
+  return listOverriddenKeys(value).length > 0;
 }
 
 /** The keys an overrides object pins, for badges and summaries. */
-export function listOverriddenKeys(value: unknown): MirrorOverrideKey[] {
+export function listOverriddenKeys(
+  value: unknown
+): (MirrorOverrideKey | MirrorOverrideLimitKey)[] {
   const overrides = parseMirrorOverrides(value);
   if (!overrides) return [];
-  return MIRROR_OVERRIDE_KEYS.filter((key) => overrides[key] != null);
+  return [
+    ...MIRROR_OVERRIDE_KEYS.filter((key) => overrides[key] != null),
+    ...MIRROR_OVERRIDE_LIMIT_KEYS.filter(
+      (key) => normalizeReleaseLimit(overrides[key]) !== undefined
+    ),
+  ];
 }
 
 /**
- * Strip flags that are null/undefined so only genuine pins are stored, and
- * collapse an empty result to null. Keeps "no overrides" as a single canonical
- * representation instead of `{}` vs `{lfs: null}` vs NULL.
+ * Strip fields that are null/undefined (or, for limits, unusable) so only
+ * genuine pins are stored, and collapse an empty result to null. Keeps "no
+ * overrides" as a single canonical representation instead of `{}` vs
+ * `{lfs: null}` vs NULL.
  */
 export function normalizeMirrorOverrides(
   value: unknown
@@ -248,6 +311,10 @@ export function normalizeMirrorOverrides(
     const flag = overrides[key];
     if (typeof flag === "boolean") cleaned[key] = flag;
   }
+  for (const key of MIRROR_OVERRIDE_LIMIT_KEYS) {
+    const limit = normalizeReleaseLimit(overrides[key]);
+    if (limit !== undefined) cleaned[key] = limit;
+  }
 
   return Object.keys(cleaned).length > 0 ? cleaned : null;
 }
@@ -255,8 +322,10 @@ export function normalizeMirrorOverrides(
 /**
  * Resolve the effective mirror options for one repository.
  *
- * Precedence is per flag, most specific tier wins:
- *   repository override -> organization override -> global config -> false
+ * Precedence is per field, most specific tier wins:
+ *   repository override -> organization override -> global config -> default
+ * where the default is `false` for flags and DEFAULT_RELEASE_LIMIT for the
+ * release limit.
  *
  * `starredCodeOnly` is applied last as a hard clamp. It is a "code only, no
  * metadata" switch for starred repos, so it forces every metadata flag off
@@ -294,6 +363,15 @@ export function resolveMirrorOptions({
       resolved[key] = !!globalConfig?.[key];
     }
   }
+
+  // Same precedence for the release limit. An unusable value at any tier
+  // (0, negative, NaN) falls through to the next one instead of being clamped
+  // up to 1, so a bad override cannot silently shrink a repo to one release.
+  resolved.releaseLimit =
+    normalizeReleaseLimit(repo?.releaseLimit) ??
+    normalizeReleaseLimit(org?.releaseLimit) ??
+    normalizeReleaseLimit(globalConfig?.releaseLimit) ??
+    DEFAULT_RELEASE_LIMIT;
 
   // Starred repos with starredCodeOnly mirror code and nothing else. This
   // clamp intentionally outranks explicit per-repo overrides: the setting

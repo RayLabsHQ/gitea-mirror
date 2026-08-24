@@ -31,6 +31,7 @@ import { MirrorOverridesDialog } from "@/components/config/MirrorOverridesDialog
 import {
   hasMirrorOverrides,
   mirrorOptionsToFlags,
+  normalizeReleaseLimit,
   type MirrorOverrideKey,
 } from "@/lib/utils/mirror-overrides";
 import { Card, CardContent } from "@/components/ui/card";
@@ -162,6 +163,8 @@ export default function RepositoryTable({
       const orgValue = orgOverrides[key];
       if (typeof orgValue === "boolean") globals[key] = orgValue;
     }
+    const orgReleaseLimit = normalizeReleaseLimit(orgOverrides.releaseLimit);
+    if (orgReleaseLimit !== undefined) globals.releaseLimit = orgReleaseLimit;
     return globals;
   }, [mirrorOptions, orgOverrides]);
 
@@ -395,51 +398,66 @@ export default function RepositoryTable({
       <Card className="mb-3">
         <CardContent className="p-4">
           <div className="flex flex-col gap-3">
-            {/* Header with checkbox and repo name */}
-            <div className="flex items-start gap-3">
-              <div
-                onClickCapture={(e) => {
-                  if (e.shiftKey && repo.id) {
-                    e.stopPropagation();
-                    handleShiftRangeSelect(index);
-                  }
-                }}
-              >
-                <Checkbox
-                  checked={isSelected}
-                  onCheckedChange={(checked) => repo.id && handleSelectRepo(repo.id, checked as boolean, index)}
-                  className="mt-1 h-5 w-5"
-                  aria-label={`Select ${repo.name}`}
-                />
+            {/* Header: checkbox, name, Custom badge and menu share one
+                vertically centered row, so the name sits at the same height
+                whether or not the badge is present. Secondary badges get
+                their own row below, indented to the name. */}
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-3">
+                <div
+                  className="flex shrink-0 items-center"
+                  onClickCapture={(e) => {
+                    if (e.shiftKey && repo.id) {
+                      e.stopPropagation();
+                      handleShiftRangeSelect(index);
+                    }
+                  }}
+                >
+                  <Checkbox
+                    checked={isSelected}
+                    onCheckedChange={(checked) => repo.id && handleSelectRepo(repo.id, checked as boolean, index)}
+                    className="h-5 w-5"
+                    aria-label={`Select ${repo.name}`}
+                  />
+                </div>
+                <h3 className="min-w-0 flex-1 truncate text-base font-medium">{repo.name}</h3>
+                {hasMirrorOverrides(repo.mirrorOverrides) && (
+                  <Badge
+                    variant="outline"
+                    className="h-6 shrink-0 text-xs"
+                    title="This repository overrides the global mirror options"
+                  >
+                    <SlidersHorizontal className="h-3 w-3" />
+                    Custom
+                  </Badge>
+                )}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" disabled={isLoading}>
+                      <MoreVertical className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => setOverridesTarget(repo)}>
+                      <SlidersHorizontal className="h-4 w-4 mr-2" />
+                      Mirror Options
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </div>
-              <div className="flex-1 min-w-0">
-                <h3 className="font-medium text-base truncate">{repo.name}</h3>
-                <div className="flex items-center gap-2 mt-1 flex-wrap">
+              {(repo.isPrivate || repo.isForked || repo.isStarred) && (
+                <div className="flex flex-wrap items-center gap-2 pl-8">
                   {repo.isPrivate && <Badge variant="secondary" className="text-xs h-5"><Lock className="h-3 w-3 mr-1" />Private</Badge>}
                   {repo.isForked && <Badge variant="secondary" className="text-xs h-5"><GitFork className="h-3 w-3 mr-1" />Fork</Badge>}
                   {repo.isStarred && <Badge variant="secondary" className="text-xs h-5"><Star className="h-3 w-3 mr-1" />Starred</Badge>}
-                  {hasMirrorOverrides(repo.mirrorOverrides) && <Badge variant="outline" className="text-xs h-5"><SlidersHorizontal className="h-3 w-3 mr-1" />Custom</Badge>}
                 </div>
-              </div>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" disabled={isLoading}>
-                    <MoreVertical className="h-4 w-4" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={() => setOverridesTarget(repo)}>
-                    <SlidersHorizontal className="h-4 w-4 mr-2" />
-                    Mirror Options
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              )}
             </div>
 
-            {/* Repository details */}
-            <div className="space-y-2">
-              {/* Owner & Organization */}
-              <div className="text-sm text-muted-foreground space-y-1">
+            {/* Details: owner/org/destination on the left, status and last
+                sync stacked on the right so the row's width is used. */}
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1 space-y-1 text-sm text-muted-foreground">
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">Owner:</span>
                   <span className="truncate">{repo.owner}</span>
@@ -457,9 +475,7 @@ export default function RepositoryTable({
                   </div>
                 )}
               </div>
-
-              {/* Status & Last Mirrored */}
-              <div className="flex items-center justify-between">
+              <div className="flex shrink-0 flex-col items-end gap-1">
                 <Badge
                   className={`capitalize
                     ${repo.status === 'imported' ? 'bg-yellow-500/10 text-yellow-600 hover:bg-yellow-500/20 dark:text-yellow-400' :

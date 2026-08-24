@@ -12,6 +12,7 @@ const mockMirrorGitRepoIssuesToGitea = mock(() => Promise.resolve());
 const mockMirrorGitRepoPullRequestsToGitea = mock(() => Promise.resolve());
 const mockMirrorGitRepoLabelsToGitea = mock(() => Promise.resolve());
 const mockMirrorGitRepoMilestonesToGitea = mock(() => Promise.resolve());
+const mockSyncRepositoryMetadataToGitea = mock(() => Promise.resolve());
 const mockGetGiteaRepoOwnerAsync = mock(() => Promise.resolve("starred"));
 const mockCreatePreSyncBundleBackup = mock(() =>
   Promise.resolve({ bundlePath: "/tmp/mock.bundle" })
@@ -355,6 +356,7 @@ describe("Enhanced Gitea Operations", () => {
     mockMirrorGitRepoPullRequestsToGitea.mockClear();
     mockMirrorGitRepoLabelsToGitea.mockClear();
     mockMirrorGitRepoMilestonesToGitea.mockClear();
+    mockSyncRepositoryMetadataToGitea.mockClear();
     mockGetGiteaRepoOwnerAsync.mockClear();
     mockGetGiteaRepoOwnerAsync.mockImplementation(() => Promise.resolve("starred"));
     mockHttpGet.mockClear();
@@ -572,6 +574,7 @@ describe("Enhanced Gitea Operations", () => {
             mirrorGitRepoPullRequestsToGitea: mockMirrorGitRepoPullRequestsToGitea,
             mirrorGitRepoLabelsToGitea: mockMirrorGitRepoLabelsToGitea,
             mirrorGitRepoMilestonesToGitea: mockMirrorGitRepoMilestonesToGitea,
+            syncRepositoryMetadataToGitea: mockSyncRepositoryMetadataToGitea,
           }
         )
       ).rejects.toThrow("Repository non-mirror-repo is not a mirror. Cannot sync.");
@@ -620,6 +623,7 @@ describe("Enhanced Gitea Operations", () => {
           mirrorGitRepoPullRequestsToGitea: mockMirrorGitRepoPullRequestsToGitea,
           mirrorGitRepoLabelsToGitea: mockMirrorGitRepoLabelsToGitea,
           mirrorGitRepoMilestonesToGitea: mockMirrorGitRepoMilestonesToGitea,
+          syncRepositoryMetadataToGitea: mockSyncRepositoryMetadataToGitea,
         }
       );
 
@@ -631,6 +635,71 @@ describe("Enhanced Gitea Operations", () => {
       expect(releaseCall.giteaRepoName).toBe("mirror-repo");
       expect(releaseCall.config.githubConfig?.token).toBe("github-token");
       expect(releaseCall.octokit).toBeDefined();
+      // No override anywhere: the resolved default limit is handed through.
+      expect(releaseCall.releaseLimit).toBe(10);
+
+      // Description/topics are reconciled on every sync, against the resolved
+      // target, with the Gitea repo info already fetched during target
+      // resolution so unchanged values can skip the write.
+      expect(mockSyncRepositoryMetadataToGitea).toHaveBeenCalledTimes(1);
+      const metadataCall = mockSyncRepositoryMetadataToGitea.mock.calls[0][0] as any;
+      expect(metadataCall.giteaOwner).toBe("starred");
+      expect(metadataCall.giteaRepoName).toBe("mirror-repo");
+      expect(metadataCall.giteaToken).toBe("encrypted-token");
+      expect(metadataCall.octokit).toBeDefined();
+      expect(metadataCall.current?.mirror).toBe(true);
+    });
+
+    test("passes the per-repository release limit through to the release mirror", async () => {
+      const config: Partial<Config> = {
+        userId: "user123",
+        githubConfig: {
+          username: "testuser",
+          token: "github-token",
+          privateRepositories: false,
+          mirrorStarred: true,
+        },
+        giteaConfig: {
+          url: "https://gitea.example.com",
+          token: "encrypted-token",
+          defaultOwner: "testuser",
+          mirrorReleases: true,
+          releaseLimit: 25,
+        },
+      };
+
+      const repository: Repository = {
+        id: "repo456",
+        name: "mirror-repo",
+        fullName: "user/mirror-repo",
+        owner: "user",
+        cloneUrl: "https://github.com/user/mirror-repo.git",
+        isPrivate: false,
+        isStarred: true,
+        status: repoStatusEnum.parse("mirrored"),
+        visibility: "public",
+        userId: "user123",
+        mirrorOverrides: { releaseLimit: 3 },
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      };
+
+      await syncGiteaRepoEnhanced(
+        { config, repository },
+        {
+          getGiteaRepoOwnerAsync: mockGetGiteaRepoOwnerAsync,
+          mirrorGitHubReleasesToGitea: mockMirrorGitHubReleasesToGitea,
+          mirrorGitRepoIssuesToGitea: mockMirrorGitRepoIssuesToGitea,
+          mirrorGitRepoPullRequestsToGitea: mockMirrorGitRepoPullRequestsToGitea,
+          mirrorGitRepoLabelsToGitea: mockMirrorGitRepoLabelsToGitea,
+          mirrorGitRepoMilestonesToGitea: mockMirrorGitRepoMilestonesToGitea,
+          syncRepositoryMetadataToGitea: mockSyncRepositoryMetadataToGitea,
+        }
+      );
+
+      expect(mockMirrorGitHubReleasesToGitea).toHaveBeenCalledTimes(1);
+      const releaseCall = mockMirrorGitHubReleasesToGitea.mock.calls[0][0] as any;
+      expect(releaseCall.releaseLimit).toBe(3);
     });
 
     test("prefers recorded mirroredLocation when owner resolution changes", async () => {
@@ -677,6 +746,7 @@ describe("Enhanced Gitea Operations", () => {
           mirrorGitRepoPullRequestsToGitea: mockMirrorGitRepoPullRequestsToGitea,
           mirrorGitRepoLabelsToGitea: mockMirrorGitRepoLabelsToGitea,
           mirrorGitRepoMilestonesToGitea: mockMirrorGitRepoMilestonesToGitea,
+          syncRepositoryMetadataToGitea: mockSyncRepositoryMetadataToGitea,
         }
       );
 
@@ -738,6 +808,7 @@ describe("Enhanced Gitea Operations", () => {
           mirrorGitRepoPullRequestsToGitea: mockMirrorGitRepoPullRequestsToGitea,
           mirrorGitRepoLabelsToGitea: mockMirrorGitRepoLabelsToGitea,
           mirrorGitRepoMilestonesToGitea: mockMirrorGitRepoMilestonesToGitea,
+          syncRepositoryMetadataToGitea: mockSyncRepositoryMetadataToGitea,
         }
       );
 
@@ -821,6 +892,7 @@ describe("Enhanced Gitea Operations", () => {
           mirrorGitRepoPullRequestsToGitea: mockMirrorGitRepoPullRequestsToGitea,
           mirrorGitRepoLabelsToGitea: mockMirrorGitRepoLabelsToGitea,
           mirrorGitRepoMilestonesToGitea: mockMirrorGitRepoMilestonesToGitea,
+          syncRepositoryMetadataToGitea: mockSyncRepositoryMetadataToGitea,
         }
       );
 
@@ -892,6 +964,7 @@ describe("Enhanced Gitea Operations", () => {
           mirrorGitRepoPullRequestsToGitea: mockMirrorGitRepoPullRequestsToGitea,
           mirrorGitRepoLabelsToGitea: mockMirrorGitRepoLabelsToGitea,
           mirrorGitRepoMilestonesToGitea: mockMirrorGitRepoMilestonesToGitea,
+          syncRepositoryMetadataToGitea: mockSyncRepositoryMetadataToGitea,
         }
       );
 
@@ -970,6 +1043,7 @@ describe("Enhanced Gitea Operations", () => {
             mirrorGitRepoPullRequestsToGitea: mockMirrorGitRepoPullRequestsToGitea,
             mirrorGitRepoLabelsToGitea: mockMirrorGitRepoLabelsToGitea,
             mirrorGitRepoMilestonesToGitea: mockMirrorGitRepoMilestonesToGitea,
+            syncRepositoryMetadataToGitea: mockSyncRepositoryMetadataToGitea,
           }
         )
       ).rejects.toThrow("Repository collide-repo not found in Gitea. Tried locations:");
@@ -1037,6 +1111,7 @@ describe("Enhanced Gitea Operations", () => {
             mirrorGitRepoPullRequestsToGitea: mockMirrorGitRepoPullRequestsToGitea,
             mirrorGitRepoLabelsToGitea: mockMirrorGitRepoLabelsToGitea,
             mirrorGitRepoMilestonesToGitea: mockMirrorGitRepoMilestonesToGitea,
+            syncRepositoryMetadataToGitea: mockSyncRepositoryMetadataToGitea,
           }
         )
       ).rejects.toThrow("Snapshot failed; sync blocked to protect history.");
@@ -1096,6 +1171,7 @@ describe("Enhanced Gitea Operations", () => {
           mirrorGitRepoPullRequestsToGitea: mockMirrorGitRepoPullRequestsToGitea,
           mirrorGitRepoLabelsToGitea: mockMirrorGitRepoLabelsToGitea,
           mirrorGitRepoMilestonesToGitea: mockMirrorGitRepoMilestonesToGitea,
+          syncRepositoryMetadataToGitea: mockSyncRepositoryMetadataToGitea,
         }
       );
 
@@ -1153,6 +1229,7 @@ describe("Enhanced Gitea Operations", () => {
           mirrorGitRepoPullRequestsToGitea: mockMirrorGitRepoPullRequestsToGitea,
           mirrorGitRepoLabelsToGitea: mockMirrorGitRepoLabelsToGitea,
           mirrorGitRepoMilestonesToGitea: mockMirrorGitRepoMilestonesToGitea,
+          syncRepositoryMetadataToGitea: mockSyncRepositoryMetadataToGitea,
         }
       );
 
@@ -1220,6 +1297,7 @@ describe("Enhanced Gitea Operations", () => {
           mirrorGitRepoPullRequestsToGitea: mockMirrorGitRepoPullRequestsToGitea,
           mirrorGitRepoLabelsToGitea: mockMirrorGitRepoLabelsToGitea,
           mirrorGitRepoMilestonesToGitea: mockMirrorGitRepoMilestonesToGitea,
+          syncRepositoryMetadataToGitea: mockSyncRepositoryMetadataToGitea,
         }
       );
 

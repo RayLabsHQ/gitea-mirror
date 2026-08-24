@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -8,6 +8,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -20,7 +21,9 @@ import type { MirrorOverrides } from "@/lib/db/schema";
 import {
   getMirrorOverrideGating,
   MIRROR_OVERRIDE_LABELS,
+  normalizeReleaseLimit,
   UI_MIRROR_OVERRIDE_KEYS,
+  type InheritedMirrorOptions,
   type MirrorOverrideKey,
 } from "@/lib/utils/mirror-overrides";
 
@@ -42,6 +45,17 @@ function fromTriState(value: TriState): boolean | undefined {
   return undefined;
 }
 
+/**
+ * The release limit is edited as free text so the user can clear the field
+ * back to "inherit" or type a multi-digit number without every intermediate
+ * keystroke being rejected. Empty means inherit.
+ */
+function parseReleaseLimitDraft(text: string): number | undefined {
+  const trimmed = text.trim();
+  if (!trimmed) return undefined;
+  return normalizeReleaseLimit(Number(trimmed));
+}
+
 export interface MirrorOverridesDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -55,7 +69,7 @@ export interface MirrorOverridesDialogProps {
    * "Inherit" actually resolves to right now. For a repository this should
    * already be global merged with its organization's overrides.
    */
-  inheritedFrom?: Partial<Record<MirrorOverrideKey, boolean>>;
+  inheritedFrom?: InheritedMirrorOptions;
   inheritedLabel?: string;
   /**
    * True while the inherited values are still being fetched. The hint is
@@ -84,18 +98,25 @@ export function MirrorOverridesDialog({
   const [draft, setDraft] = useState<Record<MirrorOverrideKey, TriState>>(
     () => buildDraft(value)
   );
+  const [releaseLimitDraft, setReleaseLimitDraft] = useState(() =>
+    buildReleaseLimitDraft(value)
+  );
   const [isSaving, setIsSaving] = useState(false);
 
   // Re-seed whenever the dialog opens or targets a different object, so a
   // previous edit never leaks into the next one.
   useEffect(() => {
-    if (open) setDraft(buildDraft(value));
+    if (open) {
+      setDraft(buildDraft(value));
+      setReleaseLimitDraft(buildReleaseLimitDraft(value));
+    }
   }, [open, value]);
 
   // What each flag currently resolves to, including the in-progress edit.
-  // Drives the labels gate so it reacts live as issues is toggled.
+  // Drives the labels and release-limit gates so they react live as issues
+  // and releases are toggled.
   const effective = useMemo(() => {
-    const next: Partial<Record<MirrorOverrideKey, boolean>> = {};
+    const next: InheritedMirrorOptions = {};
     for (const key of UI_MIRROR_OVERRIDE_KEYS) {
       const pinned = fromTriState(draft[key]);
       next[key] = pinned ?? inheritedFrom?.[key] ?? false;
@@ -114,9 +135,16 @@ export function MirrorOverridesDialog({
     [targetKind, isStarred, starredCodeOnly, effective]
   );
 
+  const pinnedReleaseLimit = parseReleaseLimitDraft(releaseLimitDraft);
+  // Non-empty text that does not parse to a usable limit (0, negative, junk).
+  const releaseLimitInvalid =
+    releaseLimitDraft.trim() !== "" && pinnedReleaseLimit === undefined;
+
   const overriddenCount = useMemo(
-    () => Object.values(draft).filter((state) => state !== "inherit").length,
-    [draft]
+    () =>
+      Object.values(draft).filter((state) => state !== "inherit").length +
+      (pinnedReleaseLimit !== undefined ? 1 : 0),
+    [draft, pinnedReleaseLimit]
   );
 
   const handleSave = async () => {
@@ -129,6 +157,7 @@ export function MirrorOverridesDialog({
         const resolved = fromTriState(draft[key]);
         if (typeof resolved === "boolean") next[key] = resolved;
       }
+      if (pinnedReleaseLimit !== undefined) next.releaseLimit = pinnedReleaseLimit;
       await onSave(Object.keys(next).length > 0 ? next : null);
       onOpenChange(false);
     } finally {
@@ -138,7 +167,19 @@ export function MirrorOverridesDialog({
 
   const handleResetAll = () => {
     setDraft(buildDraft(null));
+    setReleaseLimitDraft("");
   };
+
+  const releaseLimitReason = gating.releaseLimit;
+  const releaseLimitDisabled = !!releaseLimitReason;
+  const inheritedReleaseLimit = inheritedFrom?.releaseLimit;
+  // Only while the field is genuinely empty: an invalid entry gets the error
+  // line instead, so "currently 10" is not shown next to a rejected "0".
+  const showReleaseLimitHint =
+    !inheritedLoading &&
+    !releaseLimitDisabled &&
+    releaseLimitDraft.trim() === "" &&
+    inheritedReleaseLimit !== undefined;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -164,42 +205,96 @@ export function MirrorOverridesDialog({
               inherited !== undefined;
 
             return (
-              <div key={key} className="space-y-1">
-                <div className="flex items-center justify-between gap-4">
-                  <Label
-                    htmlFor={`override-${key}`}
-                    className={isDisabled ? "flex-1 text-muted-foreground" : "flex-1"}
-                  >
-                    {MIRROR_OVERRIDE_LABELS[key]}
-                    {showHint && (
-                      <span className="ml-2 text-xs font-normal text-muted-foreground">
-                        currently {inherited ? "on" : "off"}
-                      </span>
-                    )}
-                  </Label>
-                  <Select
-                    value={draft[key]}
-                    disabled={isDisabled}
-                    onValueChange={(next) =>
-                      setDraft((prev) => ({ ...prev, [key]: next as TriState }))
-                    }
-                  >
-                    <SelectTrigger id={`override-${key}`} className="w-32">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="inherit">Inherit</SelectItem>
-                      <SelectItem value="on">On</SelectItem>
-                      <SelectItem value="off">Off</SelectItem>
-                    </SelectContent>
-                  </Select>
+              <Fragment key={key}>
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between gap-4">
+                    <Label
+                      htmlFor={`override-${key}`}
+                      className={isDisabled ? "flex-1 text-muted-foreground" : "flex-1"}
+                    >
+                      {MIRROR_OVERRIDE_LABELS[key]}
+                      {showHint && (
+                        <span className="ml-2 text-xs font-normal text-muted-foreground">
+                          currently {inherited ? "on" : "off"}
+                        </span>
+                      )}
+                    </Label>
+                    <Select
+                      value={draft[key]}
+                      disabled={isDisabled}
+                      onValueChange={(next) =>
+                        setDraft((prev) => ({ ...prev, [key]: next as TriState }))
+                      }
+                    >
+                      <SelectTrigger id={`override-${key}`} className="w-32">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="inherit">Inherit</SelectItem>
+                        <SelectItem value="on">On</SelectItem>
+                        <SelectItem value="off">Off</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {isDisabled && (
+                    <p className="text-xs text-muted-foreground">
+                      {disabledReason}
+                    </p>
+                  )}
                 </div>
-                {isDisabled && (
-                  <p className="text-xs text-muted-foreground">
-                    {disabledReason}
-                  </p>
+
+                {/* The limit only means something while releases are mirrored,
+                    so it sits directly under that row. */}
+                {key === "mirrorReleases" && (
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between gap-4">
+                      <Label
+                        htmlFor="override-releaseLimit"
+                        className={
+                          releaseLimitDisabled
+                            ? "flex-1 text-muted-foreground"
+                            : "flex-1"
+                        }
+                      >
+                        {MIRROR_OVERRIDE_LABELS.releaseLimit}
+                        {showReleaseLimitHint && (
+                          <span className="ml-2 text-xs font-normal text-muted-foreground">
+                            currently {inheritedReleaseLimit}
+                          </span>
+                        )}
+                      </Label>
+                      <Input
+                        id="override-releaseLimit"
+                        type="number"
+                        inputMode="numeric"
+                        min={1}
+                        step={1}
+                        placeholder="Inherit"
+                        className="w-32"
+                        value={releaseLimitDraft}
+                        disabled={releaseLimitDisabled}
+                        aria-invalid={releaseLimitInvalid || undefined}
+                        onChange={(event) => setReleaseLimitDraft(event.target.value)}
+                      />
+                    </div>
+                    {releaseLimitDisabled ? (
+                      <p className="text-xs text-muted-foreground">
+                        {releaseLimitReason}
+                      </p>
+                    ) : releaseLimitInvalid ? (
+                      <p className="text-xs text-destructive">
+                        Enter a whole number of 1 or more, or leave it empty to
+                        inherit.
+                      </p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        Newest releases to keep, assets included. Older ones
+                        past the limit are removed from Gitea on the next sync.
+                      </p>
+                    )}
+                  </div>
                 )}
-              </div>
+              </Fragment>
             );
           })}
         </div>
@@ -225,7 +320,7 @@ export function MirrorOverridesDialog({
           >
             Cancel
           </Button>
-          <Button onClick={handleSave} disabled={isSaving}>
+          <Button onClick={handleSave} disabled={isSaving || releaseLimitInvalid}>
             {isSaving ? "Saving..." : "Save"}
           </Button>
         </DialogFooter>
@@ -242,4 +337,11 @@ function buildDraft(
     draft[key] = toTriState(value?.[key]);
   }
   return draft;
+}
+
+function buildReleaseLimitDraft(
+  value: MirrorOverrides | null | undefined
+): string {
+  const limit = normalizeReleaseLimit(value?.releaseLimit);
+  return limit === undefined ? "" : String(limit);
 }

@@ -18,7 +18,10 @@ import {
   parseRepositoryMetadataState,
   serializeRepositoryMetadataState,
 } from "./metadata-state";
-import { resolveMirrorOptionsForRepository } from "./utils/mirror-overrides";
+import {
+  normalizeReleaseLimit,
+  resolveMirrorOptionsForRepository,
+} from "./utils/mirror-overrides";
 
 /**
  * Helper function to get organization configuration including destination override
@@ -416,17 +419,29 @@ const getSourceRepositoryCoordinates = (repository: Repository) => {
   };
 };
 
-const fetchGitHubTopics = async ({
+type GitHubRepositoryMetadata = {
+  description: string | null;
+  /** Null when the payload carried no usable topic list. */
+  topics: string[] | null;
+};
+
+/**
+ * Fetch the upstream description and topics in one call.
+ * `GET /repos/{owner}/{repo}` carries both, and the client's ETag layer (see
+ * createGitHubClient) turns the per-sync re-check into a rate-limit-free 304
+ * whenever nothing changed upstream.
+ */
+const fetchGitHubRepositoryMetadata = async ({
   octokit,
   repository,
 }: {
   octokit: Octokit;
   repository: Repository;
-}): Promise<string[] | null> => {
+}): Promise<GitHubRepositoryMetadata | null> => {
   const { owner, repo } = getSourceRepositoryCoordinates(repository);
 
   try {
-    const response = await octokit.request("GET /repos/{owner}/{repo}/topics", {
+    const response = await octokit.request("GET /repos/{owner}/{repo}", {
       owner,
       repo,
       headers: {
@@ -434,18 +449,23 @@ const fetchGitHubTopics = async ({
       },
     });
 
-    const names = (response.data as { names?: unknown }).names;
-    if (!Array.isArray(names)) {
+    const data = response.data as { description?: unknown; topics?: unknown };
+    const description =
+      typeof data.description === "string" ? data.description : null;
+    const topics = Array.isArray(data.topics)
+      ? data.topics.filter((topic): topic is string => typeof topic === "string")
+      : null;
+
+    if (topics === null) {
       console.warn(
-        `[Metadata] Unexpected topics payload for ${repository.fullName}; skipping topic sync.`
+        `[Metadata] Unexpected topics payload for ${repository.fullName}; topic sync will be skipped.`
       );
-      return null;
     }
 
-    return names.filter((topic): topic is string => typeof topic === "string");
+    return { description, topics };
   } catch (error) {
     console.warn(
-      `[Metadata] Failed to fetch topics from GitHub for ${repository.fullName}: ${
+      `[Metadata] Failed to fetch repository metadata from GitHub for ${repository.fullName}: ${
         error instanceof Error ? error.message : String(error)
       }`
     );
@@ -453,55 +473,116 @@ const fetchGitHubTopics = async ({
   }
 };
 
-const syncRepositoryMetadataToGitea = async ({
+/** Order-insensitive, case-insensitive topic list comparison. */
+const sameTopicSet = (a: string[], b: string[]): boolean => {
+  if (a.length !== b.length) return false;
+  const sortedA = a.map((topic) => topic.toLowerCase()).sort();
+  const sortedB = b.map((topic) => topic.toLowerCase()).sort();
+  return sortedA.every((topic, index) => topic === sortedB[index]);
+};
+
+/**
+ * Bring the Gitea repository's description and topics in line with GitHub.
+ *
+ * Runs after migration and on every sync. GitHub is authoritative whenever it
+ * can be reached; the stored `repository.description` is only a fallback (no
+ * token, or a transient GitHub failure), and an empty fallback is never
+ * written so a blip upstream cannot wipe a description Gitea already has.
+ * A refreshed description is written back to the local row so the UI and any
+ * token-less path see the same value Gitea does.
+ *
+ * `current` is what Gitea holds right now, for callers that already fetched
+ * the repo. Values that already match are not rewritten.
+ *
+ * Every step degrades to a warning: metadata must never fail a mirror run.
+ */
+export const syncRepositoryMetadataToGitea = async ({
   config,
   octokit,
   repository,
   giteaOwner,
   giteaRepoName,
   giteaToken,
+  current,
 }: {
   config: Partial<Config>;
-  octokit: Octokit;
+  /** Null when no GitHub token is available. */
+  octokit: Octokit | null;
   repository: Repository;
   giteaOwner: string;
   giteaRepoName: string;
   giteaToken: string;
+  current?: { description?: string | null; topics?: string[] | null } | null;
 }): Promise<void> => {
   const giteaBaseUrl = config.giteaConfig?.url;
   if (!giteaBaseUrl) {
     return;
   }
 
-  const repoApiUrl = `${giteaBaseUrl}/api/v1/repos/${giteaOwner}/${giteaRepoName}`;
+  const target = `${giteaOwner}/${giteaRepoName}`;
+  const repoApiUrl = `${giteaBaseUrl}/api/v1/repos/${target}`;
   const authHeaders = {
     Authorization: `token ${giteaToken}`,
   };
-  const description = repository.description?.trim() || "";
 
-  try {
-    await httpPatch(
-      repoApiUrl,
-      { description },
-      authHeaders
-    );
+  const upstream = octokit
+    ? await fetchGitHubRepositoryMetadata({ octokit, repository })
+    : null;
+
+  const storedDescription = repository.description ?? null;
+  const description =
+    (upstream ? upstream.description : storedDescription)?.trim() || "";
+
+  if (upstream && repository.id && upstream.description !== storedDescription) {
+    try {
+      await db
+        .update(repositories)
+        .set({ description: upstream.description, updatedAt: new Date() })
+        .where(eq(repositories.id, repository.id));
+    } catch (error) {
+      console.warn(
+        `[Metadata] Failed to store the refreshed description for ${repository.fullName}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+  }
+
+  if (!upstream && !description) {
     console.log(
-      `[Metadata] Synced description for ${repository.fullName} to ${giteaOwner}/${giteaRepoName}`
+      `[Metadata] No description available for ${repository.fullName} (GitHub not consulted); leaving ${target} unchanged`
     );
-  } catch (error) {
-    console.warn(
-      `[Metadata] Failed to sync description for ${repository.fullName} to ${giteaOwner}/${giteaRepoName}: ${
-        error instanceof Error ? error.message : String(error)
-      }`
+  } else if (current && (current.description ?? "").trim() === description) {
+    console.log(
+      `[Metadata] Description for ${repository.fullName} already matches ${target}; skipping`
     );
+  } else {
+    try {
+      await httpPatch(repoApiUrl, { description }, authHeaders);
+      console.log(
+        `[Metadata] Synced description for ${repository.fullName} to ${target}`
+      );
+    } catch (error) {
+      console.warn(
+        `[Metadata] Failed to sync description for ${repository.fullName} to ${target}: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
   }
 
   if (config.giteaConfig?.addTopics === false) {
     return;
   }
 
-  const sourceTopics = await fetchGitHubTopics({ octokit, repository });
-  if (sourceTopics === null) {
+  if (!octokit) {
+    console.log(
+      `[Metadata] Skipping topic sync for ${repository.fullName}: no GitHub token`
+    );
+    return;
+  }
+
+  if (!upstream?.topics) {
     console.warn(
       `[Metadata] Skipping topic sync for ${repository.fullName} because GitHub topics could not be fetched.`
     );
@@ -509,22 +590,25 @@ const syncRepositoryMetadataToGitea = async ({
   }
 
   const topics = normalizeTopicsForGitea(
-    sourceTopics,
+    upstream.topics,
     config.giteaConfig?.topicPrefix
   );
 
-  try {
-    await httpPut(
-      `${repoApiUrl}/topics`,
-      { topics },
-      authHeaders
-    );
+  if (current?.topics && sameTopicSet(current.topics, topics)) {
     console.log(
-      `[Metadata] Synced ${topics.length} topic(s) for ${repository.fullName} to ${giteaOwner}/${giteaRepoName}`
+      `[Metadata] Topics for ${repository.fullName} already match ${target}; skipping`
+    );
+    return;
+  }
+
+  try {
+    await httpPut(`${repoApiUrl}/topics`, { topics }, authHeaders);
+    console.log(
+      `[Metadata] Synced ${topics.length} topic(s) for ${repository.fullName} to ${target}`
     );
   } catch (error) {
     console.warn(
-      `[Metadata] Failed to sync topics for ${repository.fullName} to ${giteaOwner}/${giteaRepoName}: ${
+      `[Metadata] Failed to sync topics for ${repository.fullName} to ${target}: ${
         error instanceof Error ? error.message : String(error)
       }`
     );
@@ -940,6 +1024,7 @@ export const mirrorGithubRepoToGitea = async ({
           repository,
           giteaOwner: repoOwner,
           giteaRepoName: targetRepoName,
+          releaseLimit: mirrorOptions.releaseLimit,
         });
         metadataState.components.releases = true;
         metadataUpdated = true;
@@ -1697,6 +1782,7 @@ export async function mirrorGitHubRepoToGiteaOrg({
           repository,
           giteaOwner: orgName,
           giteaRepoName: targetRepoName,
+          releaseLimit: mirrorOptions.releaseLimit,
         });
         metadataState.components.releases = true;
         metadataUpdated = true;
@@ -2992,12 +3078,19 @@ export async function mirrorGitHubReleasesToGitea({
   config,
   giteaOwner,
   giteaRepoName,
+  releaseLimit: releaseLimitOverride,
 }: {
   octokit: Octokit;
   repository: Repository;
   config: Partial<Config>;
   giteaOwner?: string;
   giteaRepoName?: string;
+  /**
+   * Already-resolved limit (global -> org -> repo). Callers that went through
+   * `resolveMirrorOptionsForRepository` pass it in; when absent it is resolved
+   * here so direct callers still honor per-repo overrides.
+   */
+  releaseLimit?: number;
 }) {
   if (
     !config.giteaConfig?.defaultOwner ||
@@ -3035,8 +3128,13 @@ export async function mirrorGitHubReleasesToGitea({
     throw new Error(`Repository ${repository.name} does not exist in Gitea at ${repoOwner}. Please ensure the repository is mirrored first.`);
   }
 
-  // Get release limit from config (default to 10)
-  const releaseLimit = Math.max(1, Math.floor(config.giteaConfig?.releaseLimit || 10));
+  // How many of the newest releases to keep. Per-repo and per-org overrides
+  // win over the global setting (#361); the resolver guarantees a positive
+  // integer. Everything below the limit is created/updated, everything beyond
+  // it is pruned from Gitea by the retention pass at the end.
+  const releaseLimit =
+    normalizeReleaseLimit(releaseLimitOverride) ??
+    (await resolveMirrorOptionsForRepository({ config, repository })).releaseLimit;
 
   // GitHub API max per page is 100; paginate until we reach the configured limit.
   const releases: Awaited<

@@ -35,6 +35,7 @@ import {
 
 type SyncDependencies = {
   getGiteaRepoOwnerAsync: typeof import("./gitea")["getGiteaRepoOwnerAsync"];
+  syncRepositoryMetadataToGitea: typeof import("./gitea")["syncRepositoryMetadataToGitea"];
   mirrorGitHubReleasesToGitea: typeof import("./gitea")["mirrorGitHubReleasesToGitea"];
   mirrorGitRepoIssuesToGitea: typeof import("./gitea")["mirrorGitRepoIssuesToGitea"];
   mirrorGitRepoPullRequestsToGitea: typeof import("./gitea")["mirrorGitRepoPullRequestsToGitea"];
@@ -58,6 +59,10 @@ export interface GiteaRepoInfo {
   // GitHub source (vs. a same-named mirror of a different source).
   original_url?: string;
   private: boolean;
+  // Current description/topics, so the per-sync metadata reconciliation can
+  // skip writes that would not change anything.
+  description?: string;
+  topics?: string[];
 }
 
 interface SyncTargetCandidate {
@@ -755,6 +760,33 @@ export async function syncGiteaRepoEnhanced({
         return metadataOctokit;
       };
 
+      // Keep the description and topics in step with GitHub on every sync,
+      // not only at migration time. Mirrors created before the description
+      // was carried over (#224), or whose upstream description changed since,
+      // otherwise stay stale forever (reported in #361). `repoInfo` is the
+      // Gitea state fetched during target resolution, so unchanged values
+      // cost no write. Without a GitHub token the stored description is used
+      // and topics are left alone.
+      try {
+        await dependencies.syncRepositoryMetadataToGitea({
+          config,
+          octokit: ensureOctokit(),
+          repository,
+          giteaOwner: repoOwner,
+          giteaRepoName: repoName,
+          giteaToken: decryptedConfig.giteaConfig.token,
+          current: repoInfo,
+        });
+      } catch (metadataError) {
+        console.warn(
+          `[Sync] Failed to reconcile description/topics for ${repository.name}: ${
+            metadataError instanceof Error
+              ? metadataError.message
+              : String(metadataError)
+          }`
+        );
+      }
+
       // Reconcile metadata on every sync (matches the release path).
       // The underlying mirror* functions are idempotent: issues/PRs are
       // matched via [GH-ISSUE #N] / [GH-PR #N] markers and PATCHed in
@@ -781,6 +813,7 @@ export async function syncGiteaRepoEnhanced({
               repository,
               giteaOwner: repoOwner,
               giteaRepoName: repoName,
+              releaseLimit: mirrorOptions.releaseLimit,
             });
             metadataState.components.releases = true;
             metadataUpdated = true;

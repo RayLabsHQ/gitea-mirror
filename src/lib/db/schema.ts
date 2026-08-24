@@ -47,11 +47,18 @@ export const backupStrategyEnum = z.enum([
 /**
  * Per-object overrides for the global mirror options in `giteaConfigSchema`.
  *
- * Every flag is nullable, and `null`/absent means "inherit from the next tier
+ * Every field is nullable, and `null`/absent means "inherit from the next tier
  * out". Resolution order is global config -> organization -> repository, and it
- * is applied per flag, so a repository can override LFS while still inheriting
+ * is applied per field, so a repository can override LFS while still inheriting
  * the org's issue setting. See `resolveMirrorOptions` in
  * `src/lib/utils/mirror-overrides.ts`.
+ *
+ * `releaseLimit` is the one non-boolean: how many of the newest GitHub releases
+ * to keep in Gitea (the global default is `giteaConfigSchema.releaseLimit`).
+ * It is deliberately a plain `z.number()` rather than `int().min(1)`: a stored
+ * out-of-range value must degrade to "inherit" for that field alone, not make
+ * the whole overrides object unparseable and silently drop the LFS opt-out
+ * next to it. `normalizeReleaseLimit` does the sanitizing.
  */
 export const mirrorOverridesSchema = z.object({
   lfs: z.boolean().nullable().optional(),
@@ -62,6 +69,7 @@ export const mirrorOverridesSchema = z.object({
   mirrorPullRequests: z.boolean().nullable().optional(),
   mirrorLabels: z.boolean().nullable().optional(),
   mirrorMilestones: z.boolean().nullable().optional(),
+  releaseLimit: z.number().nullable().optional(),
 });
 
 export type MirrorOverrides = z.infer<typeof mirrorOverridesSchema>;
