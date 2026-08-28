@@ -14,9 +14,9 @@ export const DEFAULT_PAIR_OPTIONS: MirrorPairOptions = {
 
 function DisabledCards({ disabled, children }: { disabled: boolean; children: ReactNode }) { return <fieldset disabled={disabled} aria-disabled={disabled} className={disabled ? "m-0 min-w-0 border-0 p-0 opacity-45" : "m-0 min-w-0 border-0 p-0"}>{children}</fieldset>; }
 
-interface PairOptionCardsProps { options: MirrorPairOptions; onChange: (options: MirrorPairOptions) => void; sourceServer?: Server; targetServer?: Server; disabled?: boolean; lockOrganization?: boolean; column?: "left" | "right"; }
+interface PairOptionCardsProps { options: MirrorPairOptions; onChange: (options: MirrorPairOptions) => void; sourceServer?: Server; targetServer?: Server; disabled?: boolean; lockOrganization?: boolean; hideOrganization?: boolean; column?: "left" | "right"; }
 
-export function PairOptionCards({ options, onChange, sourceServer, targetServer, disabled = false, lockOrganization = false, column }: PairOptionCardsProps) {
+export function PairOptionCards({ options, onChange, sourceServer, targetServer, disabled = false, lockOrganization = false, hideOrganization = false, column }: PairOptionCardsProps) {
   const selection = options.repositorySelection; const organization = options.organizationStructure; const protection = options.destructiveProtection; const content = options.mirrorContent;
   const update = <K extends keyof MirrorPairOptions>(key: K, value: MirrorPairOptions[K]) => onChange({ ...options, [key]: value });
   const githubConfig: GitHubConfig = { username: sourceServer?.username ?? "", token: "", privateRepositories: selection.privateRepositories, includeCollaboratorRepos: selection.includeCollaboratorRepos, includeOrganizations: selection.includeOrganizations, mirrorStarred: selection.mirrorStarred, starredLists: selection.starredLists, starredDuplicateStrategy: selection.starredDuplicateStrategy, starredReposMode: selection.starredReposMode };
@@ -27,14 +27,18 @@ export function PairOptionCards({ options, onChange, sourceServer, targetServer,
   const setMirrorOptions: Dispatch<SetStateAction<MirrorOptions>> = (next) => { const value = typeof next === "function" ? next(mirrorOptions) : next; update("mirrorContent", { ...content, ...value, releases: value.mirrorReleases, lfs: value.mirrorLFS, issues: value.metadataComponents.issues, pullRequests: value.metadataComponents.pullRequests, labels: value.metadataComponents.labels, milestones: value.metadataComponents.milestones, wiki: value.metadataComponents.wiki }); };
   const setAdvancedOptions: Dispatch<SetStateAction<AdvancedOptions>> = (next) => { const value = typeof next === "function" ? next(advancedOptions) : next; update("repositorySelection", { ...selection, ...value, includeForks: !value.skipForks }); };
   const setGiteaConfig: Dispatch<SetStateAction<GiteaConfig>> = (next) => { const value = typeof next === "function" ? next(giteaConfig) : next; onChange({ ...options, organizationStructure: { ...organization, strategy: value.mirrorStrategy ?? organization.strategy, singleOrg: value.organization, visibility: value.visibility, starredReposOrg: value.starredReposOrg, starredReposMode: value.starredReposMode ?? "dedicated-org", personalReposOrg: value.personalReposOrg, preserveOrgStructure: value.preserveOrgStructure }, destructiveProtection: { ...protection, backupStrategy: value.backupStrategy ?? protection.backupStrategy, backupRetentionCount: value.backupRetentionCount ?? protection.backupRetentionCount, backupRetentionDays: value.backupRetentionDays ?? protection.backupRetentionDays, backupDirectory: value.backupDirectory ?? protection.backupDirectory, blockSyncOnBackupFailure: Boolean(value.blockSyncOnBackupFailure), detectForcePush: true } }); };
-  const repositoryAndProtection = <DisabledCards disabled={disabled}>
-    <GitHubConfigForm part="settings" config={githubConfig} setConfig={setGitHubConfig} mirrorOptions={mirrorOptions} setMirrorOptions={setMirrorOptions} advancedOptions={advancedOptions} setAdvancedOptions={setAdvancedOptions} giteaConfig={giteaConfig} setGiteaConfig={setGiteaConfig} />
+  const repositorySelection = <DisabledCards disabled={disabled}>
+    <GitHubConfigForm part="selection" config={githubConfig} setConfig={setGitHubConfig} mirrorOptions={mirrorOptions} setMirrorOptions={setMirrorOptions} advancedOptions={advancedOptions} setAdvancedOptions={setAdvancedOptions} giteaConfig={giteaConfig} setGiteaConfig={setGiteaConfig} />
   </DisabledCards>;
-  const organizationAndContent = <><DisabledCards disabled={disabled || lockOrganization}>
+  const destructiveProtection = <DisabledCards disabled={disabled}>
+    <GitHubConfigForm part="protection" config={githubConfig} setConfig={setGitHubConfig} mirrorOptions={mirrorOptions} setMirrorOptions={setMirrorOptions} advancedOptions={advancedOptions} setAdvancedOptions={setAdvancedOptions} giteaConfig={giteaConfig} setGiteaConfig={setGiteaConfig} />
+  </DisabledCards>;
+  const repositoryAndProtection = <div className="flex flex-col gap-6">{repositorySelection}{!hideOrganization && destructiveProtection}</div>;
+  const organizationAndContent = <>{!hideOrganization && <DisabledCards disabled={disabled || lockOrganization}>
     <GiteaConfigForm part="organization" config={giteaConfig} setConfig={setGiteaConfig} githubUsername={sourceServer?.username} alwaysShowDestinationOrg />
-  </DisabledCards><DisabledCards disabled={disabled}>
+  </DisabledCards>}<DisabledCards disabled={disabled}>
     <GitHubMirrorSettings part="content" githubConfig={githubConfig} mirrorOptions={mirrorOptions} advancedOptions={advancedOptions} onGitHubConfigChange={setGitHubConfig} onMirrorOptionsChange={setMirrorOptions} onAdvancedOptionsChange={setAdvancedOptions} />
-  </DisabledCards></>;
+  </DisabledCards>{hideOrganization && destructiveProtection}</>;
 
   if (column === "left") return repositoryAndProtection;
   if (column === "right") return <div className="flex flex-col gap-6">{organizationAndContent}</div>;

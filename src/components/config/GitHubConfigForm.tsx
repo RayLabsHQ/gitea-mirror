@@ -44,7 +44,7 @@ interface GitHubConfigFormProps {
   isAutoSaving?: boolean;
   /** Which card group to render: the connection card, or the settings stack
    *  (repository selection + destructive update protection). */
-  part?: "connection" | "settings";
+  part?: "connection" | "settings" | "selection" | "protection";
   /** Let the settings cards participate directly in a parent CSS grid. */
   cardsInGrid?: boolean;
 }
@@ -224,9 +224,7 @@ export function GitHubConfigForm({
     );
   }
 
-  return (
-    <div className={cardsInGrid ? "contents" : "flex flex-col gap-6"}>
-      <GitHubMirrorSettings
+  const selectionCard = <GitHubMirrorSettings
         part="selection"
         githubConfig={config}
         mirrorOptions={mirrorOptions}
@@ -243,10 +241,9 @@ export function GitHubConfigForm({
           setAdvancedOptions(newOptions);
           if (onAdvancedOptionsAutoSave) onAdvancedOptionsAutoSave(newOptions);
         }}
-      />
+      />;
 
-      {/* Destructive Update Protection */}
-      {giteaConfig && setGiteaConfig && (
+  const protectionCard = giteaConfig && setGiteaConfig && (
         <SettingsCard
           icon={ShieldAlert}
           title="Destructive Update Protection"
@@ -363,7 +360,15 @@ export function GitHubConfigForm({
             </>
           )}
         </SettingsCard>
-      )}
+      );
+
+  if (part === "selection") return selectionCard;
+  if (part === "protection") return protectionCard;
+
+  return (
+    <div className={cardsInGrid ? "contents" : "flex flex-col gap-6"}>
+      {selectionCard}
+      {protectionCard}
     </div>
   );
 }

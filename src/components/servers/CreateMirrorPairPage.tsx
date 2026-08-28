@@ -305,6 +305,7 @@ export function CreateMirrorPairPage() {
             targetServer={targetServer}
             disabled={!pairIsComplete}
             lockOrganization={isEditing}
+            hideOrganization={isEditing}
           />
         </div>
 
@@ -316,6 +317,7 @@ export function CreateMirrorPairPage() {
           targetServer={targetServer}
           disabled={!pairIsComplete}
           lockOrganization={isEditing}
+          hideOrganization={isEditing}
         />
       </div>
 
