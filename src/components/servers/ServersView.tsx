@@ -195,18 +195,20 @@ export function ServersView() {
           </div>
 
           {isServerCardOpen && (
-            <ServerCard
-              server={editingServer}
-              onCancel={() => {
-                setIsServerCardOpen(false);
-                setEditingServer(null);
-              }}
-              onSaved={async () => {
-                setIsServerCardOpen(false);
-                setEditingServer(null);
-                await fetchServers();
-              }}
-            />
+            <div className={editingServer === null ? "w-full md:w-1/2" : "w-full"}>
+              <ServerCard
+                server={editingServer}
+                onCancel={() => {
+                  setIsServerCardOpen(false);
+                  setEditingServer(null);
+                }}
+                onSaved={async () => {
+                  setIsServerCardOpen(false);
+                  setEditingServer(null);
+                  await fetchServers();
+                }}
+              />
+            </div>
           )}
 
           {isLoading ? (
