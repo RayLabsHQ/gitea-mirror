@@ -205,8 +205,8 @@ export function MatrixView({ servers, pairs, isLoading, onRefresh }: MatrixViewP
                   </div>
                   <div className="h-full p-3 flex items-center flex-[1] text-sm">
                     {pair.mirrorType === "two-way"
-                      ? "<=> Two Way Mirror"
-                      : "=> Source to Target"}
+                      ? "Two Way Mirror"
+                      : "Source to Target"}
                   </div>
                   <div className="h-full p-3 flex items-center flex-[1]">
                     <Select

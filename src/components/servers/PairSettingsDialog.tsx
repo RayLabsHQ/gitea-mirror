@@ -278,8 +278,8 @@ export function PairSettingsDialog({
                 <SelectValue placeholder="Select mirror type" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="one-way">{"=> Source to Target"}</SelectItem>
-                <SelectItem value="two-way">{"<=> Two Way Mirror"}</SelectItem>
+                <SelectItem value="one-way">{"Source to Target"}</SelectItem>
+                <SelectItem value="two-way">{"Two Way Mirror"}</SelectItem>
               </SelectContent>
             </Select>
           </div>
