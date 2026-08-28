@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, GitCompareArrows, LoaderCircle, Save } from "lucide-react";
+import { ArrowLeft, GitCompareArrows, LoaderCircle, Save, Settings } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -36,6 +36,15 @@ function mergeOptions(options?: Partial<MirrorPairOptions>): MirrorPairOptions {
     destructiveProtection: { ...DEFAULT_PAIR_OPTIONS.destructiveProtection, ...options?.destructiveProtection },
     mirrorContent: { ...DEFAULT_PAIR_OPTIONS.mirrorContent, ...options?.mirrorContent, metadataComponents: { ...DEFAULT_PAIR_OPTIONS.mirrorContent.metadataComponents, ...options?.mirrorContent?.metadataComponents } },
   };
+}
+
+function ReadOnlySetting({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-4 border-b py-2.5 last:border-b-0">
+      <span className="text-sm text-muted-foreground">{label}</span>
+      <span className="text-right text-sm font-medium text-foreground">{value || "—"}</span>
+    </div>
+  );
 }
 
 export function CreateMirrorPairPage() {
@@ -126,6 +135,16 @@ export function CreateMirrorPairPage() {
     }
   };
 
+  const mirrorTypeLabel = mirrorType === "two-way" ? "Two Way Mirror" : mirrorType === "one-way" ? "Source to Target" : "—";
+  const organizationStrategyLabel = options.organizationStructure.strategy === "preserve"
+    ? "Preserve Organization Structure"
+    : options.organizationStructure.strategy === "mixed"
+      ? "Mixed Mode"
+      : options.organizationStructure.strategy === "single-org"
+        ? "Dedicated Organization"
+        : "Flat User";
+  const starredModeLabel = options.organizationStructure.starredReposMode === "dedicated-org" ? "Dedicated Organization" : "Preserve Source Owner";
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -146,9 +165,30 @@ export function CreateMirrorPairPage() {
 
       <div className="grid grid-cols-1 items-start gap-6 md:grid-cols-2">
         <div className="flex flex-col gap-6">
+          {isEditing ? (
+            <SettingsCard icon={Settings} title="Settings">
+              <div className="grid grid-cols-1 divide-y md:grid-cols-2 md:divide-x md:divide-y-0">
+                <CardSection>
+                  <h2 className="mb-2 text-sm font-semibold">Mirror Settings</h2>
+                  <ReadOnlySetting label="Source Server" value={sourceServer ? `${sourceServer.name} (${SERVER_TYPE_LABELS[sourceServer.type]})` : "—"} />
+                  <ReadOnlySetting label="Target Server" value={targetServer ? `${targetServer.name} (${SERVER_TYPE_LABELS[targetServer.type]})` : "—"} />
+                  <ReadOnlySetting label="Mirror Type" value={mirrorTypeLabel} />
+                  <ReadOnlySetting label="Username" value={username} />
+                </CardSection>
+                <CardSection>
+                  <h2 className="mb-2 text-sm font-semibold">Organization Settings</h2>
+                  <ReadOnlySetting label="Organization Strategy" value={organizationStrategyLabel} />
+                  <ReadOnlySetting label="Starred Repositories" value={starredModeLabel} />
+                  <ReadOnlySetting label="Starred Repos Organization" value={options.organizationStructure.starredReposOrg ?? ""} />
+                  <ReadOnlySetting label="Destination Organization" value={options.organizationStructure.singleOrg ?? ""} />
+                  <ReadOnlySetting label="Organization Visibility" value={options.organizationStructure.visibility} />
+                </CardSection>
+              </div>
+            </SettingsCard>
+          ) : (
           <SettingsCard
             icon={GitCompareArrows}
-            title={isEditing ? "Edit Mirror Pair" : "Add Mirror Pair"}
+            title="Add Mirror Pair"
             footer={<StatusFooterItem icon={GitCompareArrows} label="Required before pair options can be configured" />}
           >
           <CardSection>
@@ -255,6 +295,7 @@ export function CreateMirrorPairPage() {
             )}
           </CardSection>
           </SettingsCard>
+          )}
 
           <PairOptionCards
             column="left"
@@ -263,6 +304,7 @@ export function CreateMirrorPairPage() {
             sourceServer={sourceServer}
             targetServer={targetServer}
             disabled={!pairIsComplete}
+            lockOrganization={isEditing}
           />
         </div>
 
@@ -273,6 +315,7 @@ export function CreateMirrorPairPage() {
           sourceServer={sourceServer}
           targetServer={targetServer}
           disabled={!pairIsComplete}
+          lockOrganization={isEditing}
         />
       </div>
 
