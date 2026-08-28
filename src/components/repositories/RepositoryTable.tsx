@@ -9,8 +9,8 @@ import {
   type SortingState,
 } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { FlipHorizontal, GitFork, MoreVertical, RefreshCw, RotateCcw, Star, Lock, Ban, Check, ChevronDown, SlidersHorizontal, Trash2, X } from "lucide-react";
-import { SiGithub, SiGitea } from "react-icons/si";
+import { FlipHorizontal, GitBranch, GitFork, MoreVertical, RefreshCw, RotateCcw, Star, Lock, Ban, Check, ChevronDown, SlidersHorizontal, Trash2, X } from "lucide-react";
+import { SiForgejo, SiGithub, SiGitea, SiGitlab } from "react-icons/si";
 import type { MirrorOverrides, Repository } from "@/lib/db/schema";
 import { Button } from "@/components/ui/button";
 import { formatLastSyncTime } from "@/lib/utils";
@@ -61,6 +61,34 @@ interface RepositoryTableProps {
   onDelete?: (repoId: string) => void;
   onApproveSync?: ({ repoId }: { repoId: string }) => Promise<void>;
   onDismissSync?: ({ repoId }: { repoId: string }) => Promise<void>;
+}
+
+type ForgeType = "github" | "gitlab" | "gitea" | "forgejo" | "git";
+
+function forgeTypeFromUrl(url?: string | null, fallback: ForgeType = "git"): ForgeType {
+  if (!url) return fallback;
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    if (host === "github.com" || host.endsWith(".github.com")) return "github";
+    if (host === "gitlab.com" || host.includes("gitlab")) return "gitlab";
+    if (host.includes("forgejo")) return "forgejo";
+    if (host.includes("gitea")) return "gitea";
+  } catch {
+    // Generic Git URLs do not always parse as browser URLs.
+  }
+  return fallback;
+}
+
+function forgeLabel(type: ForgeType) {
+  return type === "github" ? "GitHub" : type === "gitlab" ? "GitLab" : type === "gitea" ? "Gitea" : type === "forgejo" ? "Forgejo" : "Git";
+}
+
+function ForgeIcon({ type, className = "h-4 w-4" }: { type: ForgeType; className?: string }) {
+  if (type === "github") return <SiGithub className={className} />;
+  if (type === "gitlab") return <SiGitlab className={className} />;
+  if (type === "gitea") return <SiGitea className={className} />;
+  if (type === "forgejo") return <SiForgejo className={className} />;
+  return <GitBranch className={className} />;
 }
 
 function getTimestamp(value: Date | string | null | undefined): number {
@@ -390,6 +418,8 @@ export default function RepositoryTable({
     const isLoading = repo.id ? loadingRepoIds.has(repo.id) : false;
     const isSelected = repo.id ? selectedRepoIds.has(repo.id) : false;
     const giteaUrl = getGiteaRepoUrl(repo);
+    const sourceForge = forgeTypeFromUrl(repo.url);
+    const targetForge = forgeTypeFromUrl(giteaConfig?.externalUrl || giteaConfig?.url, "gitea");
 
     return (
       <Card className="mb-3">
@@ -612,11 +642,11 @@ export default function RepositoryTable({
                     href={repo.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    title="View on GitHub"
+                    title={`View on ${forgeLabel(sourceForge)}`}
                     className="flex items-center justify-center gap-2"
                   >
-                    <SiGithub className="h-4 w-4 flex-shrink-0" />
-                    <span className="text-xs">GitHub</span>
+                    <ForgeIcon type={sourceForge} className="h-4 w-4 flex-shrink-0" />
+                    <span className="text-xs">{forgeLabel(sourceForge)}</span>
                   </a>
                 </Button>
                 {giteaUrl ? (
@@ -625,17 +655,17 @@ export default function RepositoryTable({
                       href={giteaUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      title="View on Gitea"
+                      title={`View on ${forgeLabel(targetForge)}`}
                       className="flex items-center justify-center gap-2"
                     >
-                      <SiGitea className="h-4 w-4 flex-shrink-0" />
-                      <span className="text-xs">Gitea</span>
+                      <ForgeIcon type={targetForge} className="h-4 w-4 flex-shrink-0" />
+                      <span className="text-xs">{forgeLabel(targetForge)}</span>
                     </a>
                   </Button>
                 ) : (
                   <Button variant="outline" size="default" disabled className="flex-1 h-10 min-w-0">
-                    <SiGitea className="h-4 w-4" />
-                    <span className="text-xs ml-2">Gitea</span>
+                    <ForgeIcon type={targetForge} className="h-4 w-4" />
+                    <span className="text-xs ml-2">{forgeLabel(targetForge)}</span>
                   </Button>
                 )}
               </div>
@@ -831,6 +861,8 @@ export default function RepositoryTable({
                   const repo = visibleRepositories[virtualRow.index];
                   if (!repo) return null;
                   const isLoading = loadingRepoIds.has(repo.id ?? "");
+                  const sourceForge = forgeTypeFromUrl(repo.url);
+                  const targetForge = forgeTypeFromUrl(giteaConfig?.externalUrl || giteaConfig?.url, "gitea");
 
                   return (
                     <div
@@ -982,17 +1014,17 @@ export default function RepositoryTable({
                           // Determine tooltip based on status and configuration
                           let tooltip: string;
                           if (!giteaConfig?.url) {
-                            tooltip = "Gitea not configured";
+                            tooltip = `${forgeLabel(targetForge)} not configured`;
                           } else if (repo.status === 'imported') {
-                            tooltip = "Repository not yet mirrored to Gitea";
+                            tooltip = `Repository not yet mirrored to ${forgeLabel(targetForge)}`;
                           } else if (repo.status === 'failed') {
-                            tooltip = "Repository mirroring failed";
+                            tooltip = `${forgeLabel(targetForge)} mirroring failed`;
                           } else if (repo.status === 'mirroring') {
-                            tooltip = "Repository is being mirrored to Gitea";
+                            tooltip = `Repository is being mirrored to ${forgeLabel(targetForge)}`;
                           } else if (giteaUrl) {
-                            tooltip = "View on Gitea";
+                            tooltip = `View on ${forgeLabel(targetForge)}`;
                           } else {
-                            tooltip = "Gitea repository not available";
+                            tooltip = `${forgeLabel(targetForge)} repository not available`;
                           }
 
                           return giteaUrl ? (
@@ -1003,12 +1035,12 @@ export default function RepositoryTable({
                                 rel="noopener noreferrer"
                                 title={tooltip}
                               >
-                                <SiGitea className="h-4 w-4" />
+                                <ForgeIcon type={targetForge} />
                               </a>
                             </Button>
                           ) : (
                             <Button variant="ghost" size="icon" disabled title={tooltip}>
-                              <SiGitea className="h-4 w-4" />
+                              <ForgeIcon type={targetForge} />
                             </Button>
                           );
                         })()}
@@ -1017,9 +1049,9 @@ export default function RepositoryTable({
                             href={repo.url}
                             target="_blank"
                             rel="noopener noreferrer"
-                            title="View on GitHub"
+                            title={`View on ${forgeLabel(sourceForge)}`}
                           >
-                            <SiGithub className="h-4 w-4" />
+                            <ForgeIcon type={sourceForge} />
                           </a>
                         </Button>
                       </div>
