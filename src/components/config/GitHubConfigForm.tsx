@@ -47,6 +47,8 @@ interface GitHubConfigFormProps {
   part?: "connection" | "settings" | "selection" | "protection";
   /** Let the settings cards participate directly in a parent CSS grid. */
   cardsInGrid?: boolean;
+  /** Hide star-list filtering when this form is embedded in pair setup. */
+  hideStarLists?: boolean;
 }
 
 const backupStrategies = [
@@ -96,6 +98,7 @@ export function GitHubConfigForm({
   isAutoSaving,
   part = "connection",
   cardsInGrid = false,
+  hideStarLists = false,
 }: GitHubConfigFormProps) {
   const [isLoading, setIsLoading] = useState(false);
 
@@ -226,6 +229,7 @@ export function GitHubConfigForm({
 
   const selectionCard = <GitHubMirrorSettings
         part="selection"
+        hideStarLists={hideStarLists}
         githubConfig={config}
         mirrorOptions={mirrorOptions}
         advancedOptions={advancedOptions}

@@ -76,6 +76,8 @@ interface GitHubMirrorSettingsProps {
   onAdvancedOptionsChange: (options: AdvancedOptions) => void;
   /** Which card to render; defaults to both. */
   part?: "selection" | "content" | "both";
+  /** Hide star-list filtering in pair-specific repository selection. */
+  hideStarLists?: boolean;
 }
 
 export function GitHubMirrorSettings({
@@ -86,6 +88,7 @@ export function GitHubMirrorSettings({
   onMirrorOptionsChange,
   onAdvancedOptionsChange,
   part = "both",
+  hideStarLists = false,
 }: GitHubMirrorSettingsProps) {
   const [starListsOpen, setStarListsOpen] = React.useState(false);
   const [starListSearch, setStarListSearch] = React.useState("");
@@ -596,7 +599,7 @@ export function GitHubMirrorSettings({
                 right={starredContentPopover}
               />
 
-              <div className="space-y-2">
+              {!hideStarLists && <div className="space-y-2">
                 <Label className="text-xs font-medium text-muted-foreground">
                   Star lists (optional)
                 </Label>
@@ -728,7 +731,7 @@ export function GitHubMirrorSettings({
                     Add
                   </Button>
                 </div>
-              </div>
+              </div>}
 
               <OptionRow
                 icon={FileCode2}
