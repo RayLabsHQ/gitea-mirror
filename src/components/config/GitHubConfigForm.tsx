@@ -9,9 +9,7 @@ import {
   Activity,
   CircleOff,
   DatabaseBackup,
-  ExternalLink,
   Hand,
-  KeyRound,
   PlugZap,
   ShieldAlert,
   ShieldCheck,
@@ -28,6 +26,7 @@ import {
   CardDivider,
   CardSection,
 } from "./settings-ui";
+import { TokenCreationGuide } from "./TokenCreationGuide";
 
 interface GitHubConfigFormProps {
   config: GitHubConfig;
@@ -207,39 +206,16 @@ export function GitHubConfigForm({
             </p>
           </div>
 
-          <div className="space-y-3 rounded-lg bg-muted/40 p-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <KeyRound className="h-4 w-4 text-muted-foreground" />
-                <span className="text-[13px] font-semibold text-muted-foreground">
-                  Creating your token
-                </span>
-              </div>
-              <a
-                href="https://github.com/settings/tokens"
-                target="_blank"
-                rel="noopener noreferrer"
-                title="Open github.com/settings/tokens"
-                aria-label="Open GitHub token settings"
-                className="text-indigo-500 hover:text-indigo-400"
-              >
-                <ExternalLink className="h-4 w-4" />
-              </a>
-            </div>
-            <ol className="list-decimal space-y-1.5 pl-4 text-xs leading-relaxed text-muted-foreground">
-              <li>GitHub → Settings → Developer settings</li>
-              <li>Personal access tokens → Generate new token (classic)</li>
-              <li>Select the scopes below and paste the token here</li>
-            </ol>
-            <div className="flex items-center gap-2">
-              <code className="rounded bg-muted px-2 py-0.5 font-mono text-[11px] text-muted-foreground">
-                repo
-              </code>
-              <code className="rounded bg-muted px-2 py-0.5 font-mono text-[11px] text-muted-foreground">
-                admin:org
-              </code>
-            </div>
-          </div>
+          <TokenCreationGuide
+            settingsUrl="https://github.com/settings/tokens"
+            settingsTitle="Open GitHub token settings"
+            steps={[
+              "GitHub → Settings → Developer settings",
+              "Personal access tokens → Generate new token (classic)",
+              "Select the scopes below and paste the token here",
+            ]}
+            scopes={["repo", "admin:org"]}
+          />
         </CardSection>
       </SettingsCard>
     );

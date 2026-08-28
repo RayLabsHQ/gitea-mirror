@@ -23,7 +23,7 @@ import { toast } from "sonner";
 import type { Server } from "@/lib/db/schema";
 import { apiRequest, formatDate, showErrorToast } from "@/lib/utils";
 import { useNavigation } from "@/components/layout/MainLayout";
-import { ServerDialog } from "./ServerDialog";
+import { ServerCard } from "./ServerCard";
 import { MatrixView } from "./MatrixView";
 import {
   SERVER_TYPE_LABELS,
@@ -36,7 +36,7 @@ export function ServersView() {
   const [servers, setServers] = useState<Server[]>([]);
   const [pairs, setPairs] = useState<MirrorPairWithServers[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
-  const [isDialogOpen, setIsDialogOpen] = useState<boolean>(false);
+  const [isServerCardOpen, setIsServerCardOpen] = useState<boolean>(false);
   const [editingServer, setEditingServer] = useState<Server | null>(null);
   const [serverToDelete, setServerToDelete] = useState<Server | null>(null);
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
@@ -89,12 +89,12 @@ export function ServersView() {
 
   const handleAddServer = () => {
     setEditingServer(null);
-    setIsDialogOpen(true);
+    setIsServerCardOpen(true);
   };
 
   const handleEditServer = (server: Server) => {
     setEditingServer(server);
-    setIsDialogOpen(true);
+    setIsServerCardOpen(true);
   };
 
   const handleTestConnection = async (server: Server) => {
@@ -168,11 +168,31 @@ export function ServersView() {
             >
               <RefreshCw className="h-4 w-4" />
             </Button>
-            <Button variant="default" onClick={handleAddServer} className="h-10 px-4 ml-auto">
+            <Button
+              variant="default"
+              onClick={handleAddServer}
+              disabled={isServerCardOpen && editingServer === null}
+              className="h-10 px-4 ml-auto"
+            >
               <Plus className="h-4 w-4 mr-2" />
               Add Server
             </Button>
           </div>
+
+          {isServerCardOpen && (
+            <ServerCard
+              server={editingServer}
+              onCancel={() => {
+                setIsServerCardOpen(false);
+                setEditingServer(null);
+              }}
+              onSaved={async () => {
+                setIsServerCardOpen(false);
+                setEditingServer(null);
+                await fetchServers();
+              }}
+            />
+          )}
 
           {isLoading ? (
             <div className="border rounded-md">
@@ -190,11 +210,13 @@ export function ServersView() {
               ))}
             </div>
           ) : servers.length === 0 ? (
-            <div className="border rounded-md text-center py-12">
-              <p className="text-muted-foreground">
-                No servers configured yet. Add a server to start building your mirror matrix.
-              </p>
-            </div>
+            isServerCardOpen ? null : (
+              <div className="border rounded-md text-center py-12">
+                <p className="text-muted-foreground">
+                  No servers configured yet. Add a server to start building your mirror matrix.
+                </p>
+              </div>
+            )
           ) : (
             <div className="border rounded-md overflow-x-auto">
               <div className="min-w-[760px]">
@@ -279,13 +301,6 @@ export function ServersView() {
           />
         </TabsContent>
       </Tabs>
-
-      <ServerDialog
-        isOpen={isDialogOpen}
-        setIsOpen={setIsDialogOpen}
-        server={editingServer}
-        onSaved={fetchServers}
-      />
 
       <Dialog
         open={serverToDelete !== null}
