@@ -79,6 +79,9 @@ const DEFAULT_OPTIONS: MirrorPairOptions = {
   },
   organizationStructure: {
     strategy: "preserve",
+    starredReposOrg: "starred",
+    starredReposMode: "dedicated-org",
+    visibility: "public",
   },
   destructiveProtection: {
     detectForcePush: true,
@@ -420,6 +423,7 @@ export function PairSettingsDialog({
                   <SelectItem value="preserve">Preserve structure</SelectItem>
                   <SelectItem value="single-org">Single org</SelectItem>
                   <SelectItem value="flat-user">Flat (under user)</SelectItem>
+                  <SelectItem value="mixed">Mixed mode</SelectItem>
                 </SelectContent>
               </Select>
             </div>

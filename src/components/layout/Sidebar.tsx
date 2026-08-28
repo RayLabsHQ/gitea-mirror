@@ -96,7 +96,9 @@ export function Sidebar({ className, onNavigate, isOpen, isCollapsed = false, on
               : "gap-y-1 pl-2 pr-3"
           )}>
             {links.map((link, index) => {
-              const isActive = currentPath === link.href;
+              const isActive =
+                currentPath === link.href ||
+                (link.href === "/servers" && currentPath.startsWith("/servers/"));
               const Icon = link.icon;
               
               const button = (

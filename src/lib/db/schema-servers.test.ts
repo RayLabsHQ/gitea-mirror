@@ -82,12 +82,37 @@ describe("mirrorPairSchema", () => {
     expect(parsed.enabled).toBe(true);
     expect(parsed.options.repositorySelection.mode).toBe("all");
     expect(parsed.options.organizationStructure.strategy).toBe("preserve");
+    expect(parsed.options.organizationStructure.starredReposMode).toBe("dedicated-org");
+    expect(parsed.options.organizationStructure.visibility).toBe("public");
     expect(parsed.options.destructiveProtection.backupStrategy).toBe("on-force-push");
     expect(parsed.options.mirrorContent.wiki).toBe(false);
   });
 
   test("accepts a two-way pair", () => {
     expect(mirrorPairSchema.parse({ ...validPair, mirrorType: "two-way" }).mirrorType).toBe("two-way");
+  });
+
+  test("accepts the full organization configuration", () => {
+    const parsed = mirrorPairSchema.parse({
+      ...validPair,
+      options: {
+        organizationStructure: {
+          strategy: "mixed",
+          singleOrg: "personal-mirrors",
+          starredReposOrg: "starred-mirrors",
+          starredReposMode: "preserve-owner",
+          visibility: "limited",
+        },
+      },
+    });
+
+    expect(parsed.options.organizationStructure).toMatchObject({
+      strategy: "mixed",
+      singleOrg: "personal-mirrors",
+      starredReposOrg: "starred-mirrors",
+      starredReposMode: "preserve-owner",
+      visibility: "limited",
+    });
   });
 
   test("rejects an unknown mirror type", () => {

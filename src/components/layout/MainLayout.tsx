@@ -8,6 +8,7 @@ import { ConfigTabs } from "../config/ConfigTabs";
 import { ActivityLog } from "../activity/ActivityLog";
 import { Organization } from "../organizations/Organization";
 import { ServersView } from "../servers/ServersView";
+import { CreateMirrorPairPage } from "../servers/CreateMirrorPairPage";
 import { Toaster } from "@/components/ui/sonner";
 import { useAuth } from "@/hooks/useAuth";
 import { useRepoSync } from "@/hooks/useSyncRepo";
@@ -25,6 +26,7 @@ interface AppProps {
     | "repositories"
     | "organizations"
     | "servers"
+    | "mirror-pair-new"
     | "configuration"
     | "activity-log";
   "client:load"?: boolean;
@@ -80,6 +82,7 @@ function AppWithProviders({ page: initialPage }: AppProps) {
         '/repositories': 'repositories',
         '/organizations': 'organizations',
         '/servers': 'servers',
+        '/servers/pairs/new': 'mirror-pair-new',
         '/config': 'configuration',
         '/activity': 'activity-log'
       };
@@ -160,6 +163,7 @@ function AppWithProviders({ page: initialPage }: AppProps) {
             {currentPage === "repositories" && <Repository />}
             {currentPage === "organizations" && <Organization />}
             {currentPage === "servers" && <ServersView />}
+            {currentPage === "mirror-pair-new" && <CreateMirrorPairPage />}
             {currentPage === "configuration" && <ConfigTabs />}
             {currentPage === "activity-log" && <ActivityLog />}
           </section>

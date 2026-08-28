@@ -45,6 +45,8 @@ interface GitHubConfigFormProps {
   /** Which card group to render: the connection card, or the settings stack
    *  (repository selection + destructive update protection). */
   part?: "connection" | "settings";
+  /** Let the settings cards participate directly in a parent CSS grid. */
+  cardsInGrid?: boolean;
 }
 
 const backupStrategies = [
@@ -92,7 +94,8 @@ export function GitHubConfigForm({
   onAdvancedOptionsAutoSave,
   onGiteaAutoSave,
   isAutoSaving,
-  part = "connection"
+  part = "connection",
+  cardsInGrid = false,
 }: GitHubConfigFormProps) {
   const [isLoading, setIsLoading] = useState(false);
 
@@ -222,7 +225,7 @@ export function GitHubConfigForm({
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className={cardsInGrid ? "contents" : "flex flex-col gap-6"}>
       <GitHubMirrorSettings
         part="selection"
         githubConfig={config}

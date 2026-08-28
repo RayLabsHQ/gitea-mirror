@@ -42,6 +42,21 @@ export function ServersView() {
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
   const [testingServerIds, setTestingServerIds] = useState<Set<string>>(new Set());
   const { navigationKey } = useNavigation();
+  const defaultTab =
+    typeof window !== "undefined" &&
+    new URLSearchParams(window.location.search).get("tab") === "matrix"
+      ? "matrix"
+      : "servers";
+
+  const handleTabChange = (value: string) => {
+    const url = new URL(window.location.href);
+    if (value === "matrix") {
+      url.searchParams.set("tab", "matrix");
+    } else {
+      url.searchParams.delete("tab");
+    }
+    window.history.replaceState({}, "", url);
+  };
 
   const fetchServers = useCallback(async () => {
     try {
@@ -151,7 +166,7 @@ export function ServersView() {
 
   return (
     <div className="flex flex-col gap-y-4 sm:gap-y-6">
-      <Tabs defaultValue="servers" className="space-y-4">
+      <Tabs defaultValue={defaultTab} onValueChange={handleTabChange} className="space-y-4">
         <TabsList className="grid h-auto w-full grid-cols-2 sm:max-w-[400px]">
           <TabsTrigger value="servers">Servers</TabsTrigger>
           <TabsTrigger value="matrix">Flow / Matrix</TabsTrigger>

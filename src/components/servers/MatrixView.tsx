@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
@@ -11,7 +11,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -21,7 +20,8 @@ import {
 } from "@/components/ui/select";
 import { LoaderCircle, Plus, Settings2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import type { MirrorType, Server, ServerType } from "@/lib/db/schema";
+import type { Server, ServerType } from "@/lib/db/schema";
+import { withBase } from "@/lib/base-path";
 import { apiRequest, showErrorToast } from "@/lib/utils";
 import { PairSettingsDialog } from "./PairSettingsDialog";
 import {
@@ -39,32 +39,10 @@ interface MatrixViewProps {
 }
 
 export function MatrixView({ servers, pairs, isLoading, onRefresh }: MatrixViewProps) {
-  const [isAddDialogOpen, setIsAddDialogOpen] = useState<boolean>(false);
   const [settingsPair, setSettingsPair] = useState<MirrorPairWithServers | null>(null);
   const [pairToDelete, setPairToDelete] = useState<MirrorPairWithServers | null>(null);
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
   const [updatingPairIds, setUpdatingPairIds] = useState<Set<string>>(new Set());
-
-  // Add-pair dialog state
-  const [newSourceId, setNewSourceId] = useState<string>("");
-  const [newTargetId, setNewTargetId] = useState<string>("");
-  const [newMirrorType, setNewMirrorType] = useState<MirrorType>("one-way");
-  const [newUsername, setNewUsername] = useState<string>("");
-  const [isAdding, setIsAdding] = useState<boolean>(false);
-
-  useEffect(() => {
-    if (isAddDialogOpen) {
-      setNewSourceId("");
-      setNewTargetId("");
-      setNewMirrorType("one-way");
-      setNewUsername("");
-    }
-  }, [isAddDialogOpen]);
-
-  const newSourceServer = servers.find((s) => s.id === newSourceId);
-  const newUsernames = newSourceServer
-    ? usernamesForType(servers, newSourceServer.type)
-    : [];
 
   const updatePair = async (
     pairId: string,
@@ -102,41 +80,6 @@ export function MatrixView({ servers, pairs, isLoading, onRefresh }: MatrixViewP
 
   const handleChangeUsername = (pair: MirrorPairWithServers, username: string) => {
     updatePair(pair.id, { username }, "Mirror pair username updated");
-  };
-
-  const handleAddPair = async (e: React.FormEvent) => {
-    e.preventDefault();
-
-    if (!newSourceId || !newTargetId || !newUsername) {
-      toast.error("Please select a source, target, and username.");
-      return;
-    }
-
-    try {
-      setIsAdding(true);
-
-      const response = await apiRequest<MatrixPairApiResponse>("/matrix", {
-        method: "POST",
-        data: {
-          sourceServerId: newSourceId,
-          targetServerId: newTargetId,
-          username: newUsername,
-          mirrorType: newMirrorType,
-        },
-      });
-
-      if (response.success) {
-        toast.success(response.message || "Mirror pair added");
-        setIsAddDialogOpen(false);
-        onRefresh();
-      } else {
-        showErrorToast(response.message || "Failed to add mirror pair", toast);
-      }
-    } catch (error) {
-      showErrorToast(error, toast);
-    } finally {
-      setIsAdding(false);
-    }
   };
 
   const handleDeletePair = async () => {
@@ -200,7 +143,9 @@ export function MatrixView({ servers, pairs, isLoading, onRefresh }: MatrixViewP
       <div className="flex items-center gap-2">
         <Button
           variant="default"
-          onClick={() => setIsAddDialogOpen(true)}
+          onClick={() => {
+            window.location.href = withBase("/servers/pairs/new");
+          }}
           className="h-10 px-4 ml-auto"
         >
           <Plus className="h-4 w-4 mr-2" />
@@ -312,118 +257,6 @@ export function MatrixView({ servers, pairs, isLoading, onRefresh }: MatrixViewP
           </div>
         </div>
       )}
-
-      <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-        <DialogContent className="w-[calc(100%-2rem)] sm:max-w-[425px] gap-0 gap-y-6 mx-4 sm:mx-0">
-          <DialogHeader>
-            <DialogTitle>Add Mirror Pair</DialogTitle>
-            <DialogDescription>
-              Choose a source and target server to start mirroring.
-            </DialogDescription>
-          </DialogHeader>
-
-          <form onSubmit={handleAddPair} className="flex flex-col gap-y-4">
-            <div>
-              <Label className="block text-sm font-medium mb-1.5">Source Server</Label>
-              <Select
-                value={newSourceId}
-                onValueChange={(val) => {
-                  setNewSourceId(val);
-                  const source = servers.find((s) => s.id === val);
-                  setNewUsername(source?.username ?? "");
-                }}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select source server" />
-                </SelectTrigger>
-                <SelectContent>
-                  {servers.map((server) => (
-                    <SelectItem key={server.id} value={server.id}>
-                      {server.name} ({SERVER_TYPE_LABELS[server.type] ?? server.type})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div>
-              <Label className="block text-sm font-medium mb-1.5">Target Server</Label>
-              <Select value={newTargetId} onValueChange={setNewTargetId}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select target server" />
-                </SelectTrigger>
-                <SelectContent>
-                  {servers.map((server) => (
-                    <SelectItem key={server.id} value={server.id}>
-                      {server.name} ({SERVER_TYPE_LABELS[server.type] ?? server.type})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div>
-              <Label className="block text-sm font-medium mb-1.5">Mirror Type</Label>
-              <Select
-                value={newMirrorType}
-                onValueChange={(val) => setNewMirrorType(val as MirrorType)}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select mirror type" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="one-way">{"=> Source to Target"}</SelectItem>
-                  <SelectItem value="two-way">{"<=> Two Way Mirror"}</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div>
-              <Label className="block text-sm font-medium mb-1.5">Username</Label>
-              <Select
-                value={newUsername}
-                onValueChange={setNewUsername}
-                disabled={!newSourceServer || newUsernames.length === 0}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue
-                    placeholder={
-                      newSourceServer
-                        ? "Select username"
-                        : "Select a source server first"
-                    }
-                  />
-                </SelectTrigger>
-                <SelectContent>
-                  {newUsernames.map((username) => (
-                    <SelectItem key={username} value={username}>
-                      {username}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="flex justify-between pt-2">
-              <Button
-                type="button"
-                variant="outline"
-                disabled={isAdding}
-                onClick={() => setIsAddDialogOpen(false)}
-              >
-                Cancel
-              </Button>
-              <Button type="submit" disabled={isAdding}>
-                {isAdding ? (
-                  <LoaderCircle className="h-4 w-4 animate-spin" />
-                ) : (
-                  "Add Pair"
-                )}
-              </Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
 
       <PairSettingsDialog
         pair={settingsPair}

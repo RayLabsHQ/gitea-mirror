@@ -864,11 +864,31 @@ export const mirrorPairRepositorySelectionSchema = z.object({
   includeForks: z.boolean().default(false),
   includeArchived: z.boolean().default(false),
   includePrivate: z.boolean().default(true),
+  privateRepositories: z.boolean().default(true),
+  includeCollaboratorRepos: z.boolean().default(true),
+  includeOrganizations: z.array(z.string()).default([]),
+  mirrorStarred: z.boolean().default(false),
+  starredLists: z.array(z.string()).default([]),
+  starredDuplicateStrategy: z.enum(["suffix", "prefix", "owner-org"]).default("suffix"),
+  starredReposMode: z.enum(["dedicated-org", "preserve-owner"]).default("dedicated-org"),
+  skipForks: z.boolean().default(false),
+  starredCodeOnly: z.boolean().default(false),
+  autoMirrorStarred: z.boolean().default(false),
+  skipPersonalRepos: z.boolean().default(false),
 });
 
 export const mirrorPairOrgStructureSchema = z.object({
-  strategy: z.enum(["preserve", "single-org", "flat-user"]).default("preserve"),
+  strategy: z
+    .enum(["preserve", "single-org", "flat-user", "mixed"])
+    .default("preserve"),
   singleOrg: z.string().optional(),
+  starredReposOrg: z.string().default("starred"),
+  starredReposMode: z
+    .enum(["dedicated-org", "preserve-owner"])
+    .default("dedicated-org"),
+  visibility: z.enum(["public", "private", "limited"]).default("public"),
+  personalReposOrg: z.string().optional(),
+  preserveOrgStructure: z.boolean().default(true),
 });
 
 export const mirrorPairDestructiveProtectionSchema = z.object({
@@ -876,6 +896,8 @@ export const mirrorPairDestructiveProtectionSchema = z.object({
   backupStrategy: backupStrategyEnum.default("on-force-push"),
   backupRetentionCount: z.number().int().min(1).default(5),
   backupRetentionDays: z.number().int().min(0).default(30),
+  backupDirectory: z.string().default("data/repo-backups"),
+  blockSyncOnBackupFailure: z.boolean().default(false),
 });
 
 export const mirrorPairContentSchema = z.object({
@@ -886,6 +908,17 @@ export const mirrorPairContentSchema = z.object({
   labels: z.boolean().default(false),
   milestones: z.boolean().default(false),
   wiki: z.boolean().default(false),
+  mirrorReleases: z.boolean().default(false),
+  releaseLimit: z.number().int().min(1).default(10),
+  mirrorLFS: z.boolean().default(false),
+  mirrorMetadata: z.boolean().default(false),
+  metadataComponents: z.object({
+    issues: z.boolean().default(false),
+    pullRequests: z.boolean().default(false),
+    labels: z.boolean().default(false),
+    milestones: z.boolean().default(false),
+    wiki: z.boolean().default(false),
+  }).prefault({}),
 });
 
 export const mirrorPairOptionsSchema = z.object({
@@ -1006,7 +1039,7 @@ export const mirrorPairs = sqliteTable("mirror_pairs", {
   options: text("options", { mode: "json" })
     .$type<MirrorPairOptions>()
     .notNull()
-    .default(sql`'{"repositorySelection":{"mode":"all","selectedRepos":[],"includePatterns":[],"excludePatterns":[],"includeForks":false,"includeArchived":false,"includePrivate":true},"organizationStructure":{"strategy":"preserve"},"destructiveProtection":{"detectForcePush":true,"backupStrategy":"on-force-push","backupRetentionCount":5,"backupRetentionDays":30},"mirrorContent":{"releases":false,"lfs":false,"issues":false,"pullRequests":false,"labels":false,"milestones":false,"wiki":false}}'`),
+    .default(sql`'{"repositorySelection":{"mode":"all","selectedRepos":[],"includePatterns":[],"excludePatterns":[],"includeForks":false,"includeArchived":false,"includePrivate":true},"organizationStructure":{"strategy":"preserve","starredReposOrg":"starred","starredReposMode":"dedicated-org","visibility":"public"},"destructiveProtection":{"detectForcePush":true,"backupStrategy":"on-force-push","backupRetentionCount":5,"backupRetentionDays":30},"mirrorContent":{"releases":false,"lfs":false,"issues":false,"pullRequests":false,"labels":false,"milestones":false,"wiki":false}}'`),
   createdAt: integer("created_at", { mode: "timestamp" })
     .notNull()
     .default(sql`(unixepoch())`),
