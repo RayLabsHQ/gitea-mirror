@@ -93,7 +93,7 @@ const MappingPreview: React.FC<{
     return (
       <div className="flex items-center justify-between gap-6">
         <div className="flex-1">
-          <div className="text-xs font-medium text-muted-foreground mb-2">GitHub</div>
+          <div className="text-xs font-medium text-muted-foreground mb-2">Source</div>
           <div className="space-y-1.5">
             <div className="flex items-center gap-2 p-1.5 bg-gray-50 dark:bg-gray-800 rounded text-xs">
               <User className="h-3 w-3" />
@@ -115,7 +115,7 @@ const MappingPreview: React.FC<{
         </div>
         
         <div className="flex-1">
-          <div className="text-xs font-medium text-muted-foreground mb-2">Gitea</div>
+          <div className="text-xs font-medium text-muted-foreground mb-2">Target</div>
           <div className="space-y-1.5">
             <div className={cn("flex items-center gap-2 p-1.5 rounded text-xs", config.repoColors.bg)}>
               <User className={cn("h-3 w-3", config.repoColors.icon)} />
@@ -139,7 +139,7 @@ const MappingPreview: React.FC<{
     return (
       <div className="flex items-center justify-between gap-6">
         <div className="flex-1">
-          <div className="text-xs font-medium text-muted-foreground mb-2">GitHub</div>
+          <div className="text-xs font-medium text-muted-foreground mb-2">Source</div>
           <div className="space-y-1.5">
             <div className="flex items-center gap-2 p-1.5 bg-gray-50 dark:bg-gray-800 rounded text-xs">
               <User className="h-3 w-3" />
@@ -161,7 +161,7 @@ const MappingPreview: React.FC<{
         </div>
         
         <div className="flex-1">
-          <div className="text-xs font-medium text-muted-foreground mb-2">Gitea</div>
+          <div className="text-xs font-medium text-muted-foreground mb-2">Target</div>
           <div className="space-y-1.5">
             <div className={cn("flex items-center gap-2 p-1.5 rounded text-xs", config.repoColors.bg)}>
               <Building2 className={cn("h-3 w-3", config.repoColors.icon)} />
@@ -185,7 +185,7 @@ const MappingPreview: React.FC<{
     return (
       <div className="flex items-center justify-between gap-6">
         <div className="flex-1">
-          <div className="text-xs font-medium text-muted-foreground mb-2">GitHub</div>
+          <div className="text-xs font-medium text-muted-foreground mb-2">Source</div>
           <div className="space-y-1.5">
             <div className="flex items-center gap-2 p-1.5 bg-gray-50 dark:bg-gray-800 rounded text-xs">
               <User className="h-3 w-3" />
@@ -207,7 +207,7 @@ const MappingPreview: React.FC<{
         </div>
         
         <div className="flex-1">
-          <div className="text-xs font-medium text-muted-foreground mb-2">Gitea</div>
+          <div className="text-xs font-medium text-muted-foreground mb-2">Target</div>
           <div className="space-y-1.5">
             <div className={cn("flex items-center gap-2 p-1.5 rounded text-xs", config.repoColors.bg)}>
               <User className={cn("h-3 w-3", config.repoColors.icon)} />
@@ -231,7 +231,7 @@ const MappingPreview: React.FC<{
     return (
       <div className="flex items-center justify-between gap-6">
         <div className="flex-1">
-          <div className="text-xs font-medium text-muted-foreground mb-2">GitHub</div>
+          <div className="text-xs font-medium text-muted-foreground mb-2">Source</div>
           <div className="space-y-1.5">
             <div className="flex items-center gap-2 p-1.5 bg-gray-50 dark:bg-gray-800 rounded text-xs">
               <User className="h-3 w-3" />
@@ -253,7 +253,7 @@ const MappingPreview: React.FC<{
         </div>
         
         <div className="flex-1">
-          <div className="text-xs font-medium text-muted-foreground mb-2">Gitea</div>
+          <div className="text-xs font-medium text-muted-foreground mb-2">Target</div>
           <div className="space-y-1.5">
             <div className={cn("flex items-center gap-2 p-1.5 rounded text-xs", config.repoColors.bg)}>
               <Building2 className={cn("h-3 w-3", config.repoColors.icon)} />
