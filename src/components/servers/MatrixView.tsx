@@ -23,7 +23,6 @@ import { toast } from "sonner";
 import type { Server, ServerType } from "@/lib/db/schema";
 import { withBase } from "@/lib/base-path";
 import { apiRequest, showErrorToast } from "@/lib/utils";
-import { PairSettingsDialog } from "./PairSettingsDialog";
 import {
   SERVER_TYPE_LABELS,
   usernamesForType,
@@ -39,7 +38,6 @@ interface MatrixViewProps {
 }
 
 export function MatrixView({ servers, pairs, isLoading, onRefresh }: MatrixViewProps) {
-  const [settingsPair, setSettingsPair] = useState<MirrorPairWithServers | null>(null);
   const [pairToDelete, setPairToDelete] = useState<MirrorPairWithServers | null>(null);
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
   const [updatingPairIds, setUpdatingPairIds] = useState<Set<string>>(new Set());
@@ -237,7 +235,9 @@ export function MatrixView({ servers, pairs, isLoading, onRefresh }: MatrixViewP
                     <Button
                       variant="outline"
                       size="icon"
-                      onClick={() => setSettingsPair(pair)}
+                      onClick={() => {
+                        window.location.href = withBase(`/servers/pairs/${pair.id}/edit`);
+                      }}
                       title="Pair settings"
                     >
                       <Settings2 className="h-4 w-4" />
@@ -257,18 +257,6 @@ export function MatrixView({ servers, pairs, isLoading, onRefresh }: MatrixViewP
           </div>
         </div>
       )}
-
-      <PairSettingsDialog
-        pair={settingsPair}
-        servers={servers}
-        isOpen={settingsPair !== null}
-        setIsOpen={(open) => {
-          if (!open) {
-            setSettingsPair(null);
-          }
-        }}
-        onSaved={onRefresh}
-      />
 
       <Dialog
         open={pairToDelete !== null}

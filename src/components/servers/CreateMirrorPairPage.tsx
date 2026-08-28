@@ -24,9 +24,23 @@ import {
   usernamesForType,
   type MatrixPairApiResponse,
   type ServersApiResponse,
+  type MirrorPairWithServers,
 } from "./shared";
 
+function mergeOptions(options?: Partial<MirrorPairOptions>): MirrorPairOptions {
+  return {
+    ...DEFAULT_PAIR_OPTIONS,
+    ...options,
+    repositorySelection: { ...DEFAULT_PAIR_OPTIONS.repositorySelection, ...options?.repositorySelection },
+    organizationStructure: { ...DEFAULT_PAIR_OPTIONS.organizationStructure, ...options?.organizationStructure },
+    destructiveProtection: { ...DEFAULT_PAIR_OPTIONS.destructiveProtection, ...options?.destructiveProtection },
+    mirrorContent: { ...DEFAULT_PAIR_OPTIONS.mirrorContent, ...options?.mirrorContent, metadataComponents: { ...DEFAULT_PAIR_OPTIONS.mirrorContent.metadataComponents, ...options?.mirrorContent?.metadataComponents } },
+  };
+}
+
 export function CreateMirrorPairPage() {
+  const editPairId = typeof window !== "undefined" ? window.location.pathname.match(/\/servers\/pairs\/([^/]+)\/edit$/)?.[1] : undefined;
+  const isEditing = Boolean(editPairId);
   const [servers, setServers] = useState<Server[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -41,6 +55,15 @@ export function CreateMirrorPairPage() {
       try {
         const response = await apiRequest<ServersApiResponse>("/servers", { method: "GET" });
         setServers(response.servers ?? []);
+        if (editPairId) {
+          const pairResponse = await apiRequest<{ pair: MirrorPairWithServers }>(`/matrix/${editPairId}`, { method: "GET" });
+          const pair = pairResponse.pair;
+          setSourceServerId(pair.sourceServerId);
+          setTargetServerId(pair.targetServerId);
+          setMirrorType(pair.mirrorType);
+          setUsername(pair.username);
+          setOptions(mergeOptions(pair.options));
+        }
       } catch (error) {
         showErrorToast(error, toast);
       } finally {
@@ -48,7 +71,7 @@ export function CreateMirrorPairPage() {
       }
     };
     fetchServers();
-  }, []);
+  }, [editPairId]);
 
   const sourceServer = useMemo(
     () => servers.find((server) => server.id === sourceServerId),
@@ -79,8 +102,8 @@ export function CreateMirrorPairPage() {
 
     try {
       setIsSaving(true);
-      const response = await apiRequest<MatrixPairApiResponse>("/matrix", {
-        method: "POST",
+      const response = await apiRequest<MatrixPairApiResponse>(isEditing ? `/matrix/${editPairId}` : "/matrix", {
+        method: isEditing ? "PUT" : "POST",
         data: {
           sourceServerId,
           targetServerId,
@@ -91,7 +114,7 @@ export function CreateMirrorPairPage() {
       });
 
       if (response.success) {
-        toast.success(response.message || "Mirror pair created");
+        toast.success(response.message || (isEditing ? "Mirror pair updated" : "Mirror pair created"));
         window.location.href = withBase("/servers?tab=matrix");
       } else {
         showErrorToast(response.message || "Failed to create mirror pair", toast);
@@ -111,7 +134,7 @@ export function CreateMirrorPairPage() {
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <div className="space-y-1">
-            <h1 className="text-2xl font-semibold leading-none tracking-tight">Create Mirror Pair</h1>
+            <h1 className="text-2xl font-semibold leading-none tracking-tight">{isEditing ? "Edit Mirror Pair" : "Create Mirror Pair"}</h1>
             <p className="text-sm text-muted-foreground">Choose the connection, then configure how repositories are mirrored.</p>
           </div>
         </div>
@@ -125,7 +148,7 @@ export function CreateMirrorPairPage() {
         <div className="flex flex-col gap-6">
           <SettingsCard
             icon={GitCompareArrows}
-            title="Add Mirror Pair"
+            title={isEditing ? "Edit Mirror Pair" : "Add Mirror Pair"}
             footer={<StatusFooterItem icon={GitCompareArrows} label="Required before pair options can be configured" />}
           >
           <CardSection>

@@ -27,6 +27,7 @@ interface AppProps {
     | "organizations"
     | "servers"
     | "mirror-pair-new"
+    | "mirror-pair-edit"
     | "configuration"
     | "activity-log";
   "client:load"?: boolean;
@@ -83,11 +84,14 @@ function AppWithProviders({ page: initialPage }: AppProps) {
         '/organizations': 'organizations',
         '/servers': 'servers',
         '/servers/pairs/new': 'mirror-pair-new',
+        '/servers/pairs/': 'mirror-pair-edit',
         '/config': 'configuration',
         '/activity': 'activity-log'
       };
 
-      const pageName = pageMap[path] || 'dashboard';
+      const pageName = path.match(/^\/servers\/pairs\/[^/]+\/edit$/)
+        ? 'mirror-pair-edit'
+        : pageMap[path] || 'dashboard';
       setCurrentPage(pageName);
       // Also increment navigation key for browser navigation to trigger loading states
       setNavigationKey(prev => prev + 1);
@@ -164,6 +168,7 @@ function AppWithProviders({ page: initialPage }: AppProps) {
             {currentPage === "organizations" && <Organization />}
             {currentPage === "servers" && <ServersView />}
             {currentPage === "mirror-pair-new" && <CreateMirrorPairPage />}
+            {currentPage === "mirror-pair-edit" && <CreateMirrorPairPage />}
             {currentPage === "configuration" && <ConfigTabs />}
             {currentPage === "activity-log" && <ActivityLog />}
           </section>
