@@ -22,11 +22,13 @@ interface GiteaConfigFormProps {
   onAutoSave?: (giteaConfig: GiteaConfig) => Promise<void>;
   isAutoSaving?: boolean;
   githubUsername?: string;
+  /** Keep the destination organization field visible when embedded in pair setup. */
+  alwaysShowDestinationOrg?: boolean;
   /** Which card to render: the connection card or the organization card. */
   part?: "connection" | "organization";
 }
 
-export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, githubUsername, part = "connection" }: GiteaConfigFormProps) {
+export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, githubUsername, alwaysShowDestinationOrg = false, part = "connection" }: GiteaConfigFormProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [serverInfo, setServerInfo] = useState<GiteaServerInfo | null>(null);
 
@@ -321,6 +323,7 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
         <CardSection>
           <OrganizationConfiguration
             strategy={mirrorStrategy}
+            alwaysShowDestinationOrg={alwaysShowDestinationOrg}
             destinationOrg={config.organization}
             starredReposOrg={config.starredReposOrg}
             starredReposMode={config.starredReposMode}

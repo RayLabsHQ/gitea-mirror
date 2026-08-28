@@ -31,7 +31,7 @@ export function PairOptionCards({ options, onChange, sourceServer, targetServer,
     <GitHubConfigForm part="settings" config={githubConfig} setConfig={setGitHubConfig} mirrorOptions={mirrorOptions} setMirrorOptions={setMirrorOptions} advancedOptions={advancedOptions} setAdvancedOptions={setAdvancedOptions} giteaConfig={giteaConfig} setGiteaConfig={setGiteaConfig} />
   </DisabledCards>;
   const organizationAndContent = <><DisabledCards disabled={disabled}>
-    <GiteaConfigForm part="organization" config={giteaConfig} setConfig={setGiteaConfig} githubUsername={sourceServer?.username} />
+    <GiteaConfigForm part="organization" config={giteaConfig} setConfig={setGiteaConfig} githubUsername={sourceServer?.username} alwaysShowDestinationOrg />
   </DisabledCards><DisabledCards disabled={disabled}>
     <GitHubMirrorSettings part="content" githubConfig={githubConfig} mirrorOptions={mirrorOptions} advancedOptions={advancedOptions} onGitHubConfigChange={setGitHubConfig} onMirrorOptionsChange={setMirrorOptions} onAdvancedOptionsChange={setAdvancedOptions} />
   </DisabledCards></>;

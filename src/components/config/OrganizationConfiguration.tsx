@@ -23,6 +23,7 @@ interface OrganizationConfigurationProps {
   onStarredReposModeChange: (mode: StarredReposMode) => void;
   onPersonalReposOrgChange: (org: string) => void;
   onVisibilityChange: (visibility: GiteaOrgVisibility) => void;
+  alwaysShowDestinationOrg?: boolean;
 }
 
 const visibilityOptions = [
@@ -43,10 +44,11 @@ export const OrganizationConfiguration: React.FC<OrganizationConfigurationProps>
   onStarredReposModeChange,
   onPersonalReposOrgChange,
   onVisibilityChange,
+  alwaysShowDestinationOrg = false,
 }) => {
   const activeStarredMode = starredReposMode || "dedicated-org";
   const showStarredReposOrgInput = activeStarredMode === "dedicated-org";
-  const showDestinationOrgInput = strategy === "single-org" || strategy === "mixed";
+  const showDestinationOrgInput = alwaysShowDestinationOrg || strategy === "single-org" || strategy === "mixed";
 
   return (
     <div className="space-y-4">
