@@ -20,7 +20,6 @@ import type {
 import { Button } from '../ui/button';
 import { useAuth } from '@/hooks/useAuth';
 import { apiRequest, showErrorToast } from '@/lib/utils';
-import { RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { Skeleton } from '@/components/ui/skeleton';
 import { invalidateConfigCache } from '@/hooks/useConfigStatus';
@@ -104,7 +103,6 @@ export function ConfigTabs() {
   });
   const { user } = useAuth();
   const [isLoading, setIsLoading] = useState(true);
-  const [isSyncing, setIsSyncing] = useState<boolean>(false);
 
   const [isAutoSavingSchedule, setIsAutoSavingSchedule] = useState<boolean>(false);
   const [isAutoSavingCleanup, setIsAutoSavingCleanup] = useState<boolean>(false);
@@ -130,53 +128,8 @@ export function ConfigTabs() {
     return isGitHubValid && isGiteaValid;
   };
 
-  const isGitHubConfigValid = (): boolean => {
-    const { githubConfig } = config;
-    return !!(githubConfig.username.trim() && githubConfig.token.trim());
-  };
-
   // Removed the problematic useEffect that was causing circular dependencies
   // The lastRun and nextRun should be managed by the backend and fetched via API
-
-  const handleImportGitHubData = async () => {
-    if (!user?.id) return;
-    setIsSyncing(true);
-    try {
-      const result = await apiRequest<{ success: boolean; message?: string; failedOrgs?: string[]; recoveredOrgs?: number }>(
-        `/sync?userId=${user.id}`,
-        { method: 'POST' },
-      );
-      if (result.success) {
-        toast.success(
-          'GitHub data imported successfully! Head to the Repositories page to start mirroring.',
-        );
-        if (result.failedOrgs && result.failedOrgs.length > 0) {
-          toast.warning(
-            `${result.failedOrgs.length} org${result.failedOrgs.length > 1 ? 's' : ''} failed to import (${result.failedOrgs.join(', ')}). Check the Organizations tab for details.`,
-          );
-        }
-        if (result.recoveredOrgs && result.recoveredOrgs > 0) {
-          toast.success(
-            `${result.recoveredOrgs} previously failed org${result.recoveredOrgs > 1 ? 's' : ''} recovered successfully.`,
-          );
-        }
-      } else {
-        toast.error(
-          `Failed to import GitHub data: ${
-            result.message || 'Unknown error'
-          }`,
-        );
-      }
-    } catch (error) {
-      toast.error(
-        `Error importing GitHub data: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-    } finally {
-      setIsSyncing(false);
-    }
-  };
 
   // Auto-save function specifically for schedule config changes
   const autoSaveScheduleConfig = useCallback(async (scheduleConfig: ScheduleConfig) => {
@@ -675,32 +628,6 @@ export function ConfigTabs() {
             Configure your GitHub and Gitea connections, and set up automatic
             mirroring.
           </p>
-        </div>
-        <div className="flex gap-x-4 w-full md:w-auto">
-          <Button
-            onClick={handleImportGitHubData}
-            disabled={isSyncing || !isGitHubConfigValid()}
-            title={
-              !isGitHubConfigValid()
-                ? 'Please fill GitHub username and token fields'
-                : isSyncing
-                ? 'Import in progress'
-                : 'Import GitHub Data'
-            }
-            className="w-full bg-indigo-500 text-white hover:bg-indigo-600 disabled:bg-muted disabled:text-muted-foreground md:w-auto"
-          >
-            {isSyncing ? (
-              <>
-                <RefreshCw className="h-4 w-4 animate-spin mr-1" />
-                Import GitHub Data
-              </>
-            ) : (
-              <>
-                <RefreshCw className="h-4 w-4 mr-1" />
-                Import GitHub Data
-              </>
-            )}
-          </Button>
         </div>
       </div>
 

@@ -1,5 +1,5 @@
 import type { APIRoute } from "astro";
-import { db, organizations, repositories, configs } from "@/lib/db";
+import { db, organizations, repositories, configs, servers } from "@/lib/db";
 import { eq, and, sql } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { createMirrorJob } from "@/lib/helpers";
@@ -14,6 +14,8 @@ import { mergeGitReposPreferStarred, calcBatchSizeForInsert } from "@/lib/repo-u
 import { getDecryptedGitHubToken } from "@/lib/utils/config-encryption";
 import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 import { isMirrorableGitHubRepo } from "@/lib/repo-eligibility";
+import { decrypt } from "@/lib/utils/encryption";
+import { importServerData } from "@/lib/server-importer";
 
 export const POST: APIRoute = async ({ request, locals }) => {
   const authResult = await requireAuthenticatedUserId({ request, locals });
@@ -37,16 +39,43 @@ export const POST: APIRoute = async ({ request, locals }) => {
       });
     }
 
-    if (!config.githubConfig?.token) {
+    const serverId = new URL(request.url).searchParams.get("serverId");
+    let selectedServer: typeof servers.$inferSelect | undefined;
+    if (serverId) {
+      selectedServer = (await db
+        .select()
+        .from(servers)
+        .where(and(eq(servers.id, serverId), eq(servers.userId, userId)))
+        .limit(1))[0];
+      if (!selectedServer || !["github", "gitlab", "gitea", "forgejo"].includes(selectedServer.type)) {
+        return jsonResponse({
+          data: { error: "Importable server not found" },
+          status: 404,
+        });
+      }
+    }
+
+    if (!selectedServer && !config.githubConfig?.token) {
       return jsonResponse({
         data: { error: "GitHub token is missing in config" },
         status: 400,
       });
     }
 
-    // Decrypt the GitHub token before using it
-    const decryptedToken = getDecryptedGitHubToken(config);
-    const githubUsername = config.githubConfig?.owner || undefined;
+    // Decrypt the selected server token (or fall back to the legacy config token).
+    const decryptedToken = selectedServer
+      ? (selectedServer.token ? decrypt(selectedServer.token) : "")
+      : getDecryptedGitHubToken(config);
+    if (!decryptedToken) {
+      return jsonResponse({
+        data: { error: "GitHub token is missing for this server" },
+        status: 400,
+      });
+    }
+    const githubUsername = selectedServer?.username || config.githubConfig?.owner || undefined;
+    const syncConfig = selectedServer
+      ? { ...config, githubConfig: { ...config.githubConfig, username: selectedServer.username, owner: selectedServer.username, token: decryptedToken } }
+      : config;
     const octokit = createGitHubClient(decryptedToken, userId, githubUsername);
 
     // Load ignored orgs from the DB so we can skip them during import
@@ -56,15 +85,29 @@ export const POST: APIRoute = async ({ request, locals }) => {
       .where(and(eq(organizations.userId, userId), eq(organizations.status, "ignored")));
     const ignoredOrgNames = new Set(ignoredOrgRows.map((o) => o.normalizedName));
 
-    // Fetch GitHub data in parallel
-    const [basicAndForkedRepos, starredRepos, orgResult] = await Promise.all([
-      getGithubRepositories({ octokit, config }),
-      config.githubConfig?.includeStarred
-        ? getGithubStarredRepositories({ octokit, config })
-        : Promise.resolve([]),
-      getGithubOrganizations({ octokit, config, skipOrgNames: ignoredOrgNames }),
-    ]);
-    const { organizations: gitOrgs, failedOrgs } = orgResult;
+    let basicAndForkedRepos;
+    let starredRepos;
+    let gitOrgs;
+    let failedOrgs;
+    if (selectedServer && selectedServer.type !== "github") {
+      const imported = await importServerData(selectedServer, decryptedToken);
+      basicAndForkedRepos = imported.repositories;
+      starredRepos = [];
+      gitOrgs = imported.organizations.filter((org) => !ignoredOrgNames.has(org.name.toLowerCase()));
+      failedOrgs = imported.failedOrgs;
+    } else {
+      const [repositoriesResult, starredResult, orgResult] = await Promise.all([
+        getGithubRepositories({ octokit, config: syncConfig }),
+        syncConfig.githubConfig?.includeStarred
+          ? getGithubStarredRepositories({ octokit, config: syncConfig })
+          : Promise.resolve([]),
+        getGithubOrganizations({ octokit, config: syncConfig, skipOrgNames: ignoredOrgNames }),
+      ]);
+      basicAndForkedRepos = repositoriesResult;
+      starredRepos = starredResult;
+      gitOrgs = orgResult.organizations;
+      failedOrgs = orgResult.failedOrgs;
+    }
 
     // Merge and de-duplicate by fullName, preferring starred variant when duplicated
     const allGithubRepos = mergeGitReposPreferStarred(basicAndForkedRepos, starredRepos);

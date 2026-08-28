@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import {
   LoaderCircle,
+  Download,
   Pencil,
   PlugZap,
   Plus,
@@ -41,6 +42,7 @@ export function ServersView() {
   const [serverToDelete, setServerToDelete] = useState<Server | null>(null);
   const [isDeleting, setIsDeleting] = useState<boolean>(false);
   const [testingServerIds, setTestingServerIds] = useState<Set<string>>(new Set());
+  const [importingServerIds, setImportingServerIds] = useState<Set<string>>(new Set());
   const { navigationKey } = useNavigation();
   const defaultTab =
     typeof window !== "undefined" &&
@@ -130,6 +132,35 @@ export function ServersView() {
       showErrorToast(error, toast);
     } finally {
       setTestingServerIds((prev) => {
+        const next = new Set(prev);
+        next.delete(server.id);
+        return next;
+      });
+    }
+  };
+
+  const handleImportData = async (server: Server) => {
+    try {
+      setImportingServerIds((prev) => new Set(prev).add(server.id));
+      const result = await apiRequest<{ success: boolean; message?: string; failedOrgs?: string[]; recoveredOrgs?: number }>(
+        `/sync?serverId=${encodeURIComponent(server.id)}`,
+        { method: "POST" },
+      );
+      if (result.success) {
+        toast.success(result.message || `${server.name} data imported successfully`);
+        if (result.failedOrgs && result.failedOrgs.length > 0) {
+          toast.warning(`${result.failedOrgs.length} organization${result.failedOrgs.length === 1 ? "" : "s"} failed to import: ${result.failedOrgs.join(", ")}`);
+        }
+        if (result.recoveredOrgs && result.recoveredOrgs > 0) {
+          toast.success(`${result.recoveredOrgs} previously failed organization${result.recoveredOrgs === 1 ? "" : "s"} recovered successfully.`);
+        }
+      } else {
+        toast.error(result.message || `Failed to import data from ${server.name}`);
+      }
+    } catch (error) {
+      showErrorToast(error, toast);
+    } finally {
+      setImportingServerIds((prev) => {
         const next = new Set(prev);
         next.delete(server.id);
         return next;
@@ -285,6 +316,24 @@ export function ServersView() {
                           </>
                         )}
                       </Button>
+                      {["github", "gitlab", "gitea", "forgejo"].includes(server.type) && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleImportData(server)}
+                          disabled={importingServerIds.has(server.id)}
+                          title={`Import data from ${SERVER_TYPE_LABELS[server.type]}`}
+                        >
+                          {importingServerIds.has(server.id) ? (
+                            <LoaderCircle className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <>
+                              <Download className="h-4 w-4 mr-1" />
+                              Import data
+                            </>
+                          )}
+                        </Button>
+                      )}
                       <Button
                         variant="outline"
                         size="icon"
