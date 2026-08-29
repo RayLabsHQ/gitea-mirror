@@ -16,6 +16,7 @@ import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 import { isMirrorableGitHubRepo } from "@/lib/repo-eligibility";
 import { decrypt } from "@/lib/utils/encryption";
 import { importServerData } from "@/lib/server-importer";
+import type { GitRepo } from "@/types/Repository";
 
 export const POST: APIRoute = async ({ request, locals }) => {
   const authResult = await requireAuthenticatedUserId({ request, locals });
@@ -85,8 +86,8 @@ export const POST: APIRoute = async ({ request, locals }) => {
       .where(and(eq(organizations.userId, userId), eq(organizations.status, "ignored")));
     const ignoredOrgNames = new Set(ignoredOrgRows.map((o) => o.normalizedName));
 
-    let basicAndForkedRepos;
-    let starredRepos;
+    let basicAndForkedRepos: GitRepo[];
+    let starredRepos: GitRepo[];
     let gitOrgs;
     let failedOrgs;
     if (selectedServer && selectedServer.type !== "github") {

@@ -114,6 +114,7 @@ export interface HealthResponse {
   updateAvailable: boolean;
   database: {
     connected: boolean;
+    message?: string;
   };
   recovery?: {
     status: string;
@@ -150,19 +151,6 @@ export const healthApi = {
         latestVersion: "unknown",
         updateAvailable: false,
         database: { connected: false, message: "Failed to connect to API" },
-        system: {
-          uptime: { startTime: "", uptimeMs: 0, formatted: "N/A" },
-          memory: {
-            rss: "N/A",
-            heapTotal: "N/A",
-            heapUsed: "N/A",
-            external: "N/A",
-            systemTotal: "N/A",
-            systemFree: "N/A",
-          },
-          os: { platform: "", version: "", arch: "" },
-          env: "",
-        },
       };
     }
   },
