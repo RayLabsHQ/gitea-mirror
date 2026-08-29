@@ -30,7 +30,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
       details: job.details ?? undefined,
       message: job.message,
       timestamp: job.timestamp,
-      jobType: job.jobType,
+      jobType: job.jobType as MirrorJob["jobType"],
       batchId: job.batchId ?? undefined,
       totalItems: job.totalItems ?? undefined,
       completedItems: job.completedItems,

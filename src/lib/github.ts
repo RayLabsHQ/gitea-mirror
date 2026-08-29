@@ -423,7 +423,14 @@ async function getGithubStarLists(octokit: Octokit): Promise<GitHubStarListNode[
   let cursor: string | null = null;
 
   do {
-    const result = await octokit.graphql<{
+    const result: {
+      viewer: {
+        lists: {
+          nodes: Array<GitHubStarListNode | null> | null;
+          pageInfo: { hasNextPage: boolean; endCursor: string | null };
+        };
+      };
+    } = await octokit.graphql<{
       viewer: {
         lists: {
           nodes: Array<GitHubStarListNode | null> | null;
@@ -476,7 +483,14 @@ async function getGithubRepositoriesForStarList(
   let cursor: string | null = null;
 
   do {
-    const result = await octokit.graphql<{
+    const result: {
+      node: {
+        items: {
+          nodes: Array<GitHubRepositoryListItem | null> | null;
+          pageInfo: { hasNextPage: boolean; endCursor: string | null };
+        };
+      } | null;
+    } = await octokit.graphql<{
       node: {
         items: {
           nodes: Array<GitHubRepositoryListItem | null> | null;

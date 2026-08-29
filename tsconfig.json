@@ -5,7 +5,12 @@
     "**/*"
   ],
   "exclude": [
-    "dist"
+    "dist",
+    "www",
+    "scripts",
+    "src/tests",
+    "**/*.test.ts",
+    "**/*.test.tsx"
   ],
   "compilerOptions": {
     "jsx": "react-jsx",

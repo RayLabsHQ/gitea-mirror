@@ -1,6 +1,8 @@
 import { z } from "zod";
 import { sqliteTable, text, integer, index, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
+import type { RepoStatus, RepositoryVisibility } from "@/types/Repository";
+import type { MembershipRole } from "@/types/organizations";
 
 // ===== Zod Validation Schemas =====
 export const userSchema = z.object({
@@ -15,6 +17,7 @@ export const userSchema = z.object({
 
 export const githubConfigSchema = z.object({
   owner: z.string(),
+  username: z.string().optional(),
   type: z.enum(["personal", "organization"]),
   token: z.string(),
   includeStarred: z.boolean().default(false),
@@ -279,7 +282,7 @@ export const mirrorJobSchema = z.object({
     .default("imported"),
   message: z.string(),
   timestamp: z.coerce.date(),
-  jobType: z.enum(["mirror", "cleanup", "import"]).default("mirror"),
+  jobType: z.enum(["mirror", "cleanup", "import", "sync", "retry"]).default("mirror"),
   batchId: z.string().optional().nullable(),
   totalItems: z.number().optional().nullable(),
   completedItems: z.number().default(0),
@@ -314,14 +317,16 @@ export const organizationSchema = z.object({
       "deleted",
       "syncing",
       "synced",
+      "archived",
+      "pending-approval",
     ])
     .default("imported"),
   lastMirrored: z.coerce.date().optional().nullable(),
   errorMessage: z.string().optional().nullable(),
   repositoryCount: z.number().default(0),
-  publicRepositoryCount: z.number().optional(),
-  privateRepositoryCount: z.number().optional(),
-  forkRepositoryCount: z.number().optional(),
+  publicRepositoryCount: z.number().nullable().optional(),
+  privateRepositoryCount: z.number().nullable().optional(),
+  forkRepositoryCount: z.number().nullable().optional(),
   createdAt: z.coerce.date(),
   updatedAt: z.coerce.date(),
 });
@@ -433,7 +438,7 @@ export const repositories = sqliteTable("repositories", {
   cloneUrl: text("clone_url").notNull(),
   owner: text("owner").notNull(),
   organization: text("organization"),
-  mirroredLocation: text("mirrored_location").default(""),
+  mirroredLocation: text("mirrored_location").notNull().default(""),
 
   isPrivate: integer("is_private", { mode: "boolean" })
     .notNull()
@@ -460,9 +465,9 @@ export const repositories = sqliteTable("repositories", {
   language: text("language"),
   description: text("description"),
   defaultBranch: text("default_branch").notNull(),
-  visibility: text("visibility").notNull().default("public"),
+  visibility: text("visibility").$type<RepositoryVisibility>().notNull().default("public"),
 
-  status: text("status").notNull().default("imported"),
+  status: text("status").$type<RepoStatus>().notNull().default("imported"),
   lastMirrored: integer("last_mirrored", { mode: "timestamp" }),
   errorMessage: text("error_message"),
   
@@ -507,20 +512,21 @@ export const mirrorJobs = sqliteTable("mirror_jobs", {
   organizationId: text("organization_id"),
   organizationName: text("organization_name"),
   details: text("details"),
-  status: text("status").notNull().default("imported"),
+  status: text("status").$type<RepoStatus>().notNull().default("imported"),
   message: text("message").notNull(),
   timestamp: integer("timestamp", { mode: "timestamp" })
     .notNull()
     .default(sql`(unixepoch())`),
 
   // Job resilience fields
-  jobType: text("job_type").notNull().default("mirror"),
+  jobType: text("job_type").$type<"mirror" | "cleanup" | "import" | "sync" | "retry">().notNull().default("mirror"),
   batchId: text("batch_id"),
   totalItems: integer("total_items"),
-  completedItems: integer("completed_items").default(0),
+  completedItems: integer("completed_items").notNull().default(0),
   itemIds: text("item_ids", { mode: "json" }).$type<string[]>(),
   completedItemIds: text("completed_item_ids", { mode: "json" })
     .$type<string[]>()
+    .notNull()
     .default(sql`'[]'`),
   inProgress: integer("in_progress", { mode: "boolean" })
     .notNull()
@@ -549,7 +555,7 @@ export const organizations = sqliteTable("organizations", {
 
   avatarUrl: text("avatar_url").notNull(),
 
-  membershipRole: text("membership_role").notNull().default("member"),
+  membershipRole: text("membership_role").$type<MembershipRole>().notNull().default("member"),
 
   isIncluded: integer("is_included", { mode: "boolean" })
     .notNull()
@@ -561,7 +567,7 @@ export const organizations = sqliteTable("organizations", {
   // global config; repository-level overrides win over these.
   mirrorOverrides: text("mirror_overrides", { mode: "json" }).$type<MirrorOverrides>(),
 
-  status: text("status").notNull().default("imported"),
+  status: text("status").$type<RepoStatus>().notNull().default("imported"),
   lastMirrored: integer("last_mirrored", { mode: "timestamp" }),
   errorMessage: text("error_message"),
 

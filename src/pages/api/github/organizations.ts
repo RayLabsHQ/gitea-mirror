@@ -33,11 +33,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
       });
     }
 
-    const githubConfig = config.githubConfig as {
-      mirrorStarred: boolean;
-      skipForks: boolean;
-      privateRepositories: boolean;
-    };
+    const githubConfig = config.githubConfig;
 
     const rawOrgs = await db
       .select()
@@ -54,7 +50,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
           eq(repositories.organization, org.name)
         ];
 
-        if (!githubConfig.mirrorStarred) {
+        if (!githubConfig.includeStarred) {
           baseConditions.push(eq(repositories.isStarred, false));
         }
 

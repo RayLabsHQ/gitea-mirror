@@ -81,6 +81,6 @@ export async function PATCH({ params, request, locals }: APIContext) {
       }
     );
   } catch (error) {
-    return createSecureErrorResponse(error);
+    return createSecureErrorResponse(error, "organization status update");
   }
 }

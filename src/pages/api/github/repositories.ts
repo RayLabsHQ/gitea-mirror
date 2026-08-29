@@ -31,12 +31,6 @@ export const GET: APIRoute = async ({ request, locals }) => {
       });
     }
 
-    const githubConfig = config.githubConfig as {
-      mirrorStarred: boolean;
-      skipForks: boolean;
-      privateRepositories: boolean;
-    };
-
     // Build query conditions based on config
     const conditions = [eq(repositories.userId, userId)];
 

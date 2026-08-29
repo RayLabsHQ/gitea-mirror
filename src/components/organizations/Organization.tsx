@@ -76,7 +76,7 @@ export function Organization() {
       setOrganizations((prevOrgs) =>
         prevOrgs.map((org) =>
           org.id === data.organizationId
-            ? { ...org, status: data.status, details: data.details }
+            ? { ...org, status: data.status, errorMessage: data.details ?? org.errorMessage }
             : org
         )
       );

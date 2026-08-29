@@ -123,7 +123,6 @@ export const POST: APIRoute = async ({ request, locals }) => {
         {
           userId: config.userId || "",
           jobType: "mirror",
-          batchId,
           getItemId: (org) => org.id,
           getItemName: (org) => org.name,
           concurrencyLimit: CONCURRENCY_LIMIT,

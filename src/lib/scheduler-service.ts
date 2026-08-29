@@ -220,7 +220,6 @@ async function runScheduledSync(config: any): Promise<void> {
               eq(repositories.userId, userId),
               or(
                 eq(repositories.status, 'imported'),
-                eq(repositories.status, 'pending'),
                 eq(repositories.status, 'failed')
               )
             )
@@ -320,8 +319,7 @@ async function runScheduledSync(config: any): Promise<void> {
           or(
             eq(repositories.status, 'mirrored'),
             eq(repositories.status, 'synced'),
-            eq(repositories.status, 'failed'),
-            eq(repositories.status, 'pending')
+            eq(repositories.status, 'failed')
           )
         )
       );
@@ -628,7 +626,6 @@ async function performInitialAutoStart(): Promise<void> {
               eq(repositories.userId, config.userId),
               or(
                 eq(repositories.status, 'imported'),
-                eq(repositories.status, 'pending'),
                 eq(repositories.status, 'failed')
               )
             )

@@ -240,7 +240,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     // Create new config
     const configId = uuidv4();
-    const insertValues: Record<string, any> = {
+    const insertValues: typeof configs.$inferInsert = {
       id: configId,
       userId,
       name: "Default Configuration",

@@ -162,10 +162,6 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const metadata = {
       id: uuidv4(),
       status: "imported" as Repository["status"],
-      lastMirrored: null,
-      errorMessage: null,
-      mirroredLocation: "",
-      destinationOrg: null,
       importedAt: new Date(),
       createdAt: repoData.created_at
         ? new Date(repoData.created_at)
@@ -180,8 +176,8 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     createMirrorJob({
       userId,
-      organizationId: metadata.organization,
-      organizationName: metadata.organization,
+      organizationId: metadata.organization ?? undefined,
+      organizationName: metadata.organization ?? undefined,
       repositoryId: metadata.id,
       repositoryName: metadata.name,
       status: "imported",

@@ -65,7 +65,10 @@ export const headerAuthPlugin = () =>
             });
           }
 
-          await setSessionCookie(ctx, { session, user });
+          await setSessionCookie(ctx, {
+            session,
+            user: { ...user, name: user.name ?? user.username ?? user.email },
+          });
 
           return ctx.json({
             token: session.token,

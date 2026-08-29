@@ -7,7 +7,7 @@ export async function GET(context: APIContext) {
   try {
     const url = new URL(context.request.url);
     const providerId = url.searchParams.get("providerId");
-    const format = url.searchParams.get("format") || "xml";
+    const format = url.searchParams.get("format") === "json" ? "json" : "xml";
 
     if (!providerId) {
       return new Response(
