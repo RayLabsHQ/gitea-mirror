@@ -17,6 +17,7 @@ import { normalizeDestinationProviderKind } from "@/lib/destination-kinds";
 import { z } from "zod";
 import { githubConfigSchema, giteaConfigSchema, scheduleConfigSchema, cleanupConfigSchema } from "@/lib/db/schema";
 import { parseInterval } from "@/lib/utils/duration-parser";
+import { normalizeReleaseAssetLimit } from "@/lib/utils/mirror-overrides";
 import { buildClockCronExpression, normalizeTimezone, parseClockCronExpression } from "@/lib/utils/schedule-utils";
 
 // Use the actual database schema types
@@ -167,6 +168,9 @@ export function mapUiToDbConfig(
     pullRequestConcurrency: giteaConfig.pullRequestConcurrency ?? 5,
     mirrorReleases: mirrorOptions.mirrorReleases,
     releaseLimit: mirrorOptions.releaseLimit || 10,
+    // null is a real value here ("assets for every mirrored release"), so
+    // it is stored as such rather than dropped.
+    releaseAssetLimit: normalizeReleaseAssetLimit(mirrorOptions.releaseAssetLimit) ?? null,
     mirrorMetadata: mirrorOptions.mirrorMetadata,
     mirrorIssues: mirrorOptions.mirrorMetadata && mirrorOptions.metadataComponents.issues,
     mirrorPullRequests: mirrorOptions.mirrorMetadata && mirrorOptions.metadataComponents.pullRequests,
@@ -239,6 +243,7 @@ export function mapDbToUiConfig(dbConfig: any): {
   const mirrorOptions: MirrorOptions = {
     mirrorReleases: dbConfig.giteaConfig?.mirrorReleases || false,
     releaseLimit: dbConfig.giteaConfig?.releaseLimit || 10,
+    releaseAssetLimit: normalizeReleaseAssetLimit(dbConfig.giteaConfig?.releaseAssetLimit) ?? null,
     mirrorLFS: dbConfig.giteaConfig?.lfs || false,
     mirrorMetadata: dbConfig.giteaConfig?.mirrorMetadata || false,
     metadataComponents: {

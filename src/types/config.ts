@@ -82,6 +82,7 @@ export interface GitHubConfig {
 export interface MirrorOptions {
   mirrorReleases: boolean;
   releaseLimit?: number;  // Limit number of releases to mirror (default: 10)
+  releaseAssetLimit?: number | null;  // Upload assets only for the newest N releases; null or absent means all, 0 means none
   mirrorLFS: boolean;  // Mirror Git LFS objects
   mirrorMetadata: boolean;
   metadataComponents: {

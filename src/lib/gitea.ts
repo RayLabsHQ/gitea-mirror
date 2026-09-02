@@ -23,8 +23,11 @@ import {
   serializeRepositoryMetadataState,
 } from "./metadata-state";
 import {
+  normalizeReleaseAssetLimit,
   normalizeReleaseLimit,
+  releaseGetsAssets,
   resolveMirrorOptionsForRepository,
+  type ResolvedMirrorOptions,
 } from "./utils/mirror-overrides";
 
 /**
@@ -1027,6 +1030,7 @@ export const mirrorGithubRepoToGitea = async ({
           giteaOwner: repoOwner,
           giteaRepoName: targetRepoName,
           releaseLimit: mirrorOptions.releaseLimit,
+          releaseAssetLimit: mirrorOptions.releaseAssetLimit,
         });
         metadataState.components.releases = true;
         metadataUpdated = true;
@@ -1783,6 +1787,7 @@ export async function mirrorGitHubRepoToGiteaOrg({
           giteaOwner: orgName,
           giteaRepoName: targetRepoName,
           releaseLimit: mirrorOptions.releaseLimit,
+          releaseAssetLimit: mirrorOptions.releaseAssetLimit,
         });
         metadataState.components.releases = true;
         metadataUpdated = true;
@@ -3079,6 +3084,7 @@ export async function mirrorGitHubReleasesToGitea({
   giteaOwner,
   giteaRepoName,
   releaseLimit: releaseLimitOverride,
+  releaseAssetLimit: releaseAssetLimitOverride,
 }: {
   octokit: Octokit;
   repository: Repository;
@@ -3091,6 +3097,12 @@ export async function mirrorGitHubReleasesToGitea({
    * here so direct callers still honor per-repo overrides.
    */
   releaseLimit?: number;
+  /**
+   * Already-resolved asset limit (#311): assets are uploaded only for the
+   * newest N of the mirrored releases. `null` means every release, 0 means
+   * none, `undefined` means resolve it here like the release limit.
+   */
+  releaseAssetLimit?: number | null;
 }) {
   if (
     !config.giteaConfig?.defaultOwner ||
@@ -3132,9 +3144,22 @@ export async function mirrorGitHubReleasesToGitea({
   // win over the global setting (#361); the resolver guarantees a positive
   // integer. Everything below the limit is created/updated, everything beyond
   // it is pruned from Gitea by the retention pass at the end.
+  let resolvedOptions: ResolvedMirrorOptions | undefined;
+  const resolveOptions = async () =>
+    (resolvedOptions ??= await resolveMirrorOptionsForRepository({ config, repository }));
+
   const releaseLimit =
     normalizeReleaseLimit(releaseLimitOverride) ??
-    (await resolveMirrorOptionsForRepository({ config, repository })).releaseLimit;
+    (await resolveOptions()).releaseLimit;
+
+  // Which of those releases also get their assets (#311). Older releases
+  // past this point are still created with notes and tag, just without the
+  // uploads. Assets already in Gitea are never removed by this limit; it only
+  // decides what a sync uploads.
+  const releaseAssetLimit =
+    releaseAssetLimitOverride !== undefined
+      ? (normalizeReleaseAssetLimit(releaseAssetLimitOverride) ?? null)
+      : (await resolveOptions()).releaseAssetLimit;
 
   // GitHub API max per page is 100; paginate until we reach the configured limit.
   const releases: Awaited<
@@ -3167,7 +3192,11 @@ export async function mirrorGitHubReleasesToGitea({
   const limitedReleases = releases.slice(0, releaseLimit);
 
   console.log(
-    `[Releases] Found ${limitedReleases.length} releases (limited to latest ${releaseLimit}) to mirror for ${repository.fullName}`
+    `[Releases] Found ${limitedReleases.length} releases (limited to latest ${releaseLimit}; ${
+      releaseAssetLimit === null
+        ? "assets for every release"
+        : `assets for the newest ${releaseAssetLimit}`
+    }) to mirror for ${repository.fullName}`
   );
 
   if (limitedReleases.length === 0) {
@@ -3180,6 +3209,7 @@ export async function mirrorGitHubReleasesToGitea({
   let skippedMissingTagCount = 0;
   let totalAssetsUploaded = 0;
   let totalAssetsFailed = 0;
+  let releasesPastAssetLimit = 0;
 
   // Process releases in their GitHub API order (newest first by default)
   const releasesToProcess = limitedReleases.slice();
@@ -3194,7 +3224,9 @@ export async function mirrorGitHubReleasesToGitea({
     console.log(`[Releases] ${idx + 1}. ${rel.tag_name} - ${dateInfo}`);
   });
 
-  for (const release of releasesToProcess) {
+  // The index doubles as the release's rank, newest first, which is what the
+  // asset limit is measured against.
+  for (const [releaseIndex, release] of releasesToProcess.entries()) {
     try {
       // Always check if release already exists — reconcile by tag set, not by ordering
       const existingReleasesResponse = await httpGet(
@@ -3254,22 +3286,33 @@ export async function mirrorGitHubReleasesToGitea({
         // Reconcile assets on every sync — backfill any that are missing or changed.
         // The update path used to `continue` here without touching assets, so a
         // release that existed without its full asset set stayed broken forever (#331).
-        const assetResult = await reconcileReleaseAssets({
-          config,
-          decryptedConfig,
-          repoOwner,
-          repoName,
-          giteaReleaseId: existingRelease.id,
-          githubAssets: release.assets || [],
-          tagName: release.tag_name,
-        });
-        if (assetResult.uploaded > 0) {
+        //
+        // The asset limit (#311) only gates the upload. Assets that reached
+        // Gitea before the limit was set or lowered stay where they are;
+        // nothing on this path deletes attachments.
+        if (releaseGetsAssets(releaseIndex, releaseAssetLimit)) {
+          const assetResult = await reconcileReleaseAssets({
+            config,
+            decryptedConfig,
+            repoOwner,
+            repoName,
+            giteaReleaseId: existingRelease.id,
+            githubAssets: release.assets || [],
+            tagName: release.tag_name,
+          });
+          if (assetResult.uploaded > 0) {
+            console.log(
+              `[Releases] Backfilled ${assetResult.uploaded} missing/changed asset(s) for existing release ${release.tag_name}`
+            );
+          }
+          totalAssetsUploaded += assetResult.uploaded;
+          totalAssetsFailed += assetResult.failed;
+        } else if (release.assets && release.assets.length > 0) {
           console.log(
-            `[Releases] Backfilled ${assetResult.uploaded} missing/changed asset(s) for existing release ${release.tag_name}`
+            `[Releases] Skipping ${release.assets.length} asset(s) for ${release.tag_name}: outside the newest ${releaseAssetLimit} release(s) that get assets (anything already uploaded is kept)`
           );
+          releasesPastAssetLimit++;
         }
-        totalAssetsUploaded += assetResult.uploaded;
-        totalAssetsFailed += assetResult.failed;
         continue;
       }
 
@@ -3312,19 +3355,27 @@ export async function mirrorGitHubReleasesToGitea({
       );
       
       // Mirror release assets if they exist (idempotent — see reconcileReleaseAssets)
+      // and the release sits inside the asset limit (#311).
       if (release.assets && release.assets.length > 0) {
-        console.log(`[Releases] Mirroring ${release.assets.length} assets for release ${release.tag_name}`);
-        const assetResult = await reconcileReleaseAssets({
-          config,
-          decryptedConfig,
-          repoOwner,
-          repoName,
-          giteaReleaseId: createReleaseResponse.data.id,
-          githubAssets: release.assets,
-          tagName: release.tag_name,
-        });
-        totalAssetsUploaded += assetResult.uploaded;
-        totalAssetsFailed += assetResult.failed;
+        if (releaseGetsAssets(releaseIndex, releaseAssetLimit)) {
+          console.log(`[Releases] Mirroring ${release.assets.length} assets for release ${release.tag_name}`);
+          const assetResult = await reconcileReleaseAssets({
+            config,
+            decryptedConfig,
+            repoOwner,
+            repoName,
+            giteaReleaseId: createReleaseResponse.data.id,
+            githubAssets: release.assets,
+            tagName: release.tag_name,
+          });
+          totalAssetsUploaded += assetResult.uploaded;
+          totalAssetsFailed += assetResult.failed;
+        } else {
+          console.log(
+            `[Releases] Skipping ${release.assets.length} asset(s) for ${release.tag_name}: outside the newest ${releaseAssetLimit} release(s) that get assets`
+          );
+          releasesPastAssetLimit++;
+        }
       }
 
       mirroredCount++;
@@ -3336,7 +3387,7 @@ export async function mirrorGitHubReleasesToGitea({
   }
 
   console.log(
-    `✅ Mirrored/Updated ${mirroredCount} releases to Gitea (${skippedCount} already up-to-date, ${skippedMissingTagCount} skipped: tag not synced yet); assets uploaded: ${totalAssetsUploaded}, failed: ${totalAssetsFailed}`
+    `✅ Mirrored/Updated ${mirroredCount} releases to Gitea (${skippedCount} already up-to-date, ${skippedMissingTagCount} skipped: tag not synced yet); assets uploaded: ${totalAssetsUploaded}, failed: ${totalAssetsFailed}, releases past the asset limit: ${releasesPastAssetLimit}`
   );
 
   if (skippedMissingTagCount > 0) {

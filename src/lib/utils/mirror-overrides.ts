@@ -25,8 +25,12 @@ export type MirrorOverrideKey = (typeof MIRROR_OVERRIDE_KEYS)[number];
  * The numeric mirror options that can be overridden per organization and per
  * repository. Kept apart from the boolean flags because every consumer of
  * MIRROR_OVERRIDE_KEYS (resolver, gating, dialog tri-states) assumes booleans.
+ *
+ * `releaseLimit` is how many of the newest releases exist in Gitea at all.
+ * `releaseAssetLimit` (#311) is how many of those also get their assets
+ * uploaded; the rest are created with notes and tag only.
  */
-export const MIRROR_OVERRIDE_LIMIT_KEYS = ["releaseLimit"] as const;
+export const MIRROR_OVERRIDE_LIMIT_KEYS = ["releaseLimit", "releaseAssetLimit"] as const;
 
 export type MirrorOverrideLimitKey = (typeof MIRROR_OVERRIDE_LIMIT_KEYS)[number];
 
@@ -34,18 +38,24 @@ export type MirrorOverrideLimitKey = (typeof MIRROR_OVERRIDE_LIMIT_KEYS)[number]
 export const DEFAULT_RELEASE_LIMIT = 10;
 
 /**
- * Fully resolved mirror options: every flag has a definite boolean value and
- * every limit a definite positive integer.
+ * Fully resolved mirror options: every flag has a definite boolean value, the
+ * release limit a definite positive integer, and the asset limit either a
+ * non-negative integer or `null` for "assets for every mirrored release".
  */
-export type ResolvedMirrorOptions = Record<MirrorOverrideKey, boolean> &
-  Record<MirrorOverrideLimitKey, number>;
+export type ResolvedMirrorOptions = Record<MirrorOverrideKey, boolean> & {
+  releaseLimit: number;
+  releaseAssetLimit: number | null;
+};
 
 /**
  * The values the tiers above an override resolve to right now. Used by the
- * dialog to label what "Inherit" means for each row.
+ * dialog to label what "Inherit" means for each row. A `null` asset limit is
+ * a known value ("all"), distinct from `undefined` (not known yet).
  */
-export type InheritedMirrorOptions = Partial<Record<MirrorOverrideKey, boolean>> &
-  Partial<Record<MirrorOverrideLimitKey, number>>;
+export type InheritedMirrorOptions = Partial<Record<MirrorOverrideKey, boolean>> & {
+  releaseLimit?: number;
+  releaseAssetLimit?: number | null;
+};
 
 /**
  * Sanitize a release limit from any tier into a positive integer, or
@@ -57,6 +67,41 @@ export function normalizeReleaseLimit(value: unknown): number | undefined {
   if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
   const limit = Math.floor(value);
   return limit >= 1 ? limit : undefined;
+}
+
+/**
+ * Sanitize a release asset limit from any tier into a non-negative integer,
+ * or `undefined` when the value is absent or unusable (so the next tier out
+ * is consulted). Unlike the release limit, 0 is meaningful here: it means
+ * release notes only, no assets. There is no numeric "all"; that is what the
+ * absence of a limit at every tier (`null`) resolves to.
+ */
+export function normalizeReleaseAssetLimit(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  const limit = Math.floor(value);
+  return limit >= 0 ? limit : undefined;
+}
+
+/** Per-key sanitizers for the numeric overrides. */
+const LIMIT_NORMALIZERS: Record<
+  MirrorOverrideLimitKey,
+  (value: unknown) => number | undefined
+> = {
+  releaseLimit: normalizeReleaseLimit,
+  releaseAssetLimit: normalizeReleaseAssetLimit,
+};
+
+/**
+ * Whether the release at `index` in the newest-first list gets its assets
+ * uploaded. `null` means no limit. A release past the limit still gets its
+ * notes and tag, and assets that already reached Gitea are never removed
+ * because of this rule; it only decides whether a sync uploads.
+ */
+export function releaseGetsAssets(
+  index: number,
+  releaseAssetLimit: number | null
+): boolean {
+  return releaseAssetLimit === null || index < releaseAssetLimit;
 }
 
 /**
@@ -145,6 +190,7 @@ export function mirrorOptionsToFlags(
         mirrorLFS?: boolean;
         mirrorReleases?: boolean;
         releaseLimit?: number;
+        releaseAssetLimit?: number | null;
         mirrorMetadata?: boolean;
         metadataComponents?: {
           issues?: boolean;
@@ -170,6 +216,8 @@ export function mirrorOptionsToFlags(
     mirrorMilestones: !!components?.milestones,
     releaseLimit:
       normalizeReleaseLimit(mirrorOptions?.releaseLimit) ?? DEFAULT_RELEASE_LIMIT,
+    releaseAssetLimit:
+      normalizeReleaseAssetLimit(mirrorOptions?.releaseAssetLimit) ?? null,
   };
 }
 
@@ -198,8 +246,8 @@ export type MirrorOverrideGating = Partial<
  *  - `shouldMirrorLabels` in gitea.ts / gitea-enhanced.ts is
  *    `mirrorLabels && !mirrorIssues`, so labels cannot take effect while issues
  *    are being mirrored (the issue path already reconciles labels)
- *  - `releaseLimit` is only read inside the release mirror, so it cannot take
- *    effect while `mirrorReleases` resolves to off
+ *  - `releaseLimit` and `releaseAssetLimit` are only read inside the release
+ *    mirror, so they cannot take effect while `mirrorReleases` resolves to off
  *
  * `effective` is the value each flag currently resolves to including the
  * in-progress edit, so the labels and release-limit gates react live as
@@ -242,6 +290,10 @@ export function getMirrorOverrideGating({
   } else if (effective.mirrorReleases === false) {
     gating.releaseLimit = MIRROR_GATING_REASONS.releasesOff;
   }
+  // The asset limit is read in the same place, so it shares the reason.
+  if (gating.releaseLimit) {
+    gating.releaseAssetLimit = gating.releaseLimit;
+  }
 
   return gating;
 }
@@ -259,6 +311,7 @@ export const MIRROR_OVERRIDE_LABELS: Record<
   mirrorLabels: "Labels",
   mirrorMilestones: "Milestones",
   releaseLimit: "Release limit",
+  releaseAssetLimit: "Release asset limit",
 };
 
 /**
@@ -307,7 +360,7 @@ export function listOverriddenKeys(
   return [
     ...MIRROR_OVERRIDE_KEYS.filter((key) => overrides[key] != null),
     ...MIRROR_OVERRIDE_LIMIT_KEYS.filter(
-      (key) => normalizeReleaseLimit(overrides[key]) !== undefined
+      (key) => LIMIT_NORMALIZERS[key](overrides[key]) !== undefined
     ),
   ];
 }
@@ -330,7 +383,7 @@ export function normalizeMirrorOverrides(
     if (typeof flag === "boolean") cleaned[key] = flag;
   }
   for (const key of MIRROR_OVERRIDE_LIMIT_KEYS) {
-    const limit = normalizeReleaseLimit(overrides[key]);
+    const limit = LIMIT_NORMALIZERS[key](overrides[key]);
     if (limit !== undefined) cleaned[key] = limit;
   }
 
@@ -342,8 +395,8 @@ export function normalizeMirrorOverrides(
  *
  * Precedence is per field, most specific tier wins:
  *   repository override -> organization override -> global config -> default
- * where the default is `false` for flags and DEFAULT_RELEASE_LIMIT for the
- * release limit.
+ * where the default is `false` for flags, DEFAULT_RELEASE_LIMIT for the
+ * release limit, and `null` (every mirrored release) for the asset limit.
  *
  * `starredCodeOnly` is applied last as a hard clamp. It is a "code only, no
  * metadata" switch for starred repos, so it forces every metadata flag off
@@ -391,6 +444,15 @@ export function resolveMirrorOptions({
     normalizeReleaseLimit(org?.releaseLimit) ??
     normalizeReleaseLimit(globalConfig?.releaseLimit) ??
     DEFAULT_RELEASE_LIMIT;
+
+  // The asset limit has no numeric default: when no tier pins one, every
+  // mirrored release gets its assets, which is what happened before #311.
+  // A pinned 0 is a real value (notes only) and must not fall through.
+  resolved.releaseAssetLimit =
+    normalizeReleaseAssetLimit(repo?.releaseAssetLimit) ??
+    normalizeReleaseAssetLimit(org?.releaseAssetLimit) ??
+    normalizeReleaseAssetLimit(globalConfig?.releaseAssetLimit) ??
+    null;
 
   // Starred repos with starredCodeOnly mirror code and nothing else. This
   // clamp intentionally outranks explicit per-repo overrides: the setting

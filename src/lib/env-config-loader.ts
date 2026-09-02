@@ -10,6 +10,7 @@ import { encrypt } from '@/lib/utils/encryption';
 import { isSourceProviderKind, type SourceProviderKind } from '@/lib/source-providers/kinds';
 import { isDestinationProviderKind, type DestinationProviderKind } from '@/lib/destination-kinds';
 import { hasDestinationChanged, hasSourceChanged, loadConfigLocks } from '@/lib/config-locks';
+import { normalizeReleaseAssetLimit } from '@/lib/utils/mirror-overrides';
 
 interface EnvConfig {
   github: {
@@ -63,6 +64,7 @@ interface EnvConfig {
     mirrorMilestones?: boolean;
     mirrorMetadata?: boolean;
     releaseLimit?: number;
+    releaseAssetLimit?: number;
     issueConcurrency?: number;
     pullRequestConcurrency?: number;
   };
@@ -180,6 +182,7 @@ function parseEnvConfig(): EnvConfig {
       mirrorMilestones: process.env.MIRROR_MILESTONES === 'true',
       mirrorMetadata: process.env.MIRROR_METADATA === 'true',
       releaseLimit: process.env.RELEASE_LIMIT ? parseInt(process.env.RELEASE_LIMIT, 10) : undefined,
+      releaseAssetLimit: process.env.RELEASE_ASSET_LIMIT ? parseInt(process.env.RELEASE_ASSET_LIMIT, 10) : undefined,
       issueConcurrency: process.env.MIRROR_ISSUE_CONCURRENCY ? parseInt(process.env.MIRROR_ISSUE_CONCURRENCY, 10) : undefined,
       pullRequestConcurrency: process.env.MIRROR_PULL_REQUEST_CONCURRENCY ? parseInt(process.env.MIRROR_PULL_REQUEST_CONCURRENCY, 10) : undefined,
     },
@@ -367,6 +370,11 @@ export async function initializeConfigFromEnv(): Promise<void> {
       // Mirror metadata options
       mirrorReleases: envConfig.mirror.mirrorReleases ?? existingConfig?.[0]?.giteaConfig?.mirrorReleases ?? false,
       releaseLimit: envConfig.mirror.releaseLimit ?? existingConfig?.[0]?.giteaConfig?.releaseLimit ?? 10,
+      // 0 is a real value (notes only); unset means assets for every mirrored release.
+      releaseAssetLimit:
+        normalizeReleaseAssetLimit(envConfig.mirror.releaseAssetLimit) ??
+        existingConfig?.[0]?.giteaConfig?.releaseAssetLimit ??
+        null,
       issueConcurrency: envConfig.mirror.issueConcurrency && envConfig.mirror.issueConcurrency > 0
         ? envConfig.mirror.issueConcurrency
         : existingConfig?.[0]?.giteaConfig?.issueConcurrency ?? 3,

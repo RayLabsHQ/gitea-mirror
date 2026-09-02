@@ -67,6 +67,10 @@ export const backupStrategyEnum = z.enum([
  * out-of-range value must degrade to "inherit" for that field alone, not make
  * the whole overrides object unparseable and silently drop the LFS opt-out
  * next to it. `normalizeReleaseLimit` does the sanitizing.
+ *
+ * `releaseAssetLimit` follows the same rule (`normalizeReleaseAssetLimit`):
+ * assets are uploaded only for the newest N mirrored releases. 0 is a real
+ * value (notes only); null/absent means inherit.
  */
 export const mirrorOverridesSchema = z.object({
   lfs: z.boolean().nullable().optional(),
@@ -78,6 +82,7 @@ export const mirrorOverridesSchema = z.object({
   mirrorLabels: z.boolean().nullable().optional(),
   mirrorMilestones: z.boolean().nullable().optional(),
   releaseLimit: z.number().nullable().optional(),
+  releaseAssetLimit: z.number().nullable().optional(),
 });
 
 export type MirrorOverrides = z.infer<typeof mirrorOverridesSchema>;
@@ -111,6 +116,9 @@ export const giteaConfigSchema = z.object({
   pullRequestConcurrency: z.number().int().min(1).default(5),
   mirrorReleases: z.boolean().default(false),
   releaseLimit: z.number().default(10),
+  // Upload assets only for the newest N mirrored releases. null/absent means
+  // every mirrored release gets its assets; 0 means release notes only.
+  releaseAssetLimit: z.number().nullable().optional(),
   mirrorMetadata: z.boolean().default(false),
   mirrorIssues: z.boolean().default(false),
   mirrorPullRequests: z.boolean().default(false),

@@ -33,6 +33,7 @@ import { MirrorOverridesDialog } from "@/components/config/MirrorOverridesDialog
 import {
   hasMirrorOverrides,
   mirrorOptionsToFlags,
+  normalizeReleaseAssetLimit,
   normalizeReleaseLimit,
   type MirrorOverrideKey,
 } from "@/lib/utils/mirror-overrides";
@@ -181,6 +182,8 @@ export default function RepositoryTable({
     }
     const orgReleaseLimit = normalizeReleaseLimit(orgOverrides.releaseLimit);
     if (orgReleaseLimit !== undefined) globals.releaseLimit = orgReleaseLimit;
+    const orgReleaseAssetLimit = normalizeReleaseAssetLimit(orgOverrides.releaseAssetLimit);
+    if (orgReleaseAssetLimit !== undefined) globals.releaseAssetLimit = orgReleaseAssetLimit;
     return globals;
   }, [mirrorOptions, orgOverrides]);
 

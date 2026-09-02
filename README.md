@@ -234,6 +234,8 @@ Transfer complete repository metadata from GitHub to Gitea/Forgejo:
 - **Wiki** - Mirror wiki content
 - **Releases** - Transfer GitHub releases with assets
 
+Releases have two limits. The release limit keeps only the newest N releases in Gitea/Forgejo. The release asset limit uploads assets only for the newest N of those, so a repository with years of releases can keep every release note and tag while only the recent binaries take up space. Leave the asset limit empty to upload assets for every mirrored release, or set it to 0 for release notes only. Both limits can be overridden per organization and per repository, and lowering the asset limit never deletes assets that were already uploaded.
+
 Enable in Settings → Mirror Options → Mirror metadata
 
 ### Repository Management
@@ -369,6 +371,14 @@ To avoid this:
 
 1. Set Gitea Mirror interval to a value greater than or equal to your server `MIN_INTERVAL`.
 2. Do not rely on manual per-repository mirror interval edits in Gitea/Forgejo, as they will be overwritten on sync.
+
+### Pushing to a mirror fails with `mirror repository is read-only`
+
+Every repository this tool creates is a Gitea/Forgejo pull mirror, and pull mirrors are read-only by design. Gitea/Forgejo refuses pushes to them so the copy can never drift from the source.
+
+Make your commits in the source repository (on GitHub, GitLab or wherever the mirror pulls from). They arrive in the mirror on the next sync. Gitea Mirror is a backup tool and does not push changes back to the source.
+
+If you want a repository you can push to, clone the mirror, push the clone to a normal (non-mirror) repository, and stop mirroring the original.
 
 ## Development
 

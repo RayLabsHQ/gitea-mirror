@@ -137,7 +137,7 @@ export function GitHubMirrorSettings({
     onGitHubConfigChange({ ...githubConfig, [field]: value });
   };
 
-  const handleMirrorChange = (field: keyof MirrorOptions, value: boolean | number) => {
+  const handleMirrorChange = (field: keyof MirrorOptions, value: boolean | number | null) => {
     onMirrorOptionsChange({ ...mirrorOptions, [field]: value });
   };
 
@@ -883,29 +883,59 @@ export function GitHubMirrorSettings({
             icon={Tag}
             label="Releases & tags"
             description={
-              isGithubSource
-                ? "Includes release assets and tags"
-                : "Release assets need a GitHub source. Tags always come with the code"
+              !isGithubSource
+                ? "Release assets need a GitHub source. Tags always come with the code"
+                : mirrorOptions.mirrorReleases
+                  ? "Includes tags. Leave the assets box empty to upload assets for every mirrored release, or set it to 0 for release notes only"
+                  : "Includes release assets and tags"
             }
             disabled={!isGithubSource}
             checked={mirrorOptions.mirrorReleases}
             onCheckedChange={(checked) => handleMirrorChange('mirrorReleases', checked)}
             extra={
               mirrorOptions.mirrorReleases ? (
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <label htmlFor="release-limit">Latest</label>
-                  <input
-                    id="release-limit"
-                    type="number"
-                    min="1"
-                    value={mirrorOptions.releaseLimit || 10}
-                    onChange={(e) => {
-                      const value = parseInt(e.target.value) || 10;
-                      const clampedValue = Math.max(1, value);
-                      handleMirrorChange('releaseLimit', clampedValue);
-                    }}
-                    className="w-16 rounded border border-input bg-background px-2 py-1 text-xs text-foreground"
-                  />
+                <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1.5 text-xs text-muted-foreground">
+                  <div className="flex items-center gap-1.5">
+                    <label htmlFor="release-limit">Latest</label>
+                    <input
+                      id="release-limit"
+                      type="number"
+                      min="1"
+                      value={mirrorOptions.releaseLimit || 10}
+                      onChange={(e) => {
+                        const value = parseInt(e.target.value) || 10;
+                        const clampedValue = Math.max(1, value);
+                        handleMirrorChange('releaseLimit', clampedValue);
+                      }}
+                      className="w-16 rounded border border-input bg-background px-2 py-1 text-xs text-foreground"
+                    />
+                  </div>
+                  {/* Empty means every mirrored release gets its assets (the
+                      behaviour before #311); 0 means notes only. */}
+                  <div className="flex items-center gap-1.5">
+                    <label htmlFor="release-asset-limit">Assets for latest</label>
+                    <input
+                      id="release-asset-limit"
+                      type="number"
+                      min="0"
+                      placeholder="all"
+                      title="Leave empty to upload assets for every mirrored release, or 0 for none"
+                      value={mirrorOptions.releaseAssetLimit ?? ''}
+                      onChange={(e) => {
+                        const raw = e.target.value.trim();
+                        if (raw === '') {
+                          handleMirrorChange('releaseAssetLimit', null);
+                          return;
+                        }
+                        const value = parseInt(raw, 10);
+                        handleMirrorChange(
+                          'releaseAssetLimit',
+                          Number.isFinite(value) ? Math.max(0, value) : null
+                        );
+                      }}
+                      className="w-16 rounded border border-input bg-background px-2 py-1 text-xs text-foreground"
+                    />
+                  </div>
                 </div>
               ) : undefined
             }

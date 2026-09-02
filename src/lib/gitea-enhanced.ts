@@ -822,6 +822,7 @@ export async function syncGiteaRepoEnhanced({
               giteaOwner: repoOwner,
               giteaRepoName: repoName,
               releaseLimit: mirrorOptions.releaseLimit,
+              releaseAssetLimit: mirrorOptions.releaseAssetLimit,
             });
             metadataState.components.releases = true;
             metadataUpdated = true;

@@ -206,6 +206,7 @@ Control what content gets mirrored from GitHub to Gitea.
 |----------|-------------|---------|---------|
 | `MIRROR_RELEASES` | Mirror GitHub releases | `false` | `true`, `false` |
 | `RELEASE_LIMIT` | Maximum number of releases to mirror per repository | `10` | Number (1-100) |
+| `RELEASE_ASSET_LIMIT` | Upload release assets only for the newest N mirrored releases. Older releases still get their notes and tag. Unset means assets for every mirrored release, `0` means release notes only. Lowering it never deletes assets already uploaded | unset (all) | Number (0 or more) |
 | `MIRROR_WIKI` | Mirror wiki content | `false` | `true`, `false` |
 | `MIRROR_METADATA` | Master toggle for metadata mirroring | `false` | `true`, `false` |
 | `MIRROR_ISSUES` | Mirror issues (requires MIRROR_METADATA=true) | `false` | `true`, `false` |

@@ -21,6 +21,7 @@ import type { MirrorOverrides } from "@/lib/db/schema";
 import {
   getMirrorOverrideGating,
   MIRROR_OVERRIDE_LABELS,
+  normalizeReleaseAssetLimit,
   normalizeReleaseLimit,
   UI_MIRROR_OVERRIDE_KEYS,
   type InheritedMirrorOptions,
@@ -54,6 +55,13 @@ function parseReleaseLimitDraft(text: string): number | undefined {
   const trimmed = text.trim();
   if (!trimmed) return undefined;
   return normalizeReleaseLimit(Number(trimmed));
+}
+
+/** Same free-text handling for the asset limit, where 0 is a valid pin. */
+function parseReleaseAssetLimitDraft(text: string): number | undefined {
+  const trimmed = text.trim();
+  if (!trimmed) return undefined;
+  return normalizeReleaseAssetLimit(Number(trimmed));
 }
 
 export interface MirrorOverridesDialogProps {
@@ -101,6 +109,9 @@ export function MirrorOverridesDialog({
   const [releaseLimitDraft, setReleaseLimitDraft] = useState(() =>
     buildReleaseLimitDraft(value)
   );
+  const [releaseAssetLimitDraft, setReleaseAssetLimitDraft] = useState(() =>
+    buildReleaseAssetLimitDraft(value)
+  );
   const [isSaving, setIsSaving] = useState(false);
 
   // Re-seed whenever the dialog opens or targets a different object, so a
@@ -109,6 +120,7 @@ export function MirrorOverridesDialog({
     if (open) {
       setDraft(buildDraft(value));
       setReleaseLimitDraft(buildReleaseLimitDraft(value));
+      setReleaseAssetLimitDraft(buildReleaseAssetLimitDraft(value));
     }
   }, [open, value]);
 
@@ -140,11 +152,16 @@ export function MirrorOverridesDialog({
   const releaseLimitInvalid =
     releaseLimitDraft.trim() !== "" && pinnedReleaseLimit === undefined;
 
+  const pinnedReleaseAssetLimit = parseReleaseAssetLimitDraft(releaseAssetLimitDraft);
+  const releaseAssetLimitInvalid =
+    releaseAssetLimitDraft.trim() !== "" && pinnedReleaseAssetLimit === undefined;
+
   const overriddenCount = useMemo(
     () =>
       Object.values(draft).filter((state) => state !== "inherit").length +
-      (pinnedReleaseLimit !== undefined ? 1 : 0),
-    [draft, pinnedReleaseLimit]
+      (pinnedReleaseLimit !== undefined ? 1 : 0) +
+      (pinnedReleaseAssetLimit !== undefined ? 1 : 0),
+    [draft, pinnedReleaseLimit, pinnedReleaseAssetLimit]
   );
 
   const handleSave = async () => {
@@ -158,6 +175,9 @@ export function MirrorOverridesDialog({
         if (typeof resolved === "boolean") next[key] = resolved;
       }
       if (pinnedReleaseLimit !== undefined) next.releaseLimit = pinnedReleaseLimit;
+      if (pinnedReleaseAssetLimit !== undefined) {
+        next.releaseAssetLimit = pinnedReleaseAssetLimit;
+      }
       await onSave(Object.keys(next).length > 0 ? next : null);
       onOpenChange(false);
     } finally {
@@ -168,6 +188,7 @@ export function MirrorOverridesDialog({
   const handleResetAll = () => {
     setDraft(buildDraft(null));
     setReleaseLimitDraft("");
+    setReleaseAssetLimitDraft("");
   };
 
   const releaseLimitReason = gating.releaseLimit;
@@ -180,6 +201,16 @@ export function MirrorOverridesDialog({
     !releaseLimitDisabled &&
     releaseLimitDraft.trim() === "" &&
     inheritedReleaseLimit !== undefined;
+
+  const releaseAssetLimitReason = gating.releaseAssetLimit;
+  const releaseAssetLimitDisabled = !!releaseAssetLimitReason;
+  // null is a known value here ("all"), so it still earns a hint.
+  const inheritedReleaseAssetLimit = inheritedFrom?.releaseAssetLimit;
+  const showReleaseAssetLimitHint =
+    !inheritedLoading &&
+    !releaseAssetLimitDisabled &&
+    releaseAssetLimitDraft.trim() === "" &&
+    inheritedReleaseAssetLimit !== undefined;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -243,9 +274,10 @@ export function MirrorOverridesDialog({
                   )}
                 </div>
 
-                {/* The limit only means something while releases are mirrored,
-                    so it sits directly under that row. */}
+                {/* The limits only mean something while releases are mirrored,
+                    so they sit directly under that row. */}
                 {key === "mirrorReleases" && (
+                  <>
                   <div className="space-y-1">
                     <div className="flex items-center justify-between gap-4">
                       <Label
@@ -288,11 +320,66 @@ export function MirrorOverridesDialog({
                       </p>
                     ) : (
                       <p className="text-xs text-muted-foreground">
-                        Newest releases to keep, assets included. Older ones
-                        past the limit are removed from Gitea on the next sync.
+                        Newest releases to keep. Older ones past the limit are
+                        removed from Gitea on the next sync.
                       </p>
                     )}
                   </div>
+
+                  <div className="space-y-1">
+                    <div className="flex items-center justify-between gap-4">
+                      <Label
+                        htmlFor="override-releaseAssetLimit"
+                        className={
+                          releaseAssetLimitDisabled
+                            ? "flex-1 text-muted-foreground"
+                            : "flex-1"
+                        }
+                      >
+                        {MIRROR_OVERRIDE_LABELS.releaseAssetLimit}
+                        {showReleaseAssetLimitHint && (
+                          <span className="ml-2 text-xs font-normal text-muted-foreground">
+                            currently{" "}
+                            {inheritedReleaseAssetLimit === null
+                              ? "all"
+                              : inheritedReleaseAssetLimit}
+                          </span>
+                        )}
+                      </Label>
+                      <Input
+                        id="override-releaseAssetLimit"
+                        type="number"
+                        inputMode="numeric"
+                        min={0}
+                        step={1}
+                        placeholder="Inherit"
+                        className="w-32"
+                        value={releaseAssetLimitDraft}
+                        disabled={releaseAssetLimitDisabled}
+                        aria-invalid={releaseAssetLimitInvalid || undefined}
+                        onChange={(event) =>
+                          setReleaseAssetLimitDraft(event.target.value)
+                        }
+                      />
+                    </div>
+                    {releaseAssetLimitDisabled ? (
+                      <p className="text-xs text-muted-foreground">
+                        {releaseAssetLimitReason}
+                      </p>
+                    ) : releaseAssetLimitInvalid ? (
+                      <p className="text-xs text-destructive">
+                        Enter a whole number of 0 or more, or leave it empty to
+                        inherit.
+                      </p>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">
+                        Assets are uploaded only for this many of the newest
+                        releases; 0 keeps release notes only. Assets already in
+                        Gitea are never removed.
+                      </p>
+                    )}
+                  </div>
+                  </>
                 )}
               </Fragment>
             );
@@ -320,7 +407,10 @@ export function MirrorOverridesDialog({
           >
             Cancel
           </Button>
-          <Button onClick={handleSave} disabled={isSaving || releaseLimitInvalid}>
+          <Button
+            onClick={handleSave}
+            disabled={isSaving || releaseLimitInvalid || releaseAssetLimitInvalid}
+          >
             {isSaving ? "Saving..." : "Save"}
           </Button>
         </DialogFooter>
@@ -343,5 +433,12 @@ function buildReleaseLimitDraft(
   value: MirrorOverrides | null | undefined
 ): string {
   const limit = normalizeReleaseLimit(value?.releaseLimit);
+  return limit === undefined ? "" : String(limit);
+}
+
+function buildReleaseAssetLimitDraft(
+  value: MirrorOverrides | null | undefined
+): string {
+  const limit = normalizeReleaseAssetLimit(value?.releaseAssetLimit);
   return limit === undefined ? "" : String(limit);
 }

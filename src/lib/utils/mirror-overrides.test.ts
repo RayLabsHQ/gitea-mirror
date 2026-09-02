@@ -6,10 +6,14 @@ import {
   listOverriddenKeys,
   MIRROR_GATING_REASONS,
   MIRROR_OVERRIDE_KEYS,
+  MIRROR_OVERRIDE_LABELS,
+  MIRROR_OVERRIDE_LIMIT_KEYS,
   mirrorOptionsToFlags,
   normalizeMirrorOverrides,
+  normalizeReleaseAssetLimit,
   normalizeReleaseLimit,
   parseMirrorOverrides,
+  releaseGetsAssets,
   resolveMirrorOptions,
   STARRED_CLAMPED_KEYS,
   UI_MIRROR_OVERRIDE_KEYS,
@@ -863,5 +867,201 @@ describe("resolveMirrorOptions for non-GitHub sources", () => {
     });
     expect(resolved.mirrorIssues).toBe(true);
     expect(resolved.mirrorReleases).toBe(true);
+  });
+});
+
+describe("release asset limit (#311)", () => {
+  describe("normalizeReleaseAssetLimit", () => {
+    test("accepts 0 and positive integers, floors fractions", () => {
+      expect(normalizeReleaseAssetLimit(0)).toBe(0);
+      expect(normalizeReleaseAssetLimit(5)).toBe(5);
+      expect(normalizeReleaseAssetLimit(2.9)).toBe(2);
+    });
+
+    test("rejects negatives, NaN, strings and absence", () => {
+      expect(normalizeReleaseAssetLimit(-1)).toBeUndefined();
+      expect(normalizeReleaseAssetLimit(Number.NaN)).toBeUndefined();
+      expect(normalizeReleaseAssetLimit("3")).toBeUndefined();
+      expect(normalizeReleaseAssetLimit(null)).toBeUndefined();
+      expect(normalizeReleaseAssetLimit(undefined)).toBeUndefined();
+    });
+
+    test("differs from the release limit exactly at 0", () => {
+      expect(normalizeReleaseLimit(0)).toBeUndefined();
+      expect(normalizeReleaseAssetLimit(0)).toBe(0);
+    });
+  });
+
+  describe("resolveMirrorOptions", () => {
+    test("resolves to null (assets for every release) when no tier pins one", () => {
+      const resolved = resolveMirrorOptions({
+        config: makeConfig({ mirrorReleases: true, releaseLimit: 10 }),
+        repository: makeRepo(),
+      });
+      expect(resolved.releaseAssetLimit).toBeNull();
+      expect(resolved.releaseLimit).toBe(10);
+    });
+
+    test("global asset limit applies when nothing overrides it", () => {
+      const resolved = resolveMirrorOptions({
+        config: makeConfig({ mirrorReleases: true, releaseAssetLimit: 5 }),
+        repository: makeRepo(),
+      });
+      expect(resolved.releaseAssetLimit).toBe(5);
+    });
+
+    test("a global 0 is a real value, not a fall-through", () => {
+      const resolved = resolveMirrorOptions({
+        config: makeConfig({ mirrorReleases: true, releaseAssetLimit: 0 }),
+        repository: makeRepo(),
+      });
+      expect(resolved.releaseAssetLimit).toBe(0);
+    });
+
+    test("organization override beats global, repository beats organization", () => {
+      const config = makeConfig({ mirrorReleases: true, releaseAssetLimit: 5 });
+
+      expect(
+        resolveMirrorOptions({
+          config,
+          repository: makeRepo(),
+          orgOverrides: { releaseAssetLimit: 2 },
+        }).releaseAssetLimit
+      ).toBe(2);
+
+      expect(
+        resolveMirrorOptions({
+          config,
+          repository: makeRepo({ mirrorOverrides: { releaseAssetLimit: 0 } }),
+          orgOverrides: { releaseAssetLimit: 2 },
+        }).releaseAssetLimit
+      ).toBe(0);
+    });
+
+    test("null in an override means inherit", () => {
+      const resolved = resolveMirrorOptions({
+        config: makeConfig({ mirrorReleases: true, releaseAssetLimit: 5 }),
+        repository: makeRepo({ mirrorOverrides: { releaseAssetLimit: null } }),
+        orgOverrides: { releaseAssetLimit: null },
+      });
+      expect(resolved.releaseAssetLimit).toBe(5);
+    });
+
+    test("an unusable override falls through to the next tier", () => {
+      const resolved = resolveMirrorOptions({
+        config: makeConfig({ mirrorReleases: true, releaseAssetLimit: 5 }),
+        repository: makeRepo({ mirrorOverrides: { releaseAssetLimit: -3 } }),
+        orgOverrides: { releaseAssetLimit: 2 },
+      });
+      expect(resolved.releaseAssetLimit).toBe(2);
+    });
+
+    test("the asset limit is independent of the release limit", () => {
+      const resolved = resolveMirrorOptions({
+        config: makeConfig({ mirrorReleases: true, releaseLimit: 3 }),
+        repository: makeRepo({ mirrorOverrides: { releaseAssetLimit: 1 } }),
+      });
+      expect(resolved.releaseLimit).toBe(3);
+      expect(resolved.releaseAssetLimit).toBe(1);
+    });
+  });
+
+  describe("releaseGetsAssets", () => {
+    test("null means every release gets assets", () => {
+      expect(releaseGetsAssets(0, null)).toBe(true);
+      expect(releaseGetsAssets(999, null)).toBe(true);
+    });
+
+    test("0 means no release gets assets", () => {
+      expect(releaseGetsAssets(0, 0)).toBe(false);
+    });
+
+    test("N covers exactly the newest N releases, by index", () => {
+      // Newest-first ordering: index 0 is the newest release.
+      expect(releaseGetsAssets(0, 2)).toBe(true);
+      expect(releaseGetsAssets(1, 2)).toBe(true);
+      expect(releaseGetsAssets(2, 2)).toBe(false);
+      expect(releaseGetsAssets(3, 2)).toBe(false);
+    });
+
+    test("a list of releases splits at the limit", () => {
+      const tags = ["v5", "v4", "v3", "v2", "v1"];
+      const withAssets = tags.filter((_, index) => releaseGetsAssets(index, 2));
+      expect(withAssets).toEqual(["v5", "v4"]);
+    });
+  });
+
+  describe("override helpers", () => {
+    test("a pinned 0 counts as an override", () => {
+      expect(hasMirrorOverrides({ releaseAssetLimit: 0 })).toBe(true);
+      expect(listOverriddenKeys({ releaseAssetLimit: 0 })).toEqual([
+        "releaseAssetLimit",
+      ]);
+    });
+
+    test("null and unusable values do not count", () => {
+      expect(hasMirrorOverrides({ releaseAssetLimit: null })).toBe(false);
+      expect(hasMirrorOverrides({ releaseAssetLimit: -1 })).toBe(false);
+      expect(listOverriddenKeys({ releaseAssetLimit: null })).toEqual([]);
+    });
+
+    test("normalizeMirrorOverrides keeps 0 and drops null", () => {
+      expect(
+        normalizeMirrorOverrides({ releaseAssetLimit: 0, releaseLimit: null })
+      ).toEqual({ releaseAssetLimit: 0 });
+      expect(normalizeMirrorOverrides({ releaseAssetLimit: null })).toBeNull();
+    });
+
+    test("the limit keys and labels agree", () => {
+      expect(MIRROR_OVERRIDE_LIMIT_KEYS).toEqual(["releaseLimit", "releaseAssetLimit"]);
+      for (const key of MIRROR_OVERRIDE_LIMIT_KEYS) {
+        expect(MIRROR_OVERRIDE_LABELS[key]).toBeTruthy();
+      }
+    });
+  });
+
+  describe("mirrorOptionsToFlags", () => {
+    test("reports null when the API sends no asset limit", () => {
+      expect(
+        mirrorOptionsToFlags({ mirrorReleases: true, releaseLimit: 10 }).releaseAssetLimit
+      ).toBeNull();
+      expect(
+        mirrorOptionsToFlags({ mirrorReleases: true, releaseAssetLimit: null }).releaseAssetLimit
+      ).toBeNull();
+    });
+
+    test("passes 0 and N through", () => {
+      expect(mirrorOptionsToFlags({ releaseAssetLimit: 0 }).releaseAssetLimit).toBe(0);
+      expect(mirrorOptionsToFlags({ releaseAssetLimit: 4 }).releaseAssetLimit).toBe(4);
+    });
+  });
+
+  describe("getMirrorOverrideGating", () => {
+    test("the asset limit is disabled with the release limit when releases are off", () => {
+      const gating = getMirrorOverrideGating({
+        targetKind: "repository",
+        effective: { mirrorReleases: false },
+      });
+      expect(gating.releaseLimit).toBe(MIRROR_GATING_REASONS.releasesOff);
+      expect(gating.releaseAssetLimit).toBe(MIRROR_GATING_REASONS.releasesOff);
+    });
+
+    test("the asset limit inherits the starred reason", () => {
+      const gating = getMirrorOverrideGating({
+        targetKind: "repository",
+        isStarred: true,
+        starredCodeOnly: true,
+        effective: { mirrorReleases: true },
+      });
+      expect(gating.releaseAssetLimit).toBe(MIRROR_GATING_REASONS.starredCodeOnly);
+    });
+
+    test("the asset limit is editable while releases are on", () => {
+      const gating = getMirrorOverrideGating({
+        targetKind: "organization",
+        effective: { mirrorReleases: true },
+      });
+      expect(gating.releaseAssetLimit).toBeUndefined();
+    });
   });
 });
