@@ -1,6 +1,7 @@
 import type { RepoStatus } from "@/types/Repository";
 import { db, mirrorJobs } from "./db";
-import { eq, and, or, lt, isNull } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
+import { buildInterruptedJobsCondition } from "./interrupted-job-detection";
 import { v4 as uuidv4 } from "uuid";
 import { publishEvent } from "./events";
 import { triggerJobNotification } from "./notification-service";
@@ -63,7 +64,10 @@ export async function createMirrorJob({
     inProgress: inProgress !== undefined ? inProgress : false,
     startedAt: inProgress ? currentTimestamp : undefined,
     completedAt: undefined,
-    lastCheckpoint: undefined,
+    // An in-progress job starts with a checkpoint at its creation time.
+    // Without one, findInterruptedJobs used to treat the job as
+    // interrupted before its first item finished (issue #372).
+    lastCheckpoint: inProgress ? currentTimestamp : undefined,
   };
 
   try {
@@ -216,6 +220,22 @@ export async function updateMirrorJobProgress({
 }
 
 /**
+ * Refreshes a job's checkpoint without recording progress. Called on a
+ * timer while a job is processing so that one long-running item (a large
+ * repository migration) cannot outlive the interrupted-job cutoff and get
+ * "resumed" by recovery while it is still live (issue #372).
+ *
+ * Only touches rows that are still in progress, so a heartbeat that fires
+ * after the job completed or failed changes nothing.
+ */
+export async function touchMirrorJobCheckpoint(jobId: string): Promise<void> {
+  await db
+    .update(mirrorJobs)
+    .set({ lastCheckpoint: new Date() })
+    .where(and(eq(mirrorJobs.id, jobId), eq(mirrorJobs.inProgress, true)));
+}
+
+/**
  * Finds interrupted jobs that need to be resumed with enhanced criteria.
  *
  * `logFound` defaults to false because this function is polled from
@@ -232,28 +252,15 @@ export async function findInterruptedJobs(
 ) {
   const { logFound = false } = options;
   try {
-    // Find jobs that are marked as in-progress but haven't been updated recently
-    const cutoffTime = new Date();
-    cutoffTime.setMinutes(cutoffTime.getMinutes() - 10); // Consider jobs inactive after 10 minutes without updates
-
-    // Also check for jobs that have been running for too long (over 2 hours)
-    const staleCutoffTime = new Date();
-    staleCutoffTime.setHours(staleCutoffTime.getHours() - 2);
-
+    // The liveness rule (checkpoint age, stale start, and the grace period
+    // for jobs that have not written a checkpoint yet) lives in
+    // interrupted-job-detection.ts so it can be tested against a real
+    // database. See issue #372 for why a null checkpoint alone is not
+    // enough to call a job interrupted.
     const interruptedJobs = await db
       .select()
       .from(mirrorJobs)
-      .where(
-        and(
-          eq(mirrorJobs.inProgress, true),
-          or(
-            // Jobs with no recent checkpoint
-            or(isNull(mirrorJobs.lastCheckpoint), lt(mirrorJobs.lastCheckpoint, cutoffTime)),
-            // Jobs that started too long ago (likely stale)
-            lt(mirrorJobs.startedAt, staleCutoffTime)
-          )
-        )
-      );
+      .where(buildInterruptedJobsCondition(mirrorJobs));
 
     // Log details about found jobs for debugging — opt-in to avoid
     // spamming the log when called from periodic passive checks.

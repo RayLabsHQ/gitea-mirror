@@ -27,6 +27,8 @@ let recoveryInitialized = false;
 // initializeRecovery() 5-minute throttle inside recovery.ts, which is
 // keyed on `lastRecoveryAttempt`). This prevents one middleware
 // invocation from triggering recovery while another is in flight.
+// Once a recovery run has started, the latch is held until that run
+// settles, even if the request that started it stops waiting.
 let recoveryInFlight = false;
 let cleanupServiceStarted = false;
 let schedulerServiceStarted = false;
@@ -128,14 +130,20 @@ export const onRequest = defineMiddleware(async (context, next) => {
   // The previous implementation used a once-per-process gate, so
   // any mid-runtime interruption (a sync that started after boot,
   // crashed mid-flight, and never got back to the resume path)
-  // would sit at `in_progress=true` forever — the periodic detector
+  // would sit at `in_progress=true` forever: the periodic detector
   // kept finding it, but the resumer never re-fired. This block
   // now re-evaluates on every request, gated by `recoveryInFlight`
   // (per-process) plus the 5-minute throttle inside
   // `initializeRecovery()` (which prevents thrashing if a resume
   // cycle keeps failing).
+  //
+  // A request only waits a bounded time for recovery, but the latch
+  // stays held until the recovery promise itself settles. Releasing
+  // it on the request timeout let later requests start overlapping
+  // attempts against the same jobs (issue #372).
   if (!recoveryInFlight) {
     recoveryInFlight = true;
+    let latchFollowsRecovery = false;
 
     try {
       // Check if recovery is actually needed before attempting
@@ -149,22 +157,34 @@ export const onRequest = defineMiddleware(async (context, next) => {
         }
         console.log('Attempting recovery from middleware...');
 
-        // Run recovery with a shorter timeout since this is during request handling
-        const recoveryResult = await Promise.race([
-          initializeRecovery({
-            skipIfRecentAttempt: true,
-            maxRetries: 2,
-            retryDelay: 3000,
-          }),
-          new Promise<boolean>((_, reject) => {
-            setTimeout(() => reject(new Error('Middleware recovery timeout')), 15000);
-          })
-        ]);
+        const recoveryPromise = initializeRecovery({
+          skipIfRecentAttempt: true,
+          maxRetries: 2,
+          retryDelay: 3000,
+        });
+        latchFollowsRecovery = true;
+        recoveryPromise
+          .catch(() => false)
+          .finally(() => {
+            recoveryInFlight = false;
+          });
 
-        if (recoveryResult) {
-          console.log('✅ Middleware recovery completed successfully');
-        } else {
-          console.log('⚠️  Middleware recovery completed with some issues');
+        // Bound how long this request waits; the recovery keeps running.
+        let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+        const timeout = new Promise<boolean>((_, reject) => {
+          timeoutHandle = setTimeout(() => reject(new Error('Middleware recovery timeout')), 15000);
+        });
+
+        try {
+          const recoveryResult = await Promise.race([recoveryPromise, timeout]);
+
+          if (recoveryResult) {
+            console.log('✅ Middleware recovery completed successfully');
+          } else {
+            console.log('⚠️  Middleware recovery completed with some issues');
+          }
+        } finally {
+          clearTimeout(timeoutHandle);
         }
       } else if (!recoveryInitialized) {
         // Only log this on the first request; otherwise we'd spam
@@ -183,7 +203,11 @@ export const onRequest = defineMiddleware(async (context, next) => {
 
       recoveryInitialized = true;
     } finally {
-      recoveryInFlight = false;
+      // Once recovery has started, the latch is released when it settles
+      // (see above), not when this request stops waiting.
+      if (!latchFollowsRecovery) {
+        recoveryInFlight = false;
+      }
     }
   }
 

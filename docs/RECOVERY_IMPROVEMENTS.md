@@ -63,9 +63,11 @@ The middleware now serves as a fallback recovery mechanism:
 
 #### Improvements:
 - **Proper Drizzle ORM syntax** for all database queries
-- **Enhanced interrupted job detection** with multiple criteria:
+- **Enhanced interrupted job detection** with multiple criteria (see `src/lib/interrupted-job-detection.ts`):
   - Jobs with no recent checkpoint (10+ minutes)
+  - Jobs that never wrote a checkpoint and started 10+ minutes ago (a job that just started is live, not interrupted)
   - Jobs running too long (2+ hours)
+- **Heartbeat during processing**: in-progress jobs start with a checkpoint and refresh it every 2 minutes, so one long item cannot make a live job look interrupted
 - **Detailed logging** of found interrupted jobs
 - **Better error handling** for database operations
 

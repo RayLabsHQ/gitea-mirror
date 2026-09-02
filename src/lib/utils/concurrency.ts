@@ -1,3 +1,5 @@
+import { JOB_HEARTBEAT_INTERVAL_MS } from "@/lib/interrupted-job-detection";
+
 /**
  * Utility for processing items in parallel with concurrency control
  *
@@ -225,7 +227,7 @@ export async function processWithResilience<T, R>(
   } = options;
 
   // Import helpers for job management and shutdown handling
-  const { createMirrorJob, updateMirrorJobProgress } = await import('@/lib/helpers');
+  const { createMirrorJob, updateMirrorJobProgress, touchMirrorJobCheckpoint } = await import('@/lib/helpers');
 
   // Import shutdown manager (with fallback for testing)
   let registerActiveJob: (jobId: string) => void = () => {};
@@ -297,6 +299,16 @@ export async function processWithResilience<T, R>(
   // Register the job with the shutdown manager
   registerActiveJob(jobId);
 
+  // Heartbeat while items are processing. Checkpoints are only written when
+  // an item completes, so a single long item would otherwise let the job
+  // cross the interrupted-job cutoff and be "resumed" by recovery while it
+  // is still running (issue #372).
+  const heartbeat = setInterval(() => {
+    touchMirrorJobCheckpoint(jobId).catch((error: unknown) => {
+      console.warn(`Failed to refresh checkpoint for job ${jobId}:`, error);
+    });
+  }, JOB_HEARTBEAT_INTERVAL_MS);
+
   // Define the checkpoint function
   const onCheckpoint = async (jobId: string, completedItemId: string) => {
     const itemName = items.find(item => getItemId(item) === completedItemId)
@@ -361,5 +373,7 @@ export async function processWithResilience<T, R>(
     unregisterActiveJob(jobId);
 
     throw error;
+  } finally {
+    clearInterval(heartbeat);
   }
 }
