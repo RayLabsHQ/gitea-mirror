@@ -135,6 +135,8 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
+          # The runner stage installs Debian security updates; never serve it from cache.
+          no-cache-filters: runner
           cache-to: type=gha,mode=max
           provenance: false # Disable provenance to avoid unknown/unknown
           sbom: false       # Disable sbom to avoid unknown/unknown
@@ -149,6 +151,8 @@ jobs:
           load: true
           tags: gitea-mirror:scan
           cache-from: type=gha
+          # The runner stage installs Debian security updates; never serve it from cache.
+          no-cache-filters: runner
           provenance: false # Disable provenance to avoid unknown/unknown
           sbom: false       # Disable sbom to avoid unknown/unknown
 

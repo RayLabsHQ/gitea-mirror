@@ -32,7 +32,7 @@ FROM debian:trixie-slim AS git-lfs-builder
 RUN apt-get update && apt-get -y upgrade && apt-get install -y --no-install-recommends \
   wget ca-certificates git make \
   && rm -rf /var/lib/apt/lists/*
-ARG GO_VERSION=1.25.12
+ARG GO_VERSION=1.25.14
 ARG GIT_LFS_VERSION=3.7.1
 RUN ARCH="$(dpkg --print-architecture)" \
   && wget -qO /tmp/go.tar.gz "https://go.dev/dl/go${GO_VERSION}.linux-${ARCH}.tar.gz" \
