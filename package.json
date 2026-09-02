@@ -58,6 +58,7 @@
     "@astrojs/mdx": "^7.0.3",
     "@astrojs/node": "^11.0.2",
     "@astrojs/react": "^6.0.1",
+    "@better-auth/api-key": "1.7.2",
     "@better-auth/oauth-provider": "1.7.2",
     "@better-auth/sso": "1.7.2",
     "@octokit/plugin-throttling": "^11.0.3",

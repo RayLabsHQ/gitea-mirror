@@ -2,6 +2,7 @@ import "@/lib/polyfills/buffer";
 import { createAuthClient } from "better-auth/react";
 import { oauthProviderClient } from "@better-auth/oauth-provider/client";
 import { ssoClient } from "@better-auth/sso/client";
+import { apiKeyClient } from "@better-auth/api-key/client";
 import type { Session as BetterAuthSession, User as BetterAuthUser } from "better-auth";
 import { withBase } from "@/lib/base-path";
 
@@ -43,6 +44,7 @@ export const authClient = createAuthClient({
   plugins: [
     oauthProviderClient(),
     ssoClient(),
+    apiKeyClient(),
   ],
 });
 

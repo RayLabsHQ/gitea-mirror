@@ -4,6 +4,7 @@ import { GiteaConfigForm } from './GiteaConfigForm';
 import { GitHubMirrorSettings } from './GitHubMirrorSettings';
 import { AutomationSettings } from './AutomationSettings';
 import { SSOSettings } from './SSOSettings';
+import { ApiKeysSettings } from './ApiKeysSettings';
 import { NotificationSettings } from './NotificationSettings';
 import type {
   ConfigApiResponse,
@@ -860,6 +861,7 @@ export function ConfigTabs() {
 
         <TabsContent value="sso" className="space-y-4">
           <SSOSettings />
+          <ApiKeysSettings />
         </TabsContent>
       </Tabs>
     </div>

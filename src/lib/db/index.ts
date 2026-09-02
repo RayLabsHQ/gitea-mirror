@@ -160,5 +160,6 @@ export {
   oauthConsents,
   jwkss,
   ssoProviders,
+  apikeys,
   rateLimits
 } from "./schema";

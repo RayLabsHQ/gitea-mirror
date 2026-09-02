@@ -17,6 +17,7 @@ This folder contains engineering and operations references for the open-source G
 ### Authentication
 - **[SSO-OIDC-SETUP.md](./SSO-OIDC-SETUP.md)** – Configure OIDC/SSO providers through the admin UI.
 - **[SSO_TESTING.md](./SSO_TESTING.md)** – Recipes for local and staging SSO testing (Google, Keycloak, mock providers).
+- **[API.md](./API.md)** – Create API keys and call the app from scripts, CI pipelines and workflow tools.
 
 If you are looking for customer-facing playbooks, see the MDX use cases under `www/src/pages/use-cases/`.
 

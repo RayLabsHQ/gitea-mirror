@@ -503,6 +503,86 @@ function verify0016Migration(db: any) {
   db.run("INSERT INTO oauth_client_assertions (id, expires_at) VALUES ('jti-16', 1234567890)");
 }
 
+function seedPre0017Database(db: any) {
+  // Migrations 0000-0016 have run. Seed a user so the api_keys foreign key
+  // has something to point at, and confirm the table does not exist yet.
+  db.run("INSERT INTO users (id, email, username, name) VALUES ('u-17', 'u17@example.com', 'u17', 'User Seventeen')");
+  const before = db.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'api_keys'").get();
+  assert(!before, "Expected api_keys to be absent before migration 0017");
+}
+
+function verify0017Migration(db: any) {
+  // The table the @better-auth/api-key plugin writes to. Column names are
+  // what the drizzle table in schema.ts declares; the plugin addresses them
+  // through the drizzle field names, so a rename here breaks key creation.
+  const cols = db.query("PRAGMA table_info(api_keys)").all() as Array<{
+    name: string;
+    notnull: number;
+    dflt_value: string | null;
+  }>;
+  const names = cols.map((c) => c.name);
+  for (const expected of [
+    "id",
+    "config_id",
+    "name",
+    "start",
+    "prefix",
+    "key",
+    "reference_id",
+    "refill_interval",
+    "refill_amount",
+    "last_refill_at",
+    "enabled",
+    "rate_limit_enabled",
+    "rate_limit_time_window",
+    "rate_limit_max",
+    "request_count",
+    "remaining",
+    "last_request",
+    "expires_at",
+    "created_at",
+    "updated_at",
+    "permissions",
+    "metadata",
+  ]) {
+    assert(names.includes(expected), `Expected api_keys.${expected} column to exist`);
+  }
+  const keyCol = cols.find((c) => c.name === "key");
+  assert(keyCol && keyCol.notnull === 1, "Expected api_keys.key to be NOT NULL");
+  const configCol = cols.find((c) => c.name === "config_id");
+  assert(configCol && configCol.dflt_value === "'default'", "Expected api_keys.config_id to default to 'default'");
+
+  const indexes = (db.query("PRAGMA index_list(api_keys)").all() as Array<{ name: string }>).map((i) => i.name);
+  assert(indexes.includes("idx_api_keys_reference_id"), "Expected an index on api_keys.reference_id");
+  assert(indexes.includes("idx_api_keys_key"), "Expected an index on api_keys.key");
+
+  // A row shaped like what the plugin inserts, then the cascade when the
+  // owning user goes away.
+  db.run("PRAGMA foreign_keys = ON");
+  db.run(
+    "INSERT INTO api_keys (id, name, start, prefix, key, reference_id, enabled, rate_limit_enabled, request_count, created_at, updated_at) " +
+      "VALUES ('key-17', 'ci', 'gm_abcdefg', 'gm_', 'hashed-key', 'u-17', 1, 0, 0, unixepoch(), unixepoch())",
+  );
+  const inserted = db.query("SELECT expires_at, config_id FROM api_keys WHERE id = 'key-17'").get() as {
+    expires_at: number | null;
+    config_id: string;
+  } | null;
+  assert(inserted && inserted.expires_at === null, "Expected a key without expiry to store NULL expires_at");
+  assert(inserted.config_id === "default", "Expected config_id to take the default");
+
+  let rejected = false;
+  try {
+    db.run("INSERT INTO api_keys (id, key, reference_id, created_at, updated_at) VALUES ('key-orphan', 'h', 'no-such-user', unixepoch(), unixepoch())");
+  } catch {
+    rejected = true;
+  }
+  assert(rejected, "Expected api_keys.reference_id to require an existing user");
+
+  db.run("DELETE FROM users WHERE id = 'u-17'");
+  const remaining = db.query("SELECT COUNT(*) AS count FROM api_keys").get() as { count: number };
+  assert(remaining.count === 0, "Expected deleting a user to cascade to their API keys");
+}
+
 const MIGRATION_0012_TIMESTAMP = 1774062000000;
 const MIGRATION_0013_TIMESTAMP = 1780377747526;
 
@@ -693,6 +773,10 @@ const latestUpgradeFixtures: Record<string, UpgradeFixture> = {
   "0016_better_auth_1_7": {
     seed: seedPre0016Database,
     verify: verify0016Migration,
+  },
+  "0017_api_keys": {
+    seed: seedPre0017Database,
+    verify: verify0017Migration,
   },
 };
 

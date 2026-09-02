@@ -3,11 +3,14 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { jwt } from "better-auth/plugins";
 import { oauthProvider } from "@better-auth/oauth-provider";
 import { sso } from "@better-auth/sso";
+import { apiKey } from "@better-auth/api-key";
 import { db, users, ssoProviders } from "./db";
+import { API_KEY_HEADER, API_KEY_LENGTH, API_KEY_PREFIX, API_KEY_START_LENGTH } from "./api-keys";
 import * as schema from "./db/schema";
 import { eq } from "drizzle-orm";
 import { withBase } from "./base-path";
 import { headerAuthPlugin } from "./auth-header-plugin";
+import { apiKeyGuardPlugin } from "./auth-api-key-guard";
 
 /**
  * Extracts the origins implied by registered SSO identity providers.
@@ -367,6 +370,37 @@ export const auth = betterAuth({
       // after the plugin's create, scoped by the operator-supplied `domain`.
       domainVerification: { enabled: true },
     }),
+
+    // API keys for automation (issue #314). A request carrying a valid key
+    // in the x-api-key header resolves to the owning user's session inside
+    // getSession, so the middleware and every route guard accept keys
+    // without per-route changes. Keys are hashed at rest; only the first
+    // characters are stored for display. Rows live in the api_keys table.
+    apiKey({
+      enableSessionForAPIKeys: true,
+      apiKeyHeaders: API_KEY_HEADER,
+      defaultPrefix: API_KEY_PREFIX,
+      defaultKeyLength: API_KEY_LENGTH,
+      requireName: true,
+      // The plugin's default is 10 requests per day per key, far too low
+      // for CI or workflow tools. Keys are not rate limited; revoke a key
+      // to stop it.
+      rateLimit: { enabled: false },
+      keyExpiration: {
+        // Never, unless the user picks an expiry when creating the key.
+        defaultExpiresIn: null,
+        minExpiresIn: 1,
+        maxExpiresIn: 365,
+      },
+      startingCharactersConfig: {
+        shouldStore: true,
+        charactersLength: API_KEY_START_LENGTH,
+      },
+    }),
+
+    // Refuses /api-key/* calls that arrive with the key header, so a key
+    // can never create, list or revoke keys. See auth-api-key-guard.ts.
+    apiKeyGuardPlugin(),
 
     // Header / forward authentication bridge. Exposes
     // POST /api/auth/sign-in/header so the middleware can mint a real

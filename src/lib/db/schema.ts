@@ -928,6 +928,46 @@ export const ssoProviders = sqliteTable("sso_providers", {
   index("idx_sso_providers_issuer").on(table.issuer),
 ]);
 
+// ===== API Keys (@better-auth/api-key) =====
+
+// Personal API keys for automation (issue #314). The plugin model is
+// "apikey"; with usePlural the adapter looks up `apikeys`, the same way
+// `jwkss` maps the jwks model. `key` holds the hash, `start` the first
+// characters for display, `referenceId` the owning user.
+export const apikeys = sqliteTable("api_keys", {
+  id: text("id").primaryKey(),
+  configId: text("config_id").notNull().default("default"),
+  name: text("name"),
+  start: text("start"),
+  prefix: text("prefix"),
+  key: text("key").notNull(),
+  referenceId: text("reference_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  refillInterval: integer("refill_interval"),
+  refillAmount: integer("refill_amount"),
+  lastRefillAt: integer("last_refill_at", { mode: "timestamp" }),
+  enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+  // The plugin writes every row with rate limiting off (see auth.ts); the
+  // column default mirrors the plugin's own schema.
+  rateLimitEnabled: integer("rate_limit_enabled", { mode: "boolean" }).notNull().default(true),
+  rateLimitTimeWindow: integer("rate_limit_time_window"),
+  rateLimitMax: integer("rate_limit_max"),
+  requestCount: integer("request_count").notNull().default(0),
+  remaining: integer("remaining"),
+  lastRequest: integer("last_request", { mode: "timestamp" }),
+  expiresAt: integer("expires_at", { mode: "timestamp" }),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .default(sql`(unixepoch())`),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
+    .notNull()
+    .default(sql`(unixepoch())`),
+  permissions: text("permissions"),
+  metadata: text("metadata"),
+}, (table) => [
+  index("idx_api_keys_reference_id").on(table.referenceId),
+  index("idx_api_keys_key").on(table.key),
+]);
+
 // ===== Rate Limit Tracking =====
 
 export const rateLimitSchema = z.object({

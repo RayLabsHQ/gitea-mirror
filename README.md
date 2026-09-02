@@ -497,6 +497,18 @@ Gitea Mirror can also act as an OIDC provider for other applications. Register O
 - Create service-to-service authentication
 - Build integrations with your Gitea Mirror instance
 
+### 5. API Keys (Scripts and CI)
+Create a personal API key under Settings → Authentication → API Keys and send it in the `x-api-key` header to call the app from scripts, CI pipelines or workflow tools. Keys act as the user who created them, can be given an expiry, and can be revoked at any time.
+
+```bash
+curl -sS -X POST https://your-domain.com/api/sync/repository \
+  -H "x-api-key: gm_..." \
+  -H "Content-Type: application/json" \
+  -d '{"owner":"octocat","repo":"hello-world"}'
+```
+
+See the [API guide](docs/API.md) for the endpoints to add, list and mirror repositories.
+
 ## Known Limitations
 
 ### Pull Request Mirroring Implementation

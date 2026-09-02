@@ -120,6 +120,13 @@
       "when": 1788336988526,
       "tag": "0016_better_auth_1_7",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1788339447860,
+      "tag": "0017_api_keys",
+      "breakpoints": true
     }
   ]
 }
