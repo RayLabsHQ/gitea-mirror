@@ -143,7 +143,7 @@ curl -sS -X POST "$BASE/api/job/mirror-repo" \
 
 ## Managing keys from the API
 
-The key endpoints themselves need a browser session (a cookie), not a key, so a leaked key cannot mint more keys. They live under `/api/auth/api-key/`:
+Manage keys through the settings UI or with a browser session. The key endpoints need a session cookie, not a key, so a leaked key cannot mint more keys, and like every cookie-authenticated `POST` to `/api/auth/*` they also need an `Origin` header (browsers send it on their own; a script must add `Origin: https://mirror.example.com`). The key itself is only for the app routes above. The endpoints live under `/api/auth/api-key/`:
 
 | Call | Body | Result |
 | --- | --- | --- |

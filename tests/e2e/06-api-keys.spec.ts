@@ -11,6 +11,18 @@ import { APP_URL, APP_USER_EMAIL, getAppSessionCookies } from "./helpers";
 
 const KEY_HEADER = "x-api-key";
 
+/**
+ * Better Auth's CSRF check rejects a cookie-authenticated POST that has no
+ * Origin header (403 MISSING_OR_NULL_ORIGIN). Browsers always send one; the
+ * Playwright request context does not, so the key management calls set it
+ * by hand. App routes and key-authenticated calls do not need it.
+ */
+const sessionPostHeaders = (cookies: string) => ({
+  Cookie: cookies,
+  Origin: APP_URL,
+  "Content-Type": "application/json",
+});
+
 test.describe("E2E: API keys", () => {
   let cookies = "";
   let keyId = "";
@@ -21,7 +33,7 @@ test.describe("E2E: API keys", () => {
     expect(cookies).toBeTruthy();
 
     const resp = await request.post(`${APP_URL}/api/auth/api-key/create`, {
-      headers: { Cookie: cookies, "Content-Type": "application/json" },
+      headers: sessionPostHeaders(cookies),
       data: { name: "e2e-key" },
       failOnStatusCode: false,
     });
@@ -83,12 +95,16 @@ test.describe("E2E: API keys", () => {
   });
 
   test("Step 4b: a key cannot create, list or revoke keys", async ({ request }) => {
+    // The api-key-guard plugin (src/lib/auth-api-key-guard.ts) answers 403
+    // with code API_KEY_CANNOT_MANAGE_KEYS before the plugin's own session
+    // check runs, so these are 403 rather than 401.
     const create = await request.post(`${APP_URL}/api/auth/api-key/create`, {
       headers: { [KEY_HEADER]: secret, "Content-Type": "application/json" },
       data: { name: "minted-by-a-key" },
       failOnStatusCode: false,
     });
     expect(create.status(), await create.text()).toBe(403);
+    expect((await create.json()).code).toBe("API_KEY_CANNOT_MANAGE_KEYS");
 
     const list = await request.get(`${APP_URL}/api/auth/api-key/list`, {
       headers: { [KEY_HEADER]: secret },
@@ -124,7 +140,7 @@ test.describe("E2E: API keys", () => {
 
   test("Step 6: revoking the key stops it working", async ({ request }) => {
     const del = await request.post(`${APP_URL}/api/auth/api-key/delete`, {
-      headers: { Cookie: cookies, "Content-Type": "application/json" },
+      headers: sessionPostHeaders(cookies),
       data: { keyId },
       failOnStatusCode: false,
     });
