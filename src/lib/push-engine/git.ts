@@ -109,7 +109,7 @@ export async function runGit(args: string[], options: RunGitOptions = {}): Promi
   const token = credentials?.token;
   const safeStdout = maskSecret(stdout, token);
   const safeStderr = maskSecret(stderr, token);
-  const subcommand = args.find((arg) => !arg.startsWith("-") && arg !== cwd) ?? "";
+  const subcommand = gitSubcommand(args);
 
   if (proc.signalCode) {
     throw new GitCommandError(
@@ -129,6 +129,26 @@ export async function runGit(args: string[], options: RunGitOptions = {}): Promi
     );
   }
   return { stdout: safeStdout, stderr: safeStderr };
+}
+
+/**
+ * The git subcommand in an argv, for error messages. Skips flags and the
+ * value that follows `-C` or `-c`, so `["-C", dir, "fetch"]` yields "fetch".
+ */
+export function gitSubcommand(args: string[]): string {
+  let skipNext = false;
+  for (const arg of args) {
+    if (skipNext) {
+      skipNext = false;
+      continue;
+    }
+    if (arg === "-C" || arg === "-c") {
+      skipNext = true;
+      continue;
+    }
+    if (!arg.startsWith("-")) return arg;
+  }
+  return "";
 }
 
 /** Keep the interesting last lines of git's output for an error message. */

@@ -16,7 +16,7 @@ import {
   runPushMirror,
   type PushMirrorPlan,
 } from "./engine";
-import { GitCommandError, runGit } from "./git";
+import { GitCommandError, gitSubcommand, runGit } from "./git";
 import { getPushLimiter, resetPushLimiter } from "./limiter";
 import { CloneLockedError, lockPathFor } from "./lock";
 import type {
@@ -360,6 +360,22 @@ describe("helpers", () => {
     ]);
     expect(countChanges(before, after)).toBe(3);
     expect(countChanges(after, after)).toBe(0);
+  });
+
+  test("gitSubcommand names the subcommand, not the -C path or -c values", () => {
+    expect(gitSubcommand(["-C", "/data/mirrors/x.git", "fetch", "--prune", "origin"])).toBe("fetch");
+    expect(gitSubcommand(["-c", "core.askPass=", "-C", "/tmp/x", "push", "--mirror"])).toBe("push");
+    expect(gitSubcommand(["clone", "--mirror", "https://example.com/a.git", "/tmp/a.git"])).toBe("clone");
+    expect(gitSubcommand(["--version"])).toBe("");
+  });
+
+  test("a failing git command reports its subcommand in the error message", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "push-engine-nogit-"));
+    try {
+      await expect(runGit(["-C", dir, "fetch", "origin"])).rejects.toThrow(/^git fetch failed \(exit \d+\)/);
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   test("isRetryableInBatches keeps credential and missing repository failures out of the batch retry", () => {
