@@ -78,6 +78,7 @@ export async function createDefaultConfig({ userId, envOverrides = {} }: Default
     githubConfig: {
       owner: githubUsername,
       type: "personal",
+      provider: "github",
       token: githubToken ? encrypt(githubToken) : "",
       includeStarred: false,
       includeForks: true,

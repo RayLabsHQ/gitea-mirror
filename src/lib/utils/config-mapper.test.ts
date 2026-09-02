@@ -257,3 +257,77 @@ test("mapUiToDbConfig resets a stale skip forkStrategy to reference when skipFor
   });
   expect(db.giteaConfig.forkStrategy).toBe("reference");
 });
+
+import { describe } from "bun:test";
+import {
+  mapDbToUiConfig as mapDbToUiConfigForSource,
+  mapUiToDbConfig as mapUiToDbConfigForSource,
+} from "./config-mapper";
+
+describe("source provider round trip", () => {
+  const giteaConfig = {
+    url: "https://gitea.example.com",
+    username: "me",
+    token: "t",
+    organization: "mirrors",
+    visibility: "public",
+    starredReposOrg: "starred",
+    preserveOrgStructure: false,
+  } as any;
+  const mirrorOptions = {
+    mirrorReleases: false,
+    mirrorLFS: false,
+    mirrorMetadata: false,
+    metadataComponents: { issues: false, pullRequests: false, labels: false, milestones: false, wiki: false },
+  } as any;
+  const advancedOptions = { skipForks: false, starredCodeOnly: false } as any;
+
+  test("stores a normalized instance URL for GitLab and Gitea sources", () => {
+    const { githubConfig } = mapUiToDbConfigForSource(
+      { provider: "gitlab", url: "GitLab.example.com/", username: "me", token: "t", privateRepositories: false, mirrorStarred: false },
+      giteaConfig,
+      mirrorOptions,
+      advancedOptions
+    );
+    expect(githubConfig.provider).toBe("gitlab");
+    expect(githubConfig.url).toBe("https://gitlab.example.com");
+  });
+
+  test("GitHub stores no URL and an empty URL means the provider default", () => {
+    const github = mapUiToDbConfigForSource(
+      { provider: "github", url: "https://github.com", username: "me", token: "t", privateRepositories: false, mirrorStarred: false },
+      giteaConfig,
+      mirrorOptions,
+      advancedOptions
+    ).githubConfig;
+    expect(github.provider).toBe("github");
+    expect(github.url).toBeUndefined();
+
+    const gitea = mapUiToDbConfigForSource(
+      { provider: "gitea", url: "  ", username: "me", token: "t", privateRepositories: false, mirrorStarred: false },
+      giteaConfig,
+      mirrorOptions,
+      advancedOptions
+    ).githubConfig;
+    expect(gitea.provider).toBe("gitea");
+    expect(gitea.url).toBeUndefined();
+  });
+
+  test("a saved provider survives a UI payload that does not mention it", () => {
+    const { githubConfig } = mapUiToDbConfigForSource(
+      { username: "me", token: "t", privateRepositories: false, mirrorStarred: false },
+      giteaConfig,
+      mirrorOptions,
+      advancedOptions,
+      { githubConfig: { provider: "gitea", url: "https://codeberg.org" } as any }
+    );
+    expect(githubConfig.provider).toBe("gitea");
+    expect(githubConfig.url).toBe("https://codeberg.org");
+  });
+
+  test("a legacy row maps to GitHub with an empty URL in the UI", () => {
+    const { githubConfig } = mapDbToUiConfigForSource({ githubConfig: { owner: "octo", token: "" } });
+    expect(githubConfig.provider).toBe("github");
+    expect(githubConfig.url).toBe("");
+  });
+});

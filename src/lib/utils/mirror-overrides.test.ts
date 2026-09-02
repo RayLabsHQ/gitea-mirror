@@ -811,3 +811,57 @@ describe("getMirrorOverrideGating - release limit follows releases", () => {
     expect(gating.releaseLimit).toBe(MIRROR_GATING_REASONS.releasesOff);
   });
 });
+
+import {
+  GITHUB_ONLY_METADATA_KEYS,
+  resolveMirrorOptions as resolveOptionsForSource,
+} from "./mirror-overrides";
+
+describe("resolveMirrorOptions for non-GitHub sources", () => {
+  const config = {
+    giteaConfig: {
+      lfs: true,
+      wiki: true,
+      mirrorReleases: true,
+      mirrorMetadata: true,
+      mirrorIssues: true,
+      mirrorPullRequests: true,
+      mirrorLabels: true,
+      mirrorMilestones: true,
+      releaseLimit: 5,
+    },
+  } as any;
+
+  test("a GitLab repository keeps code, wiki and LFS but no GitHub API metadata", () => {
+    const resolved = resolveOptionsForSource({
+      config,
+      repository: { isStarred: false, mirrorOverrides: null, sourceProvider: "gitlab" } as any,
+    });
+    expect(resolved.lfs).toBe(true);
+    expect(resolved.wiki).toBe(true);
+    for (const key of GITHUB_ONLY_METADATA_KEYS) {
+      expect(resolved[key]).toBe(false);
+    }
+  });
+
+  test("the clamp outranks a per repository override", () => {
+    const resolved = resolveOptionsForSource({
+      config,
+      repository: {
+        isStarred: false,
+        mirrorOverrides: { mirrorIssues: true },
+        sourceProvider: "gitea",
+      } as any,
+    });
+    expect(resolved.mirrorIssues).toBe(false);
+  });
+
+  test("rows without a source provider are GitHub rows and stay untouched", () => {
+    const resolved = resolveOptionsForSource({
+      config,
+      repository: { isStarred: false, mirrorOverrides: null } as any,
+    });
+    expect(resolved.mirrorIssues).toBe(true);
+    expect(resolved.mirrorReleases).toBe(true);
+  });
+});

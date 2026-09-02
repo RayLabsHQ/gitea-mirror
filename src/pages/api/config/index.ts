@@ -1,4 +1,10 @@
 import type { APIRoute } from "astro";
+import {
+  SOURCE_PROVIDER_LABELS,
+  isSourceProviderKind,
+  isValidSourceUrl,
+  normalizeSourceProviderKind,
+} from "@/lib/source-providers/kinds";
 import { db, configs, users } from "@/lib/db";
 import { v4 as uuidv4 } from "uuid";
 import { eq, sql } from "drizzle-orm";
@@ -78,6 +84,27 @@ export const POST: APIRoute = async ({ request, locals }) => {
       } catch {
         return new Response(
           JSON.stringify({ success: false, message: "Invalid Gitea URL format." }),
+          { status: 400, headers: { "Content-Type": "application/json" } }
+        );
+      }
+    }
+
+    // Validate the source provider and, for GitLab and Gitea sources, the instance URL
+    if (githubConfig.provider !== undefined && !isSourceProviderKind(githubConfig.provider)) {
+      return new Response(
+        JSON.stringify({ success: false, message: "Unknown source provider." }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+    const sourceProvider = normalizeSourceProviderKind(githubConfig.provider);
+    if (sourceProvider !== "github") {
+      const rawSourceUrl = typeof githubConfig.url === "string" ? githubConfig.url.trim() : "";
+      if (rawSourceUrl && !isValidSourceUrl(rawSourceUrl)) {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            message: `${SOURCE_PROVIDER_LABELS[sourceProvider]} URL must be a valid http or https URL.`,
+          }),
           { status: 400, headers: { "Content-Type": "application/json" } }
         );
       }

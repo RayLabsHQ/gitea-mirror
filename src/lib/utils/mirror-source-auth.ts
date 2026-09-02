@@ -1,3 +1,5 @@
+import type { SourceProviderKind } from "@/lib/source-providers/kinds";
+
 interface BuildGithubSourceAuthPayloadParams {
   token?: string | null;
   githubOwner?: string | null;
@@ -46,4 +48,60 @@ export function buildGithubSourceAuthPayload({
     auth_password: normalizedToken,
     auth_token: normalizedToken,
   };
+}
+
+interface BuildSourceAuthPayloadParams {
+  provider: SourceProviderKind;
+  token?: string | null;
+  /** The account the token belongs to. */
+  username?: string | null;
+  repositoryOwner?: string | null;
+}
+
+const GITLAB_AUTH_USERNAME = "oauth2";
+const DEFAULT_GITEA_AUTH_USERNAME = "token";
+
+/**
+ * Build the clone credentials Gitea stores for a pull mirror, per source host.
+ *
+ * - GitHub: account name plus the token as password.
+ * - GitLab: the documented "oauth2" username plus a personal access token.
+ * - Gitea and Forgejo: any username plus the token as password.
+ *
+ * Returns an empty object when no token is available so callers can
+ * Object.assign the result unconditionally.
+ */
+export function buildSourceAuthPayload({
+  provider,
+  token,
+  username,
+  repositoryOwner,
+}: BuildSourceAuthPayloadParams): GithubSourceAuthPayloadOrEmpty {
+  const normalizedToken = normalize(token);
+  if (!normalizedToken) {
+    return {};
+  }
+
+  switch (provider) {
+    case "gitlab":
+      return {
+        auth_username: GITLAB_AUTH_USERNAME,
+        auth_password: normalizedToken,
+        auth_token: normalizedToken,
+      };
+    case "gitea":
+      return {
+        auth_username:
+          normalize(username) || normalize(repositoryOwner) || DEFAULT_GITEA_AUTH_USERNAME,
+        auth_password: normalizedToken,
+        auth_token: normalizedToken,
+      };
+    case "github":
+    default:
+      return buildGithubSourceAuthPayload({
+        token: normalizedToken,
+        githubOwner: username,
+        repositoryOwner,
+      });
+  }
 }

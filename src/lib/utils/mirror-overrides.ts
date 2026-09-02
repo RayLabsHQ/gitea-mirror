@@ -1,6 +1,7 @@
 import type { Config } from "@/types/config";
 import type { MirrorOverrides, Repository } from "@/lib/db/schema";
 import { mirrorOverridesSchema } from "@/lib/db/schema";
+import { normalizeSourceProviderKind } from "@/lib/source-providers/kinds";
 
 /**
  * The mirror option flags that can be overridden per organization and per
@@ -68,6 +69,23 @@ export function normalizeReleaseLimit(value: unknown): number | undefined {
  */
 export const STARRED_CLAMPED_KEYS = [
   "wiki",
+  "mirrorReleases",
+  "mirrorMetadata",
+  "mirrorIssues",
+  "mirrorPullRequests",
+  "mirrorLabels",
+  "mirrorMilestones",
+] as const satisfies readonly MirrorOverrideKey[];
+
+/**
+ * Flags that only work for GitHub sources.
+ *
+ * Issue, pull request, release, label and milestone mirroring read the
+ * GitHub API. A repository from GitLab or Gitea gets code, wiki and LFS
+ * through the Gitea pull mirror and nothing else, so the resolver forces
+ * these off for it regardless of what any tier asked for.
+ */
+export const GITHUB_ONLY_METADATA_KEYS = [
   "mirrorReleases",
   "mirrorMetadata",
   "mirrorIssues",
@@ -342,7 +360,8 @@ export function resolveMirrorOptions({
   orgOverrides,
 }: {
   config: Partial<Config>;
-  repository: Pick<Repository, "isStarred" | "mirrorOverrides">;
+  repository: Pick<Repository, "isStarred" | "mirrorOverrides"> &
+    Partial<Pick<Repository, "sourceProvider">>;
   orgOverrides?: unknown;
 }): ResolvedMirrorOptions {
   const globalConfig = config.giteaConfig;
@@ -384,6 +403,14 @@ export function resolveMirrorOptions({
     // flags the UI disables always matches the set the runtime forces off.
     // Note it excludes `lfs` by design.
     for (const key of STARRED_CLAMPED_KEYS) {
+      resolved[key] = false;
+    }
+  }
+
+  // Metadata mirroring needs the GitHub API. Rows without a source
+  // provider predate the column and came from GitHub.
+  if (normalizeSourceProviderKind(repository.sourceProvider) !== "github") {
+    for (const key of GITHUB_ONLY_METADATA_KEYS) {
       resolved[key] = false;
     }
   }

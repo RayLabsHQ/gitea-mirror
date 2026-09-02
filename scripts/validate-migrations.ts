@@ -354,6 +354,60 @@ function verify0014Migration(db: any) {
   assert(parsed.lfs === false, `Expected persisted lfs override false, got ${updated.mirror_overrides}`);
 }
 
+function seedPre0015Database(db: any) {
+  // Migrations 0000-0014 have run, so repositories exist but carry no source
+  // columns. Seed one so the column-add can be verified against a
+  // pre-existing row: everything before 0015 came from GitHub.
+  db.run("INSERT INTO users (id, email, username, name) VALUES ('u-src', 'src@example.com', 'src', 'Source User')");
+  db.run("INSERT INTO configs (id, user_id, name, is_active, github_config, gitea_config, schedule_config, cleanup_config) VALUES ('cfg-pre15', 'u-src', 'Default', 1, '{}', '{}', '{}', '{}')");
+  db.run(
+    "INSERT INTO repositories (id, user_id, config_id, name, full_name, normalized_full_name, url, clone_url, owner, default_branch) " +
+      "VALUES ('repo-pre15', 'u-src', 'cfg-pre15', 'tool', 'src/tool', 'src/tool', 'https://github.com/src/tool', 'https://github.com/src/tool.git', 'src', 'main')",
+  );
+}
+
+function verify0015Migration(db: any) {
+  const cols = db
+    .query("PRAGMA table_info(repositories)")
+    .all() as Array<{ name: string; type: string; notnull: number; dflt_value: string | null }>;
+
+  for (const [name, expectedDefault] of [
+    ["source_provider", "'github'"],
+    ["source_url", "'https://github.com'"],
+  ] as const) {
+    const col = cols.find((c) => c.name === name);
+    assert(col, `Expected repositories.${name} column to exist`);
+    assert(col.notnull === 1, `Expected repositories.${name} to be NOT NULL`);
+    assert(
+      col.dflt_value === expectedDefault,
+      `Expected repositories.${name} default ${expectedDefault}, got ${col.dflt_value}`,
+    );
+  }
+
+  // Pre-existing rows are backfilled as GitHub, which is where they came from.
+  const existing = db
+    .query("SELECT source_provider, source_url FROM repositories WHERE id = 'repo-pre15'")
+    .get() as { source_provider: string; source_url: string } | null;
+  assert(existing, "Expected pre-existing repository row to survive migration");
+  assert(
+    existing.source_provider === "github" && existing.source_url === "https://github.com",
+    `Expected existing repository to default to GitHub, got ${JSON.stringify(existing)}`,
+  );
+
+  // New rows can record another host.
+  db.run(
+    "INSERT INTO repositories (id, user_id, config_id, name, full_name, normalized_full_name, url, clone_url, owner, default_branch, source_provider, source_url) " +
+      "VALUES ('repo-gitlab', 'u-src', 'cfg-pre15', 'tool', 'group/tool', 'group/tool', 'https://gitlab.com/group/tool', 'https://gitlab.com/group/tool.git', 'group', 'main', 'gitlab', 'https://gitlab.com')",
+  );
+  const inserted = db
+    .query("SELECT source_provider, source_url FROM repositories WHERE id = 'repo-gitlab'")
+    .get() as { source_provider: string; source_url: string } | null;
+  assert(
+    inserted?.source_provider === "gitlab" && inserted.source_url === "https://gitlab.com",
+    `Expected GitLab source to round-trip, got ${JSON.stringify(inserted)}`,
+  );
+}
+
 const MIGRATION_0012_TIMESTAMP = 1774062000000;
 const MIGRATION_0013_TIMESTAMP = 1780377747526;
 
@@ -472,6 +526,10 @@ const latestUpgradeFixtures: Record<string, UpgradeFixture> = {
   "0014_needy_white_tiger": {
     seed: seedPre0014Database,
     verify: verify0014Migration,
+  },
+  "0015_source_provider": {
+    seed: seedPre0015Database,
+    verify: verify0015Migration,
   },
 };
 

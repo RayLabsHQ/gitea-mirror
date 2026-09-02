@@ -1,4 +1,8 @@
 import { z } from "zod";
+import {
+  SOURCE_PROVIDER_KINDS,
+  type SourceProviderKind,
+} from "../source-providers/kinds";
 import { sqliteTable, text, integer, index, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
@@ -17,6 +21,10 @@ export const githubConfigSchema = z.object({
   owner: z.string(),
   type: z.enum(["personal", "organization"]),
   token: z.string(),
+  // Which host the repositories come from. "gitea" also covers Forgejo.
+  provider: z.enum(SOURCE_PROVIDER_KINDS).default("github"),
+  // Base URL of the instance for GitLab and Gitea sources.
+  url: z.string().optional(),
   includeStarred: z.boolean().default(false),
   includeForks: z.boolean().default(true),
   skipForks: z.boolean().default(false),
@@ -220,6 +228,8 @@ export const repositorySchema = z.object({
   url: z.url(),
   cloneUrl: z.url(),
   owner: z.string(),
+  sourceProvider: z.string().optional(),
+  sourceUrl: z.string().optional(),
   organization: z.string().optional().nullable(),
   mirroredLocation: z.string().default(""),
   isPrivate: z.boolean().default(false),
@@ -439,6 +449,14 @@ export const repositories = sqliteTable("repositories", {
   normalizedFullName: text("normalized_full_name").notNull(),
   url: text("url").notNull(),
   cloneUrl: text("clone_url").notNull(),
+  // Which host the repository was imported from, and that host's base
+  // URL. The mirror step picks clone credentials from these, and the
+  // cleanup service only judges repositories from the configured source.
+  sourceProvider: text("source_provider")
+    .$type<SourceProviderKind>()
+    .notNull()
+    .default("github"),
+  sourceUrl: text("source_url").notNull().default("https://github.com"),
   owner: text("owner").notNull(),
   organization: text("organization"),
   mirroredLocation: text("mirrored_location").default(""),

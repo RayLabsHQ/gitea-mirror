@@ -7,9 +7,12 @@ import { db, configs, users } from '@/lib/db';
 import { eq, and, sql } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import { encrypt } from '@/lib/utils/encryption';
+import { isSourceProviderKind, type SourceProviderKind } from '@/lib/source-providers/kinds';
 
 interface EnvConfig {
   github: {
+    provider?: SourceProviderKind;
+    url?: string;
     username?: string;
     token?: string;
     type?: 'personal' | 'organization';
@@ -112,6 +115,13 @@ function parseEnvConfig(): EnvConfig {
 
   return {
     github: {
+      // SOURCE_PROVIDER picks GitHub, GitLab or Gitea/Forgejo; SOURCE_URL is
+      // the instance base URL for the last two. Username and token still come
+      // from GITHUB_USERNAME and GITHUB_TOKEN whatever the provider.
+      provider: isSourceProviderKind(process.env.SOURCE_PROVIDER)
+        ? process.env.SOURCE_PROVIDER
+        : undefined,
+      url: process.env.SOURCE_URL,
       username: process.env.GITHUB_USERNAME,
       token: process.env.GITHUB_TOKEN,
       type: process.env.GITHUB_TYPE as 'personal' | 'organization',
@@ -276,6 +286,8 @@ export async function initializeConfigFromEnv(): Promise<void> {
     const githubConfig = {
       owner: envConfig.github.username || existingConfig?.[0]?.githubConfig?.owner || '',
       type: envConfig.github.type || existingConfig?.[0]?.githubConfig?.type || 'personal',
+      provider: envConfig.github.provider || existingConfig?.[0]?.githubConfig?.provider || 'github',
+      url: envConfig.github.url || existingConfig?.[0]?.githubConfig?.url || undefined,
       token: envConfig.github.token ? encrypt(envConfig.github.token) : existingConfig?.[0]?.githubConfig?.token || '',
       includeStarred: envConfig.github.mirrorStarred ?? existingConfig?.[0]?.githubConfig?.includeStarred ?? false,
       includeForks: !(envConfig.github.skipForks ?? false),

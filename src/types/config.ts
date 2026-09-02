@@ -5,6 +5,8 @@ export type MirrorStrategy = "preserve" | "single-org" | "flat-user" | "mixed";
 export type StarredReposMode = "dedicated-org" | "preserve-owner";
 export type BackupStrategy = "disabled" | "always" | "on-force-push" | "block-on-force-push";
 export type ScheduleMode = "interval" | "clock";
+/** Which host repositories are pulled from. "gitea" also covers Forgejo. */
+export type SourceProvider = "github" | "gitlab" | "gitea";
 
 export interface GiteaConfig {
   url: string;
@@ -58,6 +60,10 @@ export interface DatabaseCleanupConfig {
 export type DuplicateNameStrategy = "suffix" | "prefix" | "owner-org";
 
 export interface GitHubConfig {
+  /** Defaults to "github" when absent. */
+  provider?: SourceProvider;
+  /** Instance base URL for GitLab and Gitea sources. */
+  url?: string;
   username: string;
   token: string;
   privateRepositories: boolean;

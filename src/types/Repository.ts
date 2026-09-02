@@ -1,4 +1,5 @@
 import type { Repository } from "@/lib/db/schema";
+import type { SourceProviderKind } from "@/lib/source-providers/kinds";
 import { z } from "zod";
 
 export const repoStatusEnum = z.enum([
@@ -51,6 +52,9 @@ export interface GitRepo {
   owner: string;
   organization?: string;
   mirroredLocation?: string;
+  /** Host the repository came from. Absent means GitHub. */
+  sourceProvider?: SourceProviderKind;
+  sourceUrl?: string;
   destinationOrg?: string | null;
 
   isPrivate: boolean;
@@ -86,6 +90,10 @@ export interface AddRepositoriesApiRequest {
   owner: string;
   force?: boolean;
   destinationOrg?: string;
+  /** Host of the pasted URL, when one was pasted. Must match the configured source. */
+  host?: string;
+  /** Path segments of the pasted URL, resolved per source on the server. */
+  path?: string[];
 }
 
 export interface AddRepositoriesApiResponse {

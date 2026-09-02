@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { GitRepo } from '@/types/Repository';
 import { repositories } from '@/lib/db/schema';
+import { getRepositorySource } from '@/lib/source-providers/kinds';
 
 export type RepoInsert = typeof repositories.$inferInsert;
 
@@ -39,6 +40,7 @@ export function normalizeGitRepoToInsert(
     owner: repo.owner,
     organization: repo.organization ?? null,
     mirroredLocation: repo.mirroredLocation || '',
+    ...repositorySourceColumns(repo),
     destinationOrg: repo.destinationOrg || null,
     isPrivate: repo.isPrivate,
     isForked: repo.isForked,
@@ -60,6 +62,14 @@ export function normalizeGitRepoToInsert(
     createdAt: repo.createdAt || new Date(),
     updatedAt: repo.updatedAt || new Date(),
   };
+}
+
+// The source columns for an insert, defaulting to GitHub for legacy producers
+export function repositorySourceColumns(
+  repo: Pick<GitRepo, 'sourceProvider' | 'sourceUrl'>
+): Pick<RepoInsert, 'sourceProvider' | 'sourceUrl'> {
+  const source = getRepositorySource(repo);
+  return { sourceProvider: source.provider, sourceUrl: source.url };
 }
 
 // Compute a safe batch size based on SQLite 999-parameter limit
