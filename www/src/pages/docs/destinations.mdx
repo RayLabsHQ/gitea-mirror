@@ -1,0 +1,134 @@
+---
+layout: '../../layouts/DocsLayout.astro'
+title: Destinations
+description: Where mirrors are created. Gitea is the default; Forgejo, GitHub and GitLab are available as beta destinations, the last two through a push engine.
+---
+
+# Destinations
+
+A destination is the host mirrors are created on. It is chosen from the **Destination** dropdown at the top of the second card on the Connections tab of the Configuration page.
+
+| Destination | How mirrors are kept up to date | Status |
+| --- | --- | --- |
+| Gitea | Pull mirror: Gitea fetches from the source on its own interval | default, supported |
+| Forgejo | Pull mirror, same API as Gitea | beta |
+| GitHub | Push engine: the app pushes branches and tags | beta |
+| GitLab | Push engine | beta |
+
+GitHub to Gitea is the supported path. The other three carry a BETA pill in the dropdown. They are tested end to end against real hosts, including github.com and gitlab.com, but have had less time in the field.
+
+![The Destination dropdown open, showing the beta pills](/assets/destinations.png)
+
+## Gitea and Forgejo
+
+These are pull mirrors. For each repository the app calls the migrate API with the source clone URL and the source token, and the destination creates a mirror that it refreshes itself on the interval set on the card (the per-repository mirror interval, `GITEA_MIRROR_INTERVAL` in the environment). Everything beyond the git data, meaning issues, pull requests, labels, milestones, releases, wiki and LFS objects, is mirrored by the app through the destination's API, subject to what the [source](./sources.md) offers.
+
+The card holds:
+
+- **Server URL** of the instance, used for all API and mirroring traffic.
+- **External URL**, optional, used for the links on the dashboard when your browser reaches the instance at a different address than the app does.
+- **Username** and **access token**. The username is the default owner for mirrors that the mirror strategy does not send elsewhere.
+- The organization settings: mirror strategy, default organization, organization visibility, and the mirror interval. See [Mirror strategies](./configuration.md#mirror-strategies).
+
+Forgejo shares Gitea's API, so everything Gitea supports works there. One thing to know: Forgejo releases before 15.0.0 do not persist the credentials sent through the migrate API, so later syncs of private repositories fail with `terminal prompts disabled`. The card shows a warning when the Test button detects such a version. Upgrade Forgejo, then delete and re-mirror the affected repositories, or re-enter the source token once in each repository's mirror settings on Forgejo.
+
+## GitHub and GitLab
+
+GitHub has no pull mirror API and GitLab only offers one on paid tiers, so for these two the app runs a push engine. When you pick one of them the card changes shape: the URL field becomes **Instance URL**, prefilled with `https://github.com` or `https://gitlab.com` and editable for GitHub Enterprise Server or a self-hosted GitLab, the username field becomes **Account**, and a notice explains that the target is overwritten on every sync.
+
+### How the push engine works
+
+For every repository whose destination is GitHub or GitLab:
+
+1. **A bare clone is kept on disk** under `mirrors/<source host>/<owner>/<name>.git` inside the data directory, next to the SQLite database, so a backup of the data directory carries the clones. The first run clones; later runs fetch with prune, so a branch or tag deleted on the source disappears from the clone.
+2. **The target repository is created when it is missing.** On GitHub it goes under the account, or under an organization the mirror strategy picks. On GitLab it goes under the user, or in a group; a missing top level group is created, a nested one is not.
+3. **Branches and tags are pushed** with force and prune, so the target ends up identical to the source, including rewritten history and deleted branches. Pull request refs, merge request refs and other host-owned namespaces are not pushed, because hosts refuse writes to them.
+4. **The default branch** on the target is set to match the source, best effort.
+5. **Statuses, jobs and activity** are the same as for a Gitea mirror, so the dashboard, the scheduler, retry, recovery and cleanup treat both kinds the same way. The repository table shows the destination's icon and links to the target repository.
+
+Scheduled sync runs the same fetch and push again. Both steps are idempotent, so an interrupted run simply runs again.
+
+Right after creating a repository, GitLab (and occasionally GitHub) answers the first push with "not found" for a second or two. The engine retries that first push up to six times, two seconds apart, before it counts as a failure.
+
+### The target is overwritten
+
+Every push uses force and prune. Anything committed directly on the target, a branch created there or a tag moved there is replaced by what the source has on the next sync. Treat a push target as read only, the same way a Gitea pull mirror is.
+
+### What is not mirrored to push targets
+
+Push targets receive **branches and tags only**. These switches are disabled with a reason in the mirror settings when a push target is selected:
+
+- issues, pull requests, labels and milestones
+- releases and release assets (tags do travel)
+- wiki
+- LFS objects
+- force push protection and its backup strategies
+
+Several destinations per repository, and pulling anything back from the target, are out of scope. Mirroring is one way.
+
+### Tokens
+
+Tokens never appear in a URL and are never written to disk. Each git process gets an inline credential helper that reads the token from an environment variable set on that process only: the source token for the fetch, the target token for the push. The remote URL stored in the bare clone is the plain source URL.
+
+| Target | Scopes | Notes |
+| --- | --- | --- |
+| GitHub | `repo`, `workflow` | GitHub rejects a push that adds GitHub Actions workflow files unless the token has `workflow`. Add `delete_repo` only if cleanup should delete repositories on GitHub. |
+| GitLab | `api`, `write_repository` | Pushes use the `oauth2` user name with the token, as GitLab documents. |
+
+GitHub organizations cannot be created through the API. Create the organization first and make the token's user a member with permission to create repositories. A private GitLab group forces its projects to be private, whatever the source visibility.
+
+### Disk usage and concurrency
+
+A bare clone takes roughly the size of the repository's git objects, so the data directory grows by about the size of everything you mirror this way. A clone is removed when its repository row is deleted, and by cleanup when it deletes an orphaned repository.
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `MIRROR_CLONE_DIR` | `mirrors` inside the data directory | Where the bare clones live. |
+| `PUSH_CONCURRENCY` | `2` | How many git fetch or push operations run at the same time across all repositories. API calls are cheap; a clone or a mirror push is not. |
+
+One git process per repository at a time is enforced with a lock file next to the clone. A lock older than an hour belongs to a run that died and is taken over. A half written clone, one without a `HEAD`, is removed and cloned again.
+
+GitHub limits the size of a single push. When one push of all refs is refused, the engine retries in batches of 50 refs, branches first, then tags, followed by a prune. If a batch is still refused, the mirror fails with git's message in the repository's status.
+
+### Cleanup on push targets
+
+When the source deletes a repository, the [cleanup service](./cleanup-and-reconcile.md) applies the configured action to the target through its API: archive, or delete. Deleting on GitHub needs the `delete_repo` scope; without it the cleanup run fails with a message naming the scope and the repository stays. On gitlab.com and instances with delayed deletion, a deleted project is renamed and kept for the configured number of days before it disappears. The bare clone is removed with the row.
+
+**Reconcile with destination** compares a Gitea or Forgejo server with the database. It is not available for push targets, which have no server side mirror state to reconcile.
+
+> **Warning:** With a push target, every repository the app imports gets created on the target once it is mirrored. If auto import and auto mirror are both on, that includes every repository the source token can see. Check the import list before enabling automatic mirroring against a GitHub organization or a GitLab group.
+
+## Switching destinations
+
+Once anything has been mirrored the destination locks. The dropdown and the URL field show a lock note with the number of mirrored repositories and a **Change** button, and changing goes through a confirmation that spells out what happens:
+
+- Existing mirrors stay on the current server and are not moved.
+- Syncing them from here fails until they exist on the new server or are removed and mirrored again.
+- New mirrors go to the new server only.
+
+Each repository row records the host it was mirrored to. A row mirrored to one host is refused on another until it is removed and mirrored again, so a token is never sent to the wrong server. Reconcile reports such rows as mirrored to a previous destination and leaves them alone. A `DESTINATION_PROVIDER` or `GITEA_URL` value that disagrees with a locked destination is ignored on boot with a warning.
+
+## Environment variables
+
+The `GITEA_*` names are kept for every destination kind, so an existing deployment only has to add `DESTINATION_PROVIDER`.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `DESTINATION_PROVIDER` | `gitea` | `gitea`, `forgejo`, `github` or `gitlab`. |
+| `GITEA_URL` | none | Instance URL. Optional for GitHub and GitLab, which default to github.com and gitlab.com; set it for GitHub Enterprise Server or a self-hosted GitLab. |
+| `GITEA_EXTERNAL_URL` | none | Browser-facing URL for dashboard links, when it differs from `GITEA_URL`. |
+| `GITEA_USERNAME` | none | Account on the destination. |
+| `GITEA_TOKEN` | none | Token with the scopes above. |
+| `GITEA_ORGANIZATION` | `github-mirrors` | Default organization or group for the `single-org` strategy. |
+| `MIRROR_CLONE_DIR` | `mirrors` inside the data directory | Push engine clone directory. |
+| `PUSH_CONCURRENCY` | `2` | Concurrent git operations for the push engine. |
+
+A GitHub organization as destination:
+
+```bash
+DESTINATION_PROVIDER=github
+GITEA_USERNAME=your-github-account
+GITEA_TOKEN=${GITHUB_TARGET_TOKEN}
+GITEA_ORGANIZATION=your-org
+MIRROR_STRATEGY=single-org
+```

@@ -18,15 +18,25 @@ The Configuration page is organized into four tabs.
 
 ### Connections
 
-This is where the two ends of the mirror are set up. It contains two cards:
+This is where the two ends of the mirror are set up. It contains two cards, one per end, and each starts with a dropdown that picks the host.
 
-**GitHub Connection** holds your GitHub username, personal access token, and account type (personal or organization). The token needs the `repo` scope for private repositories and `admin:org` to read organization data. This card also carries the repository selection options: whether to include private repositories, public repositories, archived repositories, forks, repositories where you are only a collaborator, and starred repositories.
+**The source card** starts with the **Source** dropdown: GitHub, GitLab or Gitea / Forgejo. GitHub is the default. The other two carry a BETA pill and show an Instance URL field for self-hosted instances. Below that come the username and personal access token for the selected host, with the scopes the card needs listed next to the token field, and the repository selection options: whether to include private repositories, public repositories, archived repositories, forks, repositories where you are only a collaborator, and starred repositories. The [Sources](./sources.md) page covers each host.
 
-**Gitea Connection** holds the destination. Gitea is the default; Forgejo, GitHub and GitLab are available from the Destination dropdown and marked beta, as are the GitLab and Gitea / Forgejo sources on the GitHub card. GitHub to Gitea is the supported path. The card holds the instance URL, an access token, and the default owner. It also carries the destination settings: the mirror strategy, default organization, organization visibility, and the per-repository mirror interval that Gitea itself uses to re-pull from GitHub.
+**The destination card** starts with the **Destination** dropdown: Gitea, Forgejo, GitHub or GitLab. Gitea is the default; the other three carry a BETA pill. For Gitea and Forgejo the card holds the server URL, an optional external URL, an access token and the username that acts as default owner. For GitHub and GitLab it holds the instance URL, the account and a token, and a notice explains that those targets are overwritten on every sync. The card also carries the organization settings: the mirror strategy, default organization, organization visibility, and the per-repository mirror interval that Gitea itself uses to re-pull from the source. The [Destinations](./destinations.md) page covers each host.
 
-Both cards have a test button that performs a live authenticated call, so you can confirm credentials before saving.
+GitHub to Gitea is the supported path. Every other source and destination is beta: tested end to end against real hosts, with less time in the field.
+
+Both cards have a **Test** button that performs a live authenticated call, so you can confirm credentials before importing anything.
+
+**Locks.** Once repositories are imported the source locks, and once anything is mirrored the destination locks. The dropdown and the URL field then show a lock note with a **Change** button, and changing goes through a confirmation that spells out what happens to the existing repositories. Environment values that disagree with a locked host are ignored on boot with a warning.
 
 If your Gitea instance is reachable at one URL from the Gitea Mirror process and at a different URL from your browser, for example an internal service name versus a public hostname, set the external URL as well. Dashboard links use the external URL while all API and mirroring traffic keeps using the primary URL.
+
+### Mirror settings
+
+Below the connection cards, the mirror settings decide what travels with the code: issues, pull requests, labels, milestones, releases, wiki and LFS objects, plus the force push protection strategy. Switches that the current source or destination cannot serve are disabled and say why.
+
+Releases have two numbers next to the switch. **Latest** is how many releases are mirrored per repository, newest first, ten by default. **Assets for latest** is how many of those get their assets uploaded: leave it empty to upload assets for every mirrored release, set it to `0` for release notes and tags only, or set it to a number to keep assets for the newest N releases while older ones keep their notes and tag. The limit never deletes assets that were already uploaded. Both values can be overridden per organization and per repository through the mirror overrides dialog, and the asset limit is `RELEASE_ASSET_LIMIT` in the environment.
 
 ### Automation
 
@@ -34,7 +44,7 @@ This tab controls scheduled mirroring and cleanup.
 
 Scheduled syncing runs on an interval or a cron schedule. When enabled it re-syncs existing mirrors, and optionally discovers newly created GitHub repositories and mirrors them without any manual action. Two separate switches govern that: auto-import decides whether new repositories are discovered and added to the database, and auto-mirror decides whether they are then actually mirrored to Gitea.
 
-The same tab holds repository cleanup, which handles repositories that have disappeared from GitHub. The action for an orphaned repository is one of `skip`, `archive`, or `delete`, and `archive` is the default because it preserves the mirrored data. There is a dry-run mode that logs what would happen without touching anything, and a list of protected repository names that cleanup will never act on.
+The same tab holds repository cleanup, which handles repositories that have disappeared from the source. The action for an orphaned repository is one of `skip`, `archive`, or `delete`, and `archive` is the default because it preserves the mirrored data. There is a dry-run mode that logs what would happen without touching anything. The card's **Reconcile with destination** button compares a Gitea or Forgejo server with the database and offers to adopt mirrors the app does not know about or reset rows whose mirror is gone. Both are described on the [Cleanup and reconcile](./cleanup-and-reconcile.md) page.
 
 ### Notifications
 
@@ -48,19 +58,21 @@ This tab configures how people sign in. Email and password authentication is alw
 
 Header authentication reads the username, email, and display name from configurable request headers. It can optionally auto-provision accounts on first sight of a new user, restricted to an allowlist of email domains.
 
+The **API Keys** card on the same tab creates keys for scripts and CI pipelines. A key is sent in the `x-api-key` header and can call every endpoint the web interface uses. See [API and API keys](./api.md).
+
 > **Warning:** Only enable header authentication when the app is genuinely behind a trusted proxy that strips those headers from inbound client requests. If clients can set the headers themselves, anyone can sign in as anyone.
 
 ## Mirror strategies
 
-The mirror strategy decides where each repository lands on the Gitea side. There are four, and they are set on the Gitea Connection card.
+The mirror strategy decides where each repository lands on the destination. There are four, and they are set on the destination card. The examples below say Gitea and organization; on GitLab the equivalent is a group, and the GitHub target uses organizations that must already exist.
 
 ### preserve
 
-Keeps the same organization structure as GitHub. A repository at `acme/api` on GitHub becomes `acme/api` in Gitea, with the organization created if it does not exist. This is the default and the right choice when you want the mirror to be recognizable to anyone who knows the GitHub side.
+Keeps the same organization structure as the source. A repository at `acme/api` on GitHub becomes `acme/api` in Gitea, with the organization created if it does not exist. This is the default and the right choice when you want the mirror to be recognizable to anyone who knows the source side.
 
 ### single-org
 
-Consolidates every repository into one Gitea organization, regardless of where it came from on GitHub. The target organization defaults to `github-mirrors`. Useful when you want all mirrored content in one clearly separated namespace.
+Consolidates every repository into one Gitea organization, regardless of where it came from on the source. The target organization defaults to `github-mirrors`. Useful when you want all mirrored content in one clearly separated namespace.
 
 ### flat-user
 
@@ -68,7 +80,7 @@ Places every repository directly under your Gitea user account, with no organiza
 
 ### mixed
 
-Splits the difference. Your personal GitHub repositories go into a single named organization, while repositories owned by GitHub organizations preserve their original structure. This keeps organization repositories where people expect them while corralling your personal ones.
+Splits the difference. Your personal repositories go into a single named organization, while repositories owned by organizations on the source preserve their original structure. This keeps organization repositories where people expect them while corralling your personal ones.
 
 > **Note:** Repositories mirrored because you starred them are handled separately from the strategy above. They can either go into a dedicated organization, which is named `starred` by default, or preserve their original owner's path. When two starred repositories from different owners share a name, a duplicate strategy setting decides whether the name gets a suffix, a prefix, or is placed in an owner-named organization.
 
@@ -93,6 +105,8 @@ The second group seeds the database configuration. On startup, if any of `GITHUB
 > **Note:** Values written from the environment overwrite the corresponding fields in the database on every start. If you set `GITEA_ORGANIZATION` in your compose file and then change the organization through the UI, the next restart puts the environment value back. Either manage a setting through the UI or through the environment, not both.
 
 Tokens supplied through the environment are encrypted with AES-256-GCM before they are stored, the same as tokens entered through the UI.
+
+The source and destination hosts are seeded the same way: `SOURCE_PROVIDER` and `SOURCE_URL` pick the source, `DESTINATION_PROVIDER` picks the destination, and the `GITHUB_*` and `GITEA_*` names keep working for every host. A value that disagrees with a locked host is ignored with a warning rather than applied.
 
 ## Core environment variables
 

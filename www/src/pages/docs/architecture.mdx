@@ -6,7 +6,7 @@ description: How Gitea Mirror is put together, from the request path through the
 
 # Architecture
 
-Gitea Mirror is a single self-hosted process. It serves a web interface, talks to the GitHub and Gitea APIs, keeps state in a local SQLite file, and runs background schedulers in the same process. There is no separate worker, queue server, or external database to operate.
+Gitea Mirror is a single self-hosted process. It serves a web interface, talks to the source and destination APIs, keeps state in a local SQLite file, and runs background schedulers in the same process. There is no separate worker, queue server, or external database to operate.
 
 ## Stack
 
@@ -14,7 +14,7 @@ The frontend is Astro 5 in server-side rendering mode, with React 19 islands for
 
 The backend is Astro API routes served through the `@astrojs/node` adapter in standalone mode. Everything runs on the Bun runtime, which requires version 1.2.9 or newer.
 
-Persistence is SQLite accessed through Drizzle ORM, using Bun's native SQLite driver. Authentication is Better Auth with session cookies. GitHub access goes through Octokit with the throttling plugin, and Gitea access goes through its REST API directly.
+Persistence is SQLite accessed through Drizzle ORM, using Bun's native SQLite driver. Authentication is Better Auth with session cookies, plus API keys through the Better Auth API key plugin. GitHub access goes through Octokit with the throttling plugin; GitLab, Gitea and Forgejo are reached through their REST APIs directly. The push engine for GitHub and GitLab destinations drives the `git` binary as a child process.
 
 ## Request path
 
@@ -76,8 +76,13 @@ src/
 │   ├── modules/         Module registry
 │   ├── polyfills/       Runtime shims
 │   ├── github.ts        GitHub client
-│   ├── gitea.ts         Gitea client
+│   ├── gitea.ts         Gitea client and pull mirror path
 │   ├── gitea-enhanced.ts Metadata mirroring
+│   ├── source-providers/ GitHub, GitLab and Gitea source adapters
+│   ├── push-engine/     Bare clones, git runner, lock, limiter, GitHub and GitLab targets
+│   ├── mirror-dispatch.ts Routes each repository to the pull mirror path or the push engine
+│   ├── destination-kinds.ts Destination catalogue and beta flags
+│   ├── destination-reconcile*.ts Reconcile the destination with the database
 │   ├── scheduler-service.ts
 │   ├── cleanup-service.ts
 │   ├── repository-cleanup-service.ts
@@ -95,7 +100,7 @@ src/
 
 Outside `src/`:
 
-- `drizzle/` holds the generated SQL migrations and their journal. Migrations run automatically on startup.
+- `drizzle/` holds the generated SQL migrations and their journal. Migrations run automatically on startup. Recent ones: 0015 added the source host columns on repositories, 0016 carried the Better Auth 1.7 schema, 0017 added API keys, and 0018 added the destination host columns on repositories with a backfill from each account's destination settings.
 - `scripts/` holds the runtime server, database management CLI, recovery and repair scripts, and the environment configuration loader entry point.
 - `helm/gitea-mirror/` is the Kubernetes Helm chart.
 - `www/` is the marketing and documentation site, a separate Astro project with its own dependencies.
@@ -107,11 +112,13 @@ Tests are colocated with the code they cover, as `*.test.ts` files next to the i
 
 Everything lives in one SQLite database. The tables that matter:
 
-`configs` holds per-user configuration as JSON columns validated by Zod schemas: `githubConfig`, `giteaConfig`, `scheduleConfig`, `cleanupConfig`, and `notificationConfig`. A user can have several configuration rows but one is marked active.
+`configs` holds per-user configuration as JSON columns validated by Zod schemas: `githubConfig`, `giteaConfig`, `scheduleConfig`, `cleanupConfig`, and `notificationConfig`. The source host lives in `githubConfig` (`provider` and `url`) and the destination host in `giteaConfig` (`provider`), the column names being historical. A user can have several configuration rows but one is marked active.
 
-`repositories` tracks every discovered repository with its GitHub metadata, its mirror status, its destination in Gitea, and any per-repository overrides.
+`repositories` tracks every discovered repository with its source metadata, its mirror status, its location on the destination, and any per-repository overrides. Each row also records which source host it came from and which destination host it was mirrored to, so a row is never mirrored with the wrong token after a host switch.
 
-`organizations` tracks GitHub organizations, including destination overrides that let one organization go somewhere different from what the global strategy would choose.
+`organizations` tracks source organizations and GitLab groups, including destination overrides that let one organization go somewhere different from what the global strategy would choose.
+
+`api_keys` holds API keys, hashed, with their name, expiry and last use.
 
 `mirrorJobs` is the job record and history. Jobs move through `pending`, `mirroring`, and then `success` or `failed`.
 
@@ -127,13 +134,17 @@ GitHub and Gitea tokens are encrypted with AES-256-GCM before being written, usi
 
 A mirror operation runs in stages.
 
-Discovery queries GitHub for repositories matching the configured selection rules, filtered by visibility, fork status, archive status, collaborator affiliation, and organization allowlists and denylists. Results are written to the `repositories` table.
+Discovery queries the configured source for repositories matching the configured selection rules, filtered by visibility, fork status, archive status, collaborator affiliation, and organization allowlists and denylists. Each source has an adapter under `src/lib/source-providers/` that maps its API onto the same repository shape. Results are written to the `repositories` table.
 
 Destination resolution decides where each repository goes, based on the mirror strategy plus any per-repository or per-organization override. The four strategies are `preserve`, `single-org`, `flat-user`, and `mixed`, described in the [configuration guide](./configuration.md).
 
-Repository creation calls Gitea's migration API to create a pull mirror, creating the destination organization first if it does not exist. Organization creation is sequential by default to avoid races when many repositories target the same new organization.
+The dispatcher in `src/lib/mirror-dispatch.ts` then picks one of two paths by destination kind, and every entry point goes through it: the mirror, sync and retry endpoints, the scheduler's auto mirror and sync phases, boot recovery and the organization mirror loop.
 
-Metadata mirroring, if enabled, follows separately. Issues are recreated with their comments, labels, assignees, and milestones. Releases are recreated with their assets. Wiki content is cloned as a separate repository.
+**Pull mirror path** (Gitea, Forgejo). Repository creation calls the migration API to create a pull mirror, creating the destination organization first if it does not exist. Organization creation is sequential by default to avoid races when many repositories target the same new organization. The destination fetches from the source itself on its mirror interval.
+
+**Push engine path** (GitHub, GitLab). The app keeps a bare clone per repository under the data directory, fetches it with prune, and pushes branches and tags to the target with force and prune. A target adapter creates, archives and deletes repositories through the host's API. A lock file per clone and a global concurrency limit keep the number of git processes bounded, and tokens reach git only through an inline credential helper fed from the child process environment. The [Destinations](./destinations.md) page describes the engine in detail.
+
+Metadata mirroring, if enabled and the source is GitHub and the destination a pull mirror, follows separately. Issues are recreated with their comments, labels, assignees, and milestones. Releases are recreated with their assets, subject to the release and asset limits. Wiki content is cloned as a separate repository.
 
 Throughout, job status updates are published as server-sent events so the dashboard reflects progress live without polling.
 
@@ -157,13 +168,13 @@ The **scheduler** performs periodic mirroring, repository discovery, and auto-mi
 
 The **cleanup service** trims the activity log according to the configured retention period.
 
-The **repository cleanup service** handles repositories that have disappeared from GitHub, archiving or deleting them according to the configured action.
+The **repository cleanup service** handles repositories that have disappeared from the source, archiving or deleting them according to the configured action, on the destination through its API when allowed to. The related reconcile pass runs on demand rather than on a schedule.
 
 The **shutdown manager** tracks running jobs and persists their state when a termination signal arrives, so an interrupted job can be resumed on the next boot instead of being lost.
 
 ## Authentication
 
-Better Auth handles sessions, with three sign-in paths.
+Better Auth handles sessions, with three sign-in paths, plus API keys for scripts.
 
 Email and password authentication is always available. The first account to sign up becomes the admin.
 
@@ -171,13 +182,13 @@ OIDC and SSO providers are registered through the Authentication tab rather than
 
 Header authentication trusts identity headers set by an upstream reverse proxy, for deployments where something like Authentik or Authelia already handles login. It can auto-provision accounts, optionally restricted to an email domain allowlist.
 
-Sessions are cookie-based and validated in the middleware on every request.
+Sessions are cookie-based and validated in the middleware on every request. An API key in the `x-api-key` header is accepted wherever a session cookie is, carries the rights of the user who created it, and is refused by the key management endpoints themselves so a leaked key cannot mint more keys.
 
 ## Deployment options
 
 **Docker** is the primary path. A multi-architecture image is published to `ghcr.io/raylabshq/gitea-mirror`, built from a multi-stage `Dockerfile` on the official Bun base image, with a statically compiled `git-lfs` binary included for LFS mirroring. Three compose files ship with the repository: `docker-compose.alt.yml` for a minimal prebuilt deployment, `docker-compose.yml` for a full environment-driven one, and `docker-compose.dev.yml` for development with hot reload.
 
-**Kubernetes** is supported through the Helm chart in `helm/gitea-mirror`. It packages a Deployment, Service, ConfigMap, Secret, optional PersistentVolumeClaim, optional ServiceAccount, and a choice of Ingress or Gateway API HTTPRoute. It needs Kubernetes 1.23 or newer and Helm 3.8 or newer.
+**Kubernetes** is supported through the Helm chart, published as an OCI package at `oci://ghcr.io/raylabshq/charts/gitea-mirror` with every release and kept in source at `helm/gitea-mirror`. It packages a Deployment, Service, ConfigMap, Secret, optional PersistentVolumeClaim, optional ServiceAccount, and a choice of Ingress or Gateway API HTTPRoute. It needs Kubernetes 1.23 or newer and Helm 3.8 or newer.
 
 **Nix** deployment works either as a flake package or as a NixOS module. `nix run github:RayLabsHQ/gitea-mirror` starts it with no setup, and the NixOS module handles secret generation and database initialization declaratively.
 

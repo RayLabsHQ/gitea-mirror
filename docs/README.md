@@ -17,12 +17,15 @@ This folder contains engineering and operations references for the open-source G
 ### Authentication
 - **[SSO-OIDC-SETUP.md](./SSO-OIDC-SETUP.md)** – Configure OIDC/SSO providers through the admin UI.
 - **[SSO_TESTING.md](./SSO_TESTING.md)** – Recipes for local and staging SSO testing (Google, Keycloak, mock providers).
+
+### API
 - **[API.md](./API.md)** – Create API keys and call the app from scripts, CI pipelines and workflow tools.
 
-### Destinations
+### Sources and destinations
+- **[SOURCE_PROVIDERS.md](./SOURCE_PROVIDERS.md)** – GitHub, GitLab and Gitea/Forgejo as sources: tokens, what each can mirror, the source lock.
 - **[PUSH_TARGETS.md](./PUSH_TARGETS.md)** – GitHub and GitLab as destinations: how the push engine works, token scopes, disk usage, what is not mirrored.
 
-If you are looking for customer-facing playbooks, see the MDX use cases under `www/src/pages/use-cases/`.
+The user-facing documentation lives on the website at <https://gitea-mirror.raylabs.io/docs/>, with its sources under `www/src/pages/docs/`. If you are looking for playbooks, see the MDX use cases under `www/src/pages/use-cases/`.
 
 ## Quick start for local development
 

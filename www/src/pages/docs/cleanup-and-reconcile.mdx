@@ -1,0 +1,78 @@
+---
+layout: '../../layouts/DocsLayout.astro'
+title: Cleanup and Reconcile
+description: What happens to mirrors whose source repository disappears, and how to bring the destination and the database back in step after a lost database or a manual change.
+---
+
+# Cleanup and Reconcile
+
+Two maintenance features live on the **Repository Cleanup** card of the Automation tab. Repository cleanup handles mirrors whose source repository is gone. Reconcile compares what the destination holds with what the database knows, and offers to fix the difference.
+
+## Repository cleanup
+
+Cleanup looks for repositories that the database tracks but that no longer exist on the source: a repository you deleted or unstarred, or one moved out of the account's reach. When it finds one it applies the configured action.
+
+### Settings
+
+| Setting | Environment variable | Default | Meaning |
+| --- | --- | --- | --- |
+| Enabled | `CLEANUP_ENABLED` | off | Runs as part of each scheduled sync. |
+| Action | `CLEANUP_ORPHANED_REPO_ACTION` | `archive` | `skip` leaves the mirror untouched, `archive` keeps it read only with an archived prefix, `delete` removes it. |
+| Dry run | `CLEANUP_DRY_RUN` | off | Log the planned actions without changing anything. |
+| Delete from destination | `CLEANUP_DELETE_FROM_GITEA` | `false` | Apply the action on the destination too. Off means only the database is updated. |
+| Protected repositories | `CLEANUP_PROTECTED_REPOS` | none | Comma-separated repository names cleanup never touches. |
+| Batch size and pause | `CLEANUP_BATCH_SIZE`, `CLEANUP_PAUSE_BETWEEN_DELETES` | `10`, `2000` | Items per batch, and the pause between deletions in milliseconds. |
+
+The first three are on the card. The others are environment variables; see the [reference](./environment-variables.md#cleanup).
+
+Cleanup can also run on demand with `POST /api/cleanup/trigger`, see the [API page](./api.md#run-cleanup).
+
+### What each action does
+
+`archive` never deletes. With **Delete from destination** off, the default, the row is marked archived in the database and the destination is left alone. With it on:
+
+- On Gitea and Forgejo, a regular repository gets the native archive flag, which makes it read only while keeping every byte. A mirror repository cannot be archived through the Gitea API, so it is renamed with an `archived-` prefix, given a description that says why, and has its mirror interval pushed out to a year so no more sync attempts run. It remains fully cloneable.
+- On GitHub and GitLab, the repository is archived through the host's API.
+
+`delete` removes the row from the database and, with **Delete from destination** on, removes the repository from the destination. Deleting on GitHub needs a token with the `delete_repo` scope; without it the run fails with a message naming the scope and the repository stays. On gitlab.com and instances with delayed deletion, a deleted project is renamed and kept for the configured number of days. For push targets the bare clone on disk is removed as well.
+
+If archiving fails for any reason, the repository is left alone and stays accessible.
+
+### How cleanup decides
+
+Cleanup is careful about what it calls an orphan, because the cost of a false positive is an archived or deleted backup.
+
+- It first lists everything the source token can see, including collaborator repositories and every organization regardless of the import filters, so narrowing a filter later cannot make old mirrors look orphaned.
+- A repository missing from that list is only a candidate. It counts as orphaned when a direct lookup of that repository on the source returns a clean 404 as well. Any other outcome, including a rate limit, a network error or a 5xx, leaves it alone.
+- If the source API cannot be reached at all, or answers 403 or 404 for the account itself, the whole run is skipped.
+- Repositories imported from a previous source, and rows mirrored to a previous destination, are not touched.
+
+The **Database Maintenance** card above cleanup is a different thing: it trims the activity log after the configured retention period (`CLEANUP_RETENTION_DAYS`) and has nothing to do with repositories.
+
+## Reconcile
+
+Cleanup only looks at the database, so a mirror that exists on the destination without a row is invisible to every maintenance feature, and a row whose mirror was deleted by hand keeps saying "mirrored". Both happen after a lost or restored database, or after someone tidied up on the destination directly. Reconcile finds them.
+
+Click **Reconcile with destination** on the Repository Cleanup card. The dialog runs a dry run as soon as it opens and sorts what it finds into groups:
+
+- **On the destination, not in the database.** Mirrors of your source that this app does not know about. Adopting them adds a row so scheduled sync and cleanup include them.
+- **In the database, gone from the destination.** Rows marked mirrored whose repository is no longer there. Resetting them makes the next mirror run recreate the mirror.
+- **Not managed by gitea-mirror.** Native repositories and mirrors of other hosts. These are listed for information and never touched.
+- **Could not be verified.** The destination did not answer the presence check for these rows. They were left alone.
+
+The dialog also reports a healthy count, and, when it applies, how many rows are mirrored to a previous destination and were left out of the comparison.
+
+Tick **Adopt** or **Reset** for the groups you want fixed and click **Apply**. The lists refresh afterwards, and one activity entry records what changed.
+
+### What counts as this app's mirror
+
+Only mirrors whose original URL points at the configured source count. The hosts that qualify are the source itself, the API host it is reached through, and the host of every clone URL already stored, which covers GitHub Enterprise and setups where the clone host differs from the nominal source. Everything else, including mirrors of other hosts and repositories that are not mirrors at all, lands in the not managed group.
+
+### Safety rules
+
+- A row is only called missing after a direct lookup of its expected location returns 404. A failed check leaves the row alone and lists it as unverified.
+- Nothing is deleted or archived on either side, and rows are never deleted. Adopting inserts rows; resetting sets a row back to imported with a note in its error field.
+- An adopted row records where the mirror already lives and keeps it there, even when the mirror strategy would put a new mirror elsewhere, so the next sync does not create a second copy.
+- Adoption uses the existing unique index on account and full name, so it cannot create duplicates.
+
+Reconcile works with Gitea and Forgejo destinations. It is not available for GitHub and GitLab, which have no server side mirror state to compare. The same comparison is available as `POST /api/cleanup/reconcile`; see the [API page](./api.md#reconcile-the-destination).

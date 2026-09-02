@@ -10,6 +10,8 @@ description: Get Gitea Mirror running with Docker in a few minutes, or build it 
 
 Gitea Mirror ships as a prebuilt multi-architecture container image. The fastest path is to pull that image and configure everything else through the web interface after it starts. This page covers the Docker path first, then building from source, then running directly on Bun.
 
+This guide walks the supported path, GitHub to Gitea. GitLab and Gitea / Forgejo as sources, and Forgejo, GitHub and GitLab as destinations, are available as beta options in the same two dropdowns; see [Sources](./sources.md) and [Destinations](./destinations.md) once the app is running.
+
 ## Requirements
 
 Before you start, you need:
@@ -148,9 +150,9 @@ Whichever install path you took, the first-run flow is the same:
 
 1. Open the app at `http://localhost:4321`, or at whatever URL you configured.
 2. Sign up. The first account created becomes the admin account.
-3. Go to the Configuration page and fill in the **GitHub Connection** and **Gitea Connection** cards on the Connections tab. Use the test buttons to confirm both sides authenticate.
+3. Go to the Configuration page and fill in the two connection cards on the Connections tab. Leave the Source dropdown on GitHub and the Destination dropdown on Gitea, enter the username and token for each, and use the Test buttons to confirm both sides authenticate.
 4. Choose a mirror strategy, which decides where repositories land in Gitea.
-5. Import your GitHub repositories, then mirror them.
+5. Import your GitHub repositories, then mirror them. Once repositories are imported the source locks, and once one is mirrored the destination locks; changing either later asks for confirmation.
 6. Optionally, turn on scheduled syncing on the Automation tab so new commits and new repositories are picked up without manual action.
 
 ## Verifying the deployment
@@ -166,6 +168,8 @@ The container image also has a built-in `HEALTHCHECK` that polls this endpoint, 
 ## Where to go next
 
 - [Configuration](./configuration.md) covers the Configuration page tab by tab, plus environment-based pre-configuration.
+- [Sources](./sources.md) and [Destinations](./destinations.md) cover the hosts beyond GitHub and Gitea.
+- [API and API keys](./api.md) is for driving the app from scripts and CI.
 - [Environment variables](./environment-variables.md) is the complete reference.
 - [CA certificates](./ca-certificates.md) explains how to trust a self-signed or privately signed Gitea instance.
 - The [use-case guides](/use-cases/) cover platform-specific installs (Proxmox, Unraid, Helm) and deeper topics like [Git LFS](/use-cases/mirror-git-lfs-repositories/), [issue and PR mirroring](/use-cases/mirror-github-issues-pull-requests/), and a [full migration to Gitea](/use-cases/migrate-github-to-gitea/).

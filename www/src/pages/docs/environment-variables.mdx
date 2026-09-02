@@ -60,14 +60,18 @@ For deployments behind a reverse proxy that already authenticates users.
 
 > **Warning:** Enable this only when a trusted proxy strips these headers from inbound client requests. Otherwise any client can set them and sign in as any user.
 
-## GitHub
+## Source
 
 ### Connection
 
+The variable names are historical: `GITHUB_USERNAME` and `GITHUB_TOKEN` hold the credentials for whichever source is selected. See [Sources](./sources.md).
+
 | Variable | Default | Description |
 | --- | --- | --- |
-| `GITHUB_USERNAME` | none | Your GitHub username. |
-| `GITHUB_TOKEN` | none | Personal access token. Needs `repo` for private repositories and `admin:org` to read organization data. |
+| `SOURCE_PROVIDER` | `github` | Which host repositories are pulled from: `github`, `gitlab` or `gitea`. `gitea` also covers Forgejo and Codeberg. Anything other than `github` is beta. |
+| `SOURCE_URL` | `https://gitlab.com` or `https://codeberg.org` | Base URL of the GitLab or Gitea / Forgejo instance. Ignored for GitHub, which uses `GH_API_URL`. |
+| `GITHUB_USERNAME` | none | Your username on the source host. |
+| `GITHUB_TOKEN` | none | Personal access token for the source host. GitHub needs `repo` and `admin:org`, GitLab `read_api` and `read_repository`, Gitea / Forgejo `read:repository`, `read:user` and `read:organization`. |
 | `GITHUB_TYPE` | `personal` | Account type: `personal` or `organization`. |
 | `GH_API_URL` | `https://api.github.com` | GitHub API base URL. Point this at GitHub Enterprise Server (`https://ghe.example.com/api/v3`) or Enterprise Cloud with data residency (`https://api.TENANT.ghe.com`). |
 | `GITHUB_API_URL` | none | Alternate name for `GH_API_URL`, checked second. Prefer `GH_API_URL`, since `GITHUB_API_URL` is set automatically inside GitHub Actions and can collide. |
@@ -102,18 +106,30 @@ Standard GitHub Enterprise Cloud on `github.com` needs no override. Use a token 
 | `PRESERVE_ORG_STRUCTURE` | `false` | Keep the GitHub organization structure in Gitea. Shorthand for the `preserve` strategy. |
 | `MIRROR_STRATEGY` | `preserve` | Destination layout: `preserve`, `single-org`, `flat-user`, or `mixed`. Takes precedence over `PRESERVE_ORG_STRUCTURE`. |
 
-## Gitea
+## Destination
 
 ### Connection
 
+The `GITEA_*` names are kept for every destination kind, so an existing deployment only has to add `DESTINATION_PROVIDER`. See [Destinations](./destinations.md).
+
 | Variable | Default | Description |
 | --- | --- | --- |
-| `GITEA_URL` | none | Gitea or Forgejo instance URL used for all API and mirroring traffic. |
+| `DESTINATION_PROVIDER` | `gitea` | Which host mirrors are created on: `gitea`, `forgejo`, `github` or `gitlab`. Gitea and Forgejo are pull mirrors; GitHub and GitLab receive pushes of branches and tags from the app. Anything other than `gitea` is beta. |
+| `GITEA_URL` | none | Destination instance URL used for all API and mirroring traffic. Optional for GitHub and GitLab, which default to github.com and gitlab.com; set it for GitHub Enterprise Server or a self-hosted GitLab. |
 | `GITEA_EXTERNAL_URL` | none | Browser-facing URL used for dashboard links, when it differs from `GITEA_URL`. |
-| `GITEA_TOKEN` | none | Gitea access token. |
-| `GITEA_USERNAME` | none | Gitea username, used as the default owner. |
-| `GITEA_ORGANIZATION` | `github-mirrors` | Default destination organization for the `single-org` strategy. |
+| `GITEA_TOKEN` | none | Destination access token. GitHub push targets need `repo` and `workflow`, plus `delete_repo` if cleanup should delete; GitLab needs `api` and `write_repository`. |
+| `GITEA_USERNAME` | none | Destination username, used as the default owner. |
+| `GITEA_ORGANIZATION` | `github-mirrors` | Default destination organization or group for the `single-org` strategy. |
 | `GITEA_SKIP_TLS_VERIFY` | `false` | Disable TLS certificate verification. Sets `NODE_TLS_REJECT_UNAUTHORIZED=0` process-wide. |
+
+### Push engine
+
+Only used when `DESTINATION_PROVIDER` is `github` or `gitlab`.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `MIRROR_CLONE_DIR` | `mirrors` inside the data directory | Where the push engine keeps its bare clones, one per repository. |
+| `PUSH_CONCURRENCY` | `2` | How many git fetch or push operations run at once across all repositories, 1 to 32. |
 
 > **Warning:** `GITEA_SKIP_TLS_VERIFY=true` disables certificate checking for every outbound HTTPS request the process makes, not just to Gitea. Use [CA certificates](./ca-certificates.md) instead for self-signed or privately signed instances.
 
@@ -142,12 +158,15 @@ Standard GitHub Enterprise Cloud on `github.com` needs no override. Use a token 
 | `MIRROR_LABELS` | `false` | Mirror repository labels. |
 | `MIRROR_MILESTONES` | `false` | Mirror milestones. |
 | `MIRROR_RELEASES` | `false` | Mirror GitHub releases along with their assets. |
-| `RELEASE_LIMIT` | `10` | Maximum releases mirrored per repository. |
+| `RELEASE_LIMIT` | `10` | Maximum releases mirrored per repository, newest first. |
+| `RELEASE_ASSET_LIMIT` | unset | Upload release assets only for the newest N mirrored releases; older releases still get their notes and tag. Unset means assets for every mirrored release, `0` means notes only. Never deletes assets already uploaded. |
 | `MIRROR_WIKI` | `false` | Clone wiki content. |
 | `MIRROR_ISSUE_CONCURRENCY` | `3` | Issues processed in parallel. |
 | `MIRROR_PULL_REQUEST_CONCURRENCY` | `5` | Pull requests processed in parallel. |
 
 > **Note:** Concurrency above `1` speeds up metadata mirroring but issues and pull requests may be created out of chronological order, since Gitea assigns numbers on creation. Set both to `1` if exact ordering matters more than throughput.
+
+Issues, pull requests, labels, milestones and releases are read from the GitHub API and need a GitHub source. With a GitHub or GitLab destination none of the metadata options apply, and neither do wiki and LFS: push targets receive branches and tags only.
 
 ## Scheduling
 
@@ -175,7 +194,7 @@ Standard GitHub Enterprise Cloud on `github.com` needs no override. Use a token 
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `AUTO_IMPORT_REPOS` | `true` | Discover and import newly created GitHub repositories during scheduled syncs. Set to `false` to disable. |
+| `AUTO_IMPORT_REPOS` | `true` | Discover and import newly created repositories on the source during scheduled syncs. Set to `false` to disable. |
 | `AUTO_MIRROR_REPOS` | `false` | Mirror newly imported repositories automatically, without a manual "Mirror All". |
 | `SCHEDULE_ONLY_MIRROR_UPDATED` | `false` | Only mirror repositories that have changed since the last run. |
 | `SCHEDULE_UPDATE_INTERVAL` | `86400000` | How often to check for updates, in milliseconds. |
@@ -194,15 +213,15 @@ Notification providers themselves (ntfy, Apprise, Gotify, and generic webhook) a
 
 ## Cleanup
 
-Cleanup covers both trimming the activity log and handling repositories that no longer exist on GitHub.
+Cleanup covers both trimming the activity log and handling repositories that no longer exist on the source. See [Cleanup and reconcile](./cleanup-and-reconcile.md).
 
 | Variable | Default | Description |
 | --- | --- | --- |
 | `CLEANUP_ENABLED` | `false` | Enable automatic cleanup. Also enabled implicitly when `CLEANUP_DELETE_IF_NOT_IN_GITHUB=true`. |
 | `CLEANUP_RETENTION_DAYS` | `7` | How long activity events are kept, in days. |
-| `CLEANUP_DELETE_IF_NOT_IN_GITHUB` | `true` | Act on repositories that no longer exist on GitHub. |
+| `CLEANUP_DELETE_IF_NOT_IN_GITHUB` | `true` | Act on repositories that no longer exist on the source. |
 | `CLEANUP_ORPHANED_REPO_ACTION` | `archive` | What to do with an orphaned repository: `skip`, `archive`, or `delete`. |
-| `CLEANUP_DELETE_FROM_GITEA` | `false` | Permit deletion of the repository from Gitea, not just from the local database. |
+| `CLEANUP_DELETE_FROM_GITEA` | `false` | Apply the orphan action on the destination too, not just in the local database. Deleting on a GitHub push target needs the `delete_repo` scope. |
 | `CLEANUP_PROTECTED_REPOS` | none | Comma-separated repository names cleanup will never touch. |
 | `CLEANUP_DRY_RUN` | `false` | Log what cleanup would do without doing it. |
 | `CLEANUP_BATCH_SIZE` | `10` | Items processed per batch. |
@@ -210,7 +229,7 @@ Cleanup covers both trimming the activity log and handling repositories that no 
 
 Cleanup has several safety behaviors worth knowing:
 
-- If the GitHub API returns an error, cleanup is skipped for that run. A 404 or a rate limit never causes a mirror to be treated as orphaned.
+- If the source API returns an error, cleanup is skipped for that run. A rate limit or a failed direct lookup never causes a mirror to be treated as orphaned; only a clean 404 on the repository itself does.
 - The `archive` action never deletes. Regular repositories use Gitea's native archive flag, which makes them read-only while preserving all data. Mirror repositories cannot be archived through the Gitea API, so they are renamed with an `archived-` prefix, given a description noting the preservation, and have their mirror interval pushed out to a year to stop sync attempts. They remain fully cloneable.
 - If archiving fails for any reason, the repository is left alone and stays accessible.
 
