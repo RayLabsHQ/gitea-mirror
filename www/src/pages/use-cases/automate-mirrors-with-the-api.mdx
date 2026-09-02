@@ -1,0 +1,146 @@
+---
+layout: ../../layouts/UseCaseLayout.astro
+title: "Automate Mirrors with the API and API Keys"
+description: "Create an API key, add a repository and start a mirror from a script or a GitHub Actions workflow, and watch status without opening the dashboard."
+canonical: "https://gitea-mirror.raylabs.io/use-cases/automate-mirrors-with-the-api/"
+---
+
+# Automate Mirrors with the API and API Keys
+
+## The dashboard is not the only door
+
+Everything the web interface does goes through JSON endpoints under `/api`. Since version 3.30 you can call them without a browser session: create an API key, put it in a header, and the same endpoints answer to a script, a CI job or a workflow tool such as n8n.
+
+Typical reasons to bother:
+
+- A template repository creates a new project on GitHub, and you want it mirrored the moment it exists rather than on the next scheduled import.
+- A deploy pipeline should not finish until the mirror is up to date.
+- A monitoring system should alert when a repository has been failing for a day.
+
+## Step-by-step
+
+### 1. Create a key
+
+Sign in, open **Configuration → Authentication** and find the **API Keys** card. Click **Create API key**, give it a name and pick an expiry: never, 30 days, 90 days or a year. The key is shown once. Copy it; afterwards only its first characters are visible in the list.
+
+Keys start with `gm_`, belong to the user who created them, and carry the same rights as that user's session. They are stored hashed. Revoke a key from the same list when a script is retired or a secret leaks.
+
+### 2. Send it
+
+Put the key in the `x-api-key` header. Every endpoint that accepts a session cookie accepts the header instead.
+
+```bash
+curl -sS "https://mirror.example.com/api/github/repositories" \
+  -H "x-api-key: gm_..."
+```
+
+A missing, malformed, expired or revoked key gets a `401` with `{"success": false, "error": "Unauthorized"}`. If the app is served under a base path, prefix every URL with it.
+
+### 3. Add a repository and mirror it
+
+Adding and mirroring are two calls. The first looks the repository up on the configured source and stores it with the status `imported`. The second starts the mirror in the background.
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+BASE="https://mirror.example.com"
+KEY="gm_..."
+
+added=$(curl -sS -X POST "$BASE/api/sync/repository" \
+  -H "x-api-key: $KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"owner":"octocat","repo":"hello-world"}')
+
+id=$(echo "$added" | jq -r '.repository.id')
+
+curl -sS -X POST "$BASE/api/job/mirror-repo" \
+  -H "x-api-key: $KEY" \
+  -H "Content-Type: application/json" \
+  -d "{\"repositoryIds\":[\"$id\"]}"
+```
+
+The add call returns `409` when the repository is already tracked. Send `"force": true` to refresh its metadata instead, or skip straight to the mirror call with the id from the list endpoint. An optional `destinationOrg` field overrides the destination organization for this one repository.
+
+`POST /api/job/sync-repo` takes the same body and re-syncs repositories that are already mirrored, which is the call a deploy pipeline wants.
+
+### 4. Watch the status
+
+`GET /api/github/repositories` lists every tracked repository whatever the source (the path kept its name for compatibility). Each entry carries `status`, `lastMirrored`, `errorMessage` and `mirroredLocation`. Status is one of `imported`, `mirroring`, `mirrored`, `failed`, `syncing`, `synced`, `skipped`, `deleted` or `archived`.
+
+A small polling loop after the mirror call:
+
+```bash
+until [ "$(curl -sS "$BASE/api/github/repositories" -H "x-api-key: $KEY" \
+  | jq -r --arg id "$id" '.repositories[] | select(.id==$id) | .status')" != "mirroring" ]; do
+  sleep 10
+done
+```
+
+For a liveness check without a key, `GET /api/health` answers what the Helm chart's probes use.
+
+## A GitHub Actions example
+
+A workflow in the template repository that registers each new repository with the mirror on its first push:
+
+```yaml
+name: Register with Gitea Mirror
+on:
+  push:
+    branches: [main]
+
+jobs:
+  register:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Add and mirror
+        env:
+          BASE: ${{ secrets.MIRROR_URL }}
+          KEY: ${{ secrets.MIRROR_API_KEY }}
+        run: |
+          owner="${GITHUB_REPOSITORY%%/*}"
+          repo="${GITHUB_REPOSITORY##*/}"
+          added=$(curl -sS -X POST "$BASE/api/sync/repository" \
+            -H "x-api-key: $KEY" -H "Content-Type: application/json" \
+            -d "{\"owner\":\"$owner\",\"repo\":\"$repo\"}" || true)
+          id=$(echo "$added" | jq -r '.repository.id // empty')
+          if [ -n "$id" ]; then
+            curl -sS -X POST "$BASE/api/job/mirror-repo" \
+              -H "x-api-key: $KEY" -H "Content-Type: application/json" \
+              -d "{\"repositoryIds\":[\"$id\"]}"
+          fi
+```
+
+The mirror has to be reachable from the runner. For a homelab behind NAT that usually means a tunnel or a self-hosted runner on the same network.
+
+## Organizations and maintenance
+
+`POST /api/sync/organization` with `{"org": "my-org", "role": "member"}` adds an organization, and `POST /api/job/mirror-org` with `{"organizationIds": [...]}` mirrors it. `POST /api/cleanup/reconcile` compares a Gitea or Forgejo destination with the database and, with `dryRun: false`, adopts untracked mirrors or resets missing rows; the [reconcile playbook](/use-cases/adopt-existing-gitea-mirrors/) explains what it touches.
+
+## What a key cannot do
+
+- **Manage keys.** The key endpoints under `/api/auth/api-key/` need a browser session, not a key, so a leaked key cannot mint more keys. Scripts that must create keys need a session cookie and an `Origin` header.
+- **Act on another account.** A key sees the source, destination and repositories of the user who created it, nothing else.
+- **Bypass the host's limits.** Keys are not rate limited by Gitea Mirror. GitHub's hourly budget still applies and the app tracks it; a runaway script is stopped by revoking its key.
+
+Deleting a user deletes their keys.
+
+## FAQ
+
+### Is there a rate limit on the API itself?
+
+No. The app trusts the key holder. If a script loops on the add call, it just gets `409` quickly. If it loops on the mirror call, it queues jobs, so put a poll between calls.
+
+### Can I use a key with the SSE event stream?
+
+The endpoints that accept a session accept a key, including the ones the dashboard uses for live updates. For most automation the list endpoint polled every few seconds is simpler.
+
+### Where is the full endpoint list?
+
+The [API reference](/docs/api/) has the endpoints with request and response shapes.
+
+## Related guides
+
+- [API reference](/docs/api/)
+- [Automate GitHub backups](/use-cases/github-backup-automation/)
+- [Adopt existing Gitea mirrors](/use-cases/adopt-existing-gitea-mirrors/)

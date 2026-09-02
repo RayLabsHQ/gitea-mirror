@@ -44,11 +44,16 @@ GitHub can change pricing, authentication rules, or terms without notice. With G
 - Version-control the document inside the mirror so updates stay in sync.
 - Rehearse twice a year; include steps to roll back to GitHub if needed.
 
-### 5. Watch for drift
+### 5. Keep a second copy on a different host
+
+Since 3.31 the destination does not have to be Gitea. **Forgejo** is a named destination, and **GitHub** and **GitLab** are push destinations (all three beta). A second Gitea Mirror account with a GitLab group as its destination gives you a copy on a different company's infrastructure at no extra cost, and the push engine keeps it identical to the source on every sync. Each account has one source and one destination, so run one account per direction. See [Mirror to GitHub or GitLab](/use-cases/mirror-to-github-or-gitlab/).
+
+### 6. Watch for drift
 
 - Review the repositories dashboard weekly for new projects, teams, or permission mismatches.
 - Check the **Automation** tab—if the scheduler is enabled, auto-discovery keeps owners current.
 - Use the Activity Log and `/api/events` export to alert on failures before your recovery point objective is breached.
+- Run **Reconcile with destination** from the Repository Cleanup card now and then. It lists mirrors on Gitea the database does not know about and rows whose mirror is gone, and fixes both on request without deleting anything. See [Adopt existing Gitea mirrors](/use-cases/adopt-existing-gitea-mirrors/).
 
 ## Success criteria
 

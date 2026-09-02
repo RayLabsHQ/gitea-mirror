@@ -1,0 +1,95 @@
+---
+layout: ../../layouts/UseCaseLayout.astro
+title: "Back Up Codeberg, Forgejo and Gitea Repositories"
+description: "Use a Gitea or Forgejo instance, Codeberg included, as the source for Gitea Mirror, and use Forgejo as a destination for the other direction."
+canonical: "https://gitea-mirror.raylabs.io/use-cases/backup-codeberg-forgejo-repositories/"
+---
+
+# Back Up Codeberg, Forgejo and Gitea Repositories
+
+## Gitea to Gitea is a real use case
+
+Plenty of projects live on Codeberg or on somebody else's Forgejo. Plenty of homelabs run two Gitea instances, one that people push to and one that only exists as a copy. Since version 3.30 Gitea Mirror covers both: the **Source** dropdown has a **Gitea / Forgejo** option, and the **Destination** dropdown has **Forgejo** next to Gitea.
+
+Both are marked **beta**. Forgejo and Gitea share the same API, so everything the Gitea path supports works, but they have had less time in the field than the GitHub to Gitea default.
+
+## Requirements
+
+- Gitea Mirror 3.30 or newer
+- The source instance URL, for example `https://codeberg.org` or `http://gitea.local:3000`
+- An access token on the source with `read:repository`, `read:user` and `read:organization`
+- A destination Gitea or Forgejo with an API token, as in the [Docker playbook](/use-cases/backup-github-repositories/)
+
+## Step-by-step
+
+### 1. Select the source
+
+Open **Configuration → Connections** and set **Source** to **Gitea / Forgejo**. The **Instance URL** defaults to Codeberg; replace it with your own instance's base URL if that is where the repositories are. If the instance is served under a path, include it, for example `http://gitea.local:3000/gitea`. Enter the username on that instance.
+
+### 2. Create the token
+
+On the source instance open **Settings → Applications** and generate a token with read access to repositories, user and organization. Paste it and click **Test**. For public repositories the token is optional: without it Gitea Mirror sees the configured user's public repositories and their stars, and adding a public repository by URL works as well.
+
+### 3. Import and mirror
+
+Use **Import Gitea / Forgejo Data** to discover the repositories the token can see, or paste a single repository URL into **Repositories → Add Repository**. A Codeberg link such as `https://codeberg.org/forgejo/forgejo` fills in owner and name.
+
+Mirror from the Repositories page, then turn on **Automatic Syncing** on the **Automation** tab. Organizations on the source map to Gitea organizations on the destination with the **Preserve Structure** strategy, or into one organization with **Single Organization**, the same as for GitHub.
+
+### 4. Decide what a "source" is for you
+
+Because the source and destination are the same kind of software, it is easy to point the app at the wrong one. The source is the instance people push to. The destination is where Gitea Mirror creates read-only pull mirrors. If you point the source at your backup, you will mirror empty repositories.
+
+## What is mirrored
+
+For Gitea and Forgejo sources the git side is complete: code, branches, tags, the wiki when enabled, LFS objects, scheduled sync, auto import of new repositories, cleanup of repositories deleted upstream, starred and private repositories, and add by URL.
+
+Issues, pull requests, labels, milestones and releases are still read from the GitHub API only, so those switches are disabled for a Gitea or Forgejo source. Force push detection is GitHub only as well. If issue history matters to you, keep that in mind when choosing which direction to mirror.
+
+## Forgejo as the destination
+
+The destination card's **Destination** dropdown offers **Forgejo** as its own kind. Under the hood it is the Gitea pull mirror path, because Forgejo kept Gitea's API, but naming it lets the app show the right icon and label, and it records on each repository row which host it was mirrored to.
+
+That record matters when you change destinations. Once anything is mirrored, the destination locks and a change goes through a confirmation dialog. Rows remember where they were mirrored, and a row mirrored to one host is refused on another until it is removed and mirrored again, so a token never goes to the wrong server. Existing mirrors stay on the old server and are not moved; new mirrors go to the new server only.
+
+`DESTINATION_PROVIDER=forgejo` sets it from the environment. The `GITEA_URL`, `GITEA_USERNAME` and `GITEA_TOKEN` names are kept for every destination kind.
+
+## Two directions, two accounts
+
+Gitea Mirror accounts have exactly one source and one destination each, and mirroring is one way. If you want Codeberg backed up to your Gitea and your Gitea pushed out to GitHub, that is two accounts in Gitea Mirror: one with a Gitea / Forgejo source and a Gitea destination, one with a Gitea source and a GitHub destination. The second one uses the push engine described in [Mirror to GitHub or GitLab](/use-cases/mirror-to-github-or-gitlab/).
+
+Bidirectional mirroring is out of scope on purpose. A backup tool that writes back to the source has too many ways to go wrong.
+
+## Environment variables
+
+```env
+SOURCE_PROVIDER=gitea
+SOURCE_URL=https://codeberg.org
+GITHUB_USERNAME=your-codeberg-username
+GITHUB_TOKEN=your-codeberg-token
+
+DESTINATION_PROVIDER=forgejo      # or gitea
+GITEA_URL=https://forgejo.lab.local
+GITEA_USERNAME=mirror-bot
+GITEA_TOKEN=your-destination-token
+```
+
+## FAQ
+
+### Can the source and destination be the same instance?
+
+Technically yes, with different owners, but the cleanup and reconcile features assume the destination holds mirrors and nothing else under the owners it scans. Use two instances if you can.
+
+### Does Forgejo need anything special?
+
+No. The migrate API, the mirror sync endpoint and the repository API are the same calls Gitea Mirror already makes against Gitea. If a future Forgejo release diverges, the separate kind is where a difference would be handled.
+
+### What about Codeberg's rate limits?
+
+Codeberg is a shared instance. Keep the sync interval sane, an hour or more for a large account, and use a token so your requests are attributed to you.
+
+## Related guides
+
+- [Sources reference](/docs/sources/)
+- [Destinations reference](/docs/destinations/)
+- [Mirror GitLab projects to Gitea](/use-cases/mirror-gitlab-to-gitea/)

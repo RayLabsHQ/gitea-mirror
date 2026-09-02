@@ -1,0 +1,85 @@
+---
+layout: ../../layouts/UseCaseLayout.astro
+title: "Control Release Asset Storage"
+description: "Mirror release notes for every release but upload binaries only for the newest few, globally or per organization and repository, so a busy project does not fill your Gitea disk."
+canonical: "https://gitea-mirror.raylabs.io/use-cases/control-release-asset-storage/"
+---
+
+# Control Release Asset Storage
+
+## Releases are cheap, assets are not
+
+A GitHub release is a tag, some notes and, usually, a set of attached files: installers, tarballs, container bundles, model weights. The notes and the tag are a few kilobytes. The assets of a project that ships builds for five platforms every two weeks can run to gigabytes per year, and a mirror that copies all of them copies every historical build you will never install.
+
+Gitea Mirror has had a release limit for a while: mirror the newest N releases and skip the rest. Since version 3.30 there is a second, independent limit for assets, so you can keep the notes of every release you mirror and the binaries of only the recent ones.
+
+## The two limits
+
+On the **Configuration** page, next to the **Releases** switch in the mirror settings, there are two small inputs.
+
+| Input | Setting | Meaning |
+|---|---|---|
+| Latest | `releaseLimit` | How many of the newest releases exist on Gitea at all. Default 10, range 1 to 100. |
+| Assets for latest | `releaseAssetLimit` | How many of those also get their assets uploaded. Empty means all of them, `0` means notes and tag only, `N` means the newest N. |
+
+Releases are ordered newest first. A release past the asset limit is still created on Gitea with its notes and tag; it just does not get the files. The two limits are independent: "Latest 50, Assets for latest 3" keeps three years of changelog browsable with the last three builds downloadable.
+
+## Nothing already uploaded is deleted
+
+The asset limit only decides whether a sync uploads. Lowering it later never removes assets that already reached Gitea. If you mirrored everything for a year and then set the limit to 2, the old files stay until you delete them in Gitea yourself. That is the safe direction for a backup tool, and it means the setting is cheap to experiment with.
+
+## Step-by-step
+
+### 1. Set a global default
+
+Open **Configuration → Connections**, scroll to the mirror settings and make sure **Releases** is on. Set **Latest** to how far back the notes should go and **Assets for latest** to how many builds you want on hand. For most homelabs, a handful of builds and a long tail of notes is the right shape.
+
+### 2. Override per organization
+
+Some organizations publish big artifacts, others publish none. Open the three-dot menu on an organization row and choose **Mirror options**. Both limits are there next to the switches, with **Inherit** meaning the global value. An organization that ships firmware images can get `0` assets while the rest of your account keeps the default.
+
+### 3. Override per repository
+
+The same dialog exists on repository rows, and a repository value wins over its organization, which wins over the global default. The dialog labels each row with what inherit resolves to right now, so you can see the effective value before you change it.
+
+### 4. Environment
+
+For deployments configured from the environment:
+
+```env
+MIRROR_RELEASES=true
+RELEASE_LIMIT=25
+RELEASE_ASSET_LIMIT=3     # unset for all, 0 for notes only
+```
+
+`RELEASE_ASSET_LIMIT` seeds the global setting on first boot, the same way the other mirror options do. The [environment variables page](/docs/environment-variables/) lists the rest.
+
+## Doing the disk math
+
+Take a project that publishes a release every two weeks with five platform builds of 40 MB each. That is 200 MB per release and about 5 GB per year of assets, for one repository. With the release limit at 25 and no asset limit, the first mirror pulls about 5 GB and every sync afterwards adds the newest release's 200 MB. With **Assets for latest** at 3, the first mirror pulls 600 MB. Each later release still adds 200 MB, because a new release is inside the limit and gets its files, and the files of the release that dropped out of the top three stay on disk until you remove them. The ongoing growth is the same; what you save is the backfill of every historical build.
+
+Multiply by the number of repositories that ship binaries and compare with the free space on the Gitea host. Gitea stores release attachments in its own attachment storage, separate from the git objects and from LFS, so check that path when you plan capacity.
+
+## Where releases apply
+
+Releases are read from the GitHub API. For GitLab and Gitea or Forgejo sources the Releases switch is disabled, and for GitHub or GitLab destinations releases are not created at all because the push engine moves branches and tags only. Both limits therefore matter on the default GitHub to Gitea path and are ignored elsewhere.
+
+## FAQ
+
+### Does lowering the release limit delete releases on Gitea?
+
+No. Neither limit deletes anything. Releases and assets that already exist stay until you remove them in Gitea.
+
+### Do assets sync again if I raise the limit?
+
+Yes, for releases within the new limit that did not get their assets before. The next sync uploads what is missing.
+
+### Can I skip releases for one repository entirely?
+
+Turn the Releases switch off in that repository's **Mirror options**. The [LFS playbook](/use-cases/mirror-git-lfs-repositories/) uses the same dialog for the same reason.
+
+## Related guides
+
+- [Mirror issues and pull requests](/use-cases/mirror-github-issues-pull-requests/)
+- [Mirror Git LFS repositories](/use-cases/mirror-git-lfs-repositories/)
+- [Configuration reference](/docs/configuration/)

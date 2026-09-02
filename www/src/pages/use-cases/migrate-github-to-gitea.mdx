@@ -72,7 +72,14 @@ Keep the GitHub repos around in archived state for a quarter. They cost nothing 
 
 ## What about the reverse direction?
 
-Teams that migrate off GitHub sometimes need to keep a public presence there. Gitea has built-in push mirroring for that: your Gitea repo pushes to a GitHub remote on every change. Gitea Mirror handles the pull direction, GitHub to Gitea; the push direction is native Gitea functionality and the two work fine together.
+Teams that migrate off GitHub sometimes need to keep a public presence there. Two options, both one way:
+
+- Gitea's built-in push mirroring: your Gitea repository pushes to a GitHub remote on every change. It is native Gitea functionality and works fine next to Gitea Mirror.
+- Gitea Mirror's own push engine (beta since 3.31): a second Gitea Mirror account with your Gitea as the source and **GitHub** as the destination keeps a bare clone and pushes branches and tags with force and prune on a schedule. It creates the target repositories for you and applies cleanup through the GitHub API. See [Mirror to GitHub or GitLab](/use-cases/mirror-to-github-or-gitlab/).
+
+Neither option pulls anything back. Bidirectional mirroring is out of scope on purpose.
+
+If you already created some mirrors in Gitea by hand before setting the app up, run **Reconcile with destination** from the Repository Cleanup card once. It adopts those mirrors into the database so scheduled sync and cleanup cover them, without moving or deleting anything. See [Adopt existing Gitea mirrors](/use-cases/adopt-existing-gitea-mirrors/).
 
 ## FAQ
 

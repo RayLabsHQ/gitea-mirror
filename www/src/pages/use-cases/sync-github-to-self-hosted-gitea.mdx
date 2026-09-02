@@ -11,6 +11,8 @@ canonical: "https://gitea-mirror.raylabs.io/use-cases/sync-github-to-self-hosted
 
 You may still collaborate on GitHub every day, yet want a LAN Gitea copy you control. Gitea Mirror bridges the two: it tracks owners, auto-discovers repos, mirrors metadata, and keeps a local instance only minutes behind upstream without hand-written cron jobs.
 
+GitHub to Gitea is the default and the best tested path. If your code lives elsewhere, the same setup works with a [GitLab source](/use-cases/mirror-gitlab-to-gitea/) or a [Codeberg, Forgejo or Gitea source](/use-cases/backup-codeberg-forgejo-repositories/), both beta, with the difference that issues, pull requests and releases are only read from GitHub for now.
+
 ## Requirements
 
 - Gitea Mirror deployed (Docker, [Proxmox LXC](/use-cases/proxmox-lxc-homelab/), [Unraid](/use-cases/unraid-github-backup/), or [Helm](/use-cases/deploy-with-helm-chart/))

@@ -43,7 +43,7 @@ The question isn't *if* you need backups—it's *which solution* fits your workf
 
 **Best for**: Homelab enthusiasts, indie developers, privacy-conscious teams, cost-sensitive startups
 
-**How it works**: Automatically mirrors your GitHub repositories to your own Gitea server using scheduled syncs. Preserves full history, metadata (issues, PRs as enriched issues, labels, milestones), releases, and wiki content.
+**How it works**: Automatically mirrors your GitHub repositories to your own Gitea server using scheduled syncs. Preserves full history, metadata (issues, PRs as enriched issues, labels, milestones), releases, and wiki content. GitLab and Gitea or Forgejo sources, and Forgejo, GitHub or GitLab destinations, are available as beta options; the metadata mirroring is GitHub to Gitea only.
 
 **Pros**:
 - ✅ **Zero recurring costs** - Just your hosting/hardware
@@ -53,6 +53,8 @@ The question isn't *if* you need backups—it's *which solution* fits your workf
 - ✅ **Docker-friendly** - One command deployment
 - ✅ **Multi-arch support** - AMD64 and ARM64 (Raspberry Pi compatible)
 - ✅ **No vendor lock-in** - Standard Git repos, portable
+- ✅ **More than one host** - GitLab, Codeberg and Forgejo as sources, Forgejo, GitHub and GitLab as destinations (beta)
+- ✅ **Scriptable** - API keys drive every endpoint the dashboard uses
 
 **Cons**:
 - ❌ You manage the infrastructure (server, backups, updates)

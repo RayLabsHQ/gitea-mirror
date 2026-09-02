@@ -30,17 +30,12 @@ kubectl create namespace gitea-mirror
 
 The [chart README](https://github.com/RayLabsHQ/gitea-mirror/blob/main/helm/gitea-mirror/README.md) documents multiple supported approaches. Choose the one that matches how you manage secrets.
 
+The chart is published to GitHub Container Registry as an OCI package on every release, at `oci://ghcr.io/raylabshq/charts/gitea-mirror`. Each chart version deploys the application release with the same number, and the chart's default image tag is that release, so there is nothing to clone and no tag to look up. Installing from a clone still works: replace the OCI reference with `./helm/gitea-mirror` from the repository root.
+
 **Inline quick start (no values file):**
 
-First, clone the repository or download the chart:
 ```bash
-git clone https://github.com/RayLabsHQ/gitea-mirror.git
-cd gitea-mirror
-```
-
-Then install with credentials:
-```bash
-helm upgrade --install gitea-mirror ./helm/gitea-mirror \
+helm upgrade --install gitea-mirror oci://ghcr.io/raylabshq/charts/gitea-mirror \
   --namespace gitea-mirror \
   --set "gitea-mirror.github.username=<your-gh-username>" \
   --set "gitea-mirror.github.token=<your-gh-token>" \
@@ -66,10 +61,12 @@ persistence:
 ```
 
 ```bash
-helm upgrade --install gitea-mirror ./helm/gitea-mirror \
+helm upgrade --install gitea-mirror oci://ghcr.io/raylabshq/charts/gitea-mirror \
   --namespace gitea-mirror \
   --values values-gitea-mirror.yaml
 ```
+
+Add `--version 3.31.0` (or any published release) to pin the chart. Without it Helm installs the newest one.
 
 **Bring your own Secret (recommended for production):**
 
@@ -105,8 +102,8 @@ After the pod is healthy, open **Configuration → Connections** inside the UI t
 
 ### 4. Keep it updated
 
-- Pull chart updates when you bump the repo: `git pull` then re-run the `helm upgrade` command.
-- Override the container image tag with `--set image.tag=v3.21.0` if you need to pin a release (defaults to `v{appVersion}` from Chart.yaml).
+- Re-run the `helm upgrade` command without `--version` to move to the newest chart, and with it the newest application image. Pass `--version` to stay on a specific release.
+- Leave `image.tag` empty to run the release the chart was published for. If you set it, use the tag as it appears on the registry, with the `v` prefix, for example `--set image.tag=v3.31.0`.
 - Use Helm rollbacks if a release misbehaves: `helm rollback gitea-mirror <REVISION> -n gitea-mirror`.
 
 ## Observability

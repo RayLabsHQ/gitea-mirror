@@ -11,6 +11,8 @@ canonical: "https://gitea-mirror.raylabs.io/use-cases/backup-github-repositories
 
 GitHub is great—right up until an outage, SSO change, or account lockout strands your projects. Gitea Mirror keeps a self-hosted copy of everything (history, metadata, LFS) so you can keep working locally. This playbook walks through the minimal Docker setup the project ships with and shows how to prove your backups actually work.
 
+This playbook covers the default path, GitHub into Gitea. Since 3.30 the source can also be [GitLab](/use-cases/mirror-gitlab-to-gitea/) or [Codeberg, Forgejo and Gitea](/use-cases/backup-codeberg-forgejo-repositories/), and since 3.31 the destination can be Forgejo, or [GitHub or GitLab](/use-cases/mirror-to-github-or-gitlab/) through a push engine. Those paths are marked beta in the settings.
+
 ## Requirements
 
 - Docker Engine and Compose on the host that will run the mirror

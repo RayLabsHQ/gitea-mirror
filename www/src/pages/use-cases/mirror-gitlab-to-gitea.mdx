@@ -1,0 +1,99 @@
+---
+layout: ../../layouts/UseCaseLayout.astro
+title: "Mirror GitLab Projects to Gitea"
+description: "Use GitLab as the source for Gitea Mirror: gitlab.com or a self-hosted instance, group and subgroup projects, token scopes, what comes across today and what does not yet."
+canonical: "https://gitea-mirror.raylabs.io/use-cases/mirror-gitlab-to-gitea/"
+---
+
+# Mirror GitLab Projects to Gitea
+
+## GitLab is a source now
+
+Gitea Mirror started as a GitHub to Gitea tool, and that is still the default and the best tested path. Since version 3.30 the connection card has a **Source** dropdown, and GitLab is one of the options. It is marked **beta**: it is tested end to end against gitlab.com and a self-hosted instance before every release, but it has had less time in the field than GitHub.
+
+The mechanics are the same as for GitHub. Gitea does the actual mirroring through its pull mirror feature, which treats GitLab as a plain git remote. Gitea Mirror's job is to find your projects through the GitLab API, create the mirrors in the right place, keep them on a schedule, and notice when a project disappears upstream.
+
+## Requirements
+
+- A running Gitea Mirror (3.30 or newer) with a Gitea or Forgejo destination configured
+- A GitLab account on gitlab.com or your own instance
+- A personal access token with the `read_api` and `read_repository` scopes
+- Network access from Gitea itself to GitLab, since Gitea performs the clone
+
+## Step-by-step
+
+### 1. Pick GitLab as the source
+
+Open **Configuration → Connections**. At the top of the source card, change the **Source** dropdown from GitHub to **GitLab**. An **Instance URL** field appears. Leave it empty for gitlab.com, or enter the base URL of your own instance, for example `https://gitlab.example.com`. The username field takes your GitLab username.
+
+If you already imported repositories from GitHub, the dropdown shows a lock note and a **Change** button instead. Changing the source is allowed, but only after a confirmation dialog, and the repositories you imported before stay tied to GitHub. More on that below.
+
+### 2. Create the token
+
+In GitLab go to **Preferences → Access tokens** and add a token with `read_api` and `read_repository`. Paste it into the token field and click **Test**. The test calls the selected instance with that token and tells you whether it can see your account.
+
+You can skip the token for public projects. Without one, Gitea Mirror only sees the public projects of the configured user, plus their starred projects, and adding a single public project by URL still works.
+
+### 3. Import projects
+
+Click **Import GitLab Data** in the top right of the Configuration page, or wait for the scheduler if you turned on auto import. Discovery lists the projects the token can see, including private ones and projects in groups you belong to.
+
+To add one project without importing everything, open **Repositories → Add Repository** and paste the project URL. Nested paths are fine: `https://gitlab.com/group/subgroup/project` fills the owner and name fields from the URL, and a deep link into a merge request or a file tree is trimmed automatically.
+
+### 4. Mirror and schedule
+
+Mirror the projects from the Repositories page as you would for GitHub. On the **Automation** tab, enable **Automatic Syncing** and pick an interval. Gitea's own pull mirror interval is not used; Gitea Mirror triggers the sync itself so the schedule you set is the schedule you get. Turn on **Auto-mirror new repositories** if new projects should be picked up without a manual import.
+
+## How GitLab groups land in Gitea
+
+GitLab nests groups, Gitea does not. A project at `group/subgroup/project` is mirrored into the Gitea organization `group` when the strategy is **Preserve Structure**, and the repository keeps `group/subgroup/project` as its full name in the Gitea Mirror table so you can still tell subgroups apart. The organization filter in the mirror settings matches the top level group.
+
+Two smaller details:
+
+- GitLab's **internal** visibility has no Gitea equivalent. Internal projects are mirrored as private, because they are not visible to anonymous users on GitLab either.
+- Repository names come from the URL path, not the display name. A project called "My Widget" with the path `my-widget` mirrors as `my-widget`.
+
+## What comes across, and what does not yet
+
+The git side is complete. Code, every branch and tag, the wiki when enabled, and LFS objects are mirrored for GitLab exactly as for GitHub, and scheduled sync, auto import, cleanup of projects deleted upstream, starred projects and private projects all work.
+
+The metadata side is GitHub only for now. Issues, merge requests, labels, milestones and releases are not read from the GitLab API yet, so those switches are disabled on the Configuration page and the mirror step skips them. Force push detection also depends on the GitHub API and is unavailable for GitLab sources. The [issue and pull request playbook](/use-cases/mirror-github-issues-pull-requests/) only applies to GitHub sources.
+
+## One source at a time
+
+An account has one source. When you switch from GitHub to GitLab, the repositories imported from GitHub are not touched. They keep syncing, because Gitea already holds their clone configuration, but the cleanup service ignores them and mirroring one of them again is refused with an error that names both hosts. If you need a GitHub repository re-mirrored after the switch, remove it and add it again from the current source.
+
+The same lock applies in the other direction. Once projects are imported from GitLab, the source and instance URL lock until you confirm a change.
+
+## Environment variables
+
+For a deployment that should come up configured, set:
+
+```env
+SOURCE_PROVIDER=gitlab
+SOURCE_URL=https://gitlab.example.com   # omit for gitlab.com
+GITHUB_USERNAME=your-gitlab-username
+GITHUB_TOKEN=glpat-...
+```
+
+The `GITHUB_*` names are kept for every source so an existing deployment only has to add `SOURCE_PROVIDER`. The full list is on the [environment variables page](/docs/environment-variables/), and the [sources page](/docs/sources/) has the capability table.
+
+## FAQ
+
+### Does this work with a self-hosted GitLab behind a private CA?
+
+Yes, if both Gitea Mirror and Gitea trust the CA. Gitea Mirror talks to the GitLab API, Gitea does the clone. See [custom CA certificates](/docs/ca-certificates/).
+
+### Can I mirror GitHub and GitLab into the same Gitea?
+
+Not from one account. Each Gitea Mirror user has one source, so create a second user for the second source. Both can point at the same Gitea server.
+
+### Will merge requests ever be mirrored?
+
+Reading merge requests from the GitLab API is the natural next step after the code path settled. Watch the [GitHub issues](https://github.com/RayLabsHQ/gitea-mirror/issues) for progress.
+
+## Related guides
+
+- [Sources reference](/docs/sources/)
+- [Back up Codeberg and Forgejo repositories](/use-cases/backup-codeberg-forgejo-repositories/)
+- [Sync GitHub to self-hosted Gitea](/use-cases/sync-github-to-self-hosted-gitea/)

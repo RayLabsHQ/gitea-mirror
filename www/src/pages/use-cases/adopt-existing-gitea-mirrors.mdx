@@ -1,0 +1,97 @@
+---
+layout: ../../layouts/UseCaseLayout.astro
+title: "Adopt Existing Gitea Mirrors with Reconcile"
+description: "Bring mirrors you created by hand or with an older tool under Gitea Mirror's management, and repair the database after a restore, without deleting anything on either side."
+canonical: "https://gitea-mirror.raylabs.io/use-cases/adopt-existing-gitea-mirrors/"
+---
+
+# Adopt Existing Gitea Mirrors with Reconcile
+
+## The database is the only thing the app looks at
+
+Gitea Mirror keeps a row for every repository it knows about. Scheduled sync, cleanup, the dashboard and the status counts all work from those rows. A mirror that exists on Gitea without a row is invisible to every one of those features, and a row whose mirror was deleted on Gitea looks healthy until the next sync fails.
+
+That happens more often than you would think:
+
+- You created pull mirrors by hand in Gitea before you found this app.
+- You migrated from a script or another tool that left mirrors behind.
+- You restored an older backup of `gitea-mirror.db`, or started with a fresh database on a new host, while Gitea kept everything.
+- Someone deleted a mirror in Gitea to free space, and the app still lists it as mirrored.
+
+Since version 3.31 the **Reconcile with destination** action compares what Gitea holds with what the database holds and offers two opt-in fixes. It works for Gitea and Forgejo destinations.
+
+## Requirements
+
+- Gitea Mirror 3.31 or newer with the destination URL, username and token configured
+- A source configured, because reconcile uses the source to decide which mirrors are yours
+- A Gitea token that can list the owners the app mirrors into
+
+## Step-by-step
+
+### 1. Run the dry run
+
+Open **Configuration → Automation** and find the **Repository Cleanup** card. Click **Reconcile with destination**. The dialog runs a dry run as soon as it opens and lists every repository under the destination owners this account mirrors into: the configured user and organization, the starred organization, organization overrides, and every owner the database already points at.
+
+The result is sorted into four groups.
+
+| Group | What it means | Fix offered |
+|---|---|---|
+| On the destination, not in the database | Mirrors of your source that the app does not know about | Adopt |
+| In the database, gone from the destination | Rows marked mirrored whose repository is no longer there | Reset |
+| Not managed by gitea-mirror | Native repositories and mirrors of other hosts | None, listed for information |
+| Could not be verified | The presence check itself failed | None, left alone |
+
+A healthy count shows how many rows matched. If some rows were mirrored to a previous destination, the dialog says how many were left out of the comparison; they are expected to be absent here and are not treated as missing.
+
+### 2. Decide what counts as yours
+
+Only mirrors whose original URL points at the configured source count as this app's. The known hosts are the source itself, the API host it is reached through, and the host of every clone URL already stored, which covers GitHub Enterprise and setups where the clone host differs from the nominal source.
+
+Everything else lands in the not managed group: repositories that are not mirrors at all, and mirrors of hosts you do not mirror from. Those are never touched by reconcile, and the cleanup service does not know about them either.
+
+### 3. Adopt
+
+Tick **Adopt** and apply. For each untracked mirror the app creates a row from the mirror's source URL, preferring the source's own metadata and falling back to what Gitea reports if the source lookup returns nothing (a private repository without a token, for example, takes its private flag from Gitea).
+
+The new row records where the mirror already lives and pins it there, even when your mirror strategy would put a new mirror somewhere else. That is deliberate: the next sync updates the existing mirror instead of creating a second copy in the "right" organization. Adoption inserts with the existing unique index on user and full name, so it cannot create duplicates.
+
+### 4. Reset
+
+Tick **Reset** and apply. Each missing row goes back to `imported` with a note in its error field, and the next mirror run recreates the mirror on Gitea. A row is only called missing after a direct lookup of its expected location returned 404. A failed check leaves the row alone and lists it under could not be verified.
+
+### 5. Run it again
+
+A second dry run should come back clean: zero untracked, zero missing. Anything still listed is either not managed, which is fine, or unverified, which usually means a network or permission problem worth a look at the Gitea logs.
+
+## What reconcile never does
+
+- It does not delete or archive anything on Gitea.
+- It does not delete rows. Missing rows are reset, not removed.
+- It does not move mirrors between organizations.
+- It does not touch native repositories or mirrors of other hosts.
+
+The cleanup service keeps its own rules for repositories deleted upstream. Reconcile is about the database matching the destination, not about the destination matching the source.
+
+## From a script
+
+The same action is `POST /api/cleanup/reconcile`. An empty body is a dry run; `{"dryRun": false, "adoptUntracked": true, "resetMissing": true}` applies both fixes. The response carries the four groups, the healthy and elsewhere counts, the owners that were scanned and the ones that were skipped because the destination does not have them. See [Automate mirrors with the API](/use-cases/automate-mirrors-with-the-api/) for keys and headers.
+
+## FAQ
+
+### I restored a database backup and the app now shows half my repositories. Is reconcile the fix?
+
+Yes. Run the dry run, check that the untracked list is what you expect, adopt. Scheduled sync and cleanup include the adopted rows from then on.
+
+### Will adoption pull issues and releases into the adopted mirror?
+
+Adoption only creates the row. Metadata comes with the next sync according to your mirror settings, and only from GitHub sources.
+
+### Why is reconcile not available for a GitHub or GitLab destination?
+
+Push targets have no server side mirror state. The app's bare clone and the row are the state, so there is nothing on the target to compare against. See [Mirror to GitHub or GitLab](/use-cases/mirror-to-github-or-gitlab/).
+
+## Related guides
+
+- [Cleanup and reconcile reference](/docs/cleanup-and-reconcile/)
+- [Automate GitHub backups](/use-cases/github-backup-automation/)
+- [Migrate from GitHub to Gitea](/use-cases/migrate-github-to-gitea/)

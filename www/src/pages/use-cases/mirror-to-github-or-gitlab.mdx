@@ -1,0 +1,118 @@
+---
+layout: ../../layouts/UseCaseLayout.astro
+title: "Mirror Repositories to GitHub or GitLab"
+description: "Use GitHub or GitLab as the destination with the push engine: what it does on every sync, where repositories are created, which token scopes it needs, and what does not travel yet."
+canonical: "https://gitea-mirror.raylabs.io/use-cases/mirror-to-github-or-gitlab/"
+---
+
+# Mirror Repositories to GitHub or GitLab
+
+## When the copy should live on a hosted service
+
+The usual Gitea Mirror setup copies GitHub into a Gitea you run. Sometimes the direction is the other way round: the repositories live on your own Gitea or Forgejo, and you want a copy on GitHub so people can find it, or your team lives on GitHub and you want a second copy in a GitLab group for good measure.
+
+Since version 3.31 the **Destination** dropdown offers **GitHub** and **GitLab**, both marked **beta**. Neither host has a pull mirror API the app can use (GitHub has none, GitLab reserves it for paid tiers), so for these two the app runs a push engine instead of asking the destination to fetch.
+
+## What the push engine does
+
+For every repository whose destination is GitHub or GitLab, each sync does the following:
+
+1. **Keeps a bare clone on disk.** It lives under `<data dir>/mirrors/<source host>/<owner>/<name>.git`, next to the SQLite database. The first run clones, later runs fetch with prune, so a branch or tag deleted at the source disappears from the clone.
+2. **Creates the target repository if it is missing.** On GitHub under the account from the connection card, or under an organization the mirror strategy picks. On GitLab under the user, or in a group; a missing top level group is created, a nested group is not.
+3. **Pushes branches and tags** with force and prune. The target ends up matching the source, including rewritten history and deleted branches.
+4. **Sets the default branch** on the target to match the source.
+
+Statuses, mirror jobs and activity rows are the same as for a Gitea mirror, so the dashboard, the scheduler, recovery and cleanup treat both the same. The repository table shows the destination's icon and links to the target repository.
+
+## The target is overwritten every sync
+
+This is the sentence to remember. Every push uses force and prune. A commit made directly on the target, a branch created there, a tag moved there, is replaced by what the source has on the next sync. Treat a push target as read only, the same way a Gitea pull mirror is read only.
+
+## What is not pushed
+
+Push targets receive branches and tags only. These are disabled in the settings for push destinations, with a note saying why:
+
+- issues, pull requests, labels and milestones
+- releases and release assets (the tags themselves do travel)
+- the wiki
+- LFS objects
+- force push protection and its backup strategies
+
+Pull request refs on GitHub and merge request refs on GitLab are not pushed either, because the hosts refuse writes to their own namespaces.
+
+Mirroring stays one way, and a repository has one destination. Nothing is pulled back from the target.
+
+## Requirements
+
+- Gitea Mirror 3.31 or newer with `git` available in the container (the official image has it)
+- Disk space next to the database, roughly the size of the git objects of everything you mirror this way
+- A token on the target with the scopes below
+
+| Target | Scopes | Notes |
+|---|---|---|
+| GitHub | `repo`, `workflow` | `workflow` is required as soon as a repository contains GitHub Actions files, or the push is rejected. Add `delete_repo` only if cleanup should delete repositories on GitHub. |
+| GitLab | `api`, `write_repository` | Pushes authenticate as the `oauth2` user with the token, as GitLab documents. |
+
+Tokens never appear in a URL and are never written to disk. Each git process gets an inline credential helper that reads the token from an environment variable set for that process only: the source token for the fetch, the target token for the push.
+
+## Step-by-step
+
+### 1. Configure the destination
+
+Open **Configuration → Connections**. In the destination card set **Destination** to **GitHub** or **GitLab**. The instance URL is prefilled with github.com or gitlab.com; change it for GitHub Enterprise Server or a self-hosted GitLab. Enter the account the token belongs to, the token, and click **Test**.
+
+For the single organization strategy, enter the organization or group name. GitHub organizations cannot be created through the API, so create the organization first and make the token's user a member with permission to create repositories. On GitLab a missing top level group is created for you.
+
+### 2. Mirror a repository
+
+Add and mirror repositories as usual. The first run for a repository clones the source and pushes everything. Large first pushes into GitHub can exceed its single push limit; the engine then retries in batches of 50 refs, branches first, then tags, then a prune. A freshly created GitLab project sometimes reports "not found" for a second or two after the create call returns, so the first push into a repository the run just created is retried a few times before it counts as a failure.
+
+### 3. Check the result
+
+Open the target repository from the link in the repository table and compare branches and tags with the source. A second sync of an unchanged repository reports that the target was already up to date.
+
+### 4. Schedule
+
+Turn on **Automatic Syncing** on the **Automation** tab. Each scheduled sync fetches and pushes again. Both steps are idempotent, so an interrupted run just runs again.
+
+## Be careful with auto mirror
+
+With a push destination, **Auto-mirror new repositories** creates a repository on the target for everything the import finds. If the source token can see a few hundred repositories, that is a few hundred new repositories on GitHub or in your GitLab group. Import first, look at the list, and only then turn auto mirror on.
+
+## Cleanup and switching
+
+When the source deletes a repository, the cleanup service applies the configured action through the target's API: archive, or delete. Deleting on GitHub needs the `delete_repo` scope; without it the cleanup run fails with a message naming the scope and the repository stays. On gitlab.com and instances with delayed deletion, a deleted project is renamed and kept for the configured number of days. The bare clone is removed with the row.
+
+Once anything has been mirrored the destination locks, and changing it asks for confirmation. Rows remember which destination they were mirrored to, and a row mirrored to one host is refused on another until it is removed and mirrored again.
+
+The **Reconcile with destination** action is for Gitea and Forgejo. Push targets have no server side mirror state to compare against, so the button is not offered for them.
+
+## Tuning
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `MIRROR_CLONE_DIR` | `<data dir>/mirrors` | Where the bare clones live. Point it at a bigger disk if the data directory is small. |
+| `PUSH_CONCURRENCY` | `2` | How many git fetch or push operations run at the same time across all repositories. |
+| `DESTINATION_PROVIDER` | `gitea` | `github` or `gitlab` to select a push target from the environment. |
+
+One git process per repository at a time is enforced with a lock file next to the clone. A lock older than an hour belongs to a run that died and is taken over; a half written clone is removed and cloned again.
+
+## FAQ
+
+### Can I push to GitHub and keep my Gitea mirror?
+
+Not from one account: each Gitea Mirror account has one destination. Create a second account for the second destination. Both can share the same source.
+
+### Does the source need to be Gitea for this?
+
+No. Any source works: GitHub to a GitLab group, a GitLab project to GitHub, a Forgejo repository to GitHub. Every source and destination pair is exercised against real hosts before a release.
+
+### Where do the release notes go?
+
+Nowhere, for now. Tags are pushed, releases are not created on the target. If releases matter, keep a Gitea destination for that repository.
+
+## Related guides
+
+- [Destinations reference](/docs/destinations/)
+- [Back up Codeberg and Forgejo repositories](/use-cases/backup-codeberg-forgejo-repositories/)
+- [Stay ready to leave GitHub](/use-cases/vendor-lock-in-prevention/)
