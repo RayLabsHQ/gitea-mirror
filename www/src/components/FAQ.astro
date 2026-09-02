@@ -4,7 +4,19 @@ import { HelpCircle } from 'lucide-react';
 const faqs = [
   {
     question: "What is Gitea Mirror and why do I need it?",
-    answer: "Gitea Mirror is a self-hosted tool that automatically backs up your GitHub repositories to your own Gitea server. You need it because GitHub outages, account issues, or policy changes can lock you out of your code. With Gitea Mirror, you own your backups completely—no monthly fees, no third-party storage, just full control over your repository history, issues, pull requests, and releases."
+    answer: "Gitea Mirror is a self-hosted tool that automatically backs up your GitHub repositories to your own Gitea server. GitHub outages, account issues, or policy changes can lock you out of your code. With Gitea Mirror you own your backups completely: no monthly fees, no third-party storage, and full control over your repository history, issues, pull requests, and releases. It can also pull from GitLab, Gitea and Forgejo, and push to GitHub, GitLab and Forgejo, all in beta."
+  },
+  {
+    question: "Which hosts can it mirror from and to?",
+    answer: "Sources: GitHub is the default. GitLab and Gitea or Forgejo, which covers Codeberg, are available in beta. Destinations: Gitea is the default. Forgejo, GitHub and GitLab are available in beta. Each account uses one source and one destination at a time. GitHub to Gitea is the supported path; every other combination works end to end but has had less time in the field, so it carries a beta label in the dropdowns.",
+    href: "/docs/sources/",
+    linkText: "Read about sources and destinations"
+  },
+  {
+    question: "Can it push to GitHub or GitLab?",
+    answer: "Yes, in beta. Neither host offers a usable pull mirror, so the app keeps a bare clone of each repository and pushes its branches and tags there with force and prune. The copy always matches the source and is overwritten on every sync, so treat it as read only. Issues, pull requests, releases, wiki and LFS objects do not travel to push targets. The GitHub token needs the repo and workflow scopes; the GitLab token needs api and write_repository.",
+    href: "/docs/destinations/",
+    linkText: "How push destinations work"
   },
   {
     question: "How is this different from BackHub or Rewind?",
@@ -12,35 +24,53 @@ const faqs = [
   },
   {
     question: "Does Gitea Mirror backup issues, pull requests, and releases?",
-    answer: "Yes! Enable 'Mirror metadata' in settings to backup issues with comments, labels, and assignees. Pull requests are mirrored as enriched issues with full metadata, commit history, and file changes (Gitea's API doesn't support creating PRs from external sources). Releases, including binary assets, and wiki pages are also backed up when enabled."
+    answer: "Yes, from GitHub. Enable 'Mirror metadata' in settings to backup issues with comments, labels, and assignees. Pull requests are mirrored as enriched issues with full metadata, commit history, and file changes (Gitea's API doesn't support creating PRs from external sources). Releases, including binary assets, and wiki pages are also backed up when enabled, and the 'Assets for latest' setting limits asset uploads to the newest releases. Other sources carry code, branches, tags, wiki and LFS only."
+  },
+  {
+    question: "Is there an API?",
+    answer: "Yes. Create an API key under Configuration, Authentication, API Keys and send it in the x-api-key header. A key uses the same endpoints as the web UI: list repositories, add one by owner and name, start a mirror, sync, run cleanup, reconcile, and check health. Keys can expire, can be revoked, and cannot create or revoke other keys.",
+    href: "/docs/api/",
+    linkText: "API reference"
   },
   {
     question: "How long does setup take?",
-    answer: "15-20 minutes with Docker. Run 'docker compose -f docker-compose.alt.yml up -d', visit localhost:4321, create an account, paste your GitHub and Gitea tokens, select repos to backup—done. The Proxmox LXC one-liner is even faster. No complex configuration files or manual scripting required."
+    answer: "15-20 minutes with Docker. Run 'docker compose -f docker-compose.alt.yml up -d', visit localhost:4321, create an account, paste your GitHub and Gitea tokens, select repos to backup, and you are done. The Proxmox LXC one-liner is even faster. No complex configuration files or manual scripting required."
+  },
+  {
+    question: "How do I install it with Helm?",
+    answer: "The chart is published to GitHub Container Registry with every release: helm upgrade --install gitea-mirror oci://ghcr.io/raylabshq/charts/gitea-mirror --namespace gitea-mirror --create-namespace. The chart version equals the application version and its default image tag is that release, so a plain install runs the newest version. Installing from a clone of the repository still works.",
+    href: "/docs/deployment/",
+    linkText: "Deployment guide"
+  },
+  {
+    question: "I already have mirrors on Gitea. Can Gitea Mirror take them over?",
+    answer: "Yes. The Reconcile action on the Automation tab compares your Gitea server with the database. Mirrors it does not know about, whose original URL points at your configured source, can be adopted as tracked rows. Rows whose mirror has gone missing can be reset so the next run recreates them. Native repositories and mirrors of other hosts are listed but never touched, and nothing is deleted on either side.",
+    href: "/docs/cleanup-and-reconcile/",
+    linkText: "Cleanup and reconcile"
   },
   {
     question: "What happens if GitHub goes down or I lose access?",
-    answer: "You can immediately clone from your Gitea server instead. Your local backups include full commit history, branches, tags, issues, releases—everything. Recovery time is typically under 2 minutes (just point git to your Gitea URL). This is why it's called disaster recovery, not just mirroring."
+    answer: "You can immediately clone from your Gitea server instead. Your local backups include full commit history, branches, tags, issues, releases, everything. Recovery time is typically under 2 minutes (just point git to your Gitea URL). This is why it's called disaster recovery, not just mirroring."
   },
   {
-    question: "How often does it sync with GitHub?",
-    answer: "Configurable from every 15 minutes to once per day (or longer). Most users choose 1-8 hours based on how fresh they want backups. The scheduler auto-discovers new repos and respects per-repo intervals, unlike Gitea's built-in mirroring which defaults to 24 hours."
+    question: "How often does it sync?",
+    answer: "Configurable from every 15 minutes to once per day (or longer). Most users choose 1-8 hours based on how fresh they want backups. The scheduler auto-discovers new repos and respects per-repo intervals, unlike Gitea's built-in mirroring which defaults to 24 hours. Push destinations run the same schedule."
   },
   {
     question: "Can I backup starred repositories?",
-    answer: "Yes! Gitea Mirror can automatically backup all your GitHub stars into a dedicated Gitea organization. Perfect for preserving important open source projects before they disappear (projects get deleted, renamed, or removed all the time)."
+    answer: "Yes! Gitea Mirror can automatically backup the repositories you have starred on your source host into a dedicated Gitea organization. Perfect for preserving important open source projects before they disappear (projects get deleted, renamed, or removed all the time)."
   },
   {
     question: "What are the system requirements?",
-    answer: "Minimal: 2 vCPU, 2GB RAM, 5-10GB storage (grows with repo count). Runs on Docker, Kubernetes, Proxmox LXC, or bare metal. Works on AMD64 and ARM64 (Raspberry Pi compatible). A small homelab server or cheap VPS is plenty for personal use."
+    answer: "Minimal: 2 vCPU, 2GB RAM, 5-10GB storage (grows with repo count). Runs on Docker, Kubernetes, Proxmox LXC, or bare metal. Works on AMD64 and ARM64 (Raspberry Pi compatible). A small homelab server or cheap VPS is plenty for personal use. Push destinations keep a bare clone per repository on disk, so budget roughly the size of those repositories on top."
   },
   {
-    question: "Is my GitHub token stored securely?",
-    answer: "Yes. All GitHub and Gitea tokens are encrypted at rest using AES-256-GCM. Even if someone gains access to the SQLite database, they can't read your tokens without the encryption key. Use the ENCRYPTION_SECRET environment variable for additional security."
+    question: "Are my tokens stored securely?",
+    answer: "Yes. All source and destination tokens are encrypted at rest using AES-256-GCM. Even if someone gains access to the SQLite database, they can't read your tokens without the encryption key. Set the ENCRYPTION_SECRET environment variable to control that key. Push targets receive tokens through a git credential helper, never in a URL or on disk."
   },
   {
     question: "Can I backup private repositories?",
-    answer: "Absolutely. Just use a GitHub personal access token (classic) with 'repo' scope enabled. Gitea Mirror will backup all repositories you have access to—public, private, and internal."
+    answer: "Absolutely. Use a GitHub personal access token (classic) with the 'repo' scope, a GitLab token with read_api and read_repository, or a Gitea or Forgejo token with read:repository, read:user and read:organization. Gitea Mirror will backup the repositories you have access to: public, private, and internal."
   },
   {
     question: "What if I have multiple GitHub organizations?",
@@ -48,11 +78,11 @@ const faqs = [
   },
   {
     question: "Does it support Git LFS (large files)?",
-    answer: "Yes! Enable 'Mirror LFS' in settings. Make sure your Gitea server has LFS enabled (LFS_START_SERVER = true) and Git v2.1.2+. Large assets like videos, datasets, and binaries are backed up alongside your code."
+    answer: "Yes! Enable 'Mirror LFS' in settings. Make sure your Gitea server has LFS enabled (LFS_START_SERVER = true) and Git v2.1.2+. Large assets like videos, datasets, and binaries are backed up alongside your code. LFS objects are not pushed to GitHub or GitLab destinations yet."
   },
   {
     question: "How do I restore from backup?",
-    answer: "Simple: 'git clone https://your-gitea-server/owner/repo.git'. Your full history, branches, and tags are there. For issues/PRs/releases, they're already in Gitea's web interface. For complete disaster recovery, restore the data volume to a fresh Gitea Mirror instance—everything (config, sync history) is preserved."
+    answer: "Simple: 'git clone https://your-gitea-server/owner/repo.git'. Your full history, branches, and tags are there. For issues/PRs/releases, they're already in Gitea's web interface. For complete disaster recovery, restore the data volume to a fresh Gitea Mirror instance and everything (config, sync history) is preserved."
   },
   {
     question: "Can I run this alongside a cloud backup service?",
@@ -60,7 +90,7 @@ const faqs = [
   },
   {
     question: "Is this enterprise-ready with SLA guarantees?",
-    answer: "No. Gitea Mirror is a community open source project—no 24/7 support, no compliance certifications, no guaranteed uptime. It's perfect for homelabs, indie developers, and small teams comfortable with self-hosting. If you need enterprise SLAs, consider commercial solutions like BackHub or GitHub Enterprise Backup."
+    answer: "No. Gitea Mirror is a community open source project with no 24/7 support, no compliance certifications, and no guaranteed uptime. It's perfect for homelabs, indie developers, and small teams comfortable with self-hosting. If you need enterprise SLAs, consider commercial solutions like BackHub or GitHub Enterprise Backup."
   }
 ];
 
@@ -90,7 +120,7 @@ const faqSchema = {
         Common Questions About GitHub Backups
       </h2>
       <p class="mt-4 text-base sm:text-lg text-muted-foreground">
-        Everything you need to know about self-hosted repository backups with Gitea Mirror.
+        What people ask about self-hosted repository backups with Gitea Mirror, and about the newer GitLab, Forgejo, GitHub and API paths.
       </p>
     </div>
 
@@ -112,6 +142,11 @@ const faqSchema = {
           <p class="mt-4 text-sm sm:text-base text-muted-foreground leading-relaxed">
             {faq.answer}
           </p>
+          {faq.href && (
+            <a href={faq.href} class="mt-3 inline-block text-sm font-medium text-primary hover:text-primary/80 transition-colors">
+              {faq.linkText}
+            </a>
+          )}
         </details>
       ))}
     </div>

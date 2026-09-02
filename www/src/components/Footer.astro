@@ -1,5 +1,5 @@
 ---
-import { Book, MessageSquare, Bug, Scale } from 'lucide-react';
+import { Book, MessageSquare, Bug, Scale, GitBranch, ArrowUpFromLine, KeyRound } from 'lucide-react';
 import { GithubIcon } from './icons/GithubIcon';
 
 const links = [
@@ -12,6 +12,21 @@ const links = [
     title: "Documentation",
     href: "/docs/",
     icon: Book
+  },
+  {
+    title: "Sources",
+    href: "/docs/sources/",
+    icon: GitBranch
+  },
+  {
+    title: "Destinations",
+    href: "/docs/destinations/",
+    icon: ArrowUpFromLine
+  },
+  {
+    title: "API",
+    href: "/docs/api/",
+    icon: KeyRound
   },
   {
     title: "Compare Tools",
@@ -47,12 +62,12 @@ const currentYear = new Date().getFullYear();
           <span class="font-semibold text-base sm:text-lg">Gitea Mirror</span>
         </div>
         <p class="text-xs sm:text-sm text-muted-foreground">
-          Keep your GitHub code safe and synced
+          Keep your code safe and synced, on a server you own
         </p>
       </div>
 
       <!-- Links -->
-      <nav class="grid grid-cols-2 sm:flex items-center justify-center gap-4 sm:gap-6 text-center">
+      <nav class="grid grid-cols-2 sm:flex sm:flex-wrap items-center justify-center gap-4 sm:gap-6 text-center">
         {links.map((link) => {
           const Icon = link.icon;
           const external = link.href.startsWith('http');

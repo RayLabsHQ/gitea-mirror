@@ -1,5 +1,5 @@
 import { Button } from "./ui/button";
-import { ArrowRight, Shield, RefreshCw, HardDrive } from "lucide-react";
+import { Shield, RefreshCw, HardDrive, GitBranch } from "lucide-react";
 import React, { Suspense } from 'react';
 
 const Spline = React.lazy(() => import('@splinetool/react-spline'));
@@ -49,6 +49,10 @@ export function Hero() {
           Automatic, private, and free. Own your code history forever.
           Preserve issues, PRs, releases, and wiki in your own Gitea server.
         </p>
+        <p className="mt-3 text-sm sm:text-base text-muted-foreground max-w-2xl mx-auto px-4 z-20">
+          It also mirrors from GitLab, Gitea and Forgejo, including Codeberg, and can push to GitHub, GitLab and Forgejo.
+          Those paths are in beta. GitHub to Gitea is the supported default.
+        </p>
 
         <div className="mt-6 sm:mt-8 flex flex-wrap items-center justify-center gap-3 text-xs sm:text-sm text-muted-foreground px-4 z-20">
           <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-primary/10 text-primary">
@@ -62,6 +66,10 @@ export function Hero() {
           <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-accent-purple/10 text-accent-purple">
             <Shield className="w-3 h-3 sm:w-4 sm:h-4" />
             <span className="font-medium">$0/month</span>
+          </div>
+          <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-accent-teal/10 text-accent-teal">
+            <GitBranch className="w-3 h-3 sm:w-4 sm:h-4" />
+            <span className="font-medium">GitLab, Forgejo and Codeberg in beta</span>
           </div>
         </div>
 

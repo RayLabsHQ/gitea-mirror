@@ -13,11 +13,11 @@ import Footer from "../components/Footer.astro";
 import { PromoBanner } from "../components/PromoBanner";
 
 const siteUrl = "https://gitea-mirror.raylabs.io";
-const title = "GitHub Backup Tool | Self-Hosted Repository Backup to Gitea";
+const title = "GitHub Backup Tool | Mirror GitHub, GitLab and Forgejo to Self-Hosted Gitea";
 const description =
-  "Automatically backup GitHub repos to your own Gitea server. Preserve issues, PRs, releases & wiki. Self-hosted, Docker-ready. Free alternative to cloud backup services.";
+  "Automatically backup GitHub repos to your own Gitea server with issues, PRs, releases and wiki. GitLab, Codeberg and Forgejo sources and GitHub or GitLab push targets in beta. Self-hosted, Docker and Helm ready, free.";
 const keywords =
-  "github backup, github backup self hosted, github repository backup, backup github to nas, github disaster recovery, offline github backup, github backup docker, automatic github backup, github account backup, gitea mirror, self-hosted git backup, repository sync, github to gitea, git mirror, code backup, self-hosted backup solution";
+  "github backup, github backup self hosted, github repository backup, backup github to nas, github disaster recovery, offline github backup, github backup docker, automatic github backup, github account backup, gitea mirror, self-hosted git backup, repository sync, github to gitea, gitlab to gitea, codeberg backup, forgejo mirror, github to gitlab mirror, git mirror, code backup, helm chart, self-hosted backup solution";
 
 // Structured data for SEO
 const structuredData = {
@@ -32,14 +32,14 @@ const structuredData = {
     priceCurrency: "USD",
   },
   description:
-    "Automatic GitHub repository backup to self-hosted Gitea. Preserves complete history, issues, PRs, and releases. Free alternative to cloud backup services.",
+    "Automatic GitHub repository backup to self-hosted Gitea. Preserves complete history, issues, PRs, and releases. Mirrors from GitLab, Gitea and Forgejo and pushes to GitHub, GitLab and Forgejo in beta. Free alternative to cloud backup services.",
   url: siteUrl,
   author: {
     "@type": "Organization",
     name: "RayLabs",
     url: "https://github.com/RayLabsHQ",
   },
-  softwareVersion: "3.11.0",
+  softwareVersion: "3.31.0",
   screenshot: [
     `${siteUrl}/assets/dashboard.png`,
     `${siteUrl}/assets/repositories.png`,
@@ -49,8 +49,12 @@ const structuredData = {
     "Automated scheduled backups",
     "Self-hosted (full data ownership)",
     "Metadata preservation (issues, PRs, releases, wiki)",
+    "GitLab, Gitea and Forgejo sources (beta)",
+    "Push mirrors to GitHub and GitLab (beta)",
+    "API keys for automation",
+    "Cleanup and reconcile of mirrors",
     "Force-push protection with smart detection",
-    "Docker, Helm, Nix, and Proxmox support",
+    "Docker, Helm chart on ghcr.io, Nix, and Proxmox support",
     "Multi-repository and organization backup",
     "Git LFS support",
     "Free and open source",

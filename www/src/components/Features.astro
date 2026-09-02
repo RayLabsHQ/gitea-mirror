@@ -3,22 +3,41 @@ import {
   RefreshCw,
   FileText,
   ShieldCheck,
-  Activity,
   Lock,
   HardDrive,
+  GitBranch,
+  ArrowUpFromLine,
+  KeyRound,
+  ListChecks,
 } from 'lucide-react';
 
 const features = [
   {
     title: "Automated Mirroring",
-    description: "Set it and forget it. Automatically sync your GitHub repositories to Gitea on a schedule.",
+    description: "Set it and forget it. Repositories sync to Gitea on a schedule, new ones are picked up automatically, and the dashboard shows every run live.",
     icon: RefreshCw,
     gradient: "from-primary/10 to-accent/10",
     iconColor: "text-primary"
   },
   {
+    title: "Multiple Sources",
+    badge: "Beta",
+    description: "GitHub is the default. GitLab, Gitea and Forgejo, including Codeberg, work too: code, branches, tags, wiki and LFS come across from any of them.",
+    icon: GitBranch,
+    gradient: "from-accent-teal/10 to-primary/10",
+    iconColor: "text-accent-teal"
+  },
+  {
+    title: "Push to GitHub or GitLab",
+    badge: "Beta",
+    description: "Neither host offers a pull mirror, so the app keeps a bare clone and pushes branches and tags. The copy always matches the source.",
+    icon: ArrowUpFromLine,
+    gradient: "from-accent-coral/10 to-primary/10",
+    iconColor: "text-accent-coral"
+  },
+  {
     title: "Metadata Preservation",
-    description: "Mirror issues, pull requests, releases, labels, milestones, and wiki pages alongside your code.",
+    description: "From GitHub, mirror issues, pull requests, releases, labels, milestones and wiki pages alongside your code. Choose how many releases carry their assets.",
     icon: FileText,
     gradient: "from-accent/10 to-accent-teal/10",
     iconColor: "text-accent"
@@ -31,25 +50,32 @@ const features = [
     iconColor: "text-accent-teal"
   },
   {
-    title: "Real-time Dashboard",
-    description: "Monitor mirror progress with live updates, activity logs, and per-repo status tracking.",
-    icon: Activity,
-    gradient: "from-accent-coral/10 to-primary/10",
-    iconColor: "text-accent-coral"
-  },
-  {
-    title: "Secure & Self-Hosted",
-    description: "Tokens encrypted at rest with AES-256-GCM. Your code stays on your infrastructure.",
-    icon: Lock,
-    gradient: "from-accent-purple/10 to-primary/10",
-    iconColor: "text-accent-purple"
-  },
-  {
     title: "Git LFS Support",
     description: "Mirror large files and binary assets alongside your repositories with full LFS support.",
     icon: HardDrive,
     gradient: "from-primary/10 to-accent-purple/10",
     iconColor: "text-primary"
+  },
+  {
+    title: "API Keys",
+    description: "Create a key, send it in the x-api-key header, and drive the same endpoints the UI uses from CI, cron or n8n: list, add, mirror, sync.",
+    icon: KeyRound,
+    gradient: "from-accent-purple/10 to-accent/10",
+    iconColor: "text-accent-purple"
+  },
+  {
+    title: "Cleanup and Reconcile",
+    description: "Archive or delete mirrors whose source is gone, adopt mirrors you made by hand, and reset rows whose copy went missing. Nothing is deleted without you.",
+    icon: ListChecks,
+    gradient: "from-accent/10 to-accent-coral/10",
+    iconColor: "text-accent"
+  },
+  {
+    title: "Secure & Self-Hosted",
+    description: "Tokens encrypted at rest with AES-256-GCM. Run it with Docker, the Helm chart on ghcr.io, Nix or Proxmox. Your code stays on your infrastructure.",
+    icon: Lock,
+    gradient: "from-accent-purple/10 to-primary/10",
+    iconColor: "text-accent-purple"
   }
 ];
 ---
@@ -62,7 +88,7 @@ const features = [
         <span class="text-gradient from-primary to-accent block sm:inline"> Reliable Backups</span>
       </h2>
       <p class="mt-4 text-base sm:text-lg text-muted-foreground max-w-2xl mx-auto px-4">
-        Powerful features designed to keep your code safe and accessible, no matter what happens.
+        Everything to keep your code safe and reachable, whichever host it lives on today.
       </p>
     </div>
 
@@ -79,7 +105,14 @@ const features = [
                 <Icon className="w-5 h-5 sm:w-6 sm:h-6" />
               </div>
               
-              <h3 class="text-lg sm:text-xl font-semibold mb-2">{feature.title}</h3>
+              <h3 class="text-lg sm:text-xl font-semibold mb-2 flex items-center gap-2 flex-wrap">
+                <span>{feature.title}</span>
+                {feature.badge && (
+                  <span class="inline-flex items-center rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-widest text-primary">
+                    {feature.badge}
+                  </span>
+                )}
+              </h3>
               <p class="text-sm sm:text-base text-muted-foreground">{feature.description}</p>
             </div>
           </div>
