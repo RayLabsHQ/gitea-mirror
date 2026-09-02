@@ -69,16 +69,35 @@ Notes:
 
 ## GitHub Configuration
 
-Settings for connecting to and configuring GitHub repository sources.
+Settings for connecting to the source host. GitHub is the default. GitLab and Gitea/Forgejo (including Codeberg) are selected with `SOURCE_PROVIDER`; the username and token variables below then hold the account and token for that host. See [SOURCE_PROVIDERS.md](SOURCE_PROVIDERS.md) for what each source supports.
 
 ### Basic Settings
 
 | Variable | Description | Default | Options |
 |----------|-------------|---------|---------|
-| `GITHUB_USERNAME` | Your GitHub username | - | - |
-| `GITHUB_TOKEN` | GitHub personal access token (requires repo and admin:org scopes) | - | - |
+| `SOURCE_PROVIDER` | Which host repositories are pulled from. `gitea` also covers Forgejo and Codeberg. | `github` | `github`, `gitlab`, `gitea` |
+| `SOURCE_URL` | Base URL of the GitLab or Gitea/Forgejo instance. Ignored for GitHub, which uses `GH_API_URL`. | `https://gitlab.com` for GitLab, `https://codeberg.org` for Gitea | e.g. `https://gitlab.example.com` |
+| `GITHUB_USERNAME` | Your username on the source host | - | - |
+| `GITHUB_TOKEN` | Personal access token for the source host. GitHub needs the `repo` and `admin:org` scopes, GitLab `read_api` and `read_repository`, Gitea/Forgejo `read:repository`, `read:user` and `read:organization`. | - | - |
 | `GITHUB_TYPE` | GitHub account type | `personal` | `personal`, `organization` |
 | `GH_API_URL` | GitHub API base URL. Override this to point at GitHub Enterprise Server or Enterprise Cloud with data residency. | `https://api.github.com` | e.g. `https://ghe.example.com/api/v3`, `https://api.TENANT.ghe.com` |
+
+### GitLab and Gitea/Forgejo sources
+
+```bash
+# Mirror from a self hosted GitLab
+SOURCE_PROVIDER=gitlab
+SOURCE_URL=https://gitlab.example.com
+GITHUB_USERNAME=my-gitlab-user
+GITHUB_TOKEN=glpat-...
+
+# Mirror from Codeberg (Forgejo)
+SOURCE_PROVIDER=gitea
+GITHUB_USERNAME=my-codeberg-user
+GITHUB_TOKEN=...
+```
+
+Code, tags, wiki and LFS are mirrored from every source. Issues, pull requests, releases, labels, milestones and star lists need a GitHub source and are skipped for the others.
 
 ### GitHub Enterprise (GHES / GHEC with data residency)
 
