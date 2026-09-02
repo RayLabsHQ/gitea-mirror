@@ -366,6 +366,17 @@ export class GiteaAPI {
     return resp.ok() || resp.status() === 200;
   }
 
+  /** Delete a repo on Gitea directly (the app is not told). */
+  async deleteRepo(owner: string, name: string): Promise<boolean> {
+    const ctx = await this.getCtx();
+    const token = await this.createToken();
+    const resp = await ctx.delete(`/api/v1/repos/${owner}/${name}`, {
+      headers: { Authorization: `token ${token}` },
+      failOnStatusCode: false,
+    });
+    return resp.ok() || resp.status() === 404;
+  }
+
   getTokenValue(): string {
     return this.token;
   }

@@ -117,6 +117,49 @@ Starts mirroring in the background and returns straight away. Poll the list endp
 
 `role` is the account's role in that organization (`member`, `admin`, `owner` or `billing_manager`). `409` means it is already tracked; `force: true` refreshes it. Then `POST /api/job/mirror-org` with `{ "organizationIds": ["..."] }` mirrors its repositories.
 
+### Reconcile the destination
+
+`POST /api/cleanup/reconcile`
+
+Compares what the destination (Gitea or Forgejo) holds with the repositories this account tracks, and reports three groups: mirrors on the destination that the database does not know about, rows marked mirrored whose repository is gone, and a healthy count. Only mirrors whose source URL points at the configured source count as this app's. Native repositories and mirrors of other hosts are listed under `notManaged` and never touched. Useful after a lost or restored database (issue #284).
+
+```json
+{ "dryRun": true, "adoptUntracked": false, "resetMissing": false }
+```
+
+The body is optional and every field defaults to the value above, so an empty `POST` is a dry run. With `dryRun: false`:
+
+- `adoptUntracked: true` creates a row for each untracked mirror from its source URL, so scheduled sync and the cleanup service include it from then on. The row keeps the mirror where it is, even when the strategy would put it elsewhere.
+- `resetMissing: true` sets each missing row back to `imported` so the next mirror run recreates the mirror. Rows are never deleted.
+
+Nothing is deleted or archived on either side by this call; the cleanup service keeps its own rules.
+
+```json
+{
+  "success": true,
+  "dryRun": false,
+  "report": {
+    "untracked": [{ "location": "github-mirrors/hello-world", "originalUrl": "https://github.com/octocat/hello-world.git", "sourcePath": "octocat/hello-world", "isPrivate": false }],
+    "missing": [{ "id": "9b2f...", "fullName": "octocat/gone", "location": "github-mirrors/gone" }],
+    "notManaged": [{ "location": "me/notes", "reason": "not a mirror" }],
+    "unverified": [],
+    "healthyCount": 41,
+    "scannedOwners": ["e2e_admin", "github-mirrors"],
+    "skippedOwners": ["starred"],
+    "totalOnDestination": 43
+  },
+  "applied": { "adopted": 1, "reset": 1, "skipped": 0 }
+}
+```
+
+`applied` is `null` on a dry run. `scannedOwners` are the destination users and organizations that were listed; `skippedOwners` are ones the configuration or the database point at but the destination does not have. A row lands in `unverified` when the presence check itself failed, and is left alone.
+
+| Status | Meaning |
+| --- | --- |
+| `200` | Report computed, and applied when asked. |
+| `400` | A field has the wrong type, or the destination is not configured yet. |
+| `404` | No configuration for this account. |
+
 ## A complete example
 
 Add a repository and mirror it in one go:

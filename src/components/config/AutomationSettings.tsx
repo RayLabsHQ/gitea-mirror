@@ -38,6 +38,7 @@ import {
   CardDivider,
   CardSection,
 } from "./settings-ui";
+import { ReconcileDestinationButton } from "./ReconcileDialog";
 
 interface AutomationSettingsProps {
   scheduleConfig: ScheduleConfig;
@@ -394,10 +395,13 @@ export function AutomationSettings({
         }
         headerAction={savingSpinner(isAutoSavingCleanup)}
         footer={
-          <StatusFooterItem
-            icon={Info}
-            label="Runs as part of each scheduled sync"
-          />
+          <>
+            <StatusFooterItem
+              icon={Info}
+              label="Runs as part of each scheduled sync"
+            />
+            <ReconcileDestinationButton />
+          </>
         }
       >
         {cleanupConfig.deleteIfNotInGitHub && (
