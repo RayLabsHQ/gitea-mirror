@@ -8,7 +8,7 @@ import { eq, and, sql } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import { encrypt } from '@/lib/utils/encryption';
 import { isSourceProviderKind, type SourceProviderKind } from '@/lib/source-providers/kinds';
-import { isDestinationProviderKind, type DestinationProviderKind } from '@/lib/destination-kinds';
+import { DESTINATION_PROVIDER_DEFAULT_URLS, isDestinationProviderKind, type DestinationProviderKind } from '@/lib/destination-kinds';
 import { hasDestinationChanged, hasSourceChanged, loadConfigLocks } from '@/lib/config-locks';
 import { normalizeReleaseAssetLimit } from '@/lib/utils/mirror-overrides';
 
@@ -153,7 +153,8 @@ function parseEnvConfig(): EnvConfig {
       mirrorStrategy: process.env.MIRROR_STRATEGY as 'preserve' | 'single-org' | 'flat-user' | 'mixed',
     },
     gitea: {
-      // DESTINATION_PROVIDER picks Gitea or Forgejo (labels only, same API).
+      // DESTINATION_PROVIDER picks Gitea or Forgejo (pull mirrors, same API),
+      // or GitHub or GitLab (push targets served by the push engine).
       provider: isDestinationProviderKind(process.env.DESTINATION_PROVIDER)
         ? process.env.DESTINATION_PROVIDER
         : undefined,
@@ -349,7 +350,12 @@ export async function initializeConfigFromEnv(): Promise<void> {
 
     // Build Gitea config
     const giteaConfig = {
-      url: envConfig.gitea.url || existingConfig?.[0]?.giteaConfig?.url || '',
+      url:
+        envConfig.gitea.url ||
+        existingConfig?.[0]?.giteaConfig?.url ||
+        // GitHub and GitLab targets default to their public instance.
+        DESTINATION_PROVIDER_DEFAULT_URLS[envConfig.gitea.provider || existingConfig?.[0]?.giteaConfig?.provider || 'gitea'] ||
+        '',
       provider: envConfig.gitea.provider || existingConfig?.[0]?.giteaConfig?.provider || 'gitea',
       externalUrl: envConfig.gitea.externalUrl || existingConfig?.[0]?.giteaConfig?.externalUrl || undefined,
       token: envConfig.gitea.token ? encrypt(envConfig.gitea.token) : existingConfig?.[0]?.giteaConfig?.token || '',

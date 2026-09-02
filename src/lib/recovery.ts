@@ -7,7 +7,7 @@ import { findInterruptedJobs, resumeInterruptedJob } from './helpers';
 import { resetStuckMirrorStatuses } from './stuck-status-recovery';
 import { db, repositories, organizations, mirrorJobs, configs } from './db';
 import { eq, and, lt, inArray, sql } from 'drizzle-orm';
-import { mirrorGithubRepoToGitea, syncGiteaRepo } from './gitea';
+import { mirrorRepositoryToDestination, syncRepositoryOnDestination } from './mirror-dispatch';
 import { createGitHubClient } from './github';
 import type { Octokit } from '@octokit/rest';
 import { resolveSourceProviderKind } from './source-providers';
@@ -303,7 +303,7 @@ async function recoverMirrorJob(job: any, remainingItemIds: string[]) {
           mirroredLocation: repo.mirroredLocation || "",
         };
 
-        await mirrorGithubRepoToGitea({
+        await mirrorRepositoryToDestination({
           octokit,
           repository: repoData,
           config,
@@ -411,7 +411,7 @@ async function recoverSyncJob(job: any, remainingItemIds: string[]) {
         };
 
         // Sync the repository
-        await syncGiteaRepo({
+        await syncRepositoryOnDestination({
           config,
           repository: repoData,
         });

@@ -3,11 +3,8 @@ import { resolveSourceProviderKind } from "@/lib/source-providers";
 import { db, configs, repositories } from "@/lib/db";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { getGiteaRepoOwnerAsync, isRepoPresentInGitea } from "@/lib/gitea";
-import {
-  mirrorGithubRepoToGitea,
-  mirrorGitHubOrgRepoToGiteaOrg,
-  syncGiteaRepo,
-} from "@/lib/gitea";
+import { mirrorRepositoryToDestination, syncRepositoryOnDestination } from "@/lib/mirror-dispatch";
+import { usesPushEngine } from "@/lib/destination-connection";
 import { createGitHubClient } from "@/lib/github";
 import { repoStatusEnum, repositoryVisibilityEnum } from "@/types/Repository";
 import type { RetryRepoRequest, RetryRepoResponse } from "@/types/retry";
@@ -129,6 +126,14 @@ export const POST: APIRoute = async ({ request, locals }) => {
             status: "imported",
           });
 
+          if (usesPushEngine(config)) {
+            // A push target: the engine clones or fetches, then pushes, and
+            // creates the target repository itself when it is missing.
+            await mirrorRepositoryToDestination({ config, octokit, repository: repoData });
+            console.log(`Pushed repo: ${repo.name}`);
+            return repo;
+          }
+
           // Determine if the repository exists in Gitea (with organization overrides)
           let owner = await getGiteaRepoOwnerAsync({
             config,
@@ -143,7 +148,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
           if (present) {
             // If the repository exists, sync it
-            await syncGiteaRepo({ config, repository: repoData });
+            await syncRepositoryOnDestination({ config, repository: repoData });
             console.log(`Synced existing repo: ${repo.name}`);
           } else {
             // If the repository doesn't exist, mirror it
@@ -166,26 +171,15 @@ export const POST: APIRoute = async ({ request, locals }) => {
               owner !== config.giteaConfig?.defaultOwner || // Different owner means org
               mirrorStrategy === "single-org"; // Single-org strategy always uses org
 
-            if (shouldUseOrgMirror) {
-              await mirrorGitHubOrgRepoToGiteaOrg({
-                config,
-                octokit,
-                orgName: owner,
-                repository: {
-                  ...repoData,
-                  status: repoStatusEnum.parse("imported"),
-                },
-              });
-            } else {
-              await mirrorGithubRepoToGitea({
-                config,
-                octokit,
-                repository: {
-                  ...repoData,
-                  status: repoStatusEnum.parse("imported"),
-                },
-              });
-            }
+            await mirrorRepositoryToDestination({
+              config,
+              octokit,
+              repository: {
+                ...repoData,
+                status: repoStatusEnum.parse("imported"),
+              },
+              orgName: shouldUseOrgMirror ? owner : undefined,
+            });
           }
 
           return repo;

@@ -1,3 +1,4 @@
+import { assertRepositoryMatchesConfiguredDestination, usesPushEngine } from "./destination-connection";
 import {
   repoStatusEnum,
   type RepositoryVisibility,
@@ -651,6 +652,11 @@ export const mirrorGithubRepoToGitea = async ({
     // Never send another host's token: the repository must come from the
     // source that is configured now.
     assertRepositoryMatchesConfiguredSource({ repository, config });
+    if (usesPushEngine(config)) {
+      throw new Error("The configured destination is a push target; the Gitea mirror path cannot serve it.");
+    }
+    // Nor to a different destination than the one the row was mirrored to.
+    assertRepositoryMatchesConfiguredDestination({ repository, config });
 
     // Get the correct owner based on the strategy (with organization overrides)
     let repoOwner = await getGiteaRepoOwnerAsync({ config, repository });
@@ -1499,6 +1505,11 @@ export async function mirrorGitHubRepoToGiteaOrg({
     // Never send another host's token: the repository must come from the
     // source that is configured now.
     assertRepositoryMatchesConfiguredSource({ repository, config });
+    if (usesPushEngine(config)) {
+      throw new Error("The configured destination is a push target; the Gitea mirror path cannot serve it.");
+    }
+    // Nor to a different destination than the one the row was mirrored to.
+    assertRepositoryMatchesConfiguredDestination({ repository, config });
 
     // Determine the actual repository name to use (handle duplicates for starred repos)
     let targetRepoName = repository.name;
@@ -2090,11 +2101,16 @@ export async function mirrorGitHubOrgToGitea({
     let giteaOrgId: number | undefined;
     let targetOrgName: string;
 
+    // GitHub and GitLab destinations are pushed by the engine, which creates
+    // the target repository (and a GitLab group) itself; no Gitea
+    // organization is created for them.
+    const pushTransport = usesPushEngine(config);
+
     // Determine the target organization based on strategy
     if (organization.destinationOrg) {
       // Organization-level override takes precedence over the strategy
       targetOrgName = organization.destinationOrg;
-      giteaOrgId = await getOrCreateGiteaOrg({
+      giteaOrgId = pushTransport ? undefined : await getOrCreateGiteaOrg({
         orgId: organization.id,
         orgName: targetOrgName,
         config,
@@ -2103,7 +2119,7 @@ export async function mirrorGitHubOrgToGitea({
     } else if (mirrorStrategy === "single-org" && config.giteaConfig?.organization) {
       // For single-org strategy, use the configured destination organization
       targetOrgName = config.giteaConfig.organization || config.giteaConfig.defaultOwner;
-      giteaOrgId = await getOrCreateGiteaOrg({
+      giteaOrgId = pushTransport ? undefined : await getOrCreateGiteaOrg({
         orgId: organization.id,
         orgName: targetOrgName,
         config,
@@ -2112,7 +2128,7 @@ export async function mirrorGitHubOrgToGitea({
     } else if (mirrorStrategy === "preserve") {
       // For preserve strategy, create/use an org with the same name as GitHub
       targetOrgName = organization.name;
-      giteaOrgId = await getOrCreateGiteaOrg({
+      giteaOrgId = pushTransport ? undefined : await getOrCreateGiteaOrg({
         orgId: organization.id,
         orgName: targetOrgName,
         config,
@@ -2168,6 +2184,12 @@ export async function mirrorGitHubOrgToGitea({
           console.log(
             `Starting mirror for repository: ${repo.name} from GitHub org ${organization.name}`
           );
+
+          if (pushTransport) {
+            const { pushMirrorRepository } = await import("./push-engine/mirror");
+            await pushMirrorRepository({ config, repository: repoData });
+            return repo;
+          }
 
           // Resolve per repo with the canonical precedence
           const owner = await getGiteaRepoOwnerAsync({ config, repository: repoData });

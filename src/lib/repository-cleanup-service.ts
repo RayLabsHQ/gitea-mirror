@@ -13,6 +13,7 @@ import {
   isRepositoryFromConfiguredSource,
 } from '@/lib/source-providers';
 import { createGiteaClient, deleteGiteaRepo, archiveGiteaRepo, getGiteaRepoOwnerAsync, checkRepoLocation } from '@/lib/gitea';
+import { usesPushEngine } from '@/lib/destination-connection';
 import { getDecryptedGiteaToken } from '@/lib/utils/config-encryption';
 import { publishEvent } from '@/lib/events';
 import { isMirrorableGitHubRepo } from '@/lib/repo-eligibility';
@@ -370,7 +371,11 @@ async function handleOrphanedRepository(
         updatedAt: new Date(),
       };
 
-      if (plan.gitea === 'archive') {
+      if (plan.gitea === 'archive' && usesPushEngine(config)) {
+        console.log(`[Repository Cleanup] Archiving orphaned repository ${repoFullName} on the push target`);
+        const { archiveOnPushTarget } = await import('@/lib/push-engine/cleanup');
+        await archiveOnPushTarget({ config, repository: repo });
+      } else if (plan.gitea === 'archive') {
         console.log(`[Repository Cleanup] Archiving orphaned repository ${repoFullName} in Gitea`);
         const { giteaClient, giteaRepoName, giteaOwner: expectedOwner } = await resolveGiteaTarget(config, repo);
         let giteaOwner = expectedOwner;
@@ -429,7 +434,11 @@ async function handleOrphanedRepository(
         },
       });
     } else if (action === 'delete') {
-      if (plan.gitea === 'delete') {
+      if (plan.gitea === 'delete' && usesPushEngine(config)) {
+        console.log(`[Repository Cleanup] Deleting orphaned repository ${repoFullName} from the push target`);
+        const { deleteOnPushTarget } = await import('@/lib/push-engine/cleanup');
+        await deleteOnPushTarget({ config, repository: repo });
+      } else if (plan.gitea === 'delete') {
         console.log(`[Repository Cleanup] Deleting orphaned repository ${repoFullName} from Gitea`);
         const { giteaClient, giteaOwner, giteaRepoName } = await resolveGiteaTarget(config, repo);
         await deleteGiteaRepo(giteaClient, giteaOwner, giteaRepoName);
@@ -439,6 +448,12 @@ async function handleOrphanedRepository(
 
       // Delete from database
       await db.delete(repositories).where(eq(repositories.id, repo.id));
+
+      if (usesPushEngine(config)) {
+        // The bare clone has no row to belong to any more.
+        const { removeCloneForRepository } = await import('@/lib/push-engine/cleanup');
+        await removeCloneForRepository({ repository: repo });
+      }
 
       // Create event
       await publishEvent({

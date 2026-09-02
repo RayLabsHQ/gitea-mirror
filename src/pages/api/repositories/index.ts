@@ -3,6 +3,7 @@ import { db, repositories, mirrorJobs } from "@/lib/db";
 import { eq, and, inArray } from "drizzle-orm";
 import { createSecureErrorResponse } from "@/lib/utils";
 import { requireAuth } from "@/lib/utils/auth-helpers";
+import { isPushDestinationKind } from "@/lib/destination-kinds";
 
 export const DELETE: APIRoute = async (context) => {
   try {
@@ -22,7 +23,14 @@ export const DELETE: APIRoute = async (context) => {
 
     // Verify all repos belong to this user before deleting
     const owned = await db
-      .select({ id: repositories.id })
+      .select({
+        id: repositories.id,
+        owner: repositories.owner,
+        name: repositories.name,
+        sourceProvider: repositories.sourceProvider,
+        sourceUrl: repositories.sourceUrl,
+        destinationProvider: repositories.destinationProvider,
+      })
       .from(repositories)
       .where(and(inArray(repositories.id, ids), eq(repositories.userId, userId)));
 
@@ -38,6 +46,19 @@ export const DELETE: APIRoute = async (context) => {
       await tx.delete(mirrorJobs).where(and(inArray(mirrorJobs.repositoryId, ownedIds), eq(mirrorJobs.userId, userId)));
       await tx.delete(repositories).where(and(inArray(repositories.id, ownedIds), eq(repositories.userId, userId)));
     });
+
+    // Rows pushed by the engine leave a bare clone behind; drop it with the row.
+    const pushed = owned.filter((row) => isPushDestinationKind(row.destinationProvider));
+    if (pushed.length > 0) {
+      const { removeCloneForRepository } = await import("@/lib/push-engine/cleanup");
+      await Promise.all(
+        pushed.map((row) =>
+          removeCloneForRepository({ repository: row }).catch((error) =>
+            console.warn(`[Repositories] Could not remove the clone for ${row.owner}/${row.name}:`, error)
+          )
+        )
+      );
+    }
 
     return new Response(
       JSON.stringify({ success: true, deleted: ownedIds.length }),

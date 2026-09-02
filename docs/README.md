@@ -19,6 +19,9 @@ This folder contains engineering and operations references for the open-source G
 - **[SSO_TESTING.md](./SSO_TESTING.md)** – Recipes for local and staging SSO testing (Google, Keycloak, mock providers).
 - **[API.md](./API.md)** – Create API keys and call the app from scripts, CI pipelines and workflow tools.
 
+### Destinations
+- **[PUSH_TARGETS.md](./PUSH_TARGETS.md)** – GitHub and GitLab as destinations: how the push engine works, token scopes, disk usage, what is not mirrored.
+
 If you are looking for customer-facing playbooks, see the MDX use cases under `www/src/pages/use-cases/`.
 
 ## Quick start for local development

@@ -127,6 +127,13 @@
       "when": 1788339447860,
       "tag": "0017_api_keys",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1788350408052,
+      "tag": "0018_destination_columns",
+      "breakpoints": true
     }
   ]
 }

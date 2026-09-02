@@ -809,6 +809,7 @@ export function ConfigTabs() {
                     <GitHubMirrorSettings
                       part="content"
                       githubConfig={config.githubConfig}
+                      destinationProvider={config.giteaConfig.provider}
                       mirrorOptions={config.mirrorOptions}
                       advancedOptions={config.advancedOptions}
                       onGitHubConfigChange={newConfig => {

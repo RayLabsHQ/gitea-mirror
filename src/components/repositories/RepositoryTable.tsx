@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { SourceIcon, repositorySourceInfo } from "@/components/source/SourceIcon";
+import { DestinationIcon, destinationInfo } from "@/components/destination/DestinationIcon";
 import {
   getCoreRowModel,
   getFilteredRowModel,
@@ -11,7 +12,7 @@ import {
 } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { FlipHorizontal, GitFork, MoreVertical, RefreshCw, RotateCcw, Star, Lock, Ban, Check, ChevronDown, SlidersHorizontal, Trash2, X } from "lucide-react";
-import { SiGithub, SiGitea } from "react-icons/si";
+import { SiGithub } from "react-icons/si";
 import type { MirrorOverrides, Repository } from "@/lib/db/schema";
 import { repoStatusEnum, type RepoStatus } from "@/types/Repository";
 import { Button } from "@/components/ui/button";
@@ -230,9 +231,12 @@ export default function RepositoryTable({
     }
   };
 
-  // Helper function to construct Gitea repository URL
+  // The configured destination: drives the icon, label and tooltips of the target links.
+  const destination = destinationInfo(giteaConfig);
+
+  // Helper function to construct the destination repository URL
   const getGiteaRepoUrl = (repository: Repository): string | null => {
-    // Only provide Gitea links for repositories that have been or are being mirrored
+    // Only provide links for repositories that have been or are being mirrored
     const validStatuses = ['mirroring', 'mirrored', 'syncing', 'synced', 'archived'];
     if (!validStatuses.includes(repository.status)) {
       return null;
@@ -662,17 +666,17 @@ export default function RepositoryTable({
                       href={giteaUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      title="View on Gitea"
+                      title={`View on ${destination.label}`}
                       className="flex items-center justify-center gap-2"
                     >
-                      <SiGitea className="h-4 w-4 flex-shrink-0" />
-                      <span className="text-xs">Gitea</span>
+                      <DestinationIcon provider={destination.provider} className="h-4 w-4 flex-shrink-0" />
+                      <span className="text-xs">{destination.label}</span>
                     </a>
                   </Button>
                 ) : (
                   <Button variant="outline" size="default" disabled className="flex-1 h-10 min-w-0">
-                    <SiGitea className="h-4 w-4" />
-                    <span className="text-xs ml-2">Gitea</span>
+                    <DestinationIcon provider={destination.provider} className="h-4 w-4" />
+                    <span className="text-xs ml-2">{destination.label}</span>
                   </Button>
                 )}
               </div>
@@ -1100,17 +1104,17 @@ export default function RepositoryTable({
                           // Determine tooltip based on status and configuration
                           let tooltip: string;
                           if (!giteaConfig?.url) {
-                            tooltip = "Gitea not configured";
+                            tooltip = `${destination.label} not configured`;
                           } else if (repo.status === 'imported') {
-                            tooltip = "Repository not yet mirrored to Gitea";
+                            tooltip = `Repository not yet mirrored to ${destination.label}`;
                           } else if (repo.status === 'failed') {
                             tooltip = "Repository mirroring failed";
                           } else if (repo.status === 'mirroring') {
-                            tooltip = "Repository is being mirrored to Gitea";
+                            tooltip = `Repository is being mirrored to ${destination.label}`;
                           } else if (giteaUrl) {
-                            tooltip = "View on Gitea";
+                            tooltip = `View on ${destination.label}`;
                           } else {
-                            tooltip = "Gitea repository not available";
+                            tooltip = `${destination.label} repository not available`;
                           }
 
                           return giteaUrl ? (
@@ -1121,12 +1125,12 @@ export default function RepositoryTable({
                                 rel="noopener noreferrer"
                                 title={tooltip}
                               >
-                                <SiGitea className="h-4 w-4" />
+                                <DestinationIcon provider={destination.provider} className="h-4 w-4" />
                               </a>
                             </Button>
                           ) : (
                             <Button variant="ghost" size="icon" disabled title={tooltip}>
-                              <SiGitea className="h-4 w-4" />
+                              <DestinationIcon provider={destination.provider} className="h-4 w-4" />
                             </Button>
                           );
                         })()}
@@ -1162,6 +1166,7 @@ export default function RepositoryTable({
         inheritedLoading={orgOverridesLoading}
         isStarred={!!overridesTarget?.isStarred}
         starredCodeOnly={!!advancedOptions?.starredCodeOnly}
+        destinationProvider={giteaConfig?.provider}
         inheritedLabel={
           overridesTarget?.organization
             ? "organization or global settings"

@@ -743,6 +743,7 @@ export function OrganizationList({
         targetKind="organization"
         targetName={overridesTarget?.name ?? ""}
         value={overridesTarget?.mirrorOverrides ?? null}
+        destinationProvider={giteaConfig?.provider}
         inheritedFrom={mirrorOptionsToFlags(mirrorOptions)}
         inheritedLabel="global settings"
         onSave={async (overrides) => {

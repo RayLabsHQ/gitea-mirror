@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import type { GitRepo } from '@/types/Repository';
 import { repositories } from '@/lib/db/schema';
 import { getRepositorySource } from '@/lib/source-providers/kinds';
+import type { RepositoryDestination } from '@/lib/destination-kinds';
 
 export type RepoInsert = typeof repositories.$inferInsert;
 
@@ -79,4 +80,14 @@ export function calcBatchSizeForInsert(columnCount: number, maxParams = 999): nu
   const safety = 0;
   const effectiveMax = Math.max(1, maxParams - safety);
   return Math.max(1, Math.floor(effectiveMax / columnCount));
+}
+
+/**
+ * The destination columns for a new repository row: where its mirror will
+ * live, taken from the destination that is configured now.
+ */
+export function repositoryDestinationColumns(
+  destination: RepositoryDestination
+): Pick<RepoInsert, 'destinationProvider' | 'destinationUrl'> {
+  return { destinationProvider: destination.provider, destinationUrl: destination.url };
 }

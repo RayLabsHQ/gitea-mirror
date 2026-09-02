@@ -3,6 +3,7 @@ import {
   SOURCE_PROVIDER_KINDS,
   type SourceProviderKind,
 } from "../source-providers/kinds";
+import type { DestinationProviderKind } from "../destination-kinds";
 import { sqliteTable, text, integer, index, uniqueIndex } from "drizzle-orm/sqlite-core";
 import { sql } from "drizzle-orm";
 
@@ -89,8 +90,9 @@ export type MirrorOverrides = z.infer<typeof mirrorOverridesSchema>;
 
 export const giteaConfigSchema = z.object({
   url: z.url(),
-  // Gitea or Forgejo. Same API; only labels and hints differ.
-  provider: z.enum(["gitea", "forgejo"]).default("gitea"),
+  // Gitea and Forgejo are pull mirrors (same API); GitHub and GitLab are
+  // push targets served by src/lib/push-engine.
+  provider: z.enum(["gitea", "forgejo", "github", "gitlab"]).default("gitea"),
   externalUrl: z.url().optional(),
   token: z.string(),
   defaultOwner: z.string(),
@@ -240,6 +242,8 @@ export const repositorySchema = z.object({
   owner: z.string(),
   sourceProvider: z.string().optional(),
   sourceUrl: z.string().optional(),
+  destinationProvider: z.string().optional(),
+  destinationUrl: z.string().optional(),
   organization: z.string().optional().nullable(),
   mirroredLocation: z.string().default(""),
   isPrivate: z.boolean().default(false),
@@ -467,6 +471,13 @@ export const repositories = sqliteTable("repositories", {
     .notNull()
     .default("github"),
   sourceUrl: text("source_url").notNull().default("https://github.com"),
+  // Where the mirror lives: the destination kind and base URL recorded when
+  // the row was imported or mirrored. An empty URL means "not recorded yet".
+  destinationProvider: text("destination_provider")
+    .$type<DestinationProviderKind>()
+    .notNull()
+    .default("gitea"),
+  destinationUrl: text("destination_url").notNull().default(""),
   owner: text("owner").notNull(),
   organization: text("organization"),
   mirroredLocation: text("mirrored_location").default(""),

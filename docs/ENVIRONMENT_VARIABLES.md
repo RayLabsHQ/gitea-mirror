@@ -149,18 +149,25 @@ Standard GitHub Enterprise Cloud on `github.com` works with the default — no o
 
 ## Gitea Configuration
 
-Settings for the destination Gitea instance.
+Settings for the destination. Gitea and Forgejo are pull mirrors; GitHub and GitLab are push targets served by the push engine (see [PUSH_TARGETS.md](PUSH_TARGETS.md)). The `GITEA_*` names apply to every destination kind.
 
 ### Connection Settings
 
 | Variable | Description | Default | Options |
 |----------|-------------|---------|---------|
-| `DESTINATION_PROVIDER` | Whether the destination is Gitea or Forgejo. Same API; changes labels and hints only. | `gitea` | `gitea`, `forgejo` |
-| `GITEA_URL` | Gitea instance URL | - | Valid URL |
+| `DESTINATION_PROVIDER` | Which host mirrors are created on. Gitea and Forgejo share one API (labels and hints differ). GitHub and GitLab (beta) receive `git push` of branches and tags from this app. | `gitea` | `gitea`, `forgejo`, `github`, `gitlab` |
+| `GITEA_URL` | Destination instance URL. Optional for GitHub and GitLab, which default to github.com and gitlab.com; set it for GitHub Enterprise Server or a self hosted GitLab. | - | Valid URL |
 | `GITEA_EXTERNAL_URL` | Optional external/browser URL used for dashboard links. API and mirroring still use `GITEA_URL`. | - | Valid URL |
 | `GITEA_TOKEN` | Gitea access token | - | - |
 | `GITEA_USERNAME` | Gitea username | - | - |
 | `GITEA_ORGANIZATION` | Default organization for single-org strategy | `github-mirrors` | Any string |
+
+### Push Targets (GitHub and GitLab destinations)
+
+| Variable | Description | Default | Options |
+|----------|-------------|---------|---------|
+| `MIRROR_CLONE_DIR` | Where the push engine keeps its bare clones, one per repository. | `<data dir>/mirrors` | Absolute or relative path |
+| `PUSH_CONCURRENCY` | How many git fetch or push operations run at once across all repositories. | `2` | 1 to 32 |
 
 ### Repository Settings
 

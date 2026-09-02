@@ -7,8 +7,11 @@ export type BackupStrategy = "disabled" | "always" | "on-force-push" | "block-on
 export type ScheduleMode = "interval" | "clock";
 /** Which host repositories are pulled from. "gitea" also covers Forgejo. */
 export type SourceProvider = "github" | "gitlab" | "gitea";
-/** Which host repositories are mirrored into. Same API, different label. */
-export type DestinationProvider = "gitea" | "forgejo";
+/**
+ * Which host repositories are mirrored into. Gitea and Forgejo are pull
+ * mirrors; GitHub and GitLab are push targets served by the push engine.
+ */
+export type DestinationProvider = "gitea" | "forgejo" | "github" | "gitlab";
 
 export interface GiteaConfig {
   /** Defaults to "gitea" when absent. */

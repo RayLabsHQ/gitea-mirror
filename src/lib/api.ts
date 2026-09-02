@@ -1,5 +1,5 @@
 import { withBase } from "@/lib/base-path";
-import type { SourceProvider } from "@/types/config";
+import type { SourceProvider, DestinationProvider } from "@/types/config";
 
 // Base API URL
 const API_BASE = withBase("/api");
@@ -93,19 +93,24 @@ export const githubApi = {
 
 // Gitea API
 export interface GiteaServerInfo {
-  type: "forgejo" | "gitea";
+  type: "forgejo" | "gitea" | "github" | "gitlab";
   version: string;
   raw: string;
   hasMirrorCredBug: boolean;
 }
 
 export const giteaApi = {
-  testConnection: (url: string, token: string) =>
+  /** Test the destination connection. The route serves Gitea, Forgejo, GitHub and GitLab. */
+  testConnection: (
+    url: string,
+    token: string,
+    options: { provider?: DestinationProvider; username?: string } = {}
+  ) =>
     apiRequest<{ success: boolean; serverInfo?: GiteaServerInfo; message?: string }>(
       "/gitea/test-connection",
       {
         method: "POST",
-        body: JSON.stringify({ url, token }),
+        body: JSON.stringify({ url, token, ...options }),
       }
     ),
 };

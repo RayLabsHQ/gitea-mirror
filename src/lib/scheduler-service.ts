@@ -6,7 +6,8 @@
 
 import { db, configs, repositories } from '@/lib/db';
 import { eq, and, or } from 'drizzle-orm';
-import { syncGiteaRepo, mirrorGithubRepoToGitea } from '@/lib/gitea';
+import { mirrorRepositoryToDestination, syncRepositoryOnDestination } from '@/lib/mirror-dispatch';
+import { usesPushEngine } from '@/lib/destination-connection';
 import { getDecryptedGitHubToken } from '@/lib/utils/config-encryption';
 import { formatDuration } from '@/lib/utils/duration-parser';
 import type { Repository } from '@/lib/db/schema';
@@ -277,7 +278,7 @@ async function runScheduledSync(config: any): Promise<void> {
                   // re-create loop spawns suffixed duplicates (#315). The create
                   // path also reuses now, but routing to sync here avoids a
                   // wasted migrate attempt and keeps recovery cheap.
-                  if (repo.status === 'failed' && repository.mirroredLocation) {
+                  if (repo.status === 'failed' && repository.mirroredLocation && !usesPushEngine(config)) {
                     const { findExistingMirror } = await import('@/lib/utils/mirror-source-match');
                     const existing = await findExistingMirror({
                       repository,
@@ -286,13 +287,13 @@ async function runScheduledSync(config: any): Promise<void> {
                       candidateName: repository.name,
                     });
                     if (existing) {
-                      await syncGiteaRepo({ config, repository });
+                      await syncRepositoryOnDestination({ config, repository });
                       console.log(`[Scheduler] Re-synced failed repository with live mirror: ${repo.fullName}`);
                       return;
                     }
                   }
 
-                  await mirrorGithubRepoToGitea({ octokit, repository, config });
+                  await mirrorRepositoryToDestination({ octokit, repository, config });
                   console.log(`[Scheduler] Auto-mirrored repository: ${repo.fullName}`);
                 } catch (error) {
                   console.error(`[Scheduler] Failed to auto-mirror repository ${repo.fullName}:`, error);
@@ -426,7 +427,7 @@ async function syncSingleRepository(config: any, repo: any): Promise<void> {
       visibility: repositoryVisibilityEnum.parse(repo.visibility),
     };
     
-    await syncGiteaRepo({ config, repository });
+    await syncRepositoryOnDestination({ config, repository });
     console.log(`[Scheduler] Successfully synced repository ${repo.fullName}`);
   } catch (error) {
     console.error(`[Scheduler] Failed to sync repository ${repo.fullName}:`, error);
@@ -682,7 +683,7 @@ async function performInitialAutoStart(): Promise<void> {
                     visibility: repositoryVisibilityEnum.parse(repo.visibility),
                   };
                   
-                  await mirrorGithubRepoToGitea({ 
+                  await mirrorRepositoryToDestination({ 
                     octokit,
                     repository,
                     config

@@ -583,6 +583,80 @@ function verify0017Migration(db: any) {
   assert(remaining.count === 0, "Expected deleting a user to cascade to their API keys");
 }
 
+function seedPre0018Database(db: any) {
+  // Migrations 0000-0017 have run. Rows carry no destination columns yet;
+  // seed one account whose gitea_config names a Forgejo server and one with
+  // an empty config, so the backfill can be verified against both.
+  db.run("INSERT INTO users (id, email, username, name) VALUES ('u-dest', 'dest@example.com', 'dest', 'Destination User')");
+  db.run(
+    "INSERT INTO configs (id, user_id, name, is_active, github_config, gitea_config, schedule_config, cleanup_config) " +
+      "VALUES ('cfg-forgejo', 'u-dest', 'Default', 1, '{}', '{\"provider\":\"forgejo\",\"url\":\"https://forge.example.com\"}', '{}', '{}')",
+  );
+  db.run(
+    "INSERT INTO configs (id, user_id, name, is_active, github_config, gitea_config, schedule_config, cleanup_config) " +
+      "VALUES ('cfg-empty', 'u-dest', 'Empty', 0, '{}', '{}', '{}', '{}')",
+  );
+  db.run(
+    "INSERT INTO repositories (id, user_id, config_id, name, full_name, normalized_full_name, url, clone_url, owner, default_branch) " +
+      "VALUES ('repo-forgejo', 'u-dest', 'cfg-forgejo', 'tool', 'dest/tool', 'dest/tool', 'https://github.com/dest/tool', 'https://github.com/dest/tool.git', 'dest', 'main')",
+  );
+  db.run(
+    "INSERT INTO repositories (id, user_id, config_id, name, full_name, normalized_full_name, url, clone_url, owner, default_branch) " +
+      "VALUES ('repo-empty', 'u-dest', 'cfg-empty', 'lib', 'dest/lib', 'dest/lib', 'https://github.com/dest/lib', 'https://github.com/dest/lib.git', 'dest', 'main')",
+  );
+}
+
+function verify0018Migration(db: any) {
+  const cols = db
+    .query("PRAGMA table_info(repositories)")
+    .all() as Array<{ name: string; notnull: number; dflt_value: string | null }>;
+
+  for (const [name, expectedDefault] of [
+    ["destination_provider", "'gitea'"],
+    ["destination_url", "''"],
+  ] as const) {
+    const col = cols.find((c) => c.name === name);
+    assert(col, `Expected repositories.${name} column to exist`);
+    assert(col.notnull === 1, `Expected repositories.${name} to be NOT NULL`);
+    assert(
+      col.dflt_value === expectedDefault,
+      `Expected repositories.${name} default ${expectedDefault}, got ${col.dflt_value}`,
+    );
+  }
+
+  // Existing rows take the destination of the account that imported them.
+  const forgejo = db
+    .query("SELECT destination_provider, destination_url FROM repositories WHERE id = 'repo-forgejo'")
+    .get() as { destination_provider: string; destination_url: string } | null;
+  assert(
+    forgejo?.destination_provider === "forgejo" && forgejo.destination_url === "https://forge.example.com",
+    `Expected the Forgejo account's row to be backfilled from its config, got ${JSON.stringify(forgejo)}`,
+  );
+
+  // An account without a destination yet leaves the URL empty, which the
+  // guard treats as "not recorded", never as a different host.
+  const empty = db
+    .query("SELECT destination_provider, destination_url FROM repositories WHERE id = 'repo-empty'")
+    .get() as { destination_provider: string; destination_url: string } | null;
+  assert(
+    empty?.destination_provider === "gitea" && empty.destination_url === "",
+    `Expected an account without a destination to default to gitea with no URL, got ${JSON.stringify(empty)}`,
+  );
+
+  // New rows can record a push target.
+  db.run(
+    "INSERT INTO repositories (id, user_id, config_id, name, full_name, normalized_full_name, url, clone_url, owner, default_branch, destination_provider, destination_url) " +
+      "VALUES ('repo-github-target', 'u-dest', 'cfg-forgejo', 'app', 'dest/app', 'dest/app', 'https://gitlab.com/dest/app', 'https://gitlab.com/dest/app.git', 'dest', 'main', 'github', 'https://github.com')",
+  );
+  const inserted = db
+    .query("SELECT destination_provider, destination_url FROM repositories WHERE id = 'repo-github-target'")
+    .get() as { destination_provider: string; destination_url: string } | null;
+  assert(
+    inserted?.destination_provider === "github" && inserted.destination_url === "https://github.com",
+    `Expected a GitHub destination to round-trip, got ${JSON.stringify(inserted)}`,
+  );
+}
+
 const MIGRATION_0012_TIMESTAMP = 1774062000000;
 const MIGRATION_0013_TIMESTAMP = 1780377747526;
 
@@ -777,6 +851,10 @@ const latestUpgradeFixtures: Record<string, UpgradeFixture> = {
   "0017_api_keys": {
     seed: seedPre0017Database,
     verify: verify0017Migration,
+  },
+  "0018_destination_columns": {
+    seed: seedPre0018Database,
+    verify: verify0018Migration,
   },
 };
 

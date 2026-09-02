@@ -12,6 +12,7 @@ import type { Repository } from "./db/schema";
 import type { Octokit } from "@octokit/rest";
 import { createGitHubClient } from "./github";
 import { createMirrorJob } from "./helpers";
+import { assertRepositoryMatchesConfiguredDestination, usesPushEngine } from "./destination-connection";
 import { decryptConfigTokens } from "./utils/config-encryption";
 import { httpPost, httpGet, httpPatch, HttpError } from "./http-client";
 import { db, repositories } from "./db";
@@ -343,6 +344,11 @@ export async function syncGiteaRepoEnhanced({
     }
 
     const decryptedConfig = decryptConfigTokens(config as Config);
+
+    if (usesPushEngine(config)) {
+      throw new Error("The configured destination is a push target; syncing goes through the push engine.");
+    }
+    assertRepositoryMatchesConfiguredDestination({ repository, config });
 
     console.log(`[Sync] Starting sync for repository ${repository.name}`);
 

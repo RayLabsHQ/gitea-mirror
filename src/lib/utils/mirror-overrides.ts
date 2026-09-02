@@ -2,6 +2,7 @@ import type { Config } from "@/types/config";
 import type { MirrorOverrides, Repository } from "@/lib/db/schema";
 import { mirrorOverridesSchema } from "@/lib/db/schema";
 import { normalizeSourceProviderKind } from "@/lib/source-providers/kinds";
+import { isPushDestinationKind, normalizeDestinationProviderKind } from "@/lib/destination-kinds";
 
 /**
  * The mirror option flags that can be overridden per organization and per
@@ -140,6 +141,29 @@ export const GITHUB_ONLY_METADATA_KEYS = [
 ] as const satisfies readonly MirrorOverrideKey[];
 
 /**
+ * Flags that cannot take effect on a push target.
+ *
+ * GitHub and GitLab destinations receive `git push` of branches and tags
+ * and nothing else: no wiki clone, no LFS transfer, no issues, releases,
+ * labels or milestones. The resolver forces all of these off for them.
+ */
+export const PUSH_TARGET_CLAMPED_KEYS = [
+  "lfs",
+  "wiki",
+  "mirrorReleases",
+  "mirrorMetadata",
+  "mirrorIssues",
+  "mirrorPullRequests",
+  "mirrorLabels",
+  "mirrorMilestones",
+] as const satisfies readonly MirrorOverrideKey[];
+
+/** True when a config's destination is served by the push engine. */
+export function isPushDestinationConfig(config: { giteaConfig?: { provider?: unknown } | null } | null | undefined): boolean {
+  return isPushDestinationKind(normalizeDestinationProviderKind(config?.giteaConfig?.provider));
+}
+
+/**
  * Flags surfaced in the override UI.
  *
  * `mirrorMetadata` is intentionally excluded. It is a write-time master switch
@@ -227,6 +251,7 @@ export const MIRROR_GATING_REASONS = {
     "Starred repos mirror code only (Advanced Options > starred code only)",
   labelsFollowIssues: "Issues mirroring already syncs labels",
   releasesOff: "Releases are not being mirrored",
+  pushTarget: "Not available for GitHub and GitLab destinations: only branches and tags are pushed",
 } as const;
 
 /** key -> reason it cannot take effect. Absent key means editable. */
@@ -258,13 +283,26 @@ export function getMirrorOverrideGating({
   isStarred,
   starredCodeOnly,
   effective,
+  destinationProvider,
 }: {
   targetKind: "repository" | "organization";
   isStarred?: boolean;
   starredCodeOnly?: boolean;
   effective: InheritedMirrorOptions;
+  /** The configured destination kind; push targets disable every toggle. */
+  destinationProvider?: unknown;
 }): MirrorOverrideGating {
   const gating: MirrorOverrideGating = {};
+
+  // A push target gets branches and tags only, whatever any tier asks for.
+  if (isPushDestinationKind(normalizeDestinationProviderKind(destinationProvider))) {
+    for (const key of PUSH_TARGET_CLAMPED_KEYS) {
+      gating[key] = MIRROR_GATING_REASONS.pushTarget;
+    }
+    gating.releaseLimit = MIRROR_GATING_REASONS.pushTarget;
+    gating.releaseAssetLimit = MIRROR_GATING_REASONS.pushTarget;
+    return gating;
+  }
 
   // Organizations are never starred, so the clamp cannot apply to them.
   const starredClampApplies =
@@ -473,6 +511,13 @@ export function resolveMirrorOptions({
   // provider predate the column and came from GitHub.
   if (normalizeSourceProviderKind(repository.sourceProvider) !== "github") {
     for (const key of GITHUB_ONLY_METADATA_KEYS) {
+      resolved[key] = false;
+    }
+  }
+
+  // A push target receives branches and tags only.
+  if (isPushDestinationConfig(config)) {
+    for (const key of PUSH_TARGET_CLAMPED_KEYS) {
       resolved[key] = false;
     }
   }

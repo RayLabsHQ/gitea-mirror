@@ -6,6 +6,7 @@ import type { Config } from "@/types/config";
 import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 import { jsonResponse, createSecureErrorResponse } from "@/lib/utils";
 import { reconcileDestination } from "@/lib/destination-reconcile-service";
+import { usesPushEngine } from "@/lib/destination-connection";
 
 const bodySchema = z.object({
   dryRun: z.boolean().optional().default(true),
@@ -65,6 +66,17 @@ export const POST: APIRoute = async ({ request, locals }) => {
         data: {
           success: false,
           error: "Configure the destination URL, username and token before reconciling",
+        },
+        status: 400,
+      });
+    }
+
+    if (usesPushEngine(config)) {
+      return jsonResponse({
+        data: {
+          success: false,
+          error:
+            "Reconcile compares a Gitea or Forgejo destination with the database. GitHub and GitLab destinations are pushed by this app and have nothing to reconcile.",
         },
         status: 400,
       });

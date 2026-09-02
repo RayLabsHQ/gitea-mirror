@@ -6,6 +6,12 @@ import {
   normalizeSourceProviderKind,
 } from "@/lib/source-providers/kinds";
 import { evaluateConfigChange, loadConfigLocks } from "@/lib/config-locks";
+import {
+  DESTINATION_PROVIDER_DEFAULT_URLS,
+  isDestinationProviderKind,
+  isPushDestinationKind,
+  normalizeDestinationProviderKind,
+} from "@/lib/destination-kinds";
 import { db, configs, users } from "@/lib/db";
 import { v4 as uuidv4 } from "uuid";
 import { eq, sql } from "drizzle-orm";
@@ -90,6 +96,22 @@ export const POST: APIRoute = async ({ request, locals }) => {
           { status: 400, headers: { "Content-Type": "application/json" } }
         );
       }
+    }
+
+    // Validate the destination provider. GitHub and GitLab targets default to
+    // their public instance when no URL is given.
+    if (giteaConfig.provider !== undefined && !isDestinationProviderKind(giteaConfig.provider)) {
+      return new Response(
+        JSON.stringify({ success: false, message: "Unknown destination provider." }),
+        { status: 400, headers: { "Content-Type": "application/json" } }
+      );
+    }
+    const destinationProvider = normalizeDestinationProviderKind(giteaConfig.provider);
+    if (
+      isPushDestinationKind(destinationProvider) &&
+      !(typeof giteaConfig.url === "string" && giteaConfig.url.trim())
+    ) {
+      giteaConfig.url = DESTINATION_PROVIDER_DEFAULT_URLS[destinationProvider];
     }
 
     // Validate the source provider and, for GitLab and Gitea sources, the instance URL

@@ -1,8 +1,9 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { SourceIcon, repositorySourceInfo } from "@/components/source/SourceIcon";
+import { DestinationIcon, destinationInfo } from "@/components/destination/DestinationIcon";
 import { Button } from "@/components/ui/button";
 import { GitFork } from "lucide-react";
-import { SiGithub, SiGitea } from "react-icons/si";
+import { SiGithub } from "react-icons/si";
 import type { Repository } from "@/lib/db/schema";
 import { buildGiteaWebUrl } from "@/lib/gitea-url";
 import { useGiteaConfig } from "@/hooks/useGiteaConfig";
@@ -15,9 +16,11 @@ interface RepositoryListProps {
 export function RepositoryList({ repositories }: RepositoryListProps) {
   const { giteaConfig } = useGiteaConfig();
 
-  // Helper function to construct Gitea repository URL
+  const destination = destinationInfo(giteaConfig);
+
+  // Helper function to construct the destination repository URL
   const getGiteaRepoUrl = (repository: Repository): string | null => {
-    // Only provide Gitea links for repositories that have been or are being mirrored
+    // Only provide links for repositories that have been or are being mirrored
     const validStatuses = ['mirroring', 'mirrored', 'syncing', 'synced'];
     if (!validStatuses.includes(repository.status)) {
       return null;
@@ -113,14 +116,14 @@ export function RepositoryList({ repositories }: RepositoryListProps) {
                           href={giteaUrl}
                           target="_blank"
                           rel="noopener noreferrer"
-                          title="View on Gitea"
+                          title={`View on ${destination.label}`}
                         >
-                          <SiGitea className="h-4 w-4" />
+                          <DestinationIcon provider={destination.provider} className="h-4 w-4" />
                         </a>
                       </Button>
                     ) : (
                       <Button variant="ghost" size="icon" className="h-8 w-8" disabled title="Not mirrored yet">
-                        <SiGitea className="h-4 w-4" />
+                        <DestinationIcon provider={destination.provider} className="h-4 w-4" />
                       </Button>
                     );
                   })()}

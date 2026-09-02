@@ -2,7 +2,9 @@ import type { APIRoute } from "astro";
 import { db, configs, repositories } from "@/lib/db";
 import { and, eq, or, sql } from "drizzle-orm";
 import { repoStatusEnum, repositoryVisibilityEnum } from "@/types/Repository";
-import { isRepoPresentInGitea, syncGiteaRepo } from "@/lib/gitea";
+import { isRepoPresentInGitea } from "@/lib/gitea";
+import { syncRepositoryOnDestination } from "@/lib/mirror-dispatch";
+import { usesPushEngine } from "@/lib/destination-connection";
 import type {
   ScheduleSyncRepoRequest,
   ScheduleSyncRepoResponse,
@@ -99,7 +101,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       for (const repo of repos) {
         try {
           // Only check Gitea presence if the repo failed previously
-          if (repo.status === "failed") {
+          if (repo.status === "failed" && !usesPushEngine(config)) {
             const isPresent = await isRepoPresentInGitea({
               config,
               owner: repo.owner,
@@ -111,7 +113,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
             }
           }
 
-          await syncGiteaRepo({
+          await syncRepositoryOnDestination({
             config,
             repository: {
               ...repo,

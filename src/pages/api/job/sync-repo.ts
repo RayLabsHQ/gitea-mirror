@@ -3,7 +3,7 @@ import type { MirrorRepoRequest } from "@/types/mirror";
 import { db, configs, repositories } from "@/lib/db";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { repositoryVisibilityEnum, repoStatusEnum } from "@/types/Repository";
-import { syncGiteaRepo } from "@/lib/gitea";
+import { syncRepositoryOnDestination } from "@/lib/mirror-dispatch";
 import type { SyncRepoResponse } from "@/types/sync";
 import { processWithResilience } from "@/lib/utils/concurrency";
 import { createSecureErrorResponse } from "@/lib/utils";
@@ -99,7 +99,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
           console.log(`Starting sync for repository: ${repo.name}`);
 
           // Sync the repository
-          await syncGiteaRepo({
+          await syncRepositoryOnDestination({
             config,
             repository: repoData,
           });

@@ -39,7 +39,8 @@ import {
   UserX,
   X
 } from "lucide-react";
-import type { GitHubConfig, MirrorOptions, AdvancedOptions, DuplicateNameStrategy } from "@/types/config";
+import type { GitHubConfig, MirrorOptions, AdvancedOptions, DuplicateNameStrategy, DestinationProvider } from "@/types/config";
+import { DESTINATION_PROVIDER_LABELS, isPushDestinationKind } from "@/lib/destination-kinds";
 import {
   Select,
   SelectContent,
@@ -74,6 +75,8 @@ import {
 interface GitHubMirrorSettingsProps {
   githubConfig: GitHubConfig;
   mirrorOptions: MirrorOptions;
+  /** The configured destination. GitHub and GitLab targets receive code only. */
+  destinationProvider?: DestinationProvider;
   advancedOptions: AdvancedOptions;
   onGitHubConfigChange: (config: GitHubConfig) => void;
   onMirrorOptionsChange: (options: MirrorOptions) => void;
@@ -89,12 +92,18 @@ export function GitHubMirrorSettings({
   onGitHubConfigChange,
   onMirrorOptionsChange,
   onAdvancedOptionsChange,
+  destinationProvider,
   part = "both",
 }: GitHubMirrorSettingsProps) {
+  // A GitHub or GitLab destination is pushed by the engine: branches and
+  // tags only, so every content switch is off and disabled for it.
+  const isPushTarget = isPushDestinationKind(destinationProvider ?? "gitea");
+  const destinationLabel = DESTINATION_PROVIDER_LABELS[destinationProvider ?? "gitea"];
+  const pushTargetReason = `Not available for ${destinationLabel} destinations: only branches and tags are pushed`;
   // Star lists, issues, pull requests, releases, labels and milestones all
   // read the GitHub API, so they are only offered for GitHub sources.
   const sourceProvider = githubConfig.provider ?? "github";
-  const isGithubSource = sourceProvider === "github";
+  const isGithubSource = sourceProvider === "github" && !isPushTarget;
   const sourceLabel = SOURCE_PROVIDER_LABELS[sourceProvider];
   const orgNoun = SOURCE_PROVIDER_ORG_NOUNS[sourceProvider];
   const [starListsOpen, setStarListsOpen] = React.useState(false);
@@ -858,9 +867,11 @@ export function GitHubMirrorSettings({
           <StatusFooterItem
             icon={Info}
             label={
-              isGithubSource
-                ? "Pull requests are mirrored as issues due to Gitea API limits"
-                : "Issues, pull requests and releases are mirrored for GitHub sources only"
+              isPushTarget
+                ? `${destinationLabel} destinations receive branches and tags only`
+                : isGithubSource
+                  ? "Pull requests are mirrored as issues due to Gitea API limits"
+                  : "Issues, pull requests and releases are mirrored for GitHub sources only"
             }
           />
         }
@@ -883,7 +894,9 @@ export function GitHubMirrorSettings({
             icon={Tag}
             label="Releases & tags"
             description={
-              !isGithubSource
+              isPushTarget
+                ? pushTargetReason
+                : !isGithubSource
                 ? "Release assets need a GitHub source. Tags always come with the code"
                 : mirrorOptions.mirrorReleases
                   ? "Includes tags. Leave the assets box empty to upload assets for every mirrored release, or set it to 0 for release notes only"
@@ -944,8 +957,11 @@ export function GitHubMirrorSettings({
           <SwitchRow
             icon={HardDrive}
             label="Git LFS objects"
-            description="Requires LFS enabled on your Gitea server and Git v2.1.2+"
+            description={
+              isPushTarget ? pushTargetReason : "Requires LFS enabled on your Gitea server and Git v2.1.2+"
+            }
             badge="BETA"
+            disabled={isPushTarget}
             checked={mirrorOptions.mirrorLFS}
             onCheckedChange={(checked) => handleMirrorChange('mirrorLFS', checked)}
           />
@@ -954,10 +970,13 @@ export function GitHubMirrorSettings({
             icon={FileText}
             label="Repository metadata"
             description={
-              isGithubSource
-                ? "Issues, pull requests, labels, milestones and wiki"
-                : "Wiki only. Issues, pull requests, labels and milestones need a GitHub source"
+              isPushTarget
+                ? pushTargetReason
+                : isGithubSource
+                  ? "Issues, pull requests, labels, milestones and wiki"
+                  : "Wiki only. Issues, pull requests, labels and milestones need a GitHub source"
             }
+            disabled={isPushTarget}
             checked={mirrorOptions.mirrorMetadata}
             onCheckedChange={(checked) => handleMirrorChange('mirrorMetadata', checked)}
             extra={mirrorOptions.mirrorMetadata ? metadataPopover : undefined}

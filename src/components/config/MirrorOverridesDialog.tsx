@@ -87,6 +87,8 @@ export interface MirrorOverridesDialogProps {
   /** Repository-only: drives the starred-code-only gating. */
   isStarred?: boolean;
   starredCodeOnly?: boolean;
+  /** The configured destination kind; GitHub and GitLab targets disable every toggle. */
+  destinationProvider?: string | null;
   onSave: (overrides: MirrorOverrides | null) => Promise<void>;
 }
 
@@ -101,6 +103,7 @@ export function MirrorOverridesDialog({
   inheritedLoading = false,
   isStarred,
   starredCodeOnly,
+  destinationProvider,
   onSave,
 }: MirrorOverridesDialogProps) {
   const [draft, setDraft] = useState<Record<MirrorOverrideKey, TriState>>(
@@ -143,8 +146,9 @@ export function MirrorOverridesDialog({
         isStarred,
         starredCodeOnly,
         effective,
+        destinationProvider,
       }),
-    [targetKind, isStarred, starredCodeOnly, effective]
+    [targetKind, isStarred, starredCodeOnly, effective, destinationProvider]
   );
 
   const pinnedReleaseLimit = parseReleaseLimitDraft(releaseLimitDraft);

@@ -5,11 +5,8 @@ import type { MirrorRepoRequest, MirrorRepoResponse } from "@/types/mirror";
 import { db, configs, repositories } from "@/lib/db";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { repositoryVisibilityEnum, repoStatusEnum } from "@/types/Repository";
-import {
-  mirrorGithubRepoToGitea,
-  mirrorGitHubOrgRepoToGiteaOrg,
-  getGiteaRepoOwnerAsync,
-} from "@/lib/gitea";
+import { getGiteaRepoOwnerAsync } from "@/lib/gitea";
+import { mirrorRepositoryToDestination } from "@/lib/mirror-dispatch";
 import { createGitHubClient } from "@/lib/github";
 import { getDecryptedGitHubToken } from "@/lib/utils/config-encryption";
 import { processWithResilience } from "@/lib/utils/concurrency";
@@ -135,20 +132,14 @@ export const POST: APIRoute = async ({ request, locals }) => {
             owner !== config.giteaConfig?.defaultOwner || // Different owner means org
             mirrorStrategy === "single-org"; // Single-org strategy always uses org
 
-          if (shouldUseOrgMirror) {
-            await mirrorGitHubOrgRepoToGiteaOrg({
-              config,
-              octokit,
-              orgName: owner,
-              repository: repoData,
-            });
-          } else {
-            await mirrorGithubRepoToGitea({
-              octokit,
-              repository: repoData,
-              config,
-            });
-          }
+          // Gitea and Forgejo receive a pull mirror; GitHub and GitLab are
+          // pushed by the engine. The dispatcher picks the path.
+          await mirrorRepositoryToDestination({
+            config,
+            octokit,
+            repository: repoData,
+            orgName: shouldUseOrgMirror ? owner : undefined,
+          });
 
           return repo;
         },

@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Activity, AlertTriangle, Building2, Info, PlugZap } from "lucide-react";
-import { SiForgejo, SiGitea } from "react-icons/si";
+import { Activity, AlertTriangle, Building2, Info, PlugZap, UploadCloud } from "lucide-react";
+import { SiForgejo, SiGitea, SiGithub, SiGitlab } from "react-icons/si";
 import {
   Select,
   SelectContent,
@@ -10,7 +10,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { DESTINATION_PROVIDER_LABELS } from "@/lib/destination-kinds";
+import {
+  DESTINATION_PROVIDER_DEFAULT_URLS,
+  DESTINATION_PROVIDER_LABELS,
+  DESTINATION_PROVIDER_ORG_NOUNS,
+  PUSH_DESTINATION_TOKEN_SCOPES,
+  isPushDestinationKind,
+} from "@/lib/destination-kinds";
 import { HostLockNotice } from "./HostLockNotice";
 import { giteaApi, type GiteaServerInfo } from "@/lib/api";
 import type {
@@ -50,10 +56,17 @@ const destinationProviders: {
   value: DestinationProvider;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
+  /** Short pill shown next to the option, e.g. BETA. */
+  badge?: string;
 }[] = [
   { value: "gitea", label: DESTINATION_PROVIDER_LABELS.gitea, icon: SiGitea },
   { value: "forgejo", label: DESTINATION_PROVIDER_LABELS.forgejo, icon: SiForgejo },
+  { value: "github", label: DESTINATION_PROVIDER_LABELS.github, icon: SiGithub, badge: "BETA" },
+  { value: "gitlab", label: DESTINATION_PROVIDER_LABELS.gitlab, icon: SiGitlab, badge: "BETA" },
 ];
+
+/** The public instance URLs a hosted target is prefilled with. */
+const HOSTED_DEFAULT_URLS = new Set(Object.values(DESTINATION_PROVIDER_DEFAULT_URLS));
 
 export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, githubUsername, destinationLock, part = "connection" }: GiteaConfigFormProps) {
   const [isLoading, setIsLoading] = useState(false);
@@ -63,9 +76,21 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
   const providerMeta =
     destinationProviders.find((option) => option.value === provider) ?? destinationProviders[0];
   const providerLabel = providerMeta.label;
+  const isPushTarget = isPushDestinationKind(provider);
+  const orgNoun = DESTINATION_PROVIDER_ORG_NOUNS[provider];
 
   const handleProviderChange = (value: string) => {
-    const newConfig: GiteaConfig = { ...config, provider: value as DestinationProvider };
+    const nextProvider = value as DestinationProvider;
+    const newConfig: GiteaConfig = { ...config, provider: nextProvider };
+    // A hosted target is prefilled with its public instance; moving away
+    // from one clears that prefill so a Gitea URL is asked for again.
+    const hostedDefault = DESTINATION_PROVIDER_DEFAULT_URLS[nextProvider];
+    const currentUrl = (config.url || "").trim();
+    if (hostedDefault && (!currentUrl || HOSTED_DEFAULT_URLS.has(currentUrl))) {
+      newConfig.url = hostedDefault;
+    } else if (!hostedDefault && HOSTED_DEFAULT_URLS.has(currentUrl)) {
+      newConfig.url = "";
+    }
     setConfig(newConfig);
     if (onAutoSave) {
       onAutoSave(newConfig, { confirmDestinationChange: destinationUnlocked });
@@ -170,7 +195,7 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
   };
 
   const testConnection = async () => {
-    if (!config.url || !config.token) {
+    if (!config.token || (!isPushTarget && !config.url)) {
       toast.error(`${providerLabel} URL and token are required to test the connection`);
       return;
     }
@@ -178,14 +203,17 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
     setIsLoading(true);
 
     try {
-      const result = await giteaApi.testConnection(config.url, config.token);
+      const result = await giteaApi.testConnection(config.url, config.token, {
+        provider,
+        username: isPushTarget ? config.username : undefined,
+      });
       if (result.success) {
         setServerInfo(result.serverInfo ?? null);
-        toast.success("Successfully connected to Gitea!");
+        toast.success(`Successfully connected to ${providerLabel}!`);
       } else {
         setServerInfo(null);
         toast.error(
-          "Failed to connect to Gitea. Please check your URL and token."
+          result.message || `Failed to connect to ${providerLabel}. Please check your URL and token.`
         );
       }
     } catch (error) {
@@ -196,6 +224,13 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const serverInfoLabel = (info: GiteaServerInfo): string => {
+    if (info.type === "github" || info.type === "gitlab") {
+      return `Connected to ${info.version}`;
+    }
+    return `${info.type === "forgejo" ? "Forgejo" : "Gitea"} ${info.version} detected`;
   };
 
   if (part === "connection") {
@@ -213,7 +248,7 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
               variant="outline"
               size="sm"
               onClick={testConnection}
-              disabled={isLoading || !config.url || !config.token}
+              disabled={isLoading || !config.token || (!isPushTarget && !config.url)}
             >
               <PlugZap className="mr-1.5 h-3.5 w-3.5" />
               {isLoading ? "Testing..." : "Test"}
@@ -222,10 +257,7 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
         }
         footer={
           serverInfo ? (
-            <StatusFooterItem
-              icon={Info}
-              label={`${serverInfo.type === "forgejo" ? "Forgejo" : "Gitea"} ${serverInfo.version} detected`}
-            />
+            <StatusFooterItem icon={Info} label={serverInfoLabel(serverInfo)} />
           ) : undefined
         }
       >
@@ -273,13 +305,20 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
                     <span className="flex items-center gap-2">
                       <option.icon className="h-3.5 w-3.5" />
                       {option.label}
+                      {option.badge && (
+                        <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-semibold tracking-wider text-muted-foreground">
+                          {option.badge}
+                        </span>
+                      )}
                     </span>
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
             <p className="text-[11px] text-muted-foreground/80">
-              Where mirrors are created. Gitea and Forgejo share the same API.
+              {isPushTarget
+                ? `${providerLabel} has no pull mirror API, so this app keeps a bare clone of each source repository and pushes its branches and tags there.`
+                : "Where mirrors are created. Gitea and Forgejo share the same API."}
             </p>
             {destinationLock?.locked && (
               <HostLockNotice
@@ -299,12 +338,26 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
             )}
           </div>
 
+          {isPushTarget && (
+            <Alert>
+              <UploadCloud className="h-4 w-4" />
+              <AlertTitle>Push target (beta)</AlertTitle>
+              <AlertDescription>
+                <p>
+                  Branches and tags are pushed with force and prune, so the {providerLabel} copy always matches the
+                  source and is overwritten on every sync. Issues, pull requests, releases, wiki and LFS objects are
+                  not mirrored. Bare clones live in the data directory next to the database.
+                </p>
+              </AlertDescription>
+            </Alert>
+          )}
+
           <div className="space-y-1.5">
             <Label
               htmlFor="gitea-username"
               className="text-xs font-medium text-muted-foreground"
             >
-              Username
+              {isPushTarget ? "Account" : "Username"}
             </Label>
             <Input
               id="gitea-username"
@@ -315,6 +368,11 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
               placeholder={`Your ${providerLabel} username`}
               required
             />
+            {isPushTarget && (
+              <p className="text-[11px] text-muted-foreground/80">
+                {`The user the token belongs to. Repositories go under this account, or under the ${orgNoun} the mirror strategy picks.`}
+              </p>
+            )}
           </div>
 
           <div className="space-y-1.5">
@@ -322,7 +380,7 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
               htmlFor="gitea-url"
               className="text-xs font-medium text-muted-foreground"
             >
-              Server URL
+              {isPushTarget ? "Instance URL" : "Server URL"}
             </Label>
             <Input
               id="gitea-url"
@@ -330,31 +388,42 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
               type="url"
               value={config.url}
               onChange={handleChange}
-              placeholder={`https://your-${provider}-instance.com`}
+              placeholder={
+                DESTINATION_PROVIDER_DEFAULT_URLS[provider] ?? `https://your-${provider}-instance.com`
+              }
               disabled={destinationLocked}
-              required
+              required={!isPushTarget}
             />
+            {isPushTarget && (
+              <p className="text-[11px] text-muted-foreground/80">
+                {provider === "github"
+                  ? "github.com, or the URL of your GitHub Enterprise Server"
+                  : "gitlab.com, or the URL of your self hosted GitLab"}
+              </p>
+            )}
           </div>
 
-          <div className="space-y-1.5">
-            <Label
-              htmlFor="gitea-external-url"
-              className="text-xs font-medium text-muted-foreground"
-            >
-              External URL (optional)
-            </Label>
-            <Input
-              id="gitea-external-url"
-              name="externalUrl"
-              type="url"
-              value={config.externalUrl || ""}
-              onChange={handleChange}
-              placeholder="https://gitea.example.com"
-            />
-            <p className="text-[11px] text-muted-foreground/80">
-              Dashboard links only, syncing always uses the server URL
-            </p>
-          </div>
+          {!isPushTarget && (
+            <div className="space-y-1.5">
+              <Label
+                htmlFor="gitea-external-url"
+                className="text-xs font-medium text-muted-foreground"
+              >
+                External URL (optional)
+              </Label>
+              <Input
+                id="gitea-external-url"
+                name="externalUrl"
+                type="url"
+                value={config.externalUrl || ""}
+                onChange={handleChange}
+                placeholder="https://gitea.example.com"
+              />
+              <p className="text-[11px] text-muted-foreground/80">
+                Dashboard links only, syncing always uses the server URL
+              </p>
+            </div>
+          )}
 
           <div className="space-y-1.5">
             <Label
@@ -373,7 +442,13 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
               required
             />
             <p className="text-[11px] text-muted-foreground/80">
-              {`Create one in ${providerLabel} under Settings → Applications`}
+              {isPushTarget
+                ? `A personal access token with the scopes ${PUSH_DESTINATION_TOKEN_SCOPES[provider].join(", ")}. ${
+                    provider === "github"
+                      ? "GitHub rejects pushes that add workflow files unless the token has the workflow scope."
+                      : "Groups the token cannot see are created as new top level groups."
+                  }`
+                : `Create one in ${providerLabel} under Settings → Applications`}
             </p>
           </div>
         </CardSection>
