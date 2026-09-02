@@ -1,7 +1,9 @@
 image:
   registry: ghcr.io
   repository: raylabshq/gitea-mirror
-  # Leave blank to use the Appversion tag
+  # Leave blank to run v<appVersion>, the release this chart was published
+  # with. If you set a tag, include the v prefix (registry tags look like
+  # v3.30.0); the value is used as is.
   tag: ""
   pullPolicy: IfNotPresent
 
