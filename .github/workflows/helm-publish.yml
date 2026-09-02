@@ -1,0 +1,103 @@
+name: Publish Helm Chart
+
+# Publishes the chart to ghcr.io as an OCI package after every release build,
+# so `helm install oci://ghcr.io/raylabshq/charts/gitea-mirror` picks up the
+# newest release without a clone. The chart version and appVersion are both
+# set to the release version.
+on:
+  workflow_run:
+    workflows: ["Docker Build, Push & Security Scan"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to publish without the v prefix (e.g. 3.30.0). Defaults to package.json on the selected ref."
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+  CHART_PATH: ./helm/gitea-mirror
+
+jobs:
+  publish:
+    name: Package and push chart
+    # For a tag build the docker workflow reports the tag name as head_branch.
+    # Wait for that build to succeed so the chart never points at an image
+    # that is not on the registry yet.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       startsWith(github.event.workflow_run.head_branch, 'v'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
+
+      - name: Resolve version
+        id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+        run: |
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            VERSION="${INPUT_VERSION:-$(jq -r .version package.json)}"
+          else
+            VERSION="${HEAD_BRANCH#v}"
+          fi
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::'${VERSION}' is not a semver version"
+            exit 1
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Publishing chart ${VERSION}"
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.19.0
+
+      - name: Lint
+        run: helm lint "$CHART_PATH"
+
+      - name: Package
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          helm package "$CHART_PATH" \
+            --version "$VERSION" \
+            --app-version "$VERSION" \
+            --destination dist
+
+      - name: Log into registry
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          echo "$GITHUB_TOKEN" | helm registry login "$REGISTRY" --username "$ACTOR" --password-stdin
+
+      - name: Push
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          OWNER_LC="$(echo "$OWNER" | tr '[:upper:]' '[:lower:]')"
+          helm push "dist/gitea-mirror-${VERSION}.tgz" "oci://${REGISTRY}/${OWNER_LC}/charts"
+          {
+            echo "### Helm chart ${VERSION} published"
+            echo
+            echo '```bash'
+            echo "helm upgrade --install gitea-mirror oci://${REGISTRY}/${OWNER_LC}/charts/gitea-mirror --version ${VERSION}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

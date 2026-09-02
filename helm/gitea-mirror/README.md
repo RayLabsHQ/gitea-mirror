@@ -4,7 +4,9 @@ Deploy **gitea-mirror** to Kubernetes using Helm. The chart packages a Deploymen
 
 - **Chart name:** `gitea-mirror`
 - **Type:** `application`
-- **App version:** `3.7.2` (default image tag, can be overridden)
+- **Chart version:** the same number as the application release it deploys
+- **App version:** the default image tag (`v<appVersion>`), can be overridden
+- **Registry:** `oci://ghcr.io/raylabshq/charts/gitea-mirror`
 
 ---
 
@@ -19,15 +21,24 @@ Deploy **gitea-mirror** to Kubernetes using Helm. The chart packages a Deploymen
 
 ## Quick start
 
-From the repo root (chart path: `helm/gitea-mirror`):
+The chart is published to GitHub Container Registry as an OCI package on every release. Each chart version deploys the application release with the same number.
 
 ```bash
 # Create a namespace (optional)
 kubectl create namespace gitea-mirror
 
 # Install with minimal required secrets/values
-helm upgrade --install gitea-mirror ./helm/gitea-mirror   --namespace gitea-mirror   --set "gitea-mirror.github.username=<your-gh-username>"   --set "gitea-mirror.github.token=<your-gh-token>"   --set "gitea-mirror.gitea.url=https://gitea.example.com"   --set "gitea-mirror.gitea.token=<your-gitea-token>"
+helm upgrade --install gitea-mirror oci://ghcr.io/raylabshq/charts/gitea-mirror \
+  --namespace gitea-mirror \
+  --set "gitea-mirror.github.username=<your-gh-username>" \
+  --set "gitea-mirror.github.token=<your-gh-token>" \
+  --set "gitea-mirror.gitea.url=https://gitea.example.com" \
+  --set "gitea-mirror.gitea.token=<your-gitea-token>"
 ```
+
+Add `--version <chart version>` to pin a release. Without it Helm installs the newest published chart.
+
+To install from a clone instead, run the same command from the repo root with `./helm/gitea-mirror` in place of the OCI reference.
 
 The default Service is `ClusterIP` on port `4321`. You can expose it via Ingress or Gateway API; see below.
 
@@ -38,8 +49,10 @@ The default Service is `ClusterIP` on port `4321`. You can expose it via Ingress
 Standard Helm upgrade:
 
 ```bash
-helm upgrade gitea-mirror ./helm/gitea-mirror -n gitea-mirror
+helm upgrade gitea-mirror oci://ghcr.io/raylabshq/charts/gitea-mirror -n gitea-mirror
 ```
+
+Each upgrade moves to the newest chart, and with it the newest application image. Pass `--version` to stay on a specific release.
 
 If you change persistence settings or storage class, a rollout may require PVC recreation.
 
@@ -63,7 +76,7 @@ If you enabled persistence with a PVC the data may persist; delete the PVC manua
 | --- | --- | --- | --- |
 | `image.registry` | string | `ghcr.io` | Container registry. |
 | `image.repository` | string | `raylabshq/gitea-mirror` | Image repository. |
-| `image.tag` | string | `""` | Image tag; when empty, uses the chart `appVersion` (`3.7.2`). |
+| `image.tag` | string | `""` | Image tag; when empty, uses `v<appVersion>`, the release this chart was published with. Registry tags carry the `v` prefix, for example `v3.30.0`. |
 | `image.pullPolicy` | string | `IfNotPresent` | K8s image pull policy. |
 | `imagePullSecrets` | list | `[]` | Image pull secrets. |
 | `podSecurityContext.runAsUser` | int | `1001` | UID. |

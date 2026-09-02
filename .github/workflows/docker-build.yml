@@ -321,7 +321,7 @@ jobs:
           sarif_file: scout-results.sarif
 
   sync-version-main:
-    name: Sync package.json version back to main
+    name: Sync package.json and Chart.yaml versions back to main
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     needs: docker
@@ -334,7 +334,7 @@ jobs:
         with:
           ref: ${{ github.event.repository.default_branch }}
 
-      - name: Update package.json version on main
+      - name: Update package.json and Chart.yaml versions on main
         env:
           TAG_VERSION: ${{ github.ref_name }}
           TARGET_BRANCH: ${{ github.event.repository.default_branch }}
@@ -345,18 +345,25 @@ jobs:
           fi
 
           APP_VERSION="${TAG_VERSION#v}"
-          echo "Syncing ${TARGET_BRANCH}/package.json to ${APP_VERSION}"
+          echo "Syncing ${TARGET_BRANCH} package.json and Chart.yaml to ${APP_VERSION}"
 
           jq --arg version "${APP_VERSION}" '.version = $version' package.json > package.json.tmp
           mv package.json.tmp package.json
 
-          if git diff --quiet -- package.json; then
-            echo "package.json on ${TARGET_BRANCH} already at ${APP_VERSION}; nothing to commit."
+          # The chart version tracks the app version so the default image tag
+          # always points at the release the chart was published with.
+          sed -i -E \
+            -e "s/^version: .*/version: ${APP_VERSION}/" \
+            -e "s/^appVersion: .*/appVersion: \"${APP_VERSION}\"/" \
+            helm/gitea-mirror/Chart.yaml
+
+          if git diff --quiet -- package.json helm/gitea-mirror/Chart.yaml; then
+            echo "Versions on ${TARGET_BRANCH} already at ${APP_VERSION}; nothing to commit."
             exit 0
           fi
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add package.json
+          git add package.json helm/gitea-mirror/Chart.yaml
           git commit -m "chore: sync version to ${APP_VERSION}"
           git push origin "HEAD:${TARGET_BRANCH}"

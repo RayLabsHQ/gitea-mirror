@@ -110,29 +110,25 @@ Database migrations run automatically at startup. Keep the data volume attached 
 
 ## Kubernetes with Helm
 
-A Helm chart lives in the repository at `helm/gitea-mirror`. It is not published to a chart repository, so install it from a clone.
+The chart is published as an OCI package at `oci://ghcr.io/raylabshq/charts/gitea-mirror`. Every release publishes a chart with the same version number as the application, and that chart's default image tag is the matching release. The chart source lives in the repository at `helm/gitea-mirror` if you would rather install from a clone.
 
 The chart deploys a Deployment, a Service, a ConfigMap, a Secret, an optional PVC, and optionally an Ingress or Gateway API HTTPRoutes. It needs Kubernetes 1.23 or newer and Helm 3.8 or newer.
 
 ### Installing
 
 ```bash
-git clone https://github.com/RayLabsHQ/gitea-mirror.git
-cd gitea-mirror
-
 kubectl create namespace gitea-mirror
 
-helm upgrade --install gitea-mirror ./helm/gitea-mirror \
+helm upgrade --install gitea-mirror oci://ghcr.io/raylabshq/charts/gitea-mirror \
   --namespace gitea-mirror \
   --values my-values.yaml
 ```
 
+Add `--version 3.30.0` (or any published release) to pin the chart. Without it Helm installs the newest one, and a later `helm upgrade` moves you to the newest release. To install from a clone, run the same command from the repository root with `./helm/gitea-mirror` in place of the OCI reference.
+
 A minimal `my-values.yaml`:
 
 ```yaml
-image:
-  tag: "3.24.0"
-
 gitea-mirror:
   core:
     betterAuthSecret: "your-32-character-minimum-secret"
@@ -165,13 +161,13 @@ ingress:
         - mirror.example.com
 ```
 
-> **Note:** The chart's `appVersion` trails the application, so leaving `image.tag` empty pins an older image than you probably want. Set `image.tag` explicitly to the release you intend to run.
+> **Note:** Leave `image.tag` empty to run the release the chart was published for. If you do set it, use the tag as it appears on the registry, with the `v` prefix, for example `v3.30.0`.
 
 ### Values that matter
 
 | Value | Default | Why it matters |
 |---|---|---|
-| `image.tag` | `""` | Falls back to the chart `appVersion`. Set it explicitly. |
+| `image.tag` | `""` | Falls back to `v<appVersion>`, the release the chart shipped with. Set it only to run a different release. |
 | `gitea-mirror.core.betterAuthSecret` | `""` | Session signing secret. |
 | `gitea-mirror.core.encryptionSecret` | `""` | Token encryption secret, stored in the chart's Secret. |
 | `gitea-mirror.core.betterAuthUrl` | `http://localhost:4321` | Must be the external URL users reach. |

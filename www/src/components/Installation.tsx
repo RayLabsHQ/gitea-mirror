@@ -43,14 +43,14 @@ export function Installation() {
       description: "Deploy to Kubernetes",
       steps: [
         {
-          title: "Clone the repository",
-          command: "git clone https://github.com/RayLabsHQ/gitea-mirror.git && cd gitea-mirror",
-          id: "helm-clone"
+          title: "Install the chart from ghcr.io",
+          command: "helm upgrade --install gitea-mirror oci://ghcr.io/raylabshq/charts/gitea-mirror \\\n  --namespace gitea-mirror --create-namespace",
+          id: "helm-install"
         },
         {
-          title: "Install the chart",
-          command: "helm upgrade --install gitea-mirror ./helm/gitea-mirror \\\n  --namespace gitea-mirror --create-namespace",
-          id: "helm-install"
+          title: "Upgrade to the newest release later",
+          command: "helm upgrade gitea-mirror oci://ghcr.io/raylabshq/charts/gitea-mirror -n gitea-mirror",
+          id: "helm-upgrade"
         },
         {
           title: "Access the application",
