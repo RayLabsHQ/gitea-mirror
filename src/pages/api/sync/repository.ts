@@ -1,5 +1,4 @@
 import type { APIRoute } from "astro";
-import { Octokit } from "@octokit/rest";
 import { configs, db, repositories } from "@/lib/db";
 import { v4 as uuidv4 } from "uuid";
 import { and, eq, sql } from "drizzle-orm";
@@ -8,10 +7,16 @@ import { jsonResponse, createSecureErrorResponse } from "@/lib/utils";
 import type {
   AddRepositoriesApiRequest,
   AddRepositoriesApiResponse,
-  RepositoryVisibility,
 } from "@/types/Repository";
 import { createMirrorJob } from "@/lib/helpers";
 import { requireAuthenticatedUserId } from "@/lib/auth-guards";
+import {
+  SOURCE_PROVIDER_LABELS,
+  createSourceProviderFromConfig,
+  describeSource,
+  sourceHostOf,
+} from "@/lib/source-providers";
+import { repositorySourceColumns } from "@/lib/repo-utils";
 
 export const POST: APIRoute = async ({ request, locals }) => {
   try {
@@ -20,7 +25,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const userId = authResult.userId;
 
     const body: AddRepositoriesApiRequest = await request.json();
-    const { owner, repo, force = false, destinationOrg } = body;
+    const { owner, repo, force = false, destinationOrg, host, path } = body;
 
     if (!owner || !repo) {
       return new Response(
@@ -45,9 +50,50 @@ export const POST: APIRoute = async ({ request, locals }) => {
       });
     }
 
-    const normalizedOwner = trimmedOwner.toLowerCase();
-    const normalizedRepo = trimmedRepo.toLowerCase();
-    const normalizedFullName = `${normalizedOwner}/${normalizedRepo}`;
+    // Get user's active config — prefer active and most-recently-updated to avoid
+    // picking a stale inactive stub when multiple rows exist (see issue #271).
+    const [config] = await db
+      .select()
+      .from(configs)
+      .where(eq(configs.userId, userId))
+      .orderBy(sql`${configs.isActive} DESC`, sql`${configs.updatedAt} DESC`)
+      .limit(1);
+
+    if (!config) {
+      return jsonResponse({
+        data: { error: "No configuration found for this user" },
+        status: 404,
+      });
+    }
+
+    const configId = config.id;
+
+    // The configured source host. Without a token GitHub still allows public
+    // lookups, so a missing token is not an error here.
+    const sourceProvider = createSourceProviderFromConfig(config, { userId });
+    const sourceConnection = sourceProvider.connection;
+    const sourceLabel = SOURCE_PROVIDER_LABELS[sourceProvider.kind];
+
+    // A pasted URL that names a different host cannot be served by this source.
+    const configuredHost = sourceHostOf(sourceConnection.url);
+    if (host && configuredHost && host.trim().toLowerCase() !== configuredHost) {
+      return jsonResponse({
+        data: {
+          success: false,
+          error: `That URL points at ${host}, but the configured source is ${describeSource(sourceConnection)}.`,
+        },
+        status: 400,
+      });
+    }
+
+    // Prefer the pasted path segments: the source host knows how to split
+    // them (GitLab nests groups, GitHub and Gitea do not).
+    const resolvedPath =
+      (Array.isArray(path) && path.length > 0
+        ? sourceProvider.resolveRepositoryPath(path)
+        : null) ?? { owner: trimmedOwner, repo: trimmedRepo };
+
+    const normalizedFullName = `${resolvedPath.owner}/${resolvedPath.repo}`.toLowerCase();
 
     // Check if repository with the same owner, name, and userId already exists
     const [existingRepo] = await db
@@ -72,71 +118,46 @@ export const POST: APIRoute = async ({ request, locals }) => {
       });
     }
 
-    // Get user's active config — prefer active and most-recently-updated to avoid
-    // picking a stale inactive stub when multiple rows exist (see issue #271).
-    const [config] = await db
-      .select()
-      .from(configs)
-      .where(eq(configs.userId, userId))
-      .orderBy(sql`${configs.isActive} DESC`, sql`${configs.updatedAt} DESC`)
-      .limit(1);
-
-    if (!config) {
+    const repoData = await sourceProvider.getRepository(resolvedPath.owner, resolvedPath.repo);
+    if (!repoData) {
       return jsonResponse({
-        data: { error: "No configuration found for this user" },
+        data: {
+          success: false,
+          error: `Repository ${resolvedPath.owner}/${resolvedPath.repo} was not found on ${sourceLabel}`,
+        },
         status: 404,
       });
     }
-
-    const configId = config.id;
-
-    // Unauthenticated one-shot lookup for public repos.
-    // Uses bare Octokit (not createGitHubClient) to preserve fast-fail on the
-    // 60 req/hr public rate limit — this endpoint is user-facing, we don't
-    // want the throttling plugin to wait multiple retry-after windows.
-    // Still respects GH_API_URL / GITHUB_API_URL for GHES / GHEC data residency.
-    const baseUrl =
-      process.env.GH_API_URL ||
-      process.env.GITHUB_API_URL ||
-      "https://api.github.com";
-    const octokit = new Octokit({ baseUrl });
-
-    const { data: repoData } = await octokit.rest.repos.get({
-      owner: trimmedOwner,
-      repo: trimmedRepo,
-    });
 
     const baseMetadata = {
       userId,
       configId,
       name: repoData.name,
-      fullName: repoData.full_name,
-      normalizedFullName,
-      url: repoData.html_url,
-      cloneUrl: repoData.clone_url,
-      owner: repoData.owner.login,
-      organization:
-        repoData.owner.type === "Organization" ? repoData.owner.login : null,
-      isPrivate: repoData.private,
-      isForked: repoData.fork,
-      forkedFrom: null,
-      hasIssues: repoData.has_issues,
+      fullName: repoData.fullName,
+      normalizedFullName: repoData.fullName.toLowerCase(),
+      url: repoData.url,
+      cloneUrl: repoData.cloneUrl,
+      owner: repoData.owner,
+      organization: repoData.organization ?? null,
+      ...repositorySourceColumns(repoData),
+      isPrivate: repoData.isPrivate,
+      isForked: repoData.isForked,
+      forkedFrom: repoData.forkedFrom ?? null,
+      hasIssues: repoData.hasIssues,
       isStarred: false,
-      isArchived: repoData.archived,
+      isArchived: repoData.isArchived,
       size: repoData.size,
-      hasLFS: false,
-      hasSubmodules: false,
+      hasLFS: repoData.hasLFS,
+      hasSubmodules: repoData.hasSubmodules,
       language: repoData.language ?? null,
       description: repoData.description ?? null,
-      defaultBranch: repoData.default_branch,
-      visibility: (repoData.visibility ?? "public") as RepositoryVisibility,
+      defaultBranch: repoData.defaultBranch,
+      visibility: repoData.visibility,
       lastMirrored: existingRepo?.lastMirrored ?? null,
       errorMessage: existingRepo?.errorMessage ?? null,
       mirroredLocation: existingRepo?.mirroredLocation ?? "",
       destinationOrg: destinationOrg?.trim() || existingRepo?.destinationOrg || null,
-      updatedAt: repoData.updated_at
-        ? new Date(repoData.updated_at)
-        : new Date(),
+      updatedAt: repoData.updatedAt,
     };
 
     if (existingRepo && force) {
@@ -144,7 +165,6 @@ export const POST: APIRoute = async ({ request, locals }) => {
         .update(repositories)
         .set({
           ...baseMetadata,
-          normalizedFullName,
           configId,
         })
         .where(eq(repositories.id, existingRepo.id))
@@ -167,9 +187,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       mirroredLocation: "",
       destinationOrg: null,
       importedAt: new Date(),
-      createdAt: repoData.created_at
-        ? new Date(repoData.created_at)
-        : new Date(),
+      createdAt: repoData.createdAt,
       ...baseMetadata,
     } satisfies Repository;
 
@@ -186,7 +204,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       repositoryName: metadata.name,
       status: "imported",
       message: `Repository ${metadata.name} fetched successfully`,
-      details: `Repository ${metadata.name} was fetched from GitHub`,
+      details: `Repository ${metadata.name} was fetched from ${sourceLabel}`,
     });
 
     const resPayload: AddRepositoriesApiResponse = {

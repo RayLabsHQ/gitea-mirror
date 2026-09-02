@@ -1,4 +1,5 @@
 import type { APIRoute } from "astro";
+import { resolveSourceProviderKind } from "@/lib/source-providers";
 import { db, configs, repositories } from "@/lib/db";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { getGiteaRepoOwnerAsync, isRepoPresentInGitea } from "@/lib/gitea";
@@ -88,9 +89,11 @@ export const POST: APIRoute = async ({ request, locals }) => {
         ? getDecryptedGitHubToken(config)
         : null;
       const githubUsername = config.githubConfig?.owner || undefined;
-      const octokit = decryptedToken
-        ? createGitHubClient(decryptedToken, userId, githubUsername)
-        : null;
+      // Only GitHub sources need an API client while mirroring (metadata).
+      const octokit =
+        decryptedToken && resolveSourceProviderKind(config) === "github"
+          ? createGitHubClient(decryptedToken, userId, githubUsername)
+          : null;
 
       // Define the concurrency limit - adjust based on API rate limits
       const CONCURRENCY_LIMIT = 3;

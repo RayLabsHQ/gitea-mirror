@@ -9,6 +9,8 @@ import { db, repositories, organizations, mirrorJobs, configs } from './db';
 import { eq, and, lt, inArray, sql } from 'drizzle-orm';
 import { mirrorGithubRepoToGitea, syncGiteaRepo } from './gitea';
 import { createGitHubClient } from './github';
+import type { Octokit } from '@octokit/rest';
+import { resolveSourceProviderKind } from './source-providers';
 import { processWithResilience } from './utils/concurrency';
 import { repositoryVisibilityEnum, repoStatusEnum } from '@/types/Repository';
 import type { Repository } from './db/schema';
@@ -271,15 +273,18 @@ async function recoverMirrorJob(job: any, remainingItemIds: string[]) {
       throw new Error('GitHub token not found in configuration');
     }
 
-    // Create GitHub client with error handling and rate limit tracking
-    let octokit;
-    try {
-      const decryptedToken = getDecryptedGitHubToken(config);
-      const githubUsername = config.githubConfig?.owner || undefined;
-      const userId = config.userId || undefined;
-      octokit = createGitHubClient(decryptedToken, userId, githubUsername);
-    } catch (error) {
-      throw new Error(`Failed to create GitHub client: ${error instanceof Error ? error.message : String(error)}`);
+    // Only GitHub sources use an API client while mirroring (metadata).
+    // Other hosts get code-only mirrors through Gitea, so no client is built.
+    let octokit: Octokit | null = null;
+    if (resolveSourceProviderKind(config) === 'github') {
+      try {
+        const decryptedToken = getDecryptedGitHubToken(config);
+        const githubUsername = config.githubConfig?.owner || undefined;
+        const userId = config.userId || undefined;
+        octokit = createGitHubClient(decryptedToken, userId, githubUsername);
+      } catch (error) {
+        throw new Error(`Failed to create GitHub client: ${error instanceof Error ? error.message : String(error)}`);
+      }
     }
 
     // Process repositories with resilience and reduced concurrency for recovery

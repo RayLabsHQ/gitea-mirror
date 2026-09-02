@@ -1,89 +1,85 @@
 import type { APIRoute } from "astro";
-import { createGitHubClient } from "@/lib/github";
 import { createSecureErrorResponse } from "@/lib/utils";
+import {
+  SOURCE_PROVIDER_LABELS,
+  createSourceProvider,
+  isSourceNotFound,
+  normalizeSourceProviderKind,
+  normalizeSourceUrl,
+} from "@/lib/source-providers";
 
+function json(body: unknown, status: number): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+/**
+ * Test a source connection. The route keeps its /github/ path for
+ * compatibility, but serves every source provider: the body carries the
+ * provider and, for GitLab and Gitea, the instance URL.
+ */
 export const POST: APIRoute = async ({ request }) => {
-  try {
-    const body = await request.json();
-    const { token, username } = body;
+  const body = await request.json().catch(() => ({}));
+  const { token, username, provider: rawProvider, url } = body ?? {};
+  const provider = normalizeSourceProviderKind(rawProvider);
+  const label = SOURCE_PROVIDER_LABELS[provider];
 
+  try {
     if (!token) {
-      return new Response(
-        JSON.stringify({
-          success: false,
-          message: "GitHub token is required",
-        }),
-        {
-          status: 400,
-          headers: {
-            "Content-Type": "application/json",
-          },
-        }
-      );
+      return json({ success: false, message: `${label} token is required` }, 400);
     }
 
-    // Create an Octokit instance with the provided token.
-    // Uses createGitHubClient so GH_API_URL / GITHUB_API_URL routes the call
-    // to the correct endpoint for GHES / GHEC with data residency.
-    const octokit = createGitHubClient(token);
+    // GitHub honors GH_API_URL / GITHUB_API_URL for GHES / GHEC inside the adapter.
+    const sourceProvider = createSourceProvider({
+      provider,
+      url: normalizeSourceUrl(url, provider),
+      username: typeof username === "string" ? username : "",
+      token,
+    });
 
-    // Test the connection by fetching the authenticated user
-    const { data } = await octokit.users.getAuthenticated();
+    const account = await sourceProvider.testConnection();
 
     // Verify that the authenticated user matches the provided username (if provided)
-    if (username && data.login !== username) {
-      return new Response(
-        JSON.stringify({
-          success: false,
-          message: `Token belongs to ${data.login}, not ${username}`,
-        }),
-        {
-          status: 400,
-          headers: {
-            "Content-Type": "application/json",
-          },
-        }
+    if (username && account.login !== username) {
+      return json(
+        { success: false, message: `Token belongs to ${account.login}, not ${username}` },
+        400
       );
     }
 
-    // Return success response with user data
-    return new Response(
-      JSON.stringify({
-        success: true,
-        message: `Successfully connected to GitHub as ${data.login}`,
-        user: {
-          login: data.login,
-          name: data.name,
-          avatar_url: data.avatar_url,
-        },
-      }),
+    return json(
       {
-        status: 200,
-        headers: {
-          "Content-Type": "application/json",
+        success: true,
+        message: `Successfully connected to ${label} as ${account.login}`,
+        user: {
+          login: account.login,
+          name: account.name ?? null,
+          avatar_url: account.avatarUrl ?? null,
         },
-      }
+      },
+      200
     );
   } catch (error) {
-    console.error("GitHub connection test failed:", error);
+    console.error(`${label} connection test failed:`, error);
 
-    // Handle specific error types
-    if (error instanceof Error && (error as any).status === 401) {
-      return new Response(
-        JSON.stringify({
-          success: false,
-          message: "Invalid GitHub token",
-        }),
-        {
-          status: 401,
-          headers: {
-            "Content-Type": "application/json",
-          },
-        }
+    const status =
+      error && typeof error === "object" && "status" in error
+        ? (error as { status?: unknown }).status
+        : undefined;
+
+    if (status === 401 || status === 403) {
+      return json({ success: false, message: `Invalid ${label} token` }, 401);
+    }
+
+    if (isSourceNotFound(error)) {
+      return json(
+        { success: false, message: `${label} API endpoint not found. Please check the instance URL.` },
+        404
       );
     }
 
-    // Generic error response
-    return createSecureErrorResponse(error, "GitHub connection test", 500);
+    return createSecureErrorResponse(error, `${label} connection test`, 500);
   }
 };

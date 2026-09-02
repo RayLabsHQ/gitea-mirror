@@ -45,18 +45,26 @@ function stripWrapping(input: string): string {
     .trim();
 }
 
+export interface RepoReferenceParts {
+  /** Lowercased host of the pasted URL, or null for the owner/repo shorthand. */
+  host: string | null;
+  segments: string[];
+}
+
 /**
- * Reduce any accepted form to its path segments.
- * Returns null when the input is not a GitHub-shaped reference at all.
+ * Reduce any accepted form to its host and path segments.
+ * Returns null when the input is not a repository-shaped reference at all.
  */
-function toPathSegments(input: string): string[] | null {
+export function parseRepoReferenceParts(input: string): RepoReferenceParts | null {
   let value = stripWrapping(input);
   if (!value) return null;
+  let host: string | null = null;
 
   // git@github.com:owner/repo.git -> owner/repo.git
-  const sshMatch = value.match(/^(?:ssh:\/\/)?git@[^:/]+[:/](.+)$/i);
+  const sshMatch = value.match(/^(?:ssh:\/\/)?git@([^:/]+)[:/](.+)$/i);
   if (sshMatch) {
-    value = sshMatch[1];
+    host = sshMatch[1].toLowerCase();
+    value = sshMatch[2];
   } else if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value) || /^[^/\s]+\.[^/\s]+\//.test(value)) {
     // A full URL, or a bare host like "github.com/owner/repo".
     const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(value)
@@ -68,6 +76,7 @@ function toPathSegments(input: string): string[] | null {
     } catch {
       return null;
     }
+    host = url.host.toLowerCase();
     value = url.pathname;
   }
 
@@ -76,7 +85,52 @@ function toPathSegments(input: string): string[] | null {
     .map((segment) => segment.trim())
     .filter(Boolean);
 
-  return segments.length > 0 ? segments : null;
+  return segments.length > 0 ? { host, segments } : null;
+}
+
+function toPathSegments(input: string): string[] | null {
+  return parseRepoReferenceParts(input)?.segments ?? null;
+}
+
+/** Segments that start the "rest of the page" after owner/repo on a flat host. */
+const FLAT_HOST_DEEP_LINK_MARKERS = new Set([
+  "-",
+  "actions",
+  "blob",
+  "branches",
+  "commit",
+  "commits",
+  "compare",
+  "issues",
+  "projects",
+  "pull",
+  "pulls",
+  "releases",
+  "settings",
+  "src",
+  "tags",
+  "tree",
+  "wiki",
+]);
+
+/**
+ * Best effort owner/repo split for a host other than github.com. GitLab
+ * nests groups and marks deep links with a "-" segment; Gitea keeps a flat
+ * owner/repo layout. The server re-resolves from the raw segments through
+ * the configured source, so this only has to be good enough for the form.
+ */
+function splitNonGithubPath(segments: string[]): { owner: string; repo: string } | null {
+  const marker = segments.indexOf("-");
+  let path = marker === -1 ? segments : segments.slice(0, marker);
+  if (marker === -1 && path.length > 2 && FLAT_HOST_DEEP_LINK_MARKERS.has(path[2].toLowerCase())) {
+    path = path.slice(0, 2);
+  }
+  if (path.length < 2) return null;
+
+  const repo = path[path.length - 1].replace(GIT_SUFFIX, "");
+  const owner = path.slice(0, -1).join("/");
+  if (!isUsableRepoName(repo) || !owner) return null;
+  return { owner, repo };
 }
 
 function isUsableAccount(segment: string | undefined): segment is string {
@@ -98,11 +152,18 @@ function isUsableRepoName(segment: string | undefined): segment is string {
 export function parseGitHubRepoReference(
   input: string
 ): { owner: string; repo: string } | null {
-  const segments = toPathSegments(input);
-  if (!segments) return null;
+  const parts = parseRepoReferenceParts(input);
+  if (!parts) return null;
+  const { host, segments } = parts;
 
   // /orgs/<name>/... never names a repository.
   if (segments[0]?.toLowerCase() === "orgs") return null;
+
+  // Other hosts may nest the owner (GitLab groups) or use different reserved
+  // paths, so they get the looser split.
+  if (host && host !== "github.com" && !host.endsWith(".github.com")) {
+    return splitNonGithubPath(segments);
+  }
 
   const [owner, rawRepo] = segments;
   if (!isUsableAccount(owner)) return null;

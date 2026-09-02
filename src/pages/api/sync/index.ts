@@ -3,15 +3,13 @@ import { db, organizations, repositories, configs } from "@/lib/db";
 import { eq, and, sql } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { createMirrorJob } from "@/lib/helpers";
-import {
-  createGitHubClient,
-  getGithubOrganizations,
-  getGithubRepositories,
-  getGithubStarredRepositories,
-} from "@/lib/github";
+import { createSourceProviderFromConfig, SOURCE_PROVIDER_LABELS } from "@/lib/source-providers";
 import { jsonResponse, createSecureErrorResponse } from "@/lib/utils";
-import { mergeGitReposPreferStarred, calcBatchSizeForInsert } from "@/lib/repo-utils";
-import { getDecryptedGitHubToken } from "@/lib/utils/config-encryption";
+import {
+  mergeGitReposPreferStarred,
+  normalizeGitRepoToInsert,
+  calcBatchSizeForInsert,
+} from "@/lib/repo-utils";
 import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 import { isMirrorableGitHubRepo } from "@/lib/repo-eligibility";
 
@@ -39,15 +37,14 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     if (!config.githubConfig?.token) {
       return jsonResponse({
-        data: { error: "GitHub token is missing in config" },
+        data: { error: "Source token is missing in config" },
         status: 400,
       });
     }
 
-    // Decrypt the GitHub token before using it
-    const decryptedToken = getDecryptedGitHubToken(config);
-    const githubUsername = config.githubConfig?.owner || undefined;
-    const octokit = createGitHubClient(decryptedToken, userId, githubUsername);
+    // The configured source host, with its token decrypted
+    const sourceProvider = createSourceProviderFromConfig(config, { userId });
+    const sourceLabel = SOURCE_PROVIDER_LABELS[sourceProvider.kind];
 
     // Load ignored orgs from the DB so we can skip them during import
     const ignoredOrgRows = await db
@@ -56,13 +53,13 @@ export const POST: APIRoute = async ({ request, locals }) => {
       .where(and(eq(organizations.userId, userId), eq(organizations.status, "ignored")));
     const ignoredOrgNames = new Set(ignoredOrgRows.map((o) => o.normalizedName));
 
-    // Fetch GitHub data in parallel
+    // Fetch source data in parallel
     const [basicAndForkedRepos, starredRepos, orgResult] = await Promise.all([
-      getGithubRepositories({ octokit, config }),
+      sourceProvider.listRepositories(config),
       config.githubConfig?.includeStarred
-        ? getGithubStarredRepositories({ octokit, config })
+        ? sourceProvider.listStarredRepositories(config)
         : Promise.resolve([]),
-      getGithubOrganizations({ octokit, config, skipOrgNames: ignoredOrgNames }),
+      sourceProvider.listOrganizations(config, ignoredOrgNames),
     ]);
     const { organizations: gitOrgs, failedOrgs } = orgResult;
 
@@ -70,40 +67,11 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const allGithubRepos = mergeGitReposPreferStarred(basicAndForkedRepos, starredRepos);
     const mirrorableGithubRepos = allGithubRepos.filter(isMirrorableGitHubRepo);
 
-    // Prepare full list of repos and orgs
-    const newRepos = mirrorableGithubRepos.map((repo) => ({
-      id: uuidv4(),
-      userId,
-      configId: config.id,
-      name: repo.name,
-      fullName: repo.fullName,
-      normalizedFullName: repo.fullName.toLowerCase(),
-      url: repo.url,
-      cloneUrl: repo.cloneUrl,
-      owner: repo.owner,
-      organization: repo.organization ?? null,
-      mirroredLocation: repo.mirroredLocation || "",
-      destinationOrg: repo.destinationOrg || null,
-      isPrivate: repo.isPrivate,
-      isForked: repo.isForked,
-      forkedFrom: repo.forkedFrom ?? null,
-      hasIssues: repo.hasIssues,
-      isStarred: repo.isStarred,
-      isArchived: repo.isArchived,
-      size: repo.size,
-      hasLFS: repo.hasLFS,
-      hasSubmodules: repo.hasSubmodules,
-      language: repo.language ?? null,
-      description: repo.description ?? null,
-      defaultBranch: repo.defaultBranch,
-      visibility: repo.visibility,
-      status: repo.status,
-      lastMirrored: repo.lastMirrored ?? null,
-      errorMessage: repo.errorMessage ?? null,
-      importedAt: repo.importedAt,
-      createdAt: repo.createdAt,
-      updatedAt: repo.updatedAt,
-    }));
+    // Prepare full list of repos and orgs. The normalizer stamps the source
+    // provider and URL on every row.
+    const newRepos = mirrorableGithubRepos.map((repo) =>
+      normalizeGitRepoToInsert(repo, { userId, configId: config.id })
+    );
 
     const newOrgs = gitOrgs.map((org) => ({
       id: uuidv4(),
@@ -243,7 +211,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
           repositoryName: repo.name,
           status: "imported",
           message: `Repository ${repo.name} fetched successfully`,
-          details: `Repository ${repo.name} was fetched from GitHub`,
+          details: `Repository ${repo.name} was fetched from ${sourceLabel}`,
         })
       ),
       ...insertedOrgs.map((org) =>
@@ -253,7 +221,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
           organizationName: org.name,
           status: "imported",
           message: `Organization ${org.name} fetched successfully`,
-          details: `Organization ${org.name} was fetched from GitHub`,
+          details: `Organization ${org.name} was fetched from ${sourceLabel}`,
         })
       ),
     ];
@@ -272,6 +240,6 @@ export const POST: APIRoute = async ({ request, locals }) => {
       },
     });
   } catch (error) {
-    return createSecureErrorResponse(error, "GitHub data sync", 500);
+    return createSecureErrorResponse(error, "source data sync", 500);
   }
 };

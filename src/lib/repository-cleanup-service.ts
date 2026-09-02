@@ -6,9 +6,14 @@
 
 import { db, configs, repositories } from '@/lib/db';
 import { eq, and, or, sql, not, inArray } from 'drizzle-orm';
-import { createGitHubClient, getGithubRepositories, getGithubStarredRepositories } from '@/lib/github';
+import {
+  createSourceProviderFromConfig,
+  describeSource,
+  getRepositorySource,
+  isRepositoryFromConfiguredSource,
+} from '@/lib/source-providers';
 import { createGiteaClient, deleteGiteaRepo, archiveGiteaRepo, getGiteaRepoOwnerAsync, checkRepoLocation } from '@/lib/gitea';
-import { getDecryptedGitHubToken, getDecryptedGiteaToken } from '@/lib/utils/config-encryption';
+import { getDecryptedGiteaToken } from '@/lib/utils/config-encryption';
 import { publishEvent } from '@/lib/events';
 import { isMirrorableGitHubRepo } from '@/lib/repo-eligibility';
 
@@ -79,14 +84,30 @@ export function planOrphanedRepoAction(
  * These are repositories that exist in our database (and likely in Gitea)
  * but are no longer in GitHub based on current criteria
  */
+/**
+ * Split a stored full name into the owner path and repository name the
+ * source host expects. Falls back to the stored owner/name for rows whose
+ * full name does not contain a slash.
+ */
+export function splitFullName(
+  fullName: string,
+  fallbackOwner: string,
+  fallbackName: string
+): { owner: string; name: string } {
+  const segments = fullName.split('/').filter(Boolean);
+  if (segments.length < 2) {
+    return { owner: fallbackOwner, name: fallbackName };
+  }
+  return { owner: segments.slice(0, -1).join('/'), name: segments[segments.length - 1] };
+}
+
 async function identifyOrphanedRepositories(config: any): Promise<any[]> {
   const userId = config.userId;
   
   try {
-    // Get current GitHub repositories with rate limit tracking
-    const decryptedToken = getDecryptedGitHubToken(config);
-    const githubUsername = config.githubConfig?.owner || undefined;
-    const octokit = createGitHubClient(decryptedToken, userId, githubUsername);
+    // The configured source host (GitHub honors GH_API_URL and tracks rate limits)
+    const sourceProvider = createSourceProviderFromConfig(config, { userId });
+    const sourceConnection = sourceProvider.connection;
     
     let allGithubRepos = [];
     let githubApiAccessible = true;
@@ -98,14 +119,12 @@ async function identifyOrphanedRepositories(config: any): Promise<any[]> {
       // user later removed from the allowlist would be flagged as orphaned and
       // archived/deleted as soon as the user narrows those filters.
       const [basicAndForkedRepos, starredRepos] = await Promise.all([
-        getGithubRepositories({
-          octokit,
-          config,
+        sourceProvider.listRepositories(config, {
           includeCollaboratorReposOverride: true,
           includeAllOrgsOverride: true,
         }),
         config.githubConfig?.includeStarred
-          ? getGithubStarredRepositories({ octokit, config })
+          ? sourceProvider.listStarredRepositories(config)
           : Promise.resolve([]),
       ]);
       
@@ -151,6 +170,15 @@ async function identifyOrphanedRepositories(config: any): Promise<any[]> {
         return false;
       }
 
+      // Only the configured source can vouch for a repository. Rows imported
+      // from another host (the source was switched since) are left alone.
+      if (!isRepositoryFromConfiguredSource(repo, sourceConnection)) {
+        console.log(
+          `[Repository Cleanup] Skipping ${repo.fullName} - imported from ${describeSource(getRepositorySource(repo))}, not the configured source`
+        );
+        return false;
+      }
+
       // If starred repos are not being fetched from GitHub, we can't determine
       // if a starred repo is orphaned - skip it to prevent data loss
       if (repo.isStarred && !config.githubConfig?.includeStarred) {
@@ -185,19 +213,21 @@ async function identifyOrphanedRepositories(config: any): Promise<any[]> {
     // one repo's verification failure can't block the others.
     const verificationOutcomes = await Promise.allSettled(
       candidateOrphans.map(async (repo) => {
+        // Look the repository up by its full name: a GitLab project under a
+        // subgroup is stored with the top level group as owner, so owner/name
+        // would not resolve on the source host.
+        const upstreamPath = splitFullName(repo.fullName, repo.owner, repo.name);
+
         if (repo.isStarred) {
           try {
-            await octokit.rest.activity.checkRepoIsStarredByAuthenticatedUser({
-              owner: repo.owner,
-              repo: repo.name,
-            });
-            // Resolves (no throw) => still starred; the bulk star fetch
-            // missed it. Fail safe: do not treat as orphaned.
-            return { repo, directCheckConfirmsGone: false };
+            const stillStarred = await sourceProvider.isRepositoryStarred(
+              upstreamPath.owner,
+              upstreamPath.name
+            );
+            // Still starred => the bulk star fetch missed it. Fail safe: do
+            // not treat as orphaned. A clean "not starred" confirms it.
+            return { repo, directCheckConfirmsGone: !stillStarred };
           } catch (starError: any) {
-            if (starError?.status === 404) {
-              return { repo, directCheckConfirmsGone: true };
-            }
             console.warn(
               `[Repository Cleanup] Direct star-check for ${repo.fullName} failed with a non-404 error; skipping this cycle to be safe: ${
                 starError instanceof Error ? starError.message : String(starError)
@@ -208,14 +238,14 @@ async function identifyOrphanedRepositories(config: any): Promise<any[]> {
         }
 
         try {
-          await octokit.rest.repos.get({ owner: repo.owner, repo: repo.name });
-          // Resolves (no throw) => repo still exists; the bulk fetch missed
-          // it (e.g. an org-allowlist edge case). Fail safe: not orphaned.
-          return { repo, directCheckConfirmsGone: false };
+          const upstream = await sourceProvider.getRepository(
+            upstreamPath.owner,
+            upstreamPath.name
+          );
+          // Present => the bulk fetch missed it (e.g. an org-allowlist edge
+          // case). Fail safe: not orphaned. A clean 404 (null) confirms it.
+          return { repo, directCheckConfirmsGone: upstream === null };
         } catch (repoError: any) {
-          if (repoError?.status === 404) {
-            return { repo, directCheckConfirmsGone: true };
-          }
           console.warn(
             `[Repository Cleanup] Direct existence check for ${repo.fullName} failed with a non-404 error; skipping this cycle to be safe: ${
               repoError instanceof Error ? repoError.message : String(repoError)

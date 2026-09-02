@@ -1,4 +1,5 @@
 import type { APIRoute } from "astro";
+import { resolveSourceProviderKind } from "@/lib/source-providers";
 import { db, configs } from "@/lib/db";
 import { eq, sql } from "drizzle-orm";
 import {
@@ -36,6 +37,11 @@ export const GET: APIRoute = async ({ request, locals }) => {
         data: { success: false, message: "GitHub token is missing in config" },
         status: 400,
       });
+    }
+
+    // Star lists only exist on GitHub. Other sources simply have none.
+    if (resolveSourceProviderKind(config) !== "github") {
+      return jsonResponse({ data: { success: true, lists: [] }, status: 200 });
     }
 
     const token = getDecryptedGitHubToken(config);

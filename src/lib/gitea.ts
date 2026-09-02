@@ -13,7 +13,11 @@ import { db, organizations, repositories } from "./db";
 import { eq, and, ne } from "drizzle-orm";
 import { decryptConfigTokens } from "./utils/config-encryption";
 import { formatDateShort } from "./utils";
-import { buildGithubSourceAuthPayload } from "./utils/mirror-source-auth";
+import { buildSourceAuthPayload } from "./utils/mirror-source-auth";
+import {
+  assertRepositoryMatchesConfiguredSource,
+  resolveSourceConnection,
+} from "./source-providers";
 import {
   parseRepositoryMetadataState,
   serializeRepositoryMetadataState,
@@ -620,7 +624,7 @@ export const mirrorGithubRepoToGitea = async ({
   repository,
   config,
 }: {
-  octokit: Octokit;
+  octokit: Octokit | null;
   repository: Repository;
   config: Partial<Config>;
 }): Promise<any> => {
@@ -640,6 +644,10 @@ export const mirrorGithubRepoToGitea = async ({
 
     // Decrypt config tokens for API usage
     const decryptedConfig = decryptConfigTokens(config as Config);
+
+    // Never send another host's token: the repository must come from the
+    // source that is configured now.
+    assertRepositoryMatchesConfiguredSource({ repository, config });
 
     // Get the correct owner based on the strategy (with organization overrides)
     let repoOwner = await getGiteaRepoOwnerAsync({ config, repository });
@@ -968,19 +976,13 @@ export const mirrorGithubRepoToGitea = async ({
     // for subsequent mirror fetches. This prevents "terminal prompts disabled"
     // errors on public repos and raises GitHub API rate limits.
     {
-      const githubOwner =
-        (
-          config.githubConfig as typeof config.githubConfig & {
-            owner?: string;
-          }
-        ).owner || "";
-
+      const sourceConnection = resolveSourceConnection(config);
       Object.assign(
         migratePayload,
-        buildGithubSourceAuthPayload({
-          token: decryptedConfig.githubConfig.token,
-          githubOwner,
-          githubUsername: config.githubConfig.username,
+        buildSourceAuthPayload({
+          provider: sourceConnection.provider,
+          token: decryptedConfig.githubConfig?.token,
+          username: sourceConnection.username,
           repositoryOwner: repository.owner,
         })
       );
@@ -1010,7 +1012,7 @@ export const mirrorGithubRepoToGitea = async ({
 
     // Mirror releases if enabled (always allowed to rerun for updates).
     // mirrorOptions already accounts for org/repo overrides and starredCodeOnly.
-    const shouldMirrorReleases = mirrorOptions.mirrorReleases;
+    const shouldMirrorReleases = mirrorOptions.mirrorReleases && octokit !== null;
 
     console.log(
       `[Metadata] Release mirroring check: mirrorReleases=${mirrorOptions.mirrorReleases}, isStarred=${repository.isStarred}, starredCodeOnly=${config.githubConfig?.starredCodeOnly}, shouldMirrorReleases=${shouldMirrorReleases}`
@@ -1045,7 +1047,7 @@ export const mirrorGithubRepoToGitea = async ({
     // The underlying mirror* functions are idempotent: issues/PRs are
     // matched via [GH-ISSUE #N] / [GH-PR #N] markers and PATCHed in place,
     // labels are deduped by name, milestones by title.
-    const shouldMirrorIssuesThisRun = mirrorOptions.mirrorIssues;
+    const shouldMirrorIssuesThisRun = mirrorOptions.mirrorIssues && octokit !== null;
 
     console.log(
       `[Metadata] Issue mirroring check: mirrorIssues=${mirrorOptions.mirrorIssues}, isStarred=${repository.isStarred}, starredCodeOnly=${config.githubConfig?.starredCodeOnly}, shouldMirrorIssues=${shouldMirrorIssuesThisRun}`
@@ -1076,7 +1078,7 @@ export const mirrorGithubRepoToGitea = async ({
       }
     }
 
-    const shouldMirrorPullRequests = mirrorOptions.mirrorPullRequests;
+    const shouldMirrorPullRequests = mirrorOptions.mirrorPullRequests && octokit !== null;
 
     console.log(
       `[Metadata] Pull request mirroring check: mirrorPullRequests=${mirrorOptions.mirrorPullRequests}, isStarred=${repository.isStarred}, starredCodeOnly=${config.githubConfig?.starredCodeOnly}, shouldMirrorPullRequests=${shouldMirrorPullRequests}`
@@ -1108,7 +1110,7 @@ export const mirrorGithubRepoToGitea = async ({
 
     // Labels-only path; issues run above already creates/reconciles labels.
     const shouldMirrorLabels =
-      mirrorOptions.mirrorLabels && !shouldMirrorIssuesThisRun;
+      mirrorOptions.mirrorLabels && !shouldMirrorIssuesThisRun && octokit !== null;
 
     console.log(
       `[Metadata] Label mirroring check: mirrorLabels=${mirrorOptions.mirrorLabels}, issuesRunning=${shouldMirrorIssuesThisRun}, isStarred=${repository.isStarred}, starredCodeOnly=${config.githubConfig?.starredCodeOnly}, shouldMirrorLabels=${shouldMirrorLabels}`
@@ -1138,7 +1140,7 @@ export const mirrorGithubRepoToGitea = async ({
       }
     }
 
-    const shouldMirrorMilestones = mirrorOptions.mirrorMilestones;
+    const shouldMirrorMilestones = mirrorOptions.mirrorMilestones && octokit !== null;
 
     console.log(
       `[Metadata] Milestone mirroring check: mirrorMilestones=${mirrorOptions.mirrorMilestones}, isStarred=${repository.isStarred}, starredCodeOnly=${config.githubConfig?.starredCodeOnly}, shouldMirrorMilestones=${shouldMirrorMilestones}`
@@ -1469,7 +1471,7 @@ export async function mirrorGitHubRepoToGiteaOrg({
   giteaOrgId,
   orgName,
 }: {
-  octokit: Octokit;
+  octokit: Octokit | null;
   config: Partial<Config>;
   repository: Repository;
   giteaOrgId: number;
@@ -1489,6 +1491,10 @@ export async function mirrorGitHubRepoToGiteaOrg({
 
     // Decrypt config tokens for API usage
     const decryptedConfig = decryptConfigTokens(config as Config);
+
+    // Never send another host's token: the repository must come from the
+    // source that is configured now.
+    assertRepositoryMatchesConfiguredSource({ repository, config });
 
     // Determine the actual repository name to use (handle duplicates for starred repos)
     let targetRepoName = repository.name;
@@ -1727,19 +1733,13 @@ export async function mirrorGitHubRepoToGiteaOrg({
     // for subsequent mirror fetches. This prevents "terminal prompts disabled"
     // errors on public repos and raises GitHub API rate limits.
     {
-      const githubOwner =
-        (
-          config.githubConfig as typeof config.githubConfig & {
-            owner?: string;
-          }
-        )?.owner || "";
-
+      const sourceConnection = resolveSourceConnection(config);
       Object.assign(
         migratePayload,
-        buildGithubSourceAuthPayload({
+        buildSourceAuthPayload({
+          provider: sourceConnection.provider,
           token: decryptedConfig.githubConfig?.token,
-          githubOwner,
-          githubUsername: config.githubConfig?.username,
+          username: sourceConnection.username,
           repositoryOwner: repository.owner,
         })
       );
@@ -1768,7 +1768,7 @@ export async function mirrorGitHubRepoToGiteaOrg({
     let metadataUpdated = false;
 
     // mirrorOptions already accounts for org/repo overrides and starredCodeOnly.
-    const shouldMirrorReleases = mirrorOptions.mirrorReleases;
+    const shouldMirrorReleases = mirrorOptions.mirrorReleases && octokit !== null;
 
     console.log(
       `[Metadata] Release mirroring check: mirrorReleases=${mirrorOptions.mirrorReleases}, isStarred=${repository.isStarred}, starredCodeOnly=${config.githubConfig?.starredCodeOnly}, shouldMirrorReleases=${shouldMirrorReleases}`
@@ -1801,7 +1801,7 @@ export async function mirrorGitHubRepoToGiteaOrg({
 
     // Reconcile metadata on every sync. See note in mirrorGithubRepoToGitea
     // above. The underlying mirror* functions are idempotent.
-    const shouldMirrorIssuesThisRun = mirrorOptions.mirrorIssues;
+    const shouldMirrorIssuesThisRun = mirrorOptions.mirrorIssues && octokit !== null;
 
     console.log(
       `[Metadata] Issue mirroring check: mirrorIssues=${mirrorOptions.mirrorIssues}, isStarred=${repository.isStarred}, starredCodeOnly=${config.githubConfig?.starredCodeOnly}, shouldMirrorIssues=${shouldMirrorIssuesThisRun}`
@@ -1832,7 +1832,7 @@ export async function mirrorGitHubRepoToGiteaOrg({
       }
     }
 
-    const shouldMirrorPullRequests = mirrorOptions.mirrorPullRequests;
+    const shouldMirrorPullRequests = mirrorOptions.mirrorPullRequests && octokit !== null;
 
     console.log(
       `[Metadata] Pull request mirroring check: mirrorPullRequests=${mirrorOptions.mirrorPullRequests}, isStarred=${repository.isStarred}, starredCodeOnly=${config.githubConfig?.starredCodeOnly}, shouldMirrorPullRequests=${shouldMirrorPullRequests}`
@@ -1864,7 +1864,7 @@ export async function mirrorGitHubRepoToGiteaOrg({
 
     // Labels-only path; issues run above already creates/reconciles labels.
     const shouldMirrorLabels =
-      mirrorOptions.mirrorLabels && !shouldMirrorIssuesThisRun;
+      mirrorOptions.mirrorLabels && !shouldMirrorIssuesThisRun && octokit !== null;
 
     console.log(
       `[Metadata] Label mirroring check: mirrorLabels=${mirrorOptions.mirrorLabels}, issuesRunning=${shouldMirrorIssuesThisRun}, isStarred=${repository.isStarred}, starredCodeOnly=${config.githubConfig?.starredCodeOnly}, shouldMirrorLabels=${shouldMirrorLabels}`
@@ -1894,7 +1894,7 @@ export async function mirrorGitHubRepoToGiteaOrg({
       }
     }
 
-    const shouldMirrorMilestones = mirrorOptions.mirrorMilestones;
+    const shouldMirrorMilestones = mirrorOptions.mirrorMilestones && octokit !== null;
 
     console.log(
       `[Metadata] Milestone mirroring check: mirrorMilestones=${mirrorOptions.mirrorMilestones}, isStarred=${repository.isStarred}, starredCodeOnly=${config.githubConfig?.starredCodeOnly}, shouldMirrorMilestones=${shouldMirrorMilestones}`
@@ -2008,7 +2008,7 @@ export async function mirrorGitHubOrgRepoToGiteaOrg({
   orgName,
 }: {
   config: Partial<Config>;
-  octokit: Octokit;
+  octokit: Octokit | null;
   repository: Repository;
   orgName: string;
 }) {
@@ -2043,7 +2043,7 @@ export async function mirrorGitHubOrgToGitea({
   config,
 }: {
   organization: Organization;
-  octokit: Octokit;
+  octokit: Octokit | null;
   config: Partial<Config>;
 }) {
   try {

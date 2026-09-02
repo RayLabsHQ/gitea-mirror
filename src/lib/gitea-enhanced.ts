@@ -7,6 +7,7 @@
  */
 
 import type { Config } from "@/types/config";
+import { normalizeSourceProviderKind } from "@/lib/source-providers/kinds";
 import type { Repository } from "./db/schema";
 import type { Octokit } from "@octokit/rest";
 import { createGitHubClient } from "./github";
@@ -530,7 +531,9 @@ export async function syncGiteaRepoEnhanced({
       if (strategyNeedsDetection(backupStrategy) && !skipForcePushDetection) {
         try {
           const decryptedGithubToken = decryptedConfig.githubConfig?.token;
-          if (decryptedGithubToken) {
+          // Force-push detection compares branches through the GitHub API,
+          // so it only runs for GitHub sources.
+          if (decryptedGithubToken && normalizeSourceProviderKind(config.githubConfig?.provider) === "github") {
             const fpOctokit = createGitHubClient(decryptedGithubToken);
             const detectionResult = await detectForcePush({
               giteaUrl: config.giteaConfig.url,
@@ -753,7 +756,12 @@ export async function syncGiteaRepoEnhanced({
         if (metadataOctokit) {
           return metadataOctokit;
         }
-        if (!decryptedConfig.githubConfig?.token) {
+        // The token belongs to whichever host is configured; only GitHub's
+        // token can drive Octokit.
+        if (
+          !decryptedConfig.githubConfig?.token ||
+          normalizeSourceProviderKind(config.githubConfig?.provider) !== "github"
+        ) {
           return null;
         }
         metadataOctokit = createGitHubClient(decryptedConfig.githubConfig.token);

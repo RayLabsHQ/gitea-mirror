@@ -6,10 +6,10 @@ import type {
   AddOrganizationApiRequest,
   AddOrganizationApiResponse,
 } from "@/types/organizations";
-import type { RepositoryVisibility, RepoStatus } from "@/types/Repository";
+import type { RepoStatus } from "@/types/Repository";
 import { v4 as uuidv4 } from "uuid";
-import { decryptConfigTokens } from "@/lib/utils/config-encryption";
-import { createGitHubClient } from "@/lib/github";
+import { createSourceProviderFromConfig } from "@/lib/source-providers";
+import { normalizeGitRepoToInsert, calcBatchSizeForInsert } from "@/lib/repo-utils";
 import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 
 export const POST: APIRoute = async ({ request, locals }) => {
@@ -98,106 +98,46 @@ export const POST: APIRoute = async ({ request, locals }) => {
     }
 
     const configId = config.id;
-    
-    // Decrypt the config to get tokens
-    const decryptedConfig = decryptConfigTokens(config);
-    
-    // Check if we have a GitHub token
-    if (!decryptedConfig.githubConfig?.token) {
+
+    if (!config.githubConfig?.token) {
       return jsonResponse({
-        data: { error: "GitHub token not configured" },
+        data: { error: "Source token not configured" },
         status: 401,
       });
     }
-    
-    // Create authenticated Octokit instance with rate limit tracking
-    const githubUsername = decryptedConfig.githubConfig?.owner || undefined;
-    const octokit = createGitHubClient(
-      decryptedConfig.githubConfig.token,
-      userId,
-      githubUsername
-    );
+
+    // The configured source host, with its token decrypted
+    const sourceProvider = createSourceProviderFromConfig(config, { userId });
 
     // Fetch org metadata
-    const { data: orgData } = await octokit.orgs.get({ org: trimmedOrg });
+    const orgData = await sourceProvider.getOrganization(trimmedOrg);
+    if (!orgData) {
+      return jsonResponse({
+        data: {
+          success: false,
+          error: `Organization ${trimmedOrg} was not found on the configured source`,
+        },
+        status: 404,
+      });
+    }
 
-    // Fetch repos based on config settings
-    const allRepos = [];
-    
-    // Fetch all repos (public, private, and member) to show in UI
-    const publicRepos = await octokit.paginate(octokit.repos.listForOrg, {
-      org: trimmedOrg,
-      type: "public",
-      per_page: 100,
-    });
-    allRepos.push(...publicRepos);
-    
-    // Always fetch private repos to show them in the UI
-    const privateRepos = await octokit.paginate(octokit.repos.listForOrg, {
-      org: trimmedOrg,
-      type: "private",
-      per_page: 100,
-    });
-    allRepos.push(...privateRepos);
-    
-    // Also fetch member repos (includes private repos the user has access to)
-    const memberRepos = await octokit.paginate(octokit.repos.listForOrg, {
-      org: trimmedOrg,
-      type: "member",
-      per_page: 100,
-    });
-    // Filter out duplicates
-    const existingIds = new Set(allRepos.map(r => r.id));
-    const uniqueMemberRepos = memberRepos.filter(r => !existingIds.has(r.id));
-    allRepos.push(...uniqueMemberRepos);
-    const mirrorableRepos = allRepos.filter((repo) => !repo.disabled);
+    // Fetch every repository the token can see in the organization
+    const orgRepos = await sourceProvider.listOrganizationRepositories(trimmedOrg);
+    const mirrorableRepos = orgRepos.filter((repo) => repo.isDisabled !== true);
 
-    // Insert repositories
-    const repoRecords = mirrorableRepos.map((repo) => {
-      const normalizedOwner = repo.owner.login.trim().toLowerCase();
-      const normalizedRepoName = repo.name.trim().toLowerCase();
-
-      return {
-        id: uuidv4(),
-        userId,
-        configId,
-        name: repo.name,
-        fullName: repo.full_name,
-        normalizedFullName: `${normalizedOwner}/${normalizedRepoName}`,
-        url: repo.html_url,
-        cloneUrl: repo.clone_url ?? "",
-        owner: repo.owner.login,
-        organization:
-          repo.owner.type === "Organization" ? repo.owner.login : null,
-        mirroredLocation: "",
-        destinationOrg: null,
-        isPrivate: repo.private,
-        isForked: repo.fork,
-        forkedFrom: null,
-        hasIssues: repo.has_issues,
-        isStarred: false,
-        isArchived: repo.archived,
-        size: repo.size,
-        hasLFS: false,
-        hasSubmodules: false,
-        language: repo.language ?? null,
-        description: repo.description ?? null,
-        defaultBranch: repo.default_branch ?? "main",
-        visibility: (repo.visibility ?? "public") as RepositoryVisibility,
-        status: "imported" as RepoStatus,
-        lastMirrored: null,
-        errorMessage: null,
-        importedAt: new Date(),
-        createdAt: repo.created_at ? new Date(repo.created_at) : new Date(),
-        updatedAt: repo.updated_at ? new Date(repo.updated_at) : new Date(),
-      };
-    });
+    // Insert repositories. The normalizer stamps the source provider and URL.
+    const repoRecords = mirrorableRepos.map((repo) =>
+      normalizeGitRepoToInsert(
+        { ...repo, organization: repo.organization ?? orgData.name },
+        { userId, configId }
+      )
+    );
 
     // Batch insert repositories to avoid SQLite parameter limit
     // Compute batch size based on column count
     const sample = repoRecords[0];
     const columnCount = Object.keys(sample ?? {}).length || 1;
-    const BATCH_SIZE = Math.max(1, Math.floor(999 / columnCount));
+    const BATCH_SIZE = calcBatchSizeForInsert(columnCount);
     for (let i = 0; i < repoRecords.length; i += BATCH_SIZE) {
       const batch = repoRecords.slice(i, i + BATCH_SIZE);
       await db
@@ -211,15 +151,15 @@ export const POST: APIRoute = async ({ request, locals }) => {
       id: uuidv4(),
       userId,
       configId,
-      name: orgData.login,
+      name: orgData.name,
       normalizedName: normalizedOrg,
-      avatarUrl: orgData.avatar_url,
+      avatarUrl: orgData.avatarUrl,
       membershipRole: role,
       isIncluded: false,
       status: "imported" as RepoStatus,
-      repositoryCount: allRepos.length,
-      createdAt: orgData.created_at ? new Date(orgData.created_at) : new Date(),
-      updatedAt: orgData.updated_at ? new Date(orgData.updated_at) : new Date(),
+      repositoryCount: orgRepos.length,
+      createdAt: orgData.createdAt,
+      updatedAt: orgData.updatedAt,
     };
 
     await db.insert(organizations).values(organizationRecord);

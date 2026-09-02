@@ -10,6 +10,7 @@ import { syncGiteaRepo, mirrorGithubRepoToGitea } from '@/lib/gitea';
 import { getDecryptedGitHubToken } from '@/lib/utils/config-encryption';
 import { formatDuration } from '@/lib/utils/duration-parser';
 import type { Repository } from '@/lib/db/schema';
+import type { Octokit } from '@octokit/rest';
 import { repoStatusEnum, repositoryVisibilityEnum } from '@/types/Repository';
 import { mergeGitReposPreferStarred, normalizeGitRepoToInsert, calcBatchSizeForInsert } from '@/lib/repo-utils';
 import { isMirrorableGitHubRepo } from '@/lib/repo-eligibility';
@@ -98,21 +99,19 @@ async function runScheduledSync(config: any): Promise<void> {
     
     // Auto-discovery: Check for new GitHub repositories
     if (scheduleConfig.autoImport !== false) {
-      console.log(`[Scheduler] Checking for new GitHub repositories for user ${userId}...`);
+      console.log(`[Scheduler] Checking for new source repositories for user ${userId}...`);
       try {
-        const { getGithubRepositories, getGithubStarredRepositories, createGitHubClient } = await import('@/lib/github');
+        const { createSourceProviderFromConfig } = await import('@/lib/source-providers');
         const { v4: uuidv4 } = await import('uuid');
-        const { getDecryptedGitHubToken } = await import('@/lib/utils/config-encryption');
 
-        // Create GitHub client (honors GH_API_URL for GHES / GHEC data residency)
-        const decryptedToken = getDecryptedGitHubToken(config);
-        const octokit = createGitHubClient(decryptedToken, userId, config.githubConfig?.owner);
+        // The configured source host (GitHub honors GH_API_URL for GHES / GHEC)
+        const sourceProvider = createSourceProviderFromConfig(config, { userId });
 
-        // Fetch GitHub data
+        // Fetch source data
         const [basicAndForkedRepos, starredRepos] = await Promise.all([
-          getGithubRepositories({ octokit, config }),
+          sourceProvider.listRepositories(config),
           config.githubConfig?.includeStarred
-            ? getGithubStarredRepositories({ octokit, config })
+            ? sourceProvider.listStarredRepositories(config)
             : Promise.resolve([]),
         ]);
         const allGithubRepos = mergeGitReposPreferStarred(basicAndForkedRepos, starredRepos);
@@ -241,10 +240,15 @@ async function runScheduledSync(config: any): Promise<void> {
         if (reposNeedingMirror.length > 0) {
           console.log(`[Scheduler] Found ${reposNeedingMirror.length} repositories that need initial mirroring`);
 
-          // Prepare Octokit client (honors GH_API_URL for GHES / GHEC data residency)
-          const decryptedToken = getDecryptedGitHubToken(config);
-          const { createGitHubClient } = await import('@/lib/github');
-          const octokit = createGitHubClient(decryptedToken, userId, config.githubConfig?.owner);
+          // Only GitHub sources need an API client while mirroring (metadata).
+          // Other hosts get code-only mirrors through Gitea.
+          const { resolveSourceProviderKind } = await import('@/lib/source-providers');
+          let octokit: Octokit | null = null;
+          if (resolveSourceProviderKind(config) === 'github') {
+            const decryptedToken = getDecryptedGitHubToken(config);
+            const { createGitHubClient } = await import('@/lib/github');
+            octokit = createGitHubClient(decryptedToken, userId, config.githubConfig?.owner);
+          }
 
           // Process repositories in batches
           const batchSize = scheduleConfig.batchSize || 10;
@@ -510,19 +514,18 @@ async function performInitialAutoStart(): Promise<void> {
       
       try {
         // Step 1: Import repositories from GitHub
-        console.log(`[Scheduler] Step 1: Importing repositories from GitHub for user ${config.userId}...`);
-        const { getGithubRepositories, getGithubStarredRepositories, createGitHubClient } = await import('@/lib/github');
+        console.log(`[Scheduler] Step 1: Importing repositories from the configured source for user ${config.userId}...`);
+        const { createSourceProviderFromConfig } = await import('@/lib/source-providers');
         const { v4: uuidv4 } = await import('uuid');
 
-        // Create GitHub client (honors GH_API_URL for GHES / GHEC data residency)
-        const decryptedToken = getDecryptedGitHubToken(config);
-        const octokit = createGitHubClient(decryptedToken, config.userId, config.githubConfig?.owner);
+        // The configured source host (GitHub honors GH_API_URL for GHES / GHEC)
+        const sourceProvider = createSourceProviderFromConfig(config, { userId: config.userId });
         
-        // Fetch GitHub data
+        // Fetch source data
         const [basicAndForkedRepos, starredRepos] = await Promise.all([
-          getGithubRepositories({ octokit, config }),
+          sourceProvider.listRepositories(config),
           config.githubConfig?.includeStarred
-            ? getGithubStarredRepositories({ octokit, config })
+            ? sourceProvider.listStarredRepositories(config)
             : Promise.resolve([]),
         ]);
         const allGithubRepos = mergeGitReposPreferStarred(basicAndForkedRepos, starredRepos);
@@ -649,8 +652,15 @@ async function performInitialAutoStart(): Promise<void> {
         if (reposNeedingMirror.length > 0) {
           console.log(`[Scheduler] Found ${reposNeedingMirror.length} repositories that need mirroring`);
           
-          // Reuse the octokit instance from above
-          // (octokit was already created in the import phase)
+          // Only GitHub sources need an API client while mirroring (metadata).
+          // Other hosts get code-only mirrors through Gitea.
+          const { resolveSourceProviderKind } = await import('@/lib/source-providers');
+          let octokit: Octokit | null = null;
+          if (resolveSourceProviderKind(config) === 'github') {
+            const decryptedToken = getDecryptedGitHubToken(config);
+            const { createGitHubClient } = await import('@/lib/github');
+            octokit = createGitHubClient(decryptedToken, config.userId, config.githubConfig?.owner);
+          }
           
           // Process repositories in batches
           const batchSize = config.scheduleConfig?.batchSize || 5;

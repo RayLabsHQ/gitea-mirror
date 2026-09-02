@@ -1,4 +1,6 @@
 import type { APIRoute } from "astro";
+import type { Octokit } from "@octokit/rest";
+import { resolveSourceProviderKind } from "@/lib/source-providers";
 import type { MirrorRepoRequest, MirrorRepoResponse } from "@/types/mirror";
 import { db, configs, repositories } from "@/lib/db";
 import { and, eq, inArray, sql } from "drizzle-orm";
@@ -85,10 +87,14 @@ export const POST: APIRoute = async ({ request, locals }) => {
         throw new Error("GitHub token is missing.");
       }
 
-      // Create a single Octokit instance to be reused with rate limit tracking
-      const decryptedToken = getDecryptedGitHubToken(config);
-      const githubUsername = config.githubConfig?.owner || undefined;
-      const octokit = createGitHubClient(decryptedToken, userId, githubUsername);
+      // Only GitHub sources need an API client while mirroring (metadata).
+      // Other hosts get code-only mirrors through Gitea.
+      let octokit: Octokit | null = null;
+      if (resolveSourceProviderKind(config) === "github") {
+        const decryptedToken = getDecryptedGitHubToken(config);
+        const githubUsername = config.githubConfig?.owner || undefined;
+        octokit = createGitHubClient(decryptedToken, userId, githubUsername);
+      }
 
       // Define the concurrency limit - adjust based on API rate limits
       const CONCURRENCY_LIMIT = 3;

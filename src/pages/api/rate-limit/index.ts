@@ -1,4 +1,5 @@
 import type { APIRoute } from "astro";
+import { resolveSourceProviderKind } from "@/lib/source-providers";
 import { db, rateLimits } from "@/lib/db";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { jsonResponse, createSecureErrorResponse } from "@/lib/utils";
@@ -28,7 +29,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
         .orderBy(sql`${configs.isActive} DESC`, sql`${configs.updatedAt} DESC`)
         .limit(1);
 
-      if (config && config.githubConfig?.token) {
+      if (config && config.githubConfig?.token && resolveSourceProviderKind(config) === "github") {
         const decryptedToken = getDecryptedGitHubToken(config);
         const githubUsername = config.githubConfig?.owner || undefined;
         const octokit = createGitHubClient(decryptedToken, userId, githubUsername);

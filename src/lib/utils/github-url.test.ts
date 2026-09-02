@@ -99,3 +99,47 @@ describe("looksLikeUrl", () => {
     expect(looksLikeUrl("microsoft")).toBe(false);
   });
 });
+
+import { parseRepoReferenceParts } from "./github-url";
+
+describe("parseRepoReferenceParts", () => {
+  it("keeps the host and every path segment for the server to resolve", () => {
+    expect(parseRepoReferenceParts("https://GitLab.com/acme/tools/widget/-/tree/main")).toEqual({
+      host: "gitlab.com",
+      segments: ["acme", "tools", "widget", "-", "tree", "main"],
+    });
+    expect(parseRepoReferenceParts("git@codeberg.org:forgejo/forgejo.git")).toEqual({
+      host: "codeberg.org",
+      segments: ["forgejo", "forgejo.git"],
+    });
+    expect(parseRepoReferenceParts("vercel/next.js")).toEqual({
+      host: null,
+      segments: ["vercel", "next.js"],
+    });
+  });
+});
+
+describe("parseGitHubRepoReference on other hosts", () => {
+  it("keeps nested GitLab groups as the owner and cuts at the dash", () => {
+    expect(
+      parseGitHubRepoReference("https://gitlab.com/acme/tools/widget/-/issues/4")
+    ).toEqual({ owner: "acme/tools", repo: "widget" });
+    expect(parseGitHubRepoReference("https://gitlab.com/acme/widget.git")).toEqual({
+      owner: "acme",
+      repo: "widget",
+    });
+  });
+
+  it("stops at Gitea deep link markers on flat hosts", () => {
+    expect(
+      parseGitHubRepoReference("https://codeberg.org/forgejo/forgejo/src/branch/forgejo/README.md")
+    ).toEqual({ owner: "forgejo", repo: "forgejo" });
+  });
+
+  it("still parses github.com the strict way", () => {
+    expect(parseGitHubRepoReference("https://github.com/vercel/next.js/tree/canary")).toEqual({
+      owner: "vercel",
+      repo: "next.js",
+    });
+  });
+});
