@@ -66,4 +66,4 @@ See [ENVIRONMENT_VARIABLES.md](ENVIRONMENT_VARIABLES.md) for the full list.
 
 ## Not yet
 
-Several sources at once (the tracking issue is #375, the follow up is a list of sources in the card), targets other than Gitea/Forgejo (see the `feature/matrix` branch), and hosts without a usable API.
+Several sources at once (the tracking issue is #375, the follow up is a list of sources in the card), hosts without a usable API, and issues, merge requests and releases from GitLab, Gitea or Forgejo sources. GitHub and GitLab as destinations shipped in 3.31.0 through the push engine, see [PUSH_TARGETS.md](PUSH_TARGETS.md).

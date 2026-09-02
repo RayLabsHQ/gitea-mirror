@@ -25,7 +25,7 @@ A missing, malformed, expired or revoked key gets `401 Unauthorized`:
 { "success": false, "error": "Unauthorized" }
 ```
 
-If the app is served under a base path (`BASE_PATH=/mirror`), prefix every URL with it: `/mirror/api/...`.
+If the app is served under a path prefix (`BASE_URL=/mirror`), prefix every URL with it: `/mirror/api/...`.
 
 ## Endpoints
 
