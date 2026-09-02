@@ -99,6 +99,8 @@ GITHUB_TOKEN=...
 
 Code, tags, wiki and LFS are mirrored from every source. Issues, pull requests, releases, labels, milestones and star lists need a GitHub source and are skipped for the others.
 
+Once repositories have been imported the source is locked, and once anything has been mirrored the Gitea server URL is locked. A `SOURCE_PROVIDER`, `SOURCE_URL` or `GITEA_URL` value that disagrees with a locked host is ignored on boot with a warning; change the host on the Configuration page, where the change asks for confirmation.
+
 ### GitHub Enterprise (GHES / GHEC with data residency)
 
 Set `GH_API_URL` to point Octokit at a non-`github.com` API endpoint:
@@ -153,6 +155,7 @@ Settings for the destination Gitea instance.
 
 | Variable | Description | Default | Options |
 |----------|-------------|---------|---------|
+| `DESTINATION_PROVIDER` | Whether the destination is Gitea or Forgejo. Same API; changes labels and hints only. | `gitea` | `gitea`, `forgejo` |
 | `GITEA_URL` | Gitea instance URL | - | Valid URL |
 | `GITEA_EXTERNAL_URL` | Optional external/browser URL used for dashboard links. API and mirroring still use `GITEA_URL`. | - | Valid URL |
 | `GITEA_TOKEN` | Gitea access token | - | - |

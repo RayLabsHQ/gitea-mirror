@@ -84,6 +84,8 @@ export type MirrorOverrides = z.infer<typeof mirrorOverridesSchema>;
 
 export const giteaConfigSchema = z.object({
   url: z.url(),
+  // Gitea or Forgejo. Same API; only labels and hints differ.
+  provider: z.enum(["gitea", "forgejo"]).default("gitea"),
   externalUrl: z.url().optional(),
   token: z.string(),
   defaultOwner: z.string(),

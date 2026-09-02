@@ -8,6 +8,7 @@ import type {
   GiteaConfig,
   BackupStrategy,
   SourceProvider,
+  ConfigLockState,
 } from "@/types/config";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
@@ -37,6 +38,7 @@ import {
   SOURCE_PROVIDER_LABELS,
 } from "@/lib/source-providers/kinds";
 import { GitHubMirrorSettings } from "./GitHubMirrorSettings";
+import { HostLockNotice } from "./HostLockNotice";
 import {
   SettingsCard,
   SectionTitle,
@@ -56,11 +58,19 @@ interface GitHubConfigFormProps {
   setAdvancedOptions: React.Dispatch<React.SetStateAction<AdvancedOptions>>;
   giteaConfig?: GiteaConfig;
   setGiteaConfig?: React.Dispatch<React.SetStateAction<GiteaConfig>>;
-  onAutoSave?: (githubConfig: GitHubConfig) => Promise<void>;
+  onAutoSave?: (
+    githubConfig: GitHubConfig,
+    options?: { confirmSourceChange?: boolean }
+  ) => Promise<void>;
   onMirrorOptionsAutoSave?: (mirrorOptions: MirrorOptions) => Promise<void>;
   onAdvancedOptionsAutoSave?: (advancedOptions: AdvancedOptions) => Promise<void>;
-  onGiteaAutoSave?: (giteaConfig: GiteaConfig) => Promise<void>;
+  onGiteaAutoSave?: (
+    giteaConfig: GiteaConfig,
+    options?: { confirmDestinationChange?: boolean }
+  ) => Promise<void>;
   isAutoSaving?: boolean;
+  /** Set once repositories were imported: the source can only change with confirmation. */
+  sourceLock?: ConfigLockState["source"];
   /** Which card group to render: the connection card, or the settings stack
    *  (repository selection + destructive update protection). */
   part?: "connection" | "settings";
@@ -108,6 +118,8 @@ type SourceProviderMeta = {
   tokenSettingsPath: string;
   tokenSteps: string[];
   scopes: string[];
+  /** Short pill shown next to the option, e.g. BETA. */
+  badge?: string;
 };
 
 const sourceProviders: SourceProviderMeta[] = [
@@ -130,6 +142,7 @@ const sourceProviders: SourceProviderMeta[] = [
     value: "gitlab",
     label: SOURCE_PROVIDER_LABELS.gitlab,
     icon: SiGitlab,
+    badge: "BETA",
     usernamePlaceholder: "Your GitLab username",
     tokenPlaceholder: "Your GitLab personal access token",
     tokenHint: "Needed for private projects, groups, and starred projects",
@@ -172,9 +185,12 @@ export function GitHubConfigForm({
   onAdvancedOptionsAutoSave,
   onGiteaAutoSave,
   isAutoSaving,
+  sourceLock,
   part = "connection"
 }: GitHubConfigFormProps) {
   const [isLoading, setIsLoading] = useState(false);
+  const [sourceUnlocked, setSourceUnlocked] = useState(false);
+  const sourceLocked = Boolean(sourceLock?.locked) && !sourceUnlocked;
 
   const provider: SourceProvider = config.provider ?? "github";
   const providerMeta =
@@ -194,7 +210,7 @@ export function GitHubConfigForm({
     };
     setConfig(newConfig);
     if (onAutoSave) {
-      onAutoSave(newConfig);
+      onAutoSave(newConfig, { confirmSourceChange: sourceUnlocked });
     }
   };
 
@@ -208,9 +224,10 @@ export function GitHubConfigForm({
 
     setConfig(newConfig);
 
-    // Auto-save for all field changes
+    // Auto-save for all field changes. Once the source was unlocked through
+    // the dialog, the save carries the confirmation the API requires.
     if (onAutoSave) {
-      onAutoSave(newConfig);
+      onAutoSave(newConfig, { confirmSourceChange: sourceUnlocked });
     }
   };
 
@@ -282,7 +299,7 @@ export function GitHubConfigForm({
             >
               Source
             </Label>
-            <Select value={provider} onValueChange={handleProviderChange}>
+            <Select value={provider} onValueChange={handleProviderChange} disabled={sourceLocked}>
               <SelectTrigger id="source-provider" className="w-full">
                 <SelectValue />
               </SelectTrigger>
@@ -292,6 +309,11 @@ export function GitHubConfigForm({
                     <span className="flex items-center gap-2">
                       <option.icon className="h-3.5 w-3.5" />
                       {option.label}
+                      {option.badge && (
+                        <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-semibold tracking-wider text-muted-foreground">
+                          {option.badge}
+                        </span>
+                      )}
                     </span>
                   </SelectItem>
                 ))}
@@ -300,8 +322,26 @@ export function GitHubConfigForm({
             <p className="text-[11px] text-muted-foreground/80">
               {provider === "github"
                 ? "Where your repositories are pulled from"
-                : "Code, tags, wiki and LFS are mirrored. Issues, pull requests and releases need a GitHub source."}
+                : provider === "gitlab"
+                  ? "Beta. Code, tags, wiki and LFS are mirrored. Issues, merge requests and releases need a GitHub source."
+                  : "Code, tags, wiki and LFS are mirrored. Issues, pull requests and releases need a GitHub source."}
             </p>
+            {sourceLock?.locked && (
+              <HostLockNotice
+                summary={`${sourceLock.repositoryCount} ${
+                  sourceLock.repositoryCount === 1 ? "repository was" : "repositories were"
+                } imported from ${providerLabel}`}
+                title="Change the source?"
+                consequences={[
+                  "Repositories already imported stay tied to the current source and keep syncing through Gitea.",
+                  "Cleanup ignores them, and mirroring one of them again is refused until it is removed and added from the new source.",
+                  "New imports come from the new source only.",
+                ]}
+                changeLabel="Change source"
+                unlocked={sourceUnlocked}
+                onUnlock={() => setSourceUnlocked(true)}
+              />
+            )}
           </div>
 
           {provider !== "github" && (
@@ -319,6 +359,7 @@ export function GitHubConfigForm({
                 value={config.url ?? ""}
                 onChange={handleChange}
                 placeholder={defaultInstanceUrl}
+                disabled={sourceLocked}
               />
               <p className="text-[11px] text-muted-foreground/80">
                 {`Leave empty for ${defaultInstanceUrl.replace(/^https?:\/\//, "")}, or enter the base URL of your own instance`}

@@ -13,6 +13,7 @@ import {
   normalizeSourceProviderKind,
   normalizeSourceUrl,
 } from "@/lib/source-providers/kinds";
+import { normalizeDestinationProviderKind } from "@/lib/destination-kinds";
 import { z } from "zod";
 import { githubConfigSchema, giteaConfigSchema, scheduleConfigSchema, cleanupConfigSchema } from "@/lib/db/schema";
 import { parseInterval } from "@/lib/utils/duration-parser";
@@ -122,6 +123,9 @@ export function mapUiToDbConfig(
   // Map Gitea config to match database schema
   const dbGiteaConfig: DbGiteaConfig = {
     url: giteaConfig.url,
+    provider: normalizeDestinationProviderKind(
+      giteaConfig.provider ?? existing?.giteaConfig?.provider
+    ),
     externalUrl: giteaConfig.externalUrl?.trim() || undefined,
     token: giteaConfig.token,
     defaultOwner: giteaConfig.username, // Map username to defaultOwner
@@ -207,6 +211,7 @@ export function mapDbToUiConfig(dbConfig: any): {
 
   // Map from database Gitea config to UI fields
   const giteaConfig: GiteaConfig = {
+    provider: normalizeDestinationProviderKind(dbConfig.giteaConfig?.provider),
     url: dbConfig.giteaConfig?.url || "",
     externalUrl: dbConfig.giteaConfig?.externalUrl || "",
     username: dbConfig.giteaConfig?.defaultOwner || "", // Map defaultOwner to username

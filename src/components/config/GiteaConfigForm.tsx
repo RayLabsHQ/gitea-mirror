@@ -1,9 +1,24 @@
 import React, { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Activity, AlertTriangle, Building2, Info, PlugZap, Server } from "lucide-react";
+import { Activity, AlertTriangle, Building2, Info, PlugZap } from "lucide-react";
+import { SiForgejo, SiGitea } from "react-icons/si";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { DESTINATION_PROVIDER_LABELS } from "@/lib/destination-kinds";
+import { HostLockNotice } from "./HostLockNotice";
 import { giteaApi, type GiteaServerInfo } from "@/lib/api";
-import type { GiteaConfig, MirrorStrategy } from "@/types/config";
+import type {
+  ConfigLockState,
+  DestinationProvider,
+  GiteaConfig,
+  MirrorStrategy,
+} from "@/types/config";
 import { toast } from "sonner";
 import { OrganizationStrategy } from "./OrganizationStrategy";
 import { OrganizationConfiguration } from "./OrganizationConfiguration";
@@ -19,15 +34,43 @@ import {
 interface GiteaConfigFormProps {
   config: GiteaConfig;
   setConfig: React.Dispatch<React.SetStateAction<GiteaConfig>>;
-  onAutoSave?: (giteaConfig: GiteaConfig) => Promise<void>;
+  onAutoSave?: (
+    giteaConfig: GiteaConfig,
+    options?: { confirmDestinationChange?: boolean }
+  ) => Promise<void>;
   isAutoSaving?: boolean;
   githubUsername?: string;
+  /** Set once repositories were mirrored: the destination can only change with confirmation. */
+  destinationLock?: ConfigLockState["destination"];
   /** Which card to render: the connection card or the organization card. */
   part?: "connection" | "organization";
 }
 
-export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, githubUsername, part = "connection" }: GiteaConfigFormProps) {
+const destinationProviders: {
+  value: DestinationProvider;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+}[] = [
+  { value: "gitea", label: DESTINATION_PROVIDER_LABELS.gitea, icon: SiGitea },
+  { value: "forgejo", label: DESTINATION_PROVIDER_LABELS.forgejo, icon: SiForgejo },
+];
+
+export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, githubUsername, destinationLock, part = "connection" }: GiteaConfigFormProps) {
   const [isLoading, setIsLoading] = useState(false);
+  const [destinationUnlocked, setDestinationUnlocked] = useState(false);
+  const destinationLocked = Boolean(destinationLock?.locked) && !destinationUnlocked;
+  const provider: DestinationProvider = config.provider ?? "gitea";
+  const providerMeta =
+    destinationProviders.find((option) => option.value === provider) ?? destinationProviders[0];
+  const providerLabel = providerMeta.label;
+
+  const handleProviderChange = (value: string) => {
+    const newConfig: GiteaConfig = { ...config, provider: value as DestinationProvider };
+    setConfig(newConfig);
+    if (onAutoSave) {
+      onAutoSave(newConfig, { confirmDestinationChange: destinationUnlocked });
+    }
+  };
   const [serverInfo, setServerInfo] = useState<GiteaServerInfo | null>(null);
 
   // Derive the mirror strategy from existing config for backward compatibility
@@ -119,15 +162,16 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
     };
     setConfig(newConfig);
 
-    // Auto-save for all field changes
+    // Auto-save for all field changes. Once the destination was unlocked
+    // through the dialog, the save carries the confirmation the API requires.
     if (onAutoSave) {
-      onAutoSave(newConfig);
+      onAutoSave(newConfig, { confirmDestinationChange: destinationUnlocked });
     }
   };
 
   const testConnection = async () => {
     if (!config.url || !config.token) {
-      toast.error("Gitea URL and token are required to test the connection");
+      toast.error(`${providerLabel} URL and token are required to test the connection`);
       return;
     }
 
@@ -157,8 +201,8 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
   if (part === "connection") {
     return (
       <SettingsCard
-        icon={Server}
-        title="Gitea Connection"
+        icon={providerMeta.icon}
+        title={`${providerLabel} Connection`}
         headerAction={
           <div className="flex items-center gap-3">
             {isAutoSaving && (
@@ -214,6 +258,49 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
 
           <div className="space-y-1.5">
             <Label
+              htmlFor="destination-provider"
+              className="text-xs font-medium text-muted-foreground"
+            >
+              Destination
+            </Label>
+            <Select value={provider} onValueChange={handleProviderChange} disabled={destinationLocked}>
+              <SelectTrigger id="destination-provider" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {destinationProviders.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    <span className="flex items-center gap-2">
+                      <option.icon className="h-3.5 w-3.5" />
+                      {option.label}
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-[11px] text-muted-foreground/80">
+              Where mirrors are created. Gitea and Forgejo share the same API.
+            </p>
+            {destinationLock?.locked && (
+              <HostLockNotice
+                summary={`${destinationLock.mirroredCount} ${
+                  destinationLock.mirroredCount === 1 ? "repository is" : "repositories are"
+                } mirrored to this ${providerLabel}`}
+                title="Change the destination?"
+                consequences={[
+                  "Existing mirrors stay on the current server and are not moved.",
+                  "Syncing them from here fails until they exist on the new server or are removed and mirrored again.",
+                  "New mirrors go to the new server only.",
+                ]}
+                changeLabel="Change destination"
+                unlocked={destinationUnlocked}
+                onUnlock={() => setDestinationUnlocked(true)}
+              />
+            )}
+          </div>
+
+          <div className="space-y-1.5">
+            <Label
               htmlFor="gitea-username"
               className="text-xs font-medium text-muted-foreground"
             >
@@ -225,7 +312,7 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
               type="text"
               value={config.username}
               onChange={handleChange}
-              placeholder="Your Gitea username"
+              placeholder={`Your ${providerLabel} username`}
               required
             />
           </div>
@@ -243,7 +330,8 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
               type="url"
               value={config.url}
               onChange={handleChange}
-              placeholder="https://your-gitea-instance.com"
+              placeholder={`https://your-${provider}-instance.com`}
+              disabled={destinationLocked}
               required
             />
           </div>
@@ -281,11 +369,11 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
               type="password"
               value={config.token}
               onChange={handleChange}
-              placeholder="Your Gitea access token"
+              placeholder={`Your ${providerLabel} access token`}
               required
             />
             <p className="text-[11px] text-muted-foreground/80">
-              Create one in Gitea under Settings → Applications
+              {`Create one in ${providerLabel} under Settings → Applications`}
             </p>
           </div>
         </CardSection>

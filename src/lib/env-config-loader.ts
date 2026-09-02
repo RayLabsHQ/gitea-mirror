@@ -8,6 +8,8 @@ import { eq, and, sql } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import { encrypt } from '@/lib/utils/encryption';
 import { isSourceProviderKind, type SourceProviderKind } from '@/lib/source-providers/kinds';
+import { isDestinationProviderKind, type DestinationProviderKind } from '@/lib/destination-kinds';
+import { hasDestinationChanged, hasSourceChanged, loadConfigLocks } from '@/lib/config-locks';
 
 interface EnvConfig {
   github: {
@@ -35,6 +37,7 @@ interface EnvConfig {
     mirrorStrategy?: 'preserve' | 'single-org' | 'flat-user' | 'mixed';
   };
   gitea: {
+    provider?: DestinationProviderKind;
     url?: string;
     externalUrl?: string;
     username?: string;
@@ -148,6 +151,10 @@ function parseEnvConfig(): EnvConfig {
       mirrorStrategy: process.env.MIRROR_STRATEGY as 'preserve' | 'single-org' | 'flat-user' | 'mixed',
     },
     gitea: {
+      // DESTINATION_PROVIDER picks Gitea or Forgejo (labels only, same API).
+      provider: isDestinationProviderKind(process.env.DESTINATION_PROVIDER)
+        ? process.env.DESTINATION_PROVIDER
+        : undefined,
       url: process.env.GITEA_URL,
       externalUrl: process.env.GITEA_EXTERNAL_URL,
       username: process.env.GITEA_USERNAME,
@@ -272,6 +279,32 @@ export async function initializeConfigFromEnv(): Promise<void> {
       .orderBy(sql`${configs.isActive} DESC`, sql`${configs.updatedAt} DESC`)
       .limit(1);
 
+    // A source with imported repositories, or a destination with mirrors, is
+    // locked: an environment variable that disagrees is ignored with a
+    // warning rather than switching hosts underneath existing mirrors. The
+    // Configuration page can still change them, with confirmation.
+    if (existingConfig[0]) {
+      const stored = existingConfig[0];
+      const locks = await loadConfigLocks(userId);
+      const incomingSource = {
+        provider: envConfig.github.provider ?? stored.githubConfig?.provider,
+        url: envConfig.github.url ?? stored.githubConfig?.url,
+      };
+      if (locks.source.locked && hasSourceChanged(stored.githubConfig, incomingSource)) {
+        console.warn(
+          `[ENV Config Loader] Ignoring SOURCE_PROVIDER/SOURCE_URL: the source is locked because ${locks.source.repositoryCount} repositories were imported from it. Change it on the Configuration page.`
+        );
+        envConfig.github.provider = undefined;
+        envConfig.github.url = undefined;
+      }
+      if (locks.destination.locked && hasDestinationChanged(stored.giteaConfig?.url, envConfig.gitea.url)) {
+        console.warn(
+          `[ENV Config Loader] Ignoring GITEA_URL: the destination is locked because ${locks.destination.mirroredCount} repositories are mirrored to it. Change it on the Configuration page.`
+        );
+        envConfig.gitea.url = undefined;
+      }
+    }
+
     // Determine mirror strategy based on environment variables or use explicit value
     let mirrorStrategy: 'preserve' | 'single-org' | 'flat-user' | 'mixed' = 'preserve';
     if (envConfig.github.mirrorStrategy) {
@@ -314,6 +347,7 @@ export async function initializeConfigFromEnv(): Promise<void> {
     // Build Gitea config
     const giteaConfig = {
       url: envConfig.gitea.url || existingConfig?.[0]?.giteaConfig?.url || '',
+      provider: envConfig.gitea.provider || existingConfig?.[0]?.giteaConfig?.provider || 'gitea',
       externalUrl: envConfig.gitea.externalUrl || existingConfig?.[0]?.giteaConfig?.externalUrl || undefined,
       token: envConfig.gitea.token ? encrypt(envConfig.gitea.token) : existingConfig?.[0]?.giteaConfig?.token || '',
       defaultOwner: envConfig.gitea.username || existingConfig?.[0]?.giteaConfig?.defaultOwner || '',

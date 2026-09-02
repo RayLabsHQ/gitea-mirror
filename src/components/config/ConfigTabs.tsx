@@ -16,6 +16,7 @@ import type {
   MirrorOptions,
   AdvancedOptions,
   NotificationConfig,
+  ConfigLockState,
 } from '@/types/config';
 import { Button } from '../ui/button';
 import { useAuth } from '@/hooks/useAuth';
@@ -52,6 +53,7 @@ export function ConfigTabs() {
       starredLists: [],
     },
     giteaConfig: {
+      provider: 'gitea',
       url: '',
       externalUrl: '',
       username: '',
@@ -108,6 +110,8 @@ export function ConfigTabs() {
   const { user } = useAuth();
   const [isLoading, setIsLoading] = useState(true);
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  // Source and destination locks from the API; null until the config is loaded.
+  const [locks, setLocks] = useState<ConfigLockState | null>(null);
 
   const [isAutoSavingSchedule, setIsAutoSavingSchedule] = useState<boolean>(false);
   const [isAutoSavingCleanup, setIsAutoSavingCleanup] = useState<boolean>(false);
@@ -315,7 +319,10 @@ export function ConfigTabs() {
   }, [user?.id, config.githubConfig, config.giteaConfig, config.scheduleConfig]);
 
   // Auto-save function specifically for GitHub config changes
-  const autoSaveGitHubConfig = useCallback(async (githubConfig: GitHubConfig) => {
+  const autoSaveGitHubConfig = useCallback(async (
+    githubConfig: GitHubConfig,
+    options: { confirmSourceChange?: boolean } = {},
+  ) => {
     if (!user?.id) return;
 
     // Clear any existing timeout
@@ -335,6 +342,7 @@ export function ConfigTabs() {
         cleanupConfig: config.cleanupConfig,
         mirrorOptions: config.mirrorOptions,
         advancedOptions: config.advancedOptions,
+        ...(options.confirmSourceChange ? { confirmSourceChange: true } : {}),
       };
 
       try {
@@ -364,7 +372,10 @@ export function ConfigTabs() {
   }, [user?.id, config.giteaConfig, config.scheduleConfig, config.cleanupConfig]);
 
   // Auto-save function specifically for Gitea config changes
-  const autoSaveGiteaConfig = useCallback(async (giteaConfig: GiteaConfig) => {
+  const autoSaveGiteaConfig = useCallback(async (
+    giteaConfig: GiteaConfig,
+    options: { confirmDestinationChange?: boolean } = {},
+  ) => {
     if (!user?.id) return;
 
     // Clear any existing timeout
@@ -384,6 +395,7 @@ export function ConfigTabs() {
         cleanupConfig: config.cleanupConfig,
         mirrorOptions: config.mirrorOptions,
         advancedOptions: config.advancedOptions,
+        ...(options.confirmDestinationChange ? { confirmDestinationChange: true } : {}),
       };
 
       try {
@@ -563,6 +575,7 @@ export function ConfigTabs() {
           { method: 'GET' },
         );
         if (response && !response.error) {
+          setLocks(response.locks ?? null);
           setConfig({
             githubConfig: {
               ...config.githubConfig,
@@ -764,6 +777,7 @@ export function ConfigTabs() {
               onAdvancedOptionsAutoSave: autoSaveAdvancedOptions,
               onGiteaAutoSave: autoSaveGiteaConfig,
               isAutoSaving: isAutoSavingGitHub,
+              sourceLock: locks?.source,
             };
             const giteaFormProps = {
               config: config.giteaConfig,
@@ -778,6 +792,7 @@ export function ConfigTabs() {
               onAutoSave: autoSaveGiteaConfig,
               isAutoSaving: isAutoSavingGitea,
               githubUsername: config.githubConfig.username,
+              destinationLock: locks?.destination,
             };
             return (
               <>

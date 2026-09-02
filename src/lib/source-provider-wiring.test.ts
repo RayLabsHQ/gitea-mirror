@@ -84,3 +84,29 @@ describe("discovery and housekeeping go through the source provider", () => {
     expect(read("repo-utils.ts")).toContain("repositorySourceColumns(repo)");
   });
 });
+
+describe("source and destination locks", () => {
+  test("the config API reports locks and refuses unconfirmed changes to a locked host", () => {
+    const source = read("..", "pages", "api", "config", "index.ts");
+    expect(source).toContain("loadConfigLocks(userId)");
+    expect(source).toContain("evaluateConfigChange({");
+    expect(source).toContain("status: 409");
+    // Every GET branch carries the locks so the page can disable the fields.
+    expect(count(source, "locks,\n")).toBeGreaterThanOrEqual(3);
+  });
+
+  test("environment variables cannot switch a locked host on boot", () => {
+    const source = read("env-config-loader.ts");
+    expect(source).toContain("hasSourceChanged(stored.githubConfig, incomingSource)");
+    expect(source).toContain("hasDestinationChanged(stored.giteaConfig?.url, envConfig.gitea.url)");
+  });
+
+  test("both connection cards disable the host fields while locked and confirm through the dialog", () => {
+    const github = read("..", "components", "config", "GitHubConfigForm.tsx");
+    expect(github).toContain("disabled={sourceLocked}");
+    expect(github).toContain("confirmSourceChange: sourceUnlocked");
+    const gitea = read("..", "components", "config", "GiteaConfigForm.tsx");
+    expect(gitea).toContain("disabled={destinationLocked}");
+    expect(gitea).toContain("confirmDestinationChange: destinationUnlocked");
+  });
+});
