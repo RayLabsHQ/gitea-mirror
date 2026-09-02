@@ -367,3 +367,68 @@ jobs:
           git add package.json helm/gitea-mirror/Chart.yaml
           git commit -m "chore: sync version to ${APP_VERSION}"
           git push origin "HEAD:${TARGET_BRANCH}"
+
+  publish-helm-chart:
+    name: Publish Helm chart to ghcr.io
+    # Runs after the image for this tag is on the registry, so the chart never
+    # points at an image that does not exist yet. The chart version and
+    # appVersion both follow the release version.
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: docker
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout tag
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: version
+        env:
+          TAG_VERSION: ${{ github.ref_name }}
+        run: |
+          if [[ ! "$TAG_VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "::error::Release tag '${TAG_VERSION}' is invalid. Expected semver tag format like v1.2.3 or v1.2.3-rc.1"
+            exit 1
+          fi
+          echo "version=${TAG_VERSION#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.19.0
+
+      - name: Lint and package chart
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          helm lint ./helm/gitea-mirror
+          helm package ./helm/gitea-mirror \
+            --version "$VERSION" \
+            --app-version "$VERSION" \
+            --destination dist
+
+      - name: Log into registry
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          echo "$GITHUB_TOKEN" | helm registry login "$REGISTRY" --username "$ACTOR" --password-stdin
+
+      - name: Push chart
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          OWNER_LC="$(echo "$OWNER" | tr '[:upper:]' '[:lower:]')"
+          helm push "dist/gitea-mirror-${VERSION}.tgz" "oci://${REGISTRY}/${OWNER_LC}/charts"
+          {
+            echo "### Helm chart ${VERSION} published"
+            echo
+            echo '```bash'
+            echo "helm upgrade --install gitea-mirror oci://${REGISTRY}/${OWNER_LC}/charts/gitea-mirror --version ${VERSION}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
