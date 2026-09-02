@@ -258,6 +258,7 @@ async function resetPassword() {
         accountId: user.id,
         userId: user.id,
         providerId: "credential",
+        issuer: "local:credential", // better-auth 1.7 keys accounts by issuer
         password: hashedPassword,
         createdAt: now,
         updatedAt: now,

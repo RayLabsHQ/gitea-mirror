@@ -37,7 +37,9 @@ function toLegacyApplication(row: typeof oauthClients.$inferSelect) {
     clientId: row.clientId,
     name: row.name ?? "",
     redirectURLs: parseRedirectUris(row.redirectUris).join(","),
-    type: row.type ?? "web",
+    // better-auth 1.7 stores the OAuth application type in application_type;
+    // rows registered on 1.6 still carry it in the legacy type column.
+    type: row.applicationType ?? row.type ?? "web",
     disabled: row.disabled ?? false,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -98,7 +100,8 @@ export async function POST(context: APIContext) {
       body: {
         client_name: name,
         redirect_uris,
-        type,
+        // 1.7 renamed the registration field and narrowed it to web or native.
+        application_type: type === "native" ? "native" : "web",
       },
     });
 

@@ -5,6 +5,7 @@ import { readFileSync } from "fs";
 import path from "path";
 import {
   repairDuplicateSsoColumns,
+  repairStrandedBetterAuth17Schema,
   restoreSsoDataAfter0013,
 } from "../src/lib/db/migration-repairs";
 
@@ -408,6 +409,100 @@ function verify0015Migration(db: any) {
   );
 }
 
+function seedPre0016Database(db: any) {
+  // Migrations 0000-0015 have run: accounts have no issuer column and the
+  // OAuth provider tables are in their better-auth 1.6 shape. Seed one
+  // account of each kind so the issuer backfill can be checked, plus a row
+  // in every OAuth table the 1.7 column adds touch.
+  db.run("INSERT INTO users (id, email, username, name) VALUES ('u-16', 'u16@example.com', 'u16', 'User Sixteen')");
+  db.run("INSERT INTO accounts (id, account_id, user_id, provider_id, password) VALUES ('acct-cred', 'u-16', 'u-16', 'credential', 'hashed')");
+  db.run("INSERT INTO sso_providers (id, issuer, domain, oidc_config, user_id, provider_id) VALUES ('sso-16', 'https://idp.example.com', 'example.com', '{}', 'u-16', 'example-oidc')");
+  db.run("INSERT INTO accounts (id, account_id, user_id, provider_id) VALUES ('acct-sso', 'sub-123', 'u-16', 'example-oidc')");
+  db.run("INSERT INTO accounts (id, account_id, user_id, provider_id) VALUES ('acct-oauth', 'gh-123', 'u-16', 'github')");
+  db.run("INSERT INTO oauth_clients (id, client_id, redirect_uris) VALUES ('app-16', 'client-16', '[\"https://example.com/cb\"]')");
+  db.run("INSERT INTO oauth_access_tokens (id, token, client_id, user_id, scopes) VALUES ('at-16', 'access-16', 'client-16', 'u-16', '[\"openid\"]')");
+  db.run("INSERT INTO oauth_refresh_tokens (id, token, client_id, user_id, scopes) VALUES ('rt-16', 'refresh-16', 'client-16', 'u-16', '[\"openid\"]')");
+  db.run("INSERT INTO oauth_consents (id, client_id, user_id, scopes) VALUES ('co-16', 'client-16', 'u-16', '[\"openid\"]')");
+  db.run("INSERT INTO jwks (id, public_key, private_key) VALUES ('key-16', 'pub', 'priv')");
+}
+
+function verify0016Migration(db: any) {
+  // better-auth 1.7 keys accounts by (issuer, accountId); sign-in looks the
+  // credential account up with issuer "local:credential", so the backfill
+  // is what keeps existing users able to log in.
+  const issuers = Object.fromEntries(
+    (db.query("SELECT id, issuer FROM accounts ORDER BY id").all() as Array<{ id: string; issuer: string }>).map(
+      (row) => [row.id, row.issuer],
+    ),
+  );
+  assert(issuers["acct-cred"] === "local:credential", `Expected credential account issuer local:credential, got ${issuers["acct-cred"]}`);
+  assert(issuers["acct-sso"] === "https://idp.example.com", `Expected SSO account to take its provider issuer, got ${issuers["acct-sso"]}`);
+  assert(issuers["acct-oauth"] === "local:oauth:github", `Expected OAuth account issuer local:oauth:github, got ${issuers["acct-oauth"]}`);
+
+  const accountCols = db.query("PRAGMA table_info(accounts)").all() as Array<{ name: string; notnull: number; dflt_value: string | null }>;
+  const issuerCol = accountCols.find((c) => c.name === "issuer");
+  assert(issuerCol && issuerCol.notnull === 1, "Expected accounts.issuer to be NOT NULL");
+
+  // jwks gained nullable alg and crv.
+  const jwksCols = db.query("PRAGMA table_info(jwks)").all() as Array<{ name: string; notnull: number }>;
+  for (const name of ["alg", "crv"]) {
+    const col = jwksCols.find((c) => c.name === name);
+    assert(col && col.notnull === 0, `Expected jwks.${name} to exist and be nullable`);
+  }
+  const key = db.query("SELECT id, alg FROM jwks WHERE id = 'key-16'").get() as { id: string; alg: string | null } | null;
+  assert(key && key.alg === null, "Expected existing jwks row to survive with NULL alg");
+
+  // Columns added for @better-auth/oauth-provider 1.7, all nullable so
+  // pre-existing rows are untouched.
+  const expectedNewColumns: Record<string, string[]> = {
+    oauth_clients: [
+      "client_discovery_id",
+      "client_credentials_scopes",
+      "backchannel_logout_uri",
+      "backchannel_logout_session_required",
+      "application_type",
+      "jwks",
+      "jwks_uri",
+      "dpop_bound_access_tokens",
+    ],
+    oauth_access_tokens: ["authorization_code_id", "resources", "requested_user_info_claims", "revoked", "confirmation"],
+    oauth_refresh_tokens: [
+      "authorization_code_id",
+      "resources",
+      "requested_user_info_claims",
+      "rotated_at",
+      "rotation_replay_response",
+      "rotation_replay_expires_at",
+      "confirmation",
+    ],
+    oauth_consents: ["resources", "requested_user_info_claims"],
+  };
+  for (const [table, columns] of Object.entries(expectedNewColumns)) {
+    const cols = db.query(`PRAGMA table_info(${table})`).all() as Array<{ name: string; notnull: number }>;
+    for (const column of columns) {
+      const col = cols.find((c) => c.name === column);
+      assert(col, `Expected ${table}.${column} column to exist`);
+      assert(col.notnull === 0, `Expected ${table}.${column} to be nullable`);
+    }
+  }
+
+  // Seeded rows survive the column adds.
+  for (const [table, id] of [
+    ["oauth_clients", "app-16"],
+    ["oauth_access_tokens", "at-16"],
+    ["oauth_refresh_tokens", "rt-16"],
+    ["oauth_consents", "co-16"],
+  ] as const) {
+    const row = db.query(`SELECT id FROM ${table} WHERE id = '${id}'`).get();
+    assert(row, `Expected ${table} row '${id}' to survive migration`);
+  }
+
+  // The three new 1.7 tables exist and accept rows.
+  db.run("INSERT INTO oauth_resources (id, identifier, name) VALUES ('res-16', 'https://api.example.com', 'Example API')");
+  db.run("INSERT INTO oauth_client_resources (id, client_id, resource_id) VALUES ('cr-16', 'client-16', 'https://api.example.com')");
+  db.run("INSERT INTO oauth_client_assertions (id, expires_at) VALUES ('jti-16', 1234567890)");
+}
+
 const MIGRATION_0012_TIMESTAMP = 1774062000000;
 const MIGRATION_0013_TIMESTAMP = 1780377747526;
 
@@ -502,6 +597,70 @@ function validateBroken0013Repair() {
   }
 }
 
+const MIGRATION_0015_TIMESTAMP = 1788333701612;
+
+/**
+ * Reproduce a database that booted the reverted better-auth 1.7.0-rc.4 build:
+ * migrations recorded through 0015, but the three rc tables and some of the
+ * rc columns already present. Migration 0016 must fail on it as-is, and
+ * repairStrandedBetterAuth17Schema() must reconcile it so 0016 then runs and
+ * backfills account issuers.
+ */
+function validateStranded0016Repair() {
+  const migration0016 = migrations.find((m) => m.entry.tag === "0016_better_auth_1_7");
+  if (!migration0016) return;
+
+  const db = new Database(":memory:");
+  try {
+    runMigrations(db, migrations.slice(0, 16)); // 0000-0015
+    db.run(
+      "CREATE TABLE IF NOT EXISTS `__drizzle_migrations` (id INTEGER PRIMARY KEY AUTOINCREMENT, hash text NOT NULL, created_at numeric)",
+    );
+    db.run("INSERT INTO `__drizzle_migrations` (hash, created_at) VALUES ('through-0015', ?)", [
+      MIGRATION_0015_TIMESTAMP,
+    ]);
+
+    // Leftovers from the rc build.
+    db.run("CREATE TABLE oauth_client_assertions (id text PRIMARY KEY NOT NULL, expires_at integer NOT NULL)");
+    db.run("CREATE TABLE oauth_resources (id text PRIMARY KEY NOT NULL, identifier text NOT NULL, name text NOT NULL)");
+    db.run("ALTER TABLE oauth_clients ADD client_discovery_id text");
+    db.run("ALTER TABLE oauth_access_tokens ADD resources text");
+
+    db.run("INSERT INTO users (id, email, username, name) VALUES ('u-rc', 'rc@example.com', 'rc', 'RC User')");
+    db.run("INSERT INTO accounts (id, account_id, user_id, provider_id, password) VALUES ('acct-rc', 'u-rc', 'u-rc', 'credential', 'hashed')");
+
+    // As-is, 0016 cannot run: the CREATE TABLE collides.
+    let failedAsIs = false;
+    try {
+      runMigration(db, migration0016);
+    } catch {
+      failedAsIs = true;
+    }
+    assert(failedAsIs, "Expected migration 0016 to fail on the rc leftovers without the repair");
+
+    const dropped = repairStrandedBetterAuth17Schema(db);
+    assert(dropped === 4, `Expected the repair to drop 2 tables and 2 columns, dropped ${dropped}`);
+
+    runMigration(db, migration0016);
+
+    const account = db
+      .query("SELECT issuer FROM accounts WHERE id = 'acct-rc'")
+      .get() as { issuer: string } | null;
+    assert(account?.issuer === "local:credential", `Expected the credential account to be backfilled after the repair, got ${account?.issuer}`);
+    const clientCols = (db.query("PRAGMA table_info(oauth_clients)").all() as TableInfoRow[]).map((c) => c.name);
+    assert(clientCols.includes("client_discovery_id") && clientCols.includes("jwks_uri"), "Expected 0016 to re-add the oauth_clients columns in full");
+    db.run("INSERT INTO oauth_client_assertions (id, expires_at) VALUES ('jti-rc', 1)");
+
+    // Idempotency: with 0016 recorded the repair is a no-op.
+    db.run("INSERT INTO `__drizzle_migrations` (hash, created_at) VALUES ('through-0016', ?)", [
+      1788336988526,
+    ]);
+    assert(repairStrandedBetterAuth17Schema(db) === 0, "Expected the repair to no-op once migration 0016 is recorded");
+  } finally {
+    db.close();
+  }
+}
+
 const latestUpgradeFixtures: Record<string, UpgradeFixture> = {
   "0009_nervous_tyger_tiger": {
     seed: seedPre0009Database,
@@ -530,6 +689,10 @@ const latestUpgradeFixtures: Record<string, UpgradeFixture> = {
   "0015_source_provider": {
     seed: seedPre0015Database,
     verify: verify0015Migration,
+  },
+  "0016_better_auth_1_7": {
+    seed: seedPre0016Database,
+    verify: verify0016Migration,
   },
 };
 
@@ -584,8 +747,11 @@ function validateMigrations() {
   // Exercise the runtime repair for the issue #312 duplicate-column crash.
   validateBroken0013Repair();
 
+  // Exercise the repair for databases that booted the reverted 1.7.0-rc.4 build.
+  validateStranded0016Repair();
+
   console.log(
-    `Validated ${migrations.length} migrations from scratch and upgrade path for ${latestMigration.entry.tag}, plus the #312 SSO-column repair.`,
+    `Validated ${migrations.length} migrations from scratch and upgrade path for ${latestMigration.entry.tag}, plus the #312 SSO-column repair and the better-auth 1.7 rc repair.`,
   );
 }
 

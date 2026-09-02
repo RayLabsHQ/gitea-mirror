@@ -3,7 +3,7 @@ import { drizzle } from "drizzle-orm/bun-sqlite";
 import fs from "fs";
 import path from "path";
 import { migrate } from "drizzle-orm/bun-sqlite/migrator";
-import { repairDuplicateSsoColumns, restoreSsoDataAfter0013 } from "./migration-repairs";
+import { repairDuplicateSsoColumns, restoreSsoDataAfter0013, repairStrandedBetterAuth17Schema } from "./migration-repairs";
 
 // Skip database initialization in test environment
 let db: ReturnType<typeof drizzle>;
@@ -117,6 +117,11 @@ if (process.env.NODE_ENV !== "test") {
       // columns so migration 0013 can run (see #312). Returns data to re-apply
       // once 0013 has re-added the columns.
       const preservedSsoData = repairDuplicateSsoColumns(sqlite);
+
+      // Drop the partial better-auth 1.7 schema left behind by the reverted
+      // rc build so migration 0016 can run (its CREATE TABLE otherwise fails
+      // with "already exists" on every boot).
+      repairStrandedBetterAuth17Schema(sqlite);
 
       // Run migrations using Drizzle migrate function
       migrate(db, { migrationsFolder: "./drizzle" });
