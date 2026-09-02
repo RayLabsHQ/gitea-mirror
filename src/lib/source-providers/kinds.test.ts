@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  isBetaSourceProvider,
   SOURCE_PROVIDER_DEFAULT_URLS,
   getRepositorySource,
   isRepositoryFromConfiguredSource,
@@ -9,6 +10,14 @@ import {
   normalizeSourceUrl,
   sourceHostOf,
 } from "./kinds";
+
+describe("isBetaSourceProvider", () => {
+  test("GitHub is the supported default; every other source is beta", () => {
+    expect(isBetaSourceProvider("github")).toBe(false);
+    expect(isBetaSourceProvider("gitlab")).toBe(true);
+    expect(isBetaSourceProvider("gitea")).toBe(true);
+  });
+});
 
 describe("normalizeSourceProviderKind", () => {
   test("accepts the three kinds and defaults everything else to GitHub", () => {

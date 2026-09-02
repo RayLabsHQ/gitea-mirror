@@ -11,6 +11,11 @@ export type SourceProviderKind = (typeof SOURCE_PROVIDER_KINDS)[number];
 
 export const DEFAULT_SOURCE_PROVIDER: SourceProviderKind = "github";
 
+/** Sources other than GitHub are beta: they work end to end but have had less time in the field. */
+export function isBetaSourceProvider(kind: SourceProviderKind): boolean {
+  return kind !== DEFAULT_SOURCE_PROVIDER;
+}
+
 /** Base URL used when the config has no instance URL for the provider. */
 export const SOURCE_PROVIDER_DEFAULT_URLS: Record<SourceProviderKind, string> = {
   github: "https://github.com",

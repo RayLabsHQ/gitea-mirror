@@ -2,7 +2,7 @@
 
 Gitea and Forgejo are pull mirrors: the app asks them to fetch from the source, and they keep the copy up to date themselves. GitHub has no pull mirror API and GitLab only offers one on paid tiers, so for those two the app runs a push engine instead. This page explains what that engine does, what it needs, and what it does not do.
 
-Push targets are marked **beta** in the destination dropdown.
+Push targets are marked **beta** in the destination dropdown, like every source and destination other than GitHub to Gitea. They are tested end to end against github.com and gitlab.com, but have had less time in the field than the default path.
 
 ## How it works
 

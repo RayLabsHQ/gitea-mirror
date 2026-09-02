@@ -69,13 +69,13 @@ Notes:
 
 ## GitHub Configuration
 
-Settings for connecting to the source host. GitHub is the default. GitLab and Gitea/Forgejo (including Codeberg) are selected with `SOURCE_PROVIDER`; the username and token variables below then hold the account and token for that host. See [SOURCE_PROVIDERS.md](SOURCE_PROVIDERS.md) for what each source supports.
+Settings for connecting to the source host. GitHub is the default and, together with a Gitea destination, the supported path; every other source or destination is beta. GitLab and Gitea/Forgejo (including Codeberg) are selected with `SOURCE_PROVIDER`; the username and token variables below then hold the account and token for that host. See [SOURCE_PROVIDERS.md](SOURCE_PROVIDERS.md) for what each source supports.
 
 ### Basic Settings
 
 | Variable | Description | Default | Options |
 |----------|-------------|---------|---------|
-| `SOURCE_PROVIDER` | Which host repositories are pulled from. `gitea` also covers Forgejo and Codeberg. | `github` | `github`, `gitlab`, `gitea` |
+| `SOURCE_PROVIDER` | Which host repositories are pulled from. `gitea` also covers Forgejo and Codeberg. Anything other than `github` is beta. | `github` | `github`, `gitlab`, `gitea` |
 | `SOURCE_URL` | Base URL of the GitLab or Gitea/Forgejo instance. Ignored for GitHub, which uses `GH_API_URL`. | `https://gitlab.com` for GitLab, `https://codeberg.org` for Gitea | e.g. `https://gitlab.example.com` |
 | `GITHUB_USERNAME` | Your username on the source host | - | - |
 | `GITHUB_TOKEN` | Personal access token for the source host. GitHub needs the `repo` and `admin:org` scopes, GitLab `read_api` and `read_repository`, Gitea/Forgejo `read:repository`, `read:user` and `read:organization`. | - | - |
@@ -155,7 +155,7 @@ Settings for the destination. Gitea and Forgejo are pull mirrors; GitHub and Git
 
 | Variable | Description | Default | Options |
 |----------|-------------|---------|---------|
-| `DESTINATION_PROVIDER` | Which host mirrors are created on. Gitea and Forgejo share one API (labels and hints differ). GitHub and GitLab (beta) receive `git push` of branches and tags from this app. | `gitea` | `gitea`, `forgejo`, `github`, `gitlab` |
+| `DESTINATION_PROVIDER` | Which host mirrors are created on. Gitea and Forgejo share one API (labels and hints differ). GitHub and GitLab receive `git push` of branches and tags from this app. Anything other than `gitea` is beta. | `gitea` | `gitea`, `forgejo`, `github`, `gitlab` |
 | `GITEA_URL` | Destination instance URL. Optional for GitHub and GitLab, which default to github.com and gitlab.com; set it for GitHub Enterprise Server or a self hosted GitLab. | - | Valid URL |
 | `GITEA_EXTERNAL_URL` | Optional external/browser URL used for dashboard links. API and mirroring still use `GITEA_URL`. | - | Valid URL |
 | `GITEA_TOKEN` | Gitea access token | - | - |

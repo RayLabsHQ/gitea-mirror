@@ -18,6 +18,7 @@ import { getDecryptedGiteaToken } from "@/lib/utils/config-encryption";
 import { createSourceProviderFromConfig, resolveSourceConnection } from "@/lib/source-providers";
 import { githubApiBaseUrl } from "@/lib/source-providers/github-source";
 import { getGiteaRepoOwnerAsync } from "@/lib/gitea";
+import { resolveDestinationIdentity } from "@/lib/destination-connection";
 import { normalizeGitRepoToInsert } from "@/lib/repo-utils";
 import { createMirrorJob } from "@/lib/helpers";
 import { processInParallel } from "@/lib/utils/concurrency";
@@ -28,6 +29,7 @@ import {
   knownSourceHosts,
   parseRepoUrl,
   type DestinationRepo,
+  splitRowsByDestination,
 } from "@/lib/destination-reconcile";
 
 const PAGE_SIZE = 50;
@@ -55,6 +57,8 @@ export interface ReconcileReport {
   /** Rows whose presence could not be confirmed because the check itself failed. */
   unverified: Array<{ fullName: string; location: string; error: string }>;
   healthyCount: number;
+  /** Rows mirrored to another destination host; they are expected to be absent here. */
+  elsewhereCount: number;
   scannedOwners: string[];
   skippedOwners: string[];
   totalOnDestination: number;
@@ -229,7 +233,10 @@ export async function reconcileDestination(
     cloneUrls: rows.map((row) => row.cloneUrl),
   });
 
-  const classified = classifyDestinationRepos({ destinationRepos, rows, knownHosts });
+  // Rows mirrored to a previous destination are neither healthy nor missing
+  // here; they are left out of the comparison and only counted.
+  const { here: rowsHere, elsewhere } = splitRowsByDestination(rows, resolveDestinationIdentity(config));
+  const classified = classifyDestinationRepos({ destinationRepos, rows: rowsHere, knownHosts });
   const listedLocations = new Set(destinationRepos.map((repo) => repo.fullName.toLowerCase()));
 
   // Rows that claim a mirror the listing did not show. Confirm each one
@@ -287,6 +294,7 @@ export async function reconcileDestination(
     notManaged: classified.notManaged,
     unverified,
     healthyCount: classified.matchedRowIds.size + confirmedPresent,
+    elsewhereCount: elsewhere.length,
     scannedOwners,
     skippedOwners,
     totalOnDestination: destinationRepos.length,

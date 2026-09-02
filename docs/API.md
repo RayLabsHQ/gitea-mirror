@@ -144,6 +144,7 @@ Nothing is deleted or archived on either side by this call; the cleanup service 
     "notManaged": [{ "location": "me/notes", "reason": "not a mirror" }],
     "unverified": [],
     "healthyCount": 41,
+    "elsewhereCount": 0,
     "scannedOwners": ["e2e_admin", "github-mirrors"],
     "skippedOwners": ["starred"],
     "totalOnDestination": 43

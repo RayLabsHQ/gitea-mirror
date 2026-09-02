@@ -30,6 +30,8 @@ import {
   resolveMirrorOptionsForRepository,
   type ResolvedMirrorOptions,
 } from "./utils/mirror-overrides";
+import { repositoryDestinationColumns } from "./repo-utils";
+import { resolveDestinationIdentity } from "./destination-connection";
 
 /**
  * Helper function to get organization configuration including destination override
@@ -814,6 +816,7 @@ export const mirrorGithubRepoToGitea = async ({
               lastMirrored: new Date(),
               errorMessage: null,
               mirroredLocation: `${repoOwner}/${targetRepoName}`,
+              ...repositoryDestinationColumns(resolveDestinationIdentity(config)),
             })
             .where(eq(repositories.id, repository.id!));
 
@@ -869,6 +872,7 @@ export const mirrorGithubRepoToGitea = async ({
       .set({
         status: repoStatusEnum.parse("mirroring"),
         mirroredLocation: targetLocation,
+        ...repositoryDestinationColumns(resolveDestinationIdentity(config)),
         updatedAt: new Date(),
       })
       .where(eq(repositories.id, repository.id!));
@@ -1195,6 +1199,7 @@ export const mirrorGithubRepoToGitea = async ({
         lastMirrored: new Date(),
         errorMessage: null,
         mirroredLocation: `${repoOwner}/${targetRepoName}`,
+        ...repositoryDestinationColumns(resolveDestinationIdentity(config)),
         metadata: metadataUpdated
           ? serializeRepositoryMetadataState(metadataState)
           : repository.metadata ?? null,
@@ -1648,6 +1653,7 @@ export async function mirrorGitHubRepoToGiteaOrg({
               lastMirrored: new Date(),
               errorMessage: null,
               mirroredLocation: `${targetOwner}/${targetRepoName}`,
+              ...repositoryDestinationColumns(resolveDestinationIdentity(config)),
             })
             .where(eq(repositories.id, repository.id!));
 
@@ -1708,6 +1714,7 @@ export async function mirrorGitHubRepoToGiteaOrg({
       .set({
         status: repoStatusEnum.parse("mirroring"),
         mirroredLocation: targetLocation,
+        ...repositoryDestinationColumns(resolveDestinationIdentity(config)),
         updatedAt: new Date(),
       })
       .where(eq(repositories.id, repository.id!));
@@ -1957,6 +1964,7 @@ export async function mirrorGitHubRepoToGiteaOrg({
         lastMirrored: new Date(),
         errorMessage: null,
         mirroredLocation: `${orgName}/${targetRepoName}`,
+        ...repositoryDestinationColumns(resolveDestinationIdentity(config)),
         metadata: metadataUpdated
           ? serializeRepositoryMetadataState(metadataState)
           : repository.metadata ?? null,

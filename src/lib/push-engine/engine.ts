@@ -36,6 +36,8 @@ export interface PushMirrorPlan {
   description?: string | null;
   defaultBranch?: string | null;
   lockStaleAfterMs?: number;
+  /** Wait between pushes into a repository this run just created; defaults to READINESS_DELAY_MS. */
+  readinessDelayMs?: number;
   log?: (message: string) => void;
 }
 
@@ -86,7 +88,9 @@ async function execute(plan: PushMirrorPlan): Promise<PushMirrorOutcome> {
     log(`created ${targetRepository.owner}/${targetRepository.name} on ${plan.target.baseUrl}`);
   }
 
-  const { pushed, batches } = await pushAll(plan, targetRepository.pushUrl, refsAfter, log);
+  const { pushed, batches } = targetRepository.created
+    ? await pushWhenReady(plan, targetRepository.pushUrl, refsAfter, log)
+    : await pushAll(plan, targetRepository.pushUrl, refsAfter, log);
   log(pushed ? `pushed to ${targetRepository.htmlUrl}` : `${targetRepository.htmlUrl} was already up to date`);
 
   const wanted = plan.defaultBranch?.trim();
@@ -205,7 +209,8 @@ export function parsePushPorcelain(output: string): { updated: number; upToDate:
   return { updated, upToDate, rejected };
 }
 
-const NON_RETRYABLE_PUSH = /authentication failed|could not read username|permission|denied|not found|repository .* does not exist|403|401|archived|read-only/i;
+const NON_RETRYABLE_PUSH =
+  /authentication failed|could not read username|permission|denied|not found|repository .* does not exist|does not appear to be a git repository|could not read from remote repository|403|401|archived|read-only/i;
 
 /** Failures that batching cannot help with: bad credentials, missing repository. */
 export function isRetryableInBatches(error: unknown): boolean {
@@ -259,6 +264,40 @@ async function pushAll(
     credentials,
   });
   return { pushed: true, batches };
+}
+
+/** How a host answers a push that arrives before a just created repository is ready. */
+const TARGET_NOT_READY = /not found|could not be found|does not exist|does not appear to be a git repository/i;
+export const READINESS_ATTEMPTS = 6;
+export const READINESS_DELAY_MS = 2000;
+
+/** True for the transient "repository not found" a host returns right after creating it. */
+export function isTargetNotReady(error: unknown): boolean {
+  if (!(error instanceof GitCommandError)) return false;
+  return TARGET_NOT_READY.test(`${error.message}\n${error.stderr}`);
+}
+
+/**
+ * First push into a repository this run created. GitLab (and sometimes
+ * GitHub) answer "not found" for a second or two after the create call
+ * returns, so a not-found here is retried a few times before it counts.
+ */
+async function pushWhenReady(
+  plan: PushMirrorPlan,
+  pushUrl: string,
+  refs: Map<string, string>,
+  log: (message: string) => void
+): Promise<{ pushed: boolean; batches: number }> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      return await pushAll(plan, pushUrl, refs, log);
+    } catch (error) {
+      if (attempt >= READINESS_ATTEMPTS || !isTargetNotReady(error)) throw error;
+      const delay = plan.readinessDelayMs ?? READINESS_DELAY_MS;
+      log(`the new repository is not ready for pushes yet (attempt ${attempt}); retrying in ${delay / 1000}s`);
+      await Bun.sleep(delay);
+    }
+  }
 }
 
 /** Remove a repository's bare clone and its lock file. */

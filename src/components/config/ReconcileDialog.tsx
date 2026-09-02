@@ -19,6 +19,8 @@ interface ReconcileReport {
   notManaged: Array<{ location: string; reason: string }>;
   unverified: Array<{ fullName: string; location: string; error: string }>;
   healthyCount: number;
+  /** Rows mirrored to another destination host, left out of the comparison. */
+  elsewhereCount?: number;
   scannedOwners: string[];
   skippedOwners: string[];
   totalOnDestination: number;
@@ -194,6 +196,13 @@ export function ReconcileDialog({ open, onOpenChange }: ReconcileDialogProps) {
               {report.totalOnDestination} repositor{report.totalOnDestination === 1 ? "y" : "ies"} under{" "}
               {report.scannedOwners.length} owner{report.scannedOwners.length === 1 ? "" : "s"} on the destination,{" "}
               {report.healthyCount} tracked and present.
+              {(report.elsewhereCount ?? 0) > 0 && (
+                <>
+                  {" "}
+                  {report.elsewhereCount} row{report.elsewhereCount === 1 ? " is" : "s are"} mirrored to a previous
+                  destination and {report.elsewhereCount === 1 ? "was" : "were"} left out.
+                </>
+              )}
               {report.skippedOwners.length > 0 && (
                 <> Not found there: {report.skippedOwners.join(", ")}.</>
               )}

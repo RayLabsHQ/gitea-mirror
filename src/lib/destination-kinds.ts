@@ -19,6 +19,11 @@ export type PushDestinationKind = (typeof PUSH_DESTINATION_KINDS)[number];
 
 export const DEFAULT_DESTINATION_PROVIDER: DestinationProviderKind = "gitea";
 
+/** Destinations other than Gitea are beta: they work end to end but have had less time in the field. */
+export function isBetaDestinationProvider(kind: DestinationProviderKind): boolean {
+  return kind !== DEFAULT_DESTINATION_PROVIDER;
+}
+
 export const DESTINATION_PROVIDER_LABELS: Record<DestinationProviderKind, string> = {
   gitea: "Gitea",
   forgejo: "Forgejo",

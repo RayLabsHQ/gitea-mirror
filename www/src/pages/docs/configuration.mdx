@@ -22,7 +22,7 @@ This is where the two ends of the mirror are set up. It contains two cards:
 
 **GitHub Connection** holds your GitHub username, personal access token, and account type (personal or organization). The token needs the `repo` scope for private repositories and `admin:org` to read organization data. This card also carries the repository selection options: whether to include private repositories, public repositories, archived repositories, forks, repositories where you are only a collaborator, and starred repositories.
 
-**Gitea Connection** holds the Gitea or Forgejo instance URL, an access token, and the default owner. It also carries the destination settings: the mirror strategy, default organization, organization visibility, and the per-repository mirror interval that Gitea itself uses to re-pull from GitHub.
+**Gitea Connection** holds the destination. Gitea is the default; Forgejo, GitHub and GitLab are available from the Destination dropdown and marked beta, as are the GitLab and Gitea / Forgejo sources on the GitHub card. GitHub to Gitea is the supported path. The card holds the instance URL, an access token, and the default owner. It also carries the destination settings: the mirror strategy, default organization, organization visibility, and the per-repository mirror interval that Gitea itself uses to re-pull from GitHub.
 
 Both cards have a test button that performs a live authenticated call, so you can confirm credentials before saving.
 

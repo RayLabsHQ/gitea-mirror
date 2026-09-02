@@ -1,6 +1,6 @@
 # Source Providers
 
-The destination card has a matching **Destination** dropdown with Gitea and Forgejo. They share the same API, so it only changes the name, icon and hints shown on the card (`DESTINATION_PROVIDER` sets it from the environment).
+GitHub to Gitea is the supported default. Every other source and every other destination is marked **beta** in the dropdowns: they are tested end to end against real hosts, but have had less time in the field. The destination card has a matching **Destination** dropdown with Gitea, Forgejo (beta, same API as Gitea), GitHub (beta) and GitLab (beta); `DESTINATION_PROVIDER` sets it from the environment, and [PUSH_TARGETS.md](PUSH_TARGETS.md) covers the GitHub and GitLab targets.
 
 Gitea Mirror pulls repositories from one source host per user. GitHub is the default. GitLab and Gitea/Forgejo are available from the **Source** dropdown at the top of the connection card on the Configuration page.
 
@@ -8,9 +8,9 @@ Gitea Mirror pulls repositories from one source host per user. GitHub is the def
 |--------|--------|----------------------|
 | GitHub | github.com, GitHub Enterprise (via `GH_API_URL`) | `https://github.com` |
 | GitLab (beta) | gitlab.com, self hosted GitLab | `https://gitlab.com` |
-| Gitea / Forgejo | Codeberg, self hosted Gitea or Forgejo | `https://codeberg.org` |
+| Gitea / Forgejo (beta) | Codeberg, self hosted Gitea or Forgejo | `https://codeberg.org` |
 
-GitLab support is marked beta: the adapter is tested against the public API and mocked responses, not yet against a private self hosted instance. Picking GitLab or Gitea/Forgejo shows an **Instance URL** field. Leave it empty for the default instance, or enter the base URL of your own (for example `https://gitlab.example.com` or `http://gitea.local:3000/gitea`). The username and token fields hold the account and token for the selected host.
+Picking GitLab or Gitea/Forgejo shows an **Instance URL** field. Leave it empty for the default instance, or enter the base URL of your own (for example `https://gitlab.example.com` or `http://gitea.local:3000/gitea`). The username and token fields hold the account and token for the selected host.
 
 ## Tokens
 

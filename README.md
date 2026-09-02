@@ -31,9 +31,9 @@ First user signup becomes admin. Configure GitHub and Gitea/Forgejo through the 
 ## ✨ Features
 
 - 🔁 Mirror public, private, and starred GitHub repos to Gitea/Forgejo
-- 🦊 **GitLab (beta) and Gitea/Forgejo sources** - Pick the source in the configuration card. gitlab.com, Codeberg and self hosted instances mirror code, tags, wiki and LFS (issues, pull requests and releases need a GitHub source). See [docs/SOURCE_PROVIDERS.md](docs/SOURCE_PROVIDERS.md)
+- 🦊 **GitLab and Gitea/Forgejo sources (beta)** - Pick the source in the configuration card. gitlab.com, Codeberg and self hosted instances mirror code, tags, wiki and LFS (issues, pull requests and releases need a GitHub source). GitHub to Gitea is the supported default; every other source or destination is beta. See [docs/SOURCE_PROVIDERS.md](docs/SOURCE_PROVIDERS.md)
 - 🏛️ **GitHub Enterprise support** - Works with GHES and GHEC with data residency via `GH_API_URL`
-- 🚀 **GitHub and GitLab destinations (beta)** - Pick GitHub or GitLab as the destination and the app keeps a bare clone of each repository and pushes its branches and tags there. Code only, and the target is overwritten on every sync. See [docs/PUSH_TARGETS.md](docs/PUSH_TARGETS.md)
+- 🚀 **Forgejo, GitHub and GitLab destinations (beta)** - Forgejo works like Gitea. Pick GitHub or GitLab and the app keeps a bare clone of each repository and pushes its branches and tags there. Code only, and the target is overwritten on every sync. See [docs/PUSH_TARGETS.md](docs/PUSH_TARGETS.md)
 - 🏢 Mirror entire organizations with flexible strategies
 - 🎯 Custom destination control for repos and organizations
 - 📦 **Git LFS support** - Mirror large files with Git LFS
@@ -205,7 +205,7 @@ bun run dev
 1. **First Time Setup**
    - Navigate to http://localhost:4321
    - Create admin account (first user signup)
-   - Configure the source and destination connections. The destination is Gitea or Forgejo (pull mirrors), or GitHub or GitLab (push targets, beta)
+   - Configure the source and destination connections. GitHub to Gitea is the default. Forgejo works like Gitea, and GitHub or GitLab as destination uses push targets. Everything other than GitHub to Gitea is beta
 
 2. **Mirror Strategies**
    - **Preserve Structure**: Maintains GitHub organization structure

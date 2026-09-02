@@ -11,6 +11,7 @@ import {
   expectedLocation,
   knownSourceHosts,
   parseRepoUrl,
+  splitRowsByDestination,
   type DestinationRepo,
   type TrackedRepositoryRow,
 } from "./destination-reconcile";
@@ -257,5 +258,32 @@ describe("collectDestinationOwners", () => {
     expect(
       collectDestinationOwners(["Mirrors", "mirrors", " starred ", "", null, undefined, "org/repo", "user"])
     ).toEqual(["Mirrors", "starred", "user"]);
+  });
+});
+
+describe("splitRowsByDestination", () => {
+  const row = (id: string, extra: Partial<TrackedRepositoryRow> = {}): TrackedRepositoryRow => ({
+    id,
+    name: id,
+    fullName: `octo/${id}`,
+    cloneUrl: `https://github.com/octo/${id}.git`,
+    mirroredLocation: `mirror-org/${id}`,
+    status: "mirrored",
+    ...extra,
+  });
+  const gitea = { provider: "gitea" as const, url: "http://gitea.local:3000" };
+
+  test("keeps rows recorded on the configured destination or with no recorded URL, sets the rest aside", () => {
+    const { here, elsewhere } = splitRowsByDestination(
+      [
+        row("same", { destinationProvider: "gitea", destinationUrl: "http://gitea.local:3000" }),
+        row("legacy", { destinationProvider: "gitea", destinationUrl: null }),
+        row("pushed", { destinationProvider: "gitlab", destinationUrl: "https://gitlab.com" }),
+        row("other-gitea", { destinationProvider: "gitea", destinationUrl: "https://try.gitea.io" }),
+      ],
+      gitea
+    );
+    expect(here.map((r) => r.id)).toEqual(["same", "legacy"]);
+    expect(elsewhere.map((r) => r.id)).toEqual(["pushed", "other-gitea"]);
   });
 });

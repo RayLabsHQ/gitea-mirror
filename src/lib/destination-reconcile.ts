@@ -13,6 +13,11 @@
  */
 
 import { sourceHostOf } from "@/lib/source-providers/kinds";
+import {
+  isRepositoryOnConfiguredDestination,
+  type RepositoryDestination,
+  type RepositoryDestinationFields,
+} from "@/lib/destination-kinds";
 
 /** What the destination reports about one repository. */
 export interface DestinationRepo {
@@ -46,6 +51,30 @@ export interface TrackedRepositoryRow {
   cloneUrl: string;
   mirroredLocation: string | null;
   status: string;
+  destinationProvider?: RepositoryDestinationFields["destinationProvider"];
+  destinationUrl?: RepositoryDestinationFields["destinationUrl"];
+}
+
+/**
+ * Split rows into the ones whose recorded destination is the configured
+ * one (or unknown) and the ones mirrored to another host. Only the first
+ * group can be missing from this destination; the second group is expected
+ * to be absent and must not be reset.
+ */
+export function splitRowsByDestination<T extends TrackedRepositoryRow>(
+  rows: T[],
+  destination: RepositoryDestination
+): { here: T[]; elsewhere: T[] } {
+  const here: T[] = [];
+  const elsewhere: T[] = [];
+  for (const row of rows) {
+    const fields = {
+      destinationProvider: row.destinationProvider ?? null,
+      destinationUrl: row.destinationUrl ?? null,
+    };
+    (isRepositoryOnConfiguredDestination(fields, destination) ? here : elsewhere).push(row);
+  }
+  return { here, elsewhere };
 }
 
 export interface NotManagedRepo {

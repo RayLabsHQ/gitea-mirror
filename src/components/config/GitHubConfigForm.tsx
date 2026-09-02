@@ -36,6 +36,7 @@ import {
 import {
   SOURCE_PROVIDER_DEFAULT_URLS,
   SOURCE_PROVIDER_LABELS,
+  isBetaSourceProvider,
 } from "@/lib/source-providers/kinds";
 import { GitHubMirrorSettings } from "./GitHubMirrorSettings";
 import { HostLockNotice } from "./HostLockNotice";
@@ -142,7 +143,7 @@ const sourceProviders: SourceProviderMeta[] = [
     value: "gitlab",
     label: SOURCE_PROVIDER_LABELS.gitlab,
     icon: SiGitlab,
-    badge: "BETA",
+    badge: isBetaSourceProvider("gitlab") ? "BETA" : undefined,
     usernamePlaceholder: "Your GitLab username",
     tokenPlaceholder: "Your GitLab personal access token",
     tokenHint: "Needed for private projects, groups, and starred projects",
@@ -158,6 +159,7 @@ const sourceProviders: SourceProviderMeta[] = [
     value: "gitea",
     label: SOURCE_PROVIDER_LABELS.gitea,
     icon: SiGitea,
+    badge: isBetaSourceProvider("gitea") ? "BETA" : undefined,
     usernamePlaceholder: "Your Gitea or Forgejo username",
     tokenPlaceholder: "Your access token",
     tokenHint: "Needed for private repos, organizations, and starred repositories",
@@ -324,7 +326,7 @@ export function GitHubConfigForm({
                 ? "Where your repositories are pulled from"
                 : provider === "gitlab"
                   ? "Beta. Code, tags, wiki and LFS are mirrored. Issues, merge requests and releases need a GitHub source."
-                  : "Code, tags, wiki and LFS are mirrored. Issues, pull requests and releases need a GitHub source."}
+                  : "Beta. Code, tags, wiki and LFS are mirrored. Issues, pull requests and releases need a GitHub source."}
             </p>
             {sourceLock?.locked && (
               <HostLockNotice

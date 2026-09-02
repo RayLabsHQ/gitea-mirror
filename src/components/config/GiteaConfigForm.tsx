@@ -16,6 +16,7 @@ import {
   DESTINATION_PROVIDER_ORG_NOUNS,
   PUSH_DESTINATION_TOKEN_SCOPES,
   isPushDestinationKind,
+  isBetaDestinationProvider,
 } from "@/lib/destination-kinds";
 import { HostLockNotice } from "./HostLockNotice";
 import { giteaApi, type GiteaServerInfo } from "@/lib/api";
@@ -61,9 +62,9 @@ const destinationProviders: {
 }[] = [
   { value: "gitea", label: DESTINATION_PROVIDER_LABELS.gitea, icon: SiGitea },
   { value: "forgejo", label: DESTINATION_PROVIDER_LABELS.forgejo, icon: SiForgejo },
-  { value: "github", label: DESTINATION_PROVIDER_LABELS.github, icon: SiGithub, badge: "BETA" },
-  { value: "gitlab", label: DESTINATION_PROVIDER_LABELS.gitlab, icon: SiGitlab, badge: "BETA" },
-];
+  { value: "github", label: DESTINATION_PROVIDER_LABELS.github, icon: SiGithub },
+  { value: "gitlab", label: DESTINATION_PROVIDER_LABELS.gitlab, icon: SiGitlab },
+].map((option) => ({ ...option, badge: isBetaDestinationProvider(option.value) ? "BETA" : undefined }));
 
 /** The public instance URLs a hosted target is prefilled with. */
 const HOSTED_DEFAULT_URLS = new Set(Object.values(DESTINATION_PROVIDER_DEFAULT_URLS));
@@ -318,7 +319,9 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
             <p className="text-[11px] text-muted-foreground/80">
               {isPushTarget
                 ? `${providerLabel} has no pull mirror API, so this app keeps a bare clone of each source repository and pushes its branches and tags there.`
-                : "Where mirrors are created. Gitea and Forgejo share the same API."}
+                : provider === "forgejo"
+                  ? "Beta. Where mirrors are created. Forgejo shares Gitea's API, so everything Gitea supports works here."
+                  : "Where mirrors are created."}
             </p>
             {destinationLock?.locked && (
               <HostLockNotice

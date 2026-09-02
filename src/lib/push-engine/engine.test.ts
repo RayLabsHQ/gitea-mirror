@@ -10,6 +10,7 @@ import {
   countChanges,
   isHealthyBareClone,
   isRetryableInBatches,
+  isTargetNotReady,
   listRefs,
   parsePushPorcelain,
   removeClone,
@@ -111,6 +112,48 @@ class LocalPushTarget implements PushTarget {
 
   async deleteRepository(owner: string, name: string): Promise<void> {
     await rm(this.dirFor(owner, name), { recursive: true, force: true });
+  }
+}
+
+/**
+ * A target whose freshly created repository only exists after the first
+ * push attempt, the way GitLab answers "not found" for a moment after the
+ * create call returns.
+ */
+class LazyPushTarget extends LocalPushTarget {
+  pushAttempts = 0;
+  private pending: { owner: string; name: string } | null = null;
+
+  constructor(root: string) {
+    super(root);
+  }
+
+  override async ensureRepository(input: EnsureRepositoryInput): Promise<PushTargetRepository> {
+    const existing = await this.getRepository(input.owner, input.name);
+    if (existing) return existing;
+    this.pending = { owner: input.owner, name: input.name };
+    const dir = path.join(this.baseUrl.replace(/^file:\/\//, ""), input.owner, `${input.name}.git`);
+    return {
+      owner: input.owner,
+      name: input.name,
+      pushUrl: `file://${dir}`,
+      htmlUrl: `file://${dir}`,
+      isPrivate: false,
+      archived: false,
+      created: true,
+    };
+  }
+
+  override pushCredentials() {
+    this.pushAttempts += 1;
+    if (this.pushAttempts === 2 && this.pending) {
+      const dir = path.join(this.baseUrl.replace(/^file:\/\//, ""), this.pending.owner, `${this.pending.name}.git`);
+      // Create the repository between the first and the second attempt.
+      Bun.spawnSync(["git", "init", "--bare", "--quiet", dir]);
+      this.createdRepositories.push(`${this.pending.owner}/${this.pending.name}`);
+      this.pending = null;
+    }
+    return null;
   }
 }
 
@@ -376,6 +419,26 @@ describe("helpers", () => {
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
+  });
+
+  test("a repository that is not ready right after creation is pushed on a later attempt", async () => {
+    const lazy = new LazyPushTarget(path.join(root, "lazy-targets"));
+    const source = await createSourceRepo(root, "lazy");
+    const outcome = await runPushMirror(planFor(source, "lazy", { target: lazy, readinessDelayMs: 10 }));
+
+    expect(outcome.targetRepository.created).toBe(true);
+    expect(outcome.pushed).toBe(true);
+    expect(lazy.pushAttempts).toBe(2);
+    const targetRefs = await listRefs(path.join(root, "lazy-targets", "acme", "lazy.git"));
+    expect(targetRefs.size).toBe(3);
+  });
+
+  test("isTargetNotReady only matches the transient not-found answers", () => {
+    const notReady = new GitCommandError("git push failed", ["push"], 128, "remote: The project you were looking for could not be found or you don't have permission to view it.");
+    const auth = new GitCommandError("git push failed", ["push"], 128, "fatal: Authentication failed for 'https://x'");
+    expect(isTargetNotReady(notReady)).toBe(true);
+    expect(isTargetNotReady(auth)).toBe(false);
+    expect(isTargetNotReady(new Error("not found"))).toBe(false);
   });
 
   test("isRetryableInBatches keeps credential and missing repository failures out of the batch retry", () => {

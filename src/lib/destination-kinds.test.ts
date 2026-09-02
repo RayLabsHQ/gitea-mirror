@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  isBetaDestinationProvider,
   describeDestination,
   destinationHostOf,
   getRepositoryDestination,
@@ -11,6 +12,13 @@ import {
 } from "./destination-kinds";
 
 describe("destination kinds", () => {
+  test("Gitea is the supported default; every other destination is beta", () => {
+    expect(isBetaDestinationProvider("gitea")).toBe(false);
+    expect(isBetaDestinationProvider("forgejo")).toBe(true);
+    expect(isBetaDestinationProvider("github")).toBe(true);
+    expect(isBetaDestinationProvider("gitlab")).toBe(true);
+  });
+
   test("recognizes the four kinds and maps codeberg to forgejo", () => {
     expect(isDestinationProviderKind("gitea")).toBe(true);
     expect(isDestinationProviderKind("forgejo")).toBe(true);
