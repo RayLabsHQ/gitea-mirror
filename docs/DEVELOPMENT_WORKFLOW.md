@@ -326,9 +326,10 @@ git push origin vX.Y.Z
 
 4. **Create GitHub release**
 
-5. **CI version sync (automatic)**:
+5. **CI version sync and chart publish (automatic)**:
 - On `v*` tags, release CI updates `package.json` version in the build context from the tag (`vX.Y.Z` -> `X.Y.Z`), so Docker release images always report the correct app version.
-- After the release build succeeds, CI commits the same `package.json` version back to `main` automatically.
+- After the release build succeeds, CI packages the Helm chart with the same version as chart version and `appVersion` and pushes it to `oci://ghcr.io/raylabshq/charts/gitea-mirror`. The chart's default image tag is `v<appVersion>`, so a default install runs that release.
+- CI then commits the same version to `package.json` and `helm/gitea-mirror/Chart.yaml` on `main` automatically.
 
 ## Contributing
 
