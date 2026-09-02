@@ -10,7 +10,11 @@ import {
   DialogTrigger,
 } from "../ui/dialog";
 import { LoaderCircle, Plus } from "lucide-react";
-import { parseGitHubRepoReference } from "@/lib/utils/github-url";
+import {
+  parseGitHubRepoReference,
+  parseRepoReferenceParts,
+  type RepoReferenceParts,
+} from "@/lib/utils/github-url";
 
 const inputClassName =
   "w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
@@ -28,6 +32,8 @@ interface AddRepositoryDialogProps {
     owner: string;
     force?: boolean;
     destinationOrg?: string;
+    host?: string;
+    path?: string[];
   }) => Promise<void>;
 }
 
@@ -40,6 +46,8 @@ export default function AddRepositoryDialog({
   const [repo, setRepo] = useState<string>("");
   const [owner, setOwner] = useState<string>("");
   const [destinationOrg, setDestinationOrg] = useState<string>("");
+  /** Host and path of the pasted URL, resolved per source on the server. */
+  const [reference, setReference] = useState<RepoReferenceParts | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>("");
 
@@ -49,6 +57,7 @@ export default function AddRepositoryDialog({
     setRepo("");
     setOwner("");
     setDestinationOrg("");
+    setReference(null);
   };
 
   useEffect(() => {
@@ -63,6 +72,7 @@ export default function AddRepositoryDialog({
     if (!parsed) return false;
     setOwner(parsed.owner);
     setRepo(parsed.repo);
+    setReference(parseRepoReferenceParts(value));
     setError("");
     return true;
   };
@@ -73,6 +83,7 @@ export default function AddRepositoryDialog({
     if (!applyReference(value)) {
       setOwner("");
       setRepo("");
+      setReference(null);
     }
   };
 
@@ -98,7 +109,7 @@ export default function AddRepositoryDialog({
     if (!repo || !owner || repo.trim() === "" || owner.trim() === "") {
       setError(
         urlIsUnparsed
-          ? "That does not look like a GitHub repository URL."
+          ? "That does not look like a repository URL."
           : "Please enter a valid repository name and owner."
       );
       return;
@@ -111,6 +122,8 @@ export default function AddRepositoryDialog({
         repo,
         owner,
         destinationOrg: destinationOrg.trim() || undefined,
+        host: reference?.host ?? undefined,
+        path: reference?.segments,
       });
 
       resetForm();
@@ -145,7 +158,7 @@ export default function AddRepositoryDialog({
                 htmlFor="repositoryUrl"
                 className="block text-sm font-medium mb-1.5"
               >
-                GitHub URL
+                Repository URL
               </label>
               <input
                 id="repositoryUrl"

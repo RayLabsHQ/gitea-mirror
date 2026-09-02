@@ -1,4 +1,5 @@
 import { withBase } from "@/lib/base-path";
+import type { SourceProvider } from "@/types/config";
 
 // Base API URL
 const API_BASE = withBase("/api");
@@ -75,10 +76,14 @@ export const authApi = {
 
 // GitHub API
 export const githubApi = {
-  testConnection: (token: string) =>
-    apiRequest<{ success: boolean }>("/github/test-connection", {
+  /** Test the source connection. The route serves every source provider. */
+  testConnection: (
+    token: string,
+    options: { provider?: SourceProvider; url?: string; username?: string } = {}
+  ) =>
+    apiRequest<{ success: boolean; message?: string }>("/github/test-connection", {
       method: "POST",
-      body: JSON.stringify({ token }),
+      body: JSON.stringify({ token, ...options }),
     }),
   getStarredLists: () =>
     apiRequest<{ success: boolean; lists: string[] }>("/github/starred-lists", {

@@ -58,6 +58,10 @@ import {
 import { cn } from "@/lib/utils";
 import { githubApi } from "@/lib/api";
 import {
+  SOURCE_PROVIDER_LABELS,
+  SOURCE_PROVIDER_ORG_NOUNS,
+} from "@/lib/source-providers/kinds";
+import {
   SettingsCard,
   SectionTitle,
   SwitchRow,
@@ -87,6 +91,12 @@ export function GitHubMirrorSettings({
   onAdvancedOptionsChange,
   part = "both",
 }: GitHubMirrorSettingsProps) {
+  // Star lists, issues, pull requests, releases, labels and milestones all
+  // read the GitHub API, so they are only offered for GitHub sources.
+  const sourceProvider = githubConfig.provider ?? "github";
+  const isGithubSource = sourceProvider === "github";
+  const sourceLabel = SOURCE_PROVIDER_LABELS[sourceProvider];
+  const orgNoun = SOURCE_PROVIDER_ORG_NOUNS[sourceProvider];
   const [starListsOpen, setStarListsOpen] = React.useState(false);
   const [starListSearch, setStarListSearch] = React.useState("");
   const [customStarListName, setCustomStarListName] = React.useState("");
@@ -410,6 +420,7 @@ export function GitHubMirrorSettings({
               variant="ghost"
               size="sm"
               className="h-auto px-2 py-1 text-xs font-normal text-primary hover:text-primary/80"
+              disabled={!isGithubSource}
               onClick={() => {
                 const allSelected = Object.values(mirrorOptions.metadataComponents).every(Boolean);
                 const newValue = !allSelected;
@@ -437,6 +448,7 @@ export function GitHubMirrorSettings({
             <div className="flex items-center space-x-3 py-1 px-1 rounded hover:bg-accent">
               <Checkbox
                 id="metadata-issues-popup"
+                disabled={!isGithubSource}
                 checked={mirrorOptions.metadataComponents.issues}
                 onCheckedChange={(checked) => handleMetadataComponentChange('issues', !!checked)}
               />
@@ -452,6 +464,7 @@ export function GitHubMirrorSettings({
             <div className="flex items-center space-x-3 py-1 px-1 rounded hover:bg-accent">
               <Checkbox
                 id="metadata-prs-popup"
+                disabled={!isGithubSource}
                 checked={mirrorOptions.metadataComponents.pullRequests}
                 onCheckedChange={(checked) => handleMetadataComponentChange('pullRequests', !!checked)}
               />
@@ -492,6 +505,7 @@ export function GitHubMirrorSettings({
             <div className="flex items-center space-x-3 py-1 px-1 rounded hover:bg-accent">
               <Checkbox
                 id="metadata-labels-popup"
+                disabled={!isGithubSource}
                 checked={mirrorOptions.metadataComponents.labels}
                 onCheckedChange={(checked) => handleMetadataComponentChange('labels', !!checked)}
               />
@@ -507,6 +521,7 @@ export function GitHubMirrorSettings({
             <div className="flex items-center space-x-3 py-1 px-1 rounded hover:bg-accent">
               <Checkbox
                 id="metadata-milestones-popup"
+                disabled={!isGithubSource}
                 checked={mirrorOptions.metadataComponents.milestones}
                 onCheckedChange={(checked) => handleMetadataComponentChange('milestones', !!checked)}
               />
@@ -575,7 +590,7 @@ export function GitHubMirrorSettings({
           <SwitchRow
             icon={Star}
             label="Starred repositories"
-            description="Include repositories you've starred on GitHub"
+            description={`Include repositories you've starred on ${sourceLabel}`}
             checked={githubConfig.mirrorStarred}
             onCheckedChange={(checked) => handleGitHubChange('mirrorStarred', checked)}
           />
@@ -596,6 +611,7 @@ export function GitHubMirrorSettings({
                 right={starredContentPopover}
               />
 
+              {isGithubSource && (
               <div className="space-y-2">
                 <Label className="text-xs font-medium text-muted-foreground">
                   Star lists (optional)
@@ -729,6 +745,7 @@ export function GitHubMirrorSettings({
                   </Button>
                 </div>
               </div>
+              )}
 
               <OptionRow
                 icon={FileCode2}
@@ -773,7 +790,7 @@ export function GitHubMirrorSettings({
           <SwitchRow
             icon={UserX}
             label="Skip personal repositories"
-            description="Only mirror repos belonging to organizations"
+            description={`Only mirror repos belonging to ${orgNoun}s`}
             checked={advancedOptions.skipPersonalRepos ?? false}
             onCheckedChange={(checked) => handleAdvancedChange('skipPersonalRepos', checked)}
           />
@@ -781,8 +798,8 @@ export function GitHubMirrorSettings({
           <div className="space-y-2">
             <OptionRow
               icon={Building}
-              label="Limit to specific organizations"
-              description="Empty mirrors every organization you belong to"
+              label={`Limit to specific ${orgNoun}s`}
+              description={`Empty mirrors every ${orgNoun} you belong to`}
             />
 
             {includedOrgs.length > 0 && (
@@ -813,7 +830,7 @@ export function GitHubMirrorSettings({
                     addIncludedOrg();
                   }
                 }}
-                placeholder="Add organization name"
+                placeholder={`Add ${orgNoun} name`}
                 className="h-8 text-xs"
               />
               <Button
@@ -840,7 +857,11 @@ export function GitHubMirrorSettings({
         footer={
           <StatusFooterItem
             icon={Info}
-            label="Pull requests are mirrored as issues due to Gitea API limits"
+            label={
+              isGithubSource
+                ? "Pull requests are mirrored as issues due to Gitea API limits"
+                : "Issues, pull requests and releases are mirrored for GitHub sources only"
+            }
           />
         }
       >
@@ -861,7 +882,12 @@ export function GitHubMirrorSettings({
           <SwitchRow
             icon={Tag}
             label="Releases & tags"
-            description="Includes release assets and tags"
+            description={
+              isGithubSource
+                ? "Includes release assets and tags"
+                : "Release assets need a GitHub source. Tags always come with the code"
+            }
+            disabled={!isGithubSource}
             checked={mirrorOptions.mirrorReleases}
             onCheckedChange={(checked) => handleMirrorChange('mirrorReleases', checked)}
             extra={
@@ -897,7 +923,11 @@ export function GitHubMirrorSettings({
           <SwitchRow
             icon={FileText}
             label="Repository metadata"
-            description="Issues, pull requests, labels, milestones and wiki"
+            description={
+              isGithubSource
+                ? "Issues, pull requests, labels, milestones and wiki"
+                : "Wiki only. Issues, pull requests, labels and milestones need a GitHub source"
+            }
             checked={mirrorOptions.mirrorMetadata}
             onCheckedChange={(checked) => handleMirrorChange('mirrorMetadata', checked)}
             extra={mirrorOptions.mirrorMetadata ? metadataPopover : undefined}

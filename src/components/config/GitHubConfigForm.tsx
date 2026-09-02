@@ -1,7 +1,14 @@
 import React, { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { githubApi } from "@/lib/api";
-import type { GitHubConfig, MirrorOptions, AdvancedOptions, GiteaConfig, BackupStrategy } from "@/types/config";
+import type {
+  GitHubConfig,
+  MirrorOptions,
+  AdvancedOptions,
+  GiteaConfig,
+  BackupStrategy,
+  SourceProvider,
+} from "@/types/config";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { toast } from "sonner";
@@ -17,7 +24,18 @@ import {
   ShieldCheck,
   Sparkles,
 } from "lucide-react";
-import { SiGithub } from "react-icons/si";
+import { SiGitea, SiGithub, SiGitlab } from "react-icons/si";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  SOURCE_PROVIDER_DEFAULT_URLS,
+  SOURCE_PROVIDER_LABELS,
+} from "@/lib/source-providers/kinds";
 import { GitHubMirrorSettings } from "./GitHubMirrorSettings";
 import {
   SettingsCard,
@@ -79,6 +97,67 @@ const backupStrategies = [
   },
 ];
 
+type SourceProviderMeta = {
+  value: SourceProvider;
+  label: string;
+  icon: React.ComponentType<{ className?: string }>;
+  usernamePlaceholder: string;
+  tokenPlaceholder: string;
+  tokenHint: string;
+  /** Appended to the instance URL to reach the token settings page. */
+  tokenSettingsPath: string;
+  tokenSteps: string[];
+  scopes: string[];
+};
+
+const sourceProviders: SourceProviderMeta[] = [
+  {
+    value: "github",
+    label: SOURCE_PROVIDER_LABELS.github,
+    icon: SiGithub,
+    usernamePlaceholder: "Your GitHub username",
+    tokenPlaceholder: "Your GitHub token (classic)",
+    tokenHint: "Needed for private repos, organizations, and starred repositories",
+    tokenSettingsPath: "/settings/tokens",
+    tokenSteps: [
+      "GitHub → Settings → Developer settings",
+      "Personal access tokens → Generate new token (classic)",
+      "Select the scopes below and paste the token here",
+    ],
+    scopes: ["repo", "admin:org"],
+  },
+  {
+    value: "gitlab",
+    label: SOURCE_PROVIDER_LABELS.gitlab,
+    icon: SiGitlab,
+    usernamePlaceholder: "Your GitLab username",
+    tokenPlaceholder: "Your GitLab personal access token",
+    tokenHint: "Needed for private projects, groups, and starred projects",
+    tokenSettingsPath: "/-/user_settings/personal_access_tokens",
+    tokenSteps: [
+      "GitLab → Preferences → Access tokens",
+      "Add new token with the scopes below",
+      "Paste the token here",
+    ],
+    scopes: ["read_api", "read_repository"],
+  },
+  {
+    value: "gitea",
+    label: SOURCE_PROVIDER_LABELS.gitea,
+    icon: SiGitea,
+    usernamePlaceholder: "Your Gitea or Forgejo username",
+    tokenPlaceholder: "Your access token",
+    tokenHint: "Needed for private repos, organizations, and starred repositories",
+    tokenSettingsPath: "/user/settings/applications",
+    tokenSteps: [
+      "Gitea → Settings → Applications",
+      "Generate a token with the permissions below",
+      "Paste the token here",
+    ],
+    scopes: ["read:repository", "read:user", "read:organization"],
+  },
+];
+
 export function GitHubConfigForm({
   config,
   setConfig,
@@ -96,6 +175,28 @@ export function GitHubConfigForm({
   part = "connection"
 }: GitHubConfigFormProps) {
   const [isLoading, setIsLoading] = useState(false);
+
+  const provider: SourceProvider = config.provider ?? "github";
+  const providerMeta =
+    sourceProviders.find((option) => option.value === provider) ?? sourceProviders[0];
+  const providerLabel = providerMeta.label;
+  const defaultInstanceUrl = SOURCE_PROVIDER_DEFAULT_URLS[provider];
+  const instanceUrl = (config.url ?? "").trim() || defaultInstanceUrl;
+  const tokenSettingsUrl = `${instanceUrl.replace(/\/+$/, "")}${providerMeta.tokenSettingsPath}`;
+
+  const handleProviderChange = (value: string) => {
+    const nextProvider = value as SourceProvider;
+    const newConfig: GitHubConfig = {
+      ...config,
+      provider: nextProvider,
+      // GitHub has no per-config instance URL (GHES routing uses GH_API_URL).
+      url: nextProvider === "github" ? "" : config.url ?? "",
+    };
+    setConfig(newConfig);
+    if (onAutoSave) {
+      onAutoSave(newConfig);
+    }
+  };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value, type, checked } = e.target;
@@ -115,18 +216,23 @@ export function GitHubConfigForm({
 
   const testConnection = async () => {
     if (!config.token) {
-      toast.error("GitHub token is required to test the connection");
+      toast.error(`${providerLabel} token is required to test the connection`);
       return;
     }
 
     setIsLoading(true);
 
     try {
-      const result = await githubApi.testConnection(config.token);
+      const result = await githubApi.testConnection(config.token, {
+        provider,
+        url: config.url,
+      });
       if (result.success) {
-        toast.success("Successfully connected to GitHub!");
+        toast.success(`Successfully connected to ${providerLabel}!`);
       } else {
-        toast.error("Failed to connect to GitHub. Please check your token.");
+        toast.error(
+          result.message || `Failed to connect to ${providerLabel}. Please check your token.`
+        );
       }
     } catch (error) {
       toast.error(
@@ -148,8 +254,8 @@ export function GitHubConfigForm({
   if (part === "connection") {
     return (
       <SettingsCard
-        icon={SiGithub}
-        title="GitHub Connection"
+        icon={providerMeta.icon}
+        title={`${providerLabel} Connection`}
         headerAction={
           <div className="flex items-center gap-3">
             {isAutoSaving && (
@@ -171,6 +277,57 @@ export function GitHubConfigForm({
         <CardSection>
           <div className="space-y-1.5">
             <Label
+              htmlFor="source-provider"
+              className="text-xs font-medium text-muted-foreground"
+            >
+              Source
+            </Label>
+            <Select value={provider} onValueChange={handleProviderChange}>
+              <SelectTrigger id="source-provider" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {sourceProviders.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    <span className="flex items-center gap-2">
+                      <option.icon className="h-3.5 w-3.5" />
+                      {option.label}
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-[11px] text-muted-foreground/80">
+              {provider === "github"
+                ? "Where your repositories are pulled from"
+                : "Code, tags, wiki and LFS are mirrored. Issues, pull requests and releases need a GitHub source."}
+            </p>
+          </div>
+
+          {provider !== "github" && (
+            <div className="space-y-1.5">
+              <Label
+                htmlFor="source-url"
+                className="text-xs font-medium text-muted-foreground"
+              >
+                Instance URL
+              </Label>
+              <Input
+                id="source-url"
+                name="url"
+                type="url"
+                value={config.url ?? ""}
+                onChange={handleChange}
+                placeholder={defaultInstanceUrl}
+              />
+              <p className="text-[11px] text-muted-foreground/80">
+                {`Leave empty for ${defaultInstanceUrl.replace(/^https?:\/\//, "")}, or enter the base URL of your own instance`}
+              </p>
+            </div>
+          )}
+
+          <div className="space-y-1.5">
+            <Label
               htmlFor="github-username"
               className="text-xs font-medium text-muted-foreground"
             >
@@ -182,7 +339,7 @@ export function GitHubConfigForm({
               type="text"
               value={config.username}
               onChange={handleChange}
-              placeholder="Your GitHub username"
+              placeholder={providerMeta.usernamePlaceholder}
               required
             />
           </div>
@@ -200,10 +357,10 @@ export function GitHubConfigForm({
               type="password"
               value={config.token}
               onChange={handleChange}
-              placeholder="Your GitHub token (classic)"
+              placeholder={providerMeta.tokenPlaceholder}
             />
             <p className="text-[11px] text-muted-foreground/80">
-              Needed for private repos, organizations, and starred repositories
+              {providerMeta.tokenHint}
             </p>
           </div>
 
@@ -216,28 +373,30 @@ export function GitHubConfigForm({
                 </span>
               </div>
               <a
-                href="https://github.com/settings/tokens"
+                href={tokenSettingsUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                title="Open github.com/settings/tokens"
-                aria-label="Open GitHub token settings"
+                title={`Open ${tokenSettingsUrl.replace(/^https?:\/\//, "")}`}
+                aria-label={`Open ${providerLabel} token settings`}
                 className="text-indigo-500 hover:text-indigo-400"
               >
                 <ExternalLink className="h-4 w-4" />
               </a>
             </div>
             <ol className="list-decimal space-y-1.5 pl-4 text-xs leading-relaxed text-muted-foreground">
-              <li>GitHub → Settings → Developer settings</li>
-              <li>Personal access tokens → Generate new token (classic)</li>
-              <li>Select the scopes below and paste the token here</li>
+              {providerMeta.tokenSteps.map((step) => (
+                <li key={step}>{step}</li>
+              ))}
             </ol>
-            <div className="flex items-center gap-2">
-              <code className="rounded bg-muted px-2 py-0.5 font-mono text-[11px] text-muted-foreground">
-                repo
-              </code>
-              <code className="rounded bg-muted px-2 py-0.5 font-mono text-[11px] text-muted-foreground">
-                admin:org
-              </code>
+            <div className="flex flex-wrap items-center gap-2">
+              {providerMeta.scopes.map((scope) => (
+                <code
+                  key={scope}
+                  className="rounded bg-muted px-2 py-0.5 font-mono text-[11px] text-muted-foreground"
+                >
+                  {scope}
+                </code>
+              ))}
             </div>
           </div>
         </CardSection>

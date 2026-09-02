@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { SourceIcon, repositorySourceInfo } from "@/components/source/SourceIcon";
 import {
   getCoreRowModel,
   getFilteredRowModel,
@@ -645,11 +646,11 @@ export default function RepositoryTable({
                     href={repo.url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    title="View on GitHub"
+                    title={`View on ${repositorySourceInfo(repo).label}`}
                     className="flex items-center justify-center gap-2"
                   >
-                    <SiGithub className="h-4 w-4 flex-shrink-0" />
-                    <span className="text-xs">GitHub</span>
+                    <SourceIcon provider={repositorySourceInfo(repo).provider} className="h-4 w-4 flex-shrink-0" />
+                    <span className="text-xs">{repositorySourceInfo(repo).label}</span>
                   </a>
                 </Button>
                 {giteaUrl ? (
@@ -1131,9 +1132,9 @@ export default function RepositoryTable({
                             href={repo.url}
                             target="_blank"
                             rel="noopener noreferrer"
-                            title="View on GitHub"
+                            title={`View on ${repositorySourceInfo(repo).label}`}
                           >
-                            <SiGithub className="h-4 w-4" />
+                            <SourceIcon provider={repositorySourceInfo(repo).provider} className="h-4 w-4" />
                           </a>
                         </Button>
                       </div>

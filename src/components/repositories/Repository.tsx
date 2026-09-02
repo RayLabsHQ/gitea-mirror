@@ -779,11 +779,15 @@ export default function Repository() {
     owner,
     force = false,
     destinationOrg,
+    host,
+    path,
   }: {
     repo: string;
     owner: string;
     force?: boolean;
     destinationOrg?: string;
+    host?: string;
+    path?: string[];
   }) => {
     if (!user || !user.id) {
       return;
@@ -819,6 +823,8 @@ export default function Repository() {
         owner: trimmedOwner,
         force,
         ...(destinationOrg ? { destinationOrg } : {}),
+        ...(host ? { host } : {}),
+        ...(path && path.length > 0 ? { path } : {}),
       };
 
       const response = await apiRequest<AddRepositoriesApiResponse>(

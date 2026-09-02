@@ -26,6 +26,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { invalidateConfigCache } from '@/hooks/useConfigStatus';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { withBase } from '@/lib/base-path';
+import { SOURCE_PROVIDER_LABELS } from '@/lib/source-providers/kinds';
 
 type ConfigState = {
   githubConfig: GitHubConfig;
@@ -42,6 +43,8 @@ const CONFIG_API_PATH = withBase('/api/config');
 export function ConfigTabs() {
   const [config, setConfig] = useState<ConfigState>({
     githubConfig: {
+      provider: 'github',
+      url: '',
       username: '',
       token: '',
       privateRepositories: false,
@@ -138,6 +141,8 @@ export function ConfigTabs() {
   // Removed the problematic useEffect that was causing circular dependencies
   // The lastRun and nextRun should be managed by the backend and fetched via API
 
+  const sourceLabel = SOURCE_PROVIDER_LABELS[config.githubConfig.provider ?? 'github'];
+
   const handleImportGitHubData = async () => {
     if (!user?.id) return;
     setIsSyncing(true);
@@ -148,7 +153,7 @@ export function ConfigTabs() {
       );
       if (result.success) {
         toast.success(
-          'GitHub data imported successfully! Head to the Repositories page to start mirroring.',
+          `${sourceLabel} data imported successfully! Head to the Repositories page to start mirroring.`,
         );
         if (result.failedOrgs && result.failedOrgs.length > 0) {
           toast.warning(
@@ -162,14 +167,14 @@ export function ConfigTabs() {
         }
       } else {
         toast.error(
-          `Failed to import GitHub data: ${
+          `Failed to import ${sourceLabel} data: ${
             result.message || 'Unknown error'
           }`,
         );
       }
     } catch (error) {
       toast.error(
-        `Error importing GitHub data: ${
+        `Error importing ${sourceLabel} data: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
@@ -559,8 +564,10 @@ export function ConfigTabs() {
         );
         if (response && !response.error) {
           setConfig({
-            githubConfig:
-              response.githubConfig || config.githubConfig,
+            githubConfig: {
+              ...config.githubConfig,
+              ...response.githubConfig, // Merge so a response without provider keeps the default
+            },
             giteaConfig:
               response.giteaConfig || config.giteaConfig,
             scheduleConfig:
@@ -692,12 +699,12 @@ export function ConfigTabs() {
             {isSyncing ? (
               <>
                 <RefreshCw className="h-4 w-4 animate-spin mr-1" />
-                Import GitHub Data
+                Import {sourceLabel} Data
               </>
             ) : (
               <>
                 <RefreshCw className="h-4 w-4 mr-1" />
-                Import GitHub Data
+                Import {sourceLabel} Data
               </>
             )}
           </Button>

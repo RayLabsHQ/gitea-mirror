@@ -1,4 +1,5 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { SourceIcon, repositorySourceInfo } from "@/components/source/SourceIcon";
 import { Button } from "@/components/ui/button";
 import { GitFork } from "lucide-react";
 import { SiGithub, SiGitea } from "react-icons/si";
@@ -128,9 +129,9 @@ export function RepositoryList({ repositories }: RepositoryListProps) {
                       href={repo.url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      title="View on GitHub"
+                      title={`View on ${repositorySourceInfo(repo).label}`}
                     >
-                      <SiGithub className="h-4 w-4" />
+                      <SourceIcon provider={repositorySourceInfo(repo).provider} className="h-4 w-4" />
                     </a>
                   </Button>
                 </div>
