@@ -16,6 +16,8 @@ import { withBase } from "@/lib/base-path";
 interface ReconcileReport {
   untracked: Array<{ location: string; originalUrl: string; sourcePath: string; isPrivate: boolean }>;
   missing: Array<{ id: string; fullName: string; location: string }>;
+  /** Rows whose recorded mirror is gone while the same source is mirrored under another owner. */
+  moved: Array<{ id: string; fullName: string; from: string; to: string }>;
   notManaged: Array<{ location: string; reason: string }>;
   unverified: Array<{ fullName: string; location: string; error: string }>;
   healthyCount: number;
@@ -26,11 +28,13 @@ interface ReconcileReport {
   totalOnDestination: number;
 }
 
+type AppliedSummary = { adopted: number; reset: number; relocated: number; skipped: number };
+
 interface ReconcileResponse {
   success: boolean;
   dryRun: boolean;
   report: ReconcileReport;
-  applied: { adopted: number; reset: number; skipped: number } | null;
+  applied: AppliedSummary | null;
   error?: string;
 }
 
@@ -41,6 +45,7 @@ async function postReconcile(body: {
   dryRun: boolean;
   adoptUntracked?: boolean;
   resetMissing?: boolean;
+  relocateMoved?: boolean;
 }): Promise<ReconcileResponse> {
   const response = await fetch(RECONCILE_API_PATH, {
     method: "POST",
@@ -103,16 +108,17 @@ interface ReconcileDialogProps {
 
 /**
  * Compares the destination with the repository database. Runs a dry run on
- * open, then applies the two opt-in fixes the user ticks.
+ * open, then applies the opt-in fixes the user ticks.
  */
 export function ReconcileDialog({ open, onOpenChange }: ReconcileDialogProps) {
   const [loading, setLoading] = useState(false);
   const [applying, setApplying] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<ReconcileReport | null>(null);
-  const [applied, setApplied] = useState<{ adopted: number; reset: number; skipped: number } | null>(null);
+  const [applied, setApplied] = useState<AppliedSummary | null>(null);
   const [adopt, setAdopt] = useState(false);
   const [reset, setReset] = useState(false);
+  const [relocate, setRelocate] = useState(false);
 
   const runDryRun = useCallback(async () => {
     setLoading(true);
@@ -133,11 +139,12 @@ export function ReconcileDialog({ open, onOpenChange }: ReconcileDialogProps) {
     setApplied(null);
     setAdopt(false);
     setReset(false);
+    setRelocate(false);
     void runDryRun();
   }, [open, runDryRun]);
 
   const apply = async () => {
-    if (!adopt && !reset) return;
+    if (!adopt && !reset && !relocate) return;
     setApplying(true);
     setError(null);
     try {
@@ -145,14 +152,16 @@ export function ReconcileDialog({ open, onOpenChange }: ReconcileDialogProps) {
         dryRun: false,
         adoptUntracked: adopt,
         resetMissing: reset,
+        relocateMoved: relocate,
       });
-      const summary = result.applied ?? { adopted: 0, reset: 0, skipped: 0 };
+      const summary = result.applied ?? { adopted: 0, reset: 0, relocated: 0, skipped: 0 };
       setApplied(summary);
       toast.success(
-        `Adopted ${summary.adopted} untracked mirror${summary.adopted === 1 ? "" : "s"}, reset ${summary.reset} missing row${summary.reset === 1 ? "" : "s"}`
+        `Adopted ${summary.adopted} untracked mirror${summary.adopted === 1 ? "" : "s"}, recorded ${summary.relocated} new location${summary.relocated === 1 ? "" : "s"}, reset ${summary.reset} missing row${summary.reset === 1 ? "" : "s"}`
       );
       setAdopt(false);
       setReset(false);
+      setRelocate(false);
       await runDryRun();
     } catch (err) {
       const message = err instanceof Error ? err.message : "Reconcile failed";
@@ -165,7 +174,9 @@ export function ReconcileDialog({ open, onOpenChange }: ReconcileDialogProps) {
 
   const untrackedCount = report?.untracked.length ?? 0;
   const missingCount = report?.missing.length ?? 0;
+  const movedCount = report?.moved.length ?? 0;
   const busy = loading || applying;
+  const nothingTicked = !adopt && !reset && !relocate;
 
   return (
     <Dialog open={open} onOpenChange={(next) => !busy && onOpenChange(next)}>
@@ -191,7 +202,9 @@ export function ReconcileDialog({ open, onOpenChange }: ReconcileDialogProps) {
         )}
 
         {report && (
-          <div className="space-y-4">
+          // min-w-0: DialogContent is a grid, and a long monospace entry would
+          // otherwise widen the track past the panel instead of truncating.
+          <div className="min-w-0 space-y-4">
             <p className="text-[12px] text-muted-foreground">
               {report.totalOnDestination} repositor{report.totalOnDestination === 1 ? "y" : "ies"} under{" "}
               {report.scannedOwners.length} owner{report.scannedOwners.length === 1 ? "" : "s"} on the destination,{" "}
@@ -215,6 +228,12 @@ export function ReconcileDialog({ open, onOpenChange }: ReconcileDialogProps) {
               tone={untrackedCount > 0 ? "amber" : "muted"}
             />
             <RepoList
+              title="Moved on the destination"
+              items={report.moved.map((r) => `${r.to} (was ${r.from})`)}
+              hint="Rows whose recorded mirror is gone while a mirror of the same source sits under another owner, usually after a transfer in Gitea. Recording the new location makes sync follow it."
+              tone={movedCount > 0 ? "amber" : "muted"}
+            />
+            <RepoList
               title="In the database, gone from the destination"
               items={report.missing.map((r) => `${r.fullName} (was ${r.location})`)}
               hint="Rows marked mirrored whose repository is no longer there. Resetting them makes the next mirror run recreate the mirror."
@@ -224,7 +243,7 @@ export function ReconcileDialog({ open, onOpenChange }: ReconcileDialogProps) {
               <RepoList
                 title="Not managed by gitea-mirror"
                 items={report.notManaged.map((r) => `${r.location} (${r.reason})`)}
-                hint="Native repositories and mirrors of other hosts. These are listed for information and never touched."
+                hint="Native repositories, mirrors of other hosts, and second copies of a tracked mirror. These are listed for information and never touched."
               />
             )}
             {report.unverified.length > 0 && (
@@ -238,7 +257,7 @@ export function ReconcileDialog({ open, onOpenChange }: ReconcileDialogProps) {
 
             {applied && (
               <p className="text-[12px] text-muted-foreground">
-                Applied: adopted {applied.adopted}, reset {applied.reset}
+                Applied: adopted {applied.adopted}, recorded {applied.relocated}, reset {applied.reset}
                 {applied.skipped > 0 ? `, skipped ${applied.skipped}` : ""}. The lists above are refreshed.
               </p>
             )}
@@ -255,6 +274,20 @@ export function ReconcileDialog({ open, onOpenChange }: ReconcileDialogProps) {
                   Adopt the {untrackedCount} untracked mirror{untrackedCount === 1 ? "" : "s"}
                   <span className="block text-[12px] text-muted-foreground">
                     Creates database rows from the source URL of each mirror.
+                  </span>
+                </span>
+              </label>
+              <label className="flex cursor-pointer items-start gap-3 text-sm">
+                <Checkbox
+                  checked={relocate}
+                  onCheckedChange={(checked) => setRelocate(checked === true)}
+                  disabled={busy || movedCount === 0}
+                  className="mt-0.5"
+                />
+                <span>
+                  Record the {movedCount} new location{movedCount === 1 ? "" : "s"}
+                  <span className="block text-[12px] text-muted-foreground">
+                    Points each row at where its mirror is now. Nothing is moved, created or deleted on the destination.
                   </span>
                 </span>
               </label>
@@ -284,7 +317,7 @@ export function ReconcileDialog({ open, onOpenChange }: ReconcileDialogProps) {
             {loading ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
             Check again
           </Button>
-          <Button type="button" onClick={() => void apply()} disabled={busy || (!adopt && !reset)}>
+          <Button type="button" onClick={() => void apply()} disabled={busy || nothingTicked}>
             {applying ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
             Apply
           </Button>

@@ -12,15 +12,18 @@ const bodySchema = z.object({
   dryRun: z.boolean().optional().default(true),
   adoptUntracked: z.boolean().optional().default(false),
   resetMissing: z.boolean().optional().default(false),
+  relocateMoved: z.boolean().optional().default(false),
 });
 
 /**
  * Compare the destination with the repository database (issue #284).
  *
  * Always computes the report. With `dryRun: false`, `adoptUntracked` creates
- * rows for mirrors the database does not know about and `resetMissing`
- * sends rows whose mirror is gone back to `imported`. Nothing is deleted or
- * archived here; the cleanup service keeps its own rules.
+ * rows for mirrors the database does not know about, `relocateMoved`
+ * repoints rows whose mirror was transferred to another owner (issue #400),
+ * and `resetMissing` sends rows whose mirror is gone back to `imported`.
+ * Nothing is deleted or archived here; the cleanup service keeps its own
+ * rules.
  */
 export const POST: APIRoute = async ({ request, locals }) => {
   try {
@@ -43,7 +46,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const parsed = bodySchema.safeParse(parsedBody);
     if (!parsed.success) {
       return jsonResponse({
-        data: { success: false, error: "dryRun, adoptUntracked and resetMissing must be booleans" },
+        data: { success: false, error: "dryRun, adoptUntracked, resetMissing and relocateMoved must be booleans" },
         status: 400,
       });
     }

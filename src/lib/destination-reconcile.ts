@@ -5,9 +5,10 @@
  * The database is the only thing the cleanup service and the UI look at, so
  * a mirror that exists on the destination without a row is invisible to
  * every maintenance feature (issue #284). The helpers here take what the
- * destination reports and what the database holds and sort it into three
+ * destination reports and what the database holds and sort it into four
  * groups: mirrors the database does not know about, rows whose mirror is
- * gone, and everything that matches. They never touch the network or the
+ * gone, rows whose mirror moved to another owner (issue #400), and
+ * everything that matches. They never touch the network or the
  * database, so they are unit tested directly; the async orchestration lives
  * in destination-reconcile-service.ts.
  */
@@ -93,6 +94,20 @@ export interface ClassifiedDestination {
   matchedRowIds: Set<string>;
   /** Rows that claim to be mirrored but no destination repository matched. */
   unmatchedMirroredRows: TrackedRepositoryRow[];
+  /**
+   * Rows whose recorded location is gone from the destination while a mirror
+   * of the same source sits somewhere else: someone transferred it there
+   * (issue #400). Sync only looks at the recorded and the expected location,
+   * so until the row is repointed every run fails and a retry would create a
+   * second copy at the old place.
+   */
+  moved: MovedMirror[];
+}
+
+export interface MovedMirror {
+  row: TrackedRepositoryRow;
+  /** `owner/name` where the destination has the mirror now. */
+  location: string;
 }
 
 /** Statuses that mean "the mirror is supposed to exist on the destination". */
@@ -219,10 +234,18 @@ export function classifyDestinationRepos({
     if (fullName && !byFullName.has(fullName)) byFullName.set(fullName, row);
   }
 
+  // Every mirror the listing showed, so a source match at a new location can
+  // be told apart from a second copy whose original is still in place.
+  const listedMirrorLocations = new Set(
+    destinationRepos.filter((repo) => repo.mirror).map((repo) => repo.fullName.toLowerCase())
+  );
+
   const untracked: DestinationRepo[] = [];
   const notManaged: NotManagedRepo[] = [];
   const trackedLocations = new Set<string>();
   const matchedRowIds = new Set<string>();
+  const moved: MovedMirror[] = [];
+  const movedRowIds = new Set<string>();
 
   for (const repo of destinationRepos) {
     const location = repo.fullName.toLowerCase();
@@ -243,24 +266,41 @@ export function classifyDestinationRepos({
       continue;
     }
 
+    const atRecordedLocation = byLocation.get(location);
     const row =
-      byLocation.get(location) ??
+      atRecordedLocation ??
       byCloneKey.get(`${origin.host}/${origin.path.toLowerCase()}`) ??
       byFullName.get(origin.path.toLowerCase());
 
-    if (row) {
-      trackedLocations.add(location);
-      matchedRowIds.add(row.id);
-    } else {
+    if (!row) {
       untracked.push(repo);
+      continue;
     }
+
+    // Matched by source rather than by the recorded location. That is a move
+    // only when the recorded mirror is really gone; if it is still listed,
+    // this repository is a second copy and is left alone.
+    const recorded = (row.mirroredLocation ?? "").trim();
+    if (!atRecordedLocation && recorded && recorded.toLowerCase() !== location) {
+      const originalStillThere = listedMirrorLocations.has(recorded.toLowerCase());
+      if (originalStillThere || movedRowIds.has(row.id)) {
+        const original = originalStillThere ? recorded : moved.find((m) => m.row.id === row.id)?.location;
+        notManaged.push({ location: repo.fullName, reason: `second copy of ${original ?? recorded}` });
+        continue;
+      }
+      moved.push({ row, location: repo.fullName });
+      movedRowIds.add(row.id);
+    }
+
+    trackedLocations.add(location);
+    matchedRowIds.add(row.id);
   }
 
   const unmatchedMirroredRows = rows.filter(
     (row) => MIRRORED_STATUSES.has(row.status) && !matchedRowIds.has(row.id)
   );
 
-  return { untracked, notManaged, trackedLocations, matchedRowIds, unmatchedMirroredRows };
+  return { untracked, notManaged, trackedLocations, matchedRowIds, unmatchedMirroredRows, moved };
 }
 
 /**

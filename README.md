@@ -243,7 +243,8 @@ Enable in Settings → Mirror Options → Mirror metadata
 - **Ignore Status** - Mark repositories to skip from mirroring
 - **Automatic Cleanup** - Configure retention period for activity logs
 - **Scheduled Sync** - Set custom intervals for automatic mirroring
-- **Reconcile with Destination** - Compare Gitea/Forgejo with the database from Configuration > Automation: adopt mirrors the database lost track of, or reset rows whose mirror is gone so the next sync recreates them. Nothing is deleted or archived by this step.
+- **Reconcile with Destination** - Compare Gitea/Forgejo with the database from Configuration > Automation: adopt mirrors the database lost track of, record the new owner of mirrors you transferred in Gitea, or reset rows whose mirror is gone so the next sync recreates them. Nothing is deleted or archived by this step.
+- **Move Mirrors from the App** - Changing a repository's or an organization's destination offers to transfer the existing mirrors on Gitea/Forgejo as well, with their history, issues and mirror settings. When the token cannot create repositories under the new owner, Gitea asks its owners to accept and sync follows the mirror once they do.
 
 ### Automatic Syncing & Synchronization
 

@@ -3,9 +3,9 @@
  *
  * Lists what the destination holds under every owner this account mirrors
  * into, sorts it against the database (see destination-reconcile.ts), and
- * on request adopts untracked mirrors or resets rows whose mirror is gone.
- * It never deletes or archives anything on either side; the cleanup service
- * keeps its own rules for that.
+ * on request adopts untracked mirrors, records where moved mirrors went, or
+ * resets rows whose mirror is gone. It never deletes or archives anything on
+ * either side; the cleanup service keeps its own rules for that.
  */
 
 import { and, eq, inArray } from "drizzle-orm";
@@ -40,6 +40,8 @@ export interface ReconcileOptions {
   dryRun: boolean;
   adoptUntracked: boolean;
   resetMissing: boolean;
+  /** Repoint rows whose mirror was transferred to another owner (issue #400). */
+  relocateMoved?: boolean;
 }
 
 export interface ReconcileReport {
@@ -52,6 +54,8 @@ export interface ReconcileReport {
   }>;
   /** Rows that say mirrored, whose repository the destination no longer has. */
   missing: Array<{ id: string; fullName: string; location: string }>;
+  /** Rows whose recorded mirror is gone while their source is mirrored under another owner. */
+  moved: Array<{ id: string; fullName: string; from: string; to: string }>;
   /** Repositories on the destination this app does not own. */
   notManaged: Array<{ location: string; reason: string }>;
   /** Rows whose presence could not be confirmed because the check itself failed. */
@@ -68,7 +72,7 @@ export interface ReconcileResult {
   dryRun: boolean;
   report: ReconcileReport;
   /** Null on a dry run. */
-  applied: { adopted: number; reset: number; skipped: number } | null;
+  applied: { adopted: number; reset: number; relocated: number; skipped: number } | null;
 }
 
 /** The subset of Gitea's repository JSON the reconcile reads. */
@@ -291,22 +295,31 @@ export async function reconcileDestination(
       isPrivate: repo.isPrivate,
     })),
     missing,
+    moved: classified.moved.map((entry) => ({
+      id: entry.row.id,
+      fullName: entry.row.fullName,
+      from: entry.row.mirroredLocation ?? "",
+      to: entry.location,
+    })),
     notManaged: classified.notManaged,
     unverified,
-    healthyCount: classified.matchedRowIds.size + confirmedPresent,
+    // Moved rows are present but recorded wrong; they are listed on their own.
+    healthyCount: classified.matchedRowIds.size - classified.moved.length + confirmedPresent,
     elsewhereCount: elsewhere.length,
     scannedOwners,
     skippedOwners,
     totalOnDestination: destinationRepos.length,
   };
 
-  if (options.dryRun || (!options.adoptUntracked && !options.resetMissing)) {
+  const relocateMoved = options.relocateMoved === true;
+  if (options.dryRun || (!options.adoptUntracked && !options.resetMissing && !relocateMoved)) {
     return { dryRun: true, report, applied: null };
   }
 
   let adopted = 0;
   let skipped = 0;
   let reset = 0;
+  let relocated = 0;
 
   if (options.adoptUntracked && classified.untracked.length > 0) {
     const sourceProvider = createSourceProviderFromConfig(config, { userId });
@@ -349,18 +362,64 @@ export async function reconcileDestination(
     reset = updated.length;
   }
 
-  if (adopted > 0 || reset > 0) {
+  if (relocateMoved && classified.moved.length > 0) {
+    const rowsById = new Map(rows.map((row) => [row.id, row]));
+    for (const entry of classified.moved) {
+      const row = rowsById.get(entry.row.id);
+      if (!row) {
+        skipped += 1;
+        continue;
+      }
+      const newOwner = entry.location.split("/")[0];
+
+      // Pin the row to its new owner when the strategy would resolve
+      // elsewhere, as adoption does, so a later reset does not recreate the
+      // mirror at the old place. The strategy already honours the row's own
+      // override, so an override pointing at the old owner is replaced.
+      let destinationOrg = row.destinationOrg ?? null;
+      try {
+        const strategyOwner = await getGiteaRepoOwnerAsync({ config, repository: row as Repository });
+        if (strategyOwner.trim().toLowerCase() !== newOwner.toLowerCase()) {
+          destinationOrg = newOwner;
+        }
+      } catch {
+        destinationOrg = newOwner;
+      }
+
+      try {
+        await db
+          .update(repositories)
+          .set({
+            mirroredLocation: entry.location,
+            destinationOrg,
+            // A sync that failed because the mirror was not at the recorded
+            // place is healthy again once the row points at it.
+            ...(row.status === "failed" ? { status: "mirrored", errorMessage: null } : {}),
+            updatedAt: new Date(),
+          })
+          .where(and(eq(repositories.userId, userId), eq(repositories.id, row.id)));
+        relocated += 1;
+      } catch (error) {
+        skipped += 1;
+        console.warn(
+          `[Reconcile] Could not record the new location of ${row.fullName}: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+    }
+  }
+
+  if (adopted > 0 || reset > 0 || relocated > 0) {
     await createMirrorJob({
       userId,
       status: "synced",
       jobType: "sync",
       message: "Reconciled the database with the destination",
-      details: `Adopted ${adopted} untracked mirror${adopted === 1 ? "" : "s"}, reset ${reset} row${reset === 1 ? "" : "s"} whose mirror was gone.`,
+      details: `Adopted ${adopted} untracked mirror${adopted === 1 ? "" : "s"}, recorded the new location of ${relocated} moved mirror${relocated === 1 ? "" : "s"}, reset ${reset} row${reset === 1 ? "" : "s"} whose mirror was gone.`,
       skipNotification: true,
     });
   }
 
-  return { dryRun: false, report, applied: { adopted, reset, skipped } };
+  return { dryRun: false, report, applied: { adopted, reset, relocated, skipped } };
 }
 
 /**

@@ -176,7 +176,7 @@ describe("classifyDestinationRepos", () => {
     expect(result.unmatchedMirroredRows).toEqual([]);
   });
 
-  test("matches a row by clone URL when the recorded location is stale", () => {
+  test("a mirror found elsewhere while the recorded location is gone is matched and reported as moved (#400)", () => {
     const result = classifyDestinationRepos({
       destinationRepos: [
         destinationRepo({ fullName: "moved/hello", originalUrl: "https://github.com/octocat/hello.git" }),
@@ -185,6 +185,49 @@ describe("classifyDestinationRepos", () => {
       knownHosts,
     });
     expect(result.untracked).toEqual([]);
+    expect(result.matchedRowIds.has("octocat/hello")).toBeTrue();
+    expect(result.unmatchedMirroredRows).toEqual([]);
+    expect(result.moved.map((m) => [m.row.id, m.location])).toEqual([["octocat/hello", "moved/hello"]]);
+  });
+
+  test("a second copy is not a move while the recorded mirror is still there", () => {
+    const result = classifyDestinationRepos({
+      destinationRepos: [
+        destinationRepo({ fullName: "copy/hello", originalUrl: "https://github.com/octocat/hello.git" }),
+        destinationRepo({ fullName: "mirrors/hello", originalUrl: "https://github.com/octocat/hello.git" }),
+      ],
+      rows: [row({ fullName: "octocat/hello", mirroredLocation: "mirrors/hello" })],
+      knownHosts,
+    });
+    expect(result.moved).toEqual([]);
+    expect(result.untracked).toEqual([]);
+    expect(result.notManaged).toEqual([{ location: "copy/hello", reason: "second copy of mirrors/hello" }]);
+    expect(result.trackedLocations.has("mirrors/hello")).toBeTrue();
+    expect(result.trackedLocations.has("copy/hello")).toBeFalse();
+  });
+
+  test("only the first of two relocated copies counts as the move", () => {
+    const result = classifyDestinationRepos({
+      destinationRepos: [
+        destinationRepo({ fullName: "a/hello", originalUrl: "https://github.com/octocat/hello.git" }),
+        destinationRepo({ fullName: "b/hello", originalUrl: "https://github.com/octocat/hello.git" }),
+      ],
+      rows: [row({ fullName: "octocat/hello", mirroredLocation: "gone/hello" })],
+      knownHosts,
+    });
+    expect(result.moved.map((m) => m.location)).toEqual(["a/hello"]);
+    expect(result.notManaged).toEqual([{ location: "b/hello", reason: "second copy of a/hello" }]);
+  });
+
+  test("a row without a recorded location is matched by source and not reported as moved", () => {
+    const result = classifyDestinationRepos({
+      destinationRepos: [
+        destinationRepo({ fullName: "mirrors/hello", originalUrl: "https://github.com/octocat/hello.git" }),
+      ],
+      rows: [row({ fullName: "octocat/hello" })],
+      knownHosts,
+    });
+    expect(result.moved).toEqual([]);
     expect(result.matchedRowIds.has("octocat/hello")).toBeTrue();
   });
 

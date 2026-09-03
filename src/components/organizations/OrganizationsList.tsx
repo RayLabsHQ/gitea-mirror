@@ -11,6 +11,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { buildGiteaWebUrl } from "@/lib/gitea-url";
 import { MirrorDestinationEditor } from "./MirrorDestinationEditor";
+import { destinationInfo } from "@/components/destination/DestinationIcon";
+import type { OrganizationMoveResult } from "@/lib/destination-transfer";
 import { MirrorOverridesDialog } from "@/components/config/MirrorOverridesDialog";
 import { hasMirrorOverrides, mirrorOptionsToFlags } from "@/lib/utils/mirror-overrides";
 import { useGiteaConfig } from "@/hooks/useGiteaConfig";
@@ -129,6 +131,34 @@ export function OrganizationList({
       await onRefresh();
     }
   };
+
+  // Plan (dryRun) or perform the move of an organization's mirrors on the
+  // destination when its destination changes (issue #400).
+  const handleMoveMirrors = async (
+    orgId: string,
+    newDestination: string | null,
+    dryRun: boolean
+  ): Promise<OrganizationMoveResult> => {
+    const response = await fetch(`${withBase("/api/organizations")}/${orgId}/move-mirrors`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ destinationOrg: newDestination, dryRun }),
+    });
+    const data = (await response.json().catch(() => ({}))) as Partial<OrganizationMoveResult> & {
+      success?: boolean;
+      error?: string;
+    };
+    if (!response.ok || !data.success || !data.plan) {
+      throw new Error(data.error || "Failed to move the mirrors");
+    }
+    if (!dryRun && onRefresh) {
+      await onRefresh();
+    }
+    return data as OrganizationMoveResult;
+  };
+
+  // GitHub and GitLab destinations are pushed to; only Gitea and Forgejo can transfer a repository.
+  const destination = destinationInfo(giteaConfig);
 
   const hasAnyFilter = Object.values(filter).some(
     (val) => val?.toString().trim() !== ""
@@ -282,6 +312,12 @@ export function OrganizationList({
                   organizationName={org.name!}
                   currentDestination={org.destinationOrg ?? undefined}
                   onUpdate={(newDestination) => handleUpdateDestination(org.id!, newDestination)}
+                  onMoveMirrors={
+                    destination.isPushTarget
+                      ? undefined
+                      : (newDestination, dryRun) => handleMoveMirrors(org.id!, newDestination, dryRun)
+                  }
+                  destinationLabel={destination.label}
                   isUpdating={isLoading}
                 />
               </div>
@@ -338,6 +374,12 @@ export function OrganizationList({
                   organizationName={org.name!}
                   currentDestination={org.destinationOrg ?? undefined}
                   onUpdate={(newDestination) => handleUpdateDestination(org.id!, newDestination)}
+                  onMoveMirrors={
+                    destination.isPushTarget
+                      ? undefined
+                      : (newDestination, dryRun) => handleMoveMirrors(org.id!, newDestination, dryRun)
+                  }
+                  destinationLabel={destination.label}
                   isUpdating={isLoading}
                 />
               </div>

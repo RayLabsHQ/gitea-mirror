@@ -324,6 +324,77 @@ describe("findExistingMirror", () => {
     expect(match).not.toBeNull();
     expect(match!.owner).toBe("starred");
   });
+
+  test("finds a mirror transferred to another owner through the search fallback when the recorded location is gone (#400)", async () => {
+    const repo = makeRepo({ mirroredLocation: "old-org/Update", status: "failed" });
+    let searched = 0;
+    const searchBySource = async () => {
+      searched += 1;
+      return {
+        mirror: true,
+        name: "Update",
+        owner: { login: "new-org" },
+        original_url: "https://github.com/NostalgiaForInfinity/Update.git",
+      } as any;
+    };
+
+    const match = await findExistingMirror({
+      repository: repo,
+      config,
+      candidateOwner: "starred",
+      candidateName: "Update",
+      getRepoInfo: async () => null,
+      searchBySource,
+    });
+
+    expect(searched).toBe(1);
+    expect(match).not.toBeNull();
+    expect(match!.owner).toBe("new-org");
+    expect(match!.repoName).toBe("Update");
+  });
+
+  test("does not search for a repository that was never mirrored", async () => {
+    const repo = makeRepo({ mirroredLocation: "" });
+    let searched = 0;
+    const searchBySource = async () => {
+      searched += 1;
+      return null;
+    };
+
+    const match = await findExistingMirror({
+      repository: repo,
+      config,
+      candidateOwner: "starred",
+      candidateName: "Update",
+      getRepoInfo: async () => null,
+      searchBySource,
+    });
+
+    expect(searched).toBe(0);
+    expect(match).toBeNull();
+  });
+
+  test("ignores a search hit that mirrors a different source", async () => {
+    const repo = makeRepo({ mirroredLocation: "old-org/Update" });
+    const searchBySource = async () =>
+      ({
+        mirror: true,
+        name: "Update",
+        owner: { login: "new-org" },
+        original_url: "https://github.com/someone-else/Update.git",
+      }) as any;
+
+    const match = await findExistingMirror({
+      repository: repo,
+      config,
+      candidateOwner: "starred",
+      candidateName: "Update",
+      getRepoInfo: async () => null,
+      searchBySource,
+    });
+
+    expect(match).toBeNull();
+  });
 });
 
 describe("classifyCandidateName — suffix vs reuse decision (#315/#309)", () => {

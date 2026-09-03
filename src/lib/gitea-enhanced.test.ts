@@ -242,6 +242,34 @@ const mockHttpGet = mock(async (url: string, headers?: any) => {
       headers: new Headers(),
     };
   }
+  // Gitea's keyword search, used when a mirror is at neither the recorded nor
+  // the expected location (#400). The real API wraps hits in { ok, data }.
+  // Two hits share the name; only the second mirrors user/moved-repo.
+  if (url.includes("/api/v1/repos/search?")) {
+    const keyword = new URL(url).searchParams.get("q");
+    const hits =
+      keyword === "moved-repo"
+        ? [
+            {
+              id: 901,
+              name: "moved-repo",
+              mirror: true,
+              owner: { login: "someone-else" },
+              original_url: "https://github.com/other/moved-repo.git",
+              private: false,
+            },
+            {
+              id: 902,
+              name: "moved-repo",
+              mirror: true,
+              owner: { login: "neworg" },
+              original_url: "https://github.com/user/moved-repo.git",
+              private: false,
+            },
+          ]
+        : [];
+    return { data: { ok: true, data: hits }, status: 200, statusText: "OK", headers: new Headers() };
+  }
   if (url.includes("/api/v1/repos/")) {
     throw new MockHttpError("Not Found", 404, "Not Found");
   }
@@ -298,6 +326,23 @@ const mockHttpPost = mock(async (url: string, body?: any, headers?: any) => {
       headers: new Headers()
     };
   }
+  // Repository transfer (issue #400): "pending-repo" needs acceptance, so the
+  // owner stays and repo_transfer is set; anything else moves at once.
+  if (url.includes("/transfer")) {
+    const pending = url.includes("/pending-repo/");
+    return {
+      data: {
+        id: 950,
+        name: url.split("/").slice(-2)[0],
+        mirror: true,
+        owner: { login: pending ? "mirrors" : body?.new_owner },
+        ...(pending ? { repo_transfer: { recipient: { login: body?.new_owner } } } : {}),
+      },
+      status: pending ? 201 : 202,
+      statusText: pending ? "Created" : "Accepted",
+      headers: new Headers()
+    };
+  }
   return { data: {}, status: 200, statusText: "OK", headers: new Headers() };
 });
 
@@ -330,11 +375,12 @@ mock.module("@/lib/repo-backup", () => ({
 }));
 
 // Now import the modules we're testing
-import { 
-  getGiteaRepoInfo, 
-  getOrCreateGiteaOrgEnhanced, 
+import {
+  getGiteaRepoInfo,
+  getOrCreateGiteaOrgEnhanced,
   syncGiteaRepoEnhanced,
-  handleExistingNonMirrorRepo 
+  handleExistingNonMirrorRepo,
+  transferGiteaRepo,
 } from "./gitea-enhanced";
 import type { Config, Repository } from "./db/schema";
 import { repoStatusEnum } from "@/types/Repository";
@@ -758,6 +804,132 @@ describe("Enhanced Gitea Operations", () => {
       expect(mirrorSyncCalls).toHaveLength(1);
       expect(String(mirrorSyncCalls[0][0])).toContain("/api/v1/repos/starred/test-repo/mirror-sync");
       expect(String(mirrorSyncCalls[0][0])).not.toContain("/api/v1/repos/ceph/test-repo/mirror-sync");
+    });
+
+    test("finds a mirror transferred to another owner through the search and syncs it there (#400)", async () => {
+      const config = {
+        userId: "user123",
+        githubConfig: {
+          username: "testuser",
+          token: "github-token",
+          privateRepositories: false,
+          mirrorStarred: true,
+        },
+        giteaConfig: {
+          url: "https://gitea.example.com",
+          token: "encrypted-token",
+          defaultOwner: "testuser",
+          mirrorReleases: true,
+        },
+      } as unknown as Partial<Config>;
+
+      // Recorded at starred/moved-repo, which the mock answers with 404; the
+      // expected owner is also "starred". Only the search knows where it went.
+      const repository = {
+        id: "repo400",
+        name: "moved-repo",
+        fullName: "user/moved-repo",
+        owner: "user",
+        url: "https://github.com/user/moved-repo",
+        cloneUrl: "https://github.com/user/moved-repo.git",
+        isPrivate: false,
+        isStarred: true,
+        status: repoStatusEnum.parse("mirrored"),
+        visibility: "public",
+        userId: "user123",
+        mirroredLocation: "starred/moved-repo",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } as Repository;
+
+      const result = await syncGiteaRepoEnhanced(
+        { config, repository },
+        {
+          getGiteaRepoOwnerAsync: mockGetGiteaRepoOwnerAsync,
+          mirrorGitHubReleasesToGitea: mockMirrorGitHubReleasesToGitea,
+          mirrorGitRepoIssuesToGitea: mockMirrorGitRepoIssuesToGitea,
+          mirrorGitRepoPullRequestsToGitea: mockMirrorGitRepoPullRequestsToGitea,
+          mirrorGitRepoLabelsToGitea: mockMirrorGitRepoLabelsToGitea,
+          mirrorGitRepoMilestonesToGitea: mockMirrorGitRepoMilestonesToGitea,
+          syncRepositoryMetadataToGitea: mockSyncRepositoryMetadataToGitea,
+        }
+      );
+
+      expect(result).toEqual({ success: true });
+
+      const searchCalls = mockHttpGet.mock.calls.filter((call) =>
+        String(call[0]).includes("/api/v1/repos/search?")
+      );
+      expect(searchCalls).toHaveLength(1);
+      expect(String(searchCalls[0][0])).toContain("q=moved-repo");
+
+      // The hit for another source with the same name is skipped.
+      const mirrorSyncCalls = mockHttpPost.mock.calls.filter((call) =>
+        String(call[0]).includes("/mirror-sync")
+      );
+      expect(mirrorSyncCalls).toHaveLength(1);
+      expect(String(mirrorSyncCalls[0][0])).toContain("/api/v1/repos/neworg/moved-repo/mirror-sync");
+
+      // The success write repoints the row so the next run goes straight there.
+      const recorded = dbUpdateSetCalls.filter((call) => call.mirroredLocation).pop();
+      expect(recorded?.mirroredLocation).toBe("neworg/moved-repo");
+      expect(recorded?.status).toBe("synced");
+    });
+
+    test("still reports not found when every search hit mirrors another source", async () => {
+      const config = {
+        userId: "user123",
+        githubConfig: {
+          username: "testuser",
+          token: "github-token",
+          privateRepositories: false,
+          mirrorStarred: true,
+        },
+        giteaConfig: {
+          url: "https://gitea.example.com",
+          token: "encrypted-token",
+          defaultOwner: "testuser",
+          mirrorReleases: true,
+        },
+      } as unknown as Partial<Config>;
+
+      // Same name as the search hits, but this repository comes from third/.
+      const repository = {
+        id: "repo401",
+        name: "moved-repo",
+        fullName: "third/moved-repo",
+        owner: "third",
+        url: "https://github.com/third/moved-repo",
+        cloneUrl: "https://github.com/third/moved-repo.git",
+        isPrivate: false,
+        isStarred: true,
+        status: repoStatusEnum.parse("mirrored"),
+        visibility: "public",
+        userId: "user123",
+        mirroredLocation: "starred/moved-repo",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } as Repository;
+
+      await expect(
+        syncGiteaRepoEnhanced(
+          { config, repository },
+          {
+            getGiteaRepoOwnerAsync: mockGetGiteaRepoOwnerAsync,
+            mirrorGitHubReleasesToGitea: mockMirrorGitHubReleasesToGitea,
+            mirrorGitRepoIssuesToGitea: mockMirrorGitRepoIssuesToGitea,
+            mirrorGitRepoPullRequestsToGitea: mockMirrorGitRepoPullRequestsToGitea,
+            mirrorGitRepoLabelsToGitea: mockMirrorGitRepoLabelsToGitea,
+            mirrorGitRepoMilestonesToGitea: mockMirrorGitRepoMilestonesToGitea,
+            syncRepositoryMetadataToGitea: mockSyncRepositoryMetadataToGitea,
+          }
+        )
+      ).rejects.toThrow("not found in Gitea");
+
+      const mirrorSyncCalls = mockHttpPost.mock.calls.filter((call) =>
+        String(call[0]).includes("/mirror-sync")
+      );
+      expect(mirrorSyncCalls).toHaveLength(0);
     });
 
     test("falls back to the archived-{name} candidate when repository.status is 'archived'", async () => {
@@ -1409,6 +1581,45 @@ describe("Enhanced Gitea Operations", () => {
       });
 
       expect(deleteCalled).toBe(true);
+    });
+  });
+
+  describe("transferGiteaRepo", () => {
+    const config = {
+      giteaConfig: {
+        url: "https://gitea.example.com",
+        token: "encrypted-token",
+        defaultOwner: "testuser",
+      },
+    } as unknown as Partial<Config>;
+
+    test("a completed transfer answers with the new owner and is not pending (#400)", async () => {
+      const result = await transferGiteaRepo({
+        config,
+        owner: "mirrors",
+        repoName: "done-repo",
+        newOwner: "archive",
+      });
+
+      expect(result.pending).toBe(false);
+      expect(result.repo.owner).toEqual({ login: "archive" });
+      const call = mockHttpPost.mock.calls.find((c) =>
+        String(c[0]).includes("/api/v1/repos/mirrors/done-repo/transfer")
+      );
+      expect(call).toBeDefined();
+      expect((call as any[])[1]).toEqual({ new_owner: "archive" });
+    });
+
+    test("a transfer waiting for acceptance keeps the old owner and is pending", async () => {
+      const result = await transferGiteaRepo({
+        config,
+        owner: "mirrors",
+        repoName: "pending-repo",
+        newOwner: "someone",
+      });
+
+      expect(result.pending).toBe(true);
+      expect(result.repo.owner).toEqual({ login: "mirrors" });
     });
   });
 });

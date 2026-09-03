@@ -28,7 +28,8 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { InlineDestinationEditor } from "./InlineDestinationEditor";
+import { toast } from "sonner";
+import { InlineDestinationEditor, type DestinationUpdateOptions } from "./InlineDestinationEditor";
 import { MarqueeText, MarqueeTrigger } from "@/components/ui/marquee-text";
 import { MirrorOverridesDialog } from "@/components/config/MirrorOverridesDialog";
 import {
@@ -208,7 +209,38 @@ export default function RepositoryTable({
     }
   };
 
-  const handleUpdateDestination = async (repoId: string, newDestination: string | null) => {
+  const handleUpdateDestination = async (
+    repoId: string,
+    newDestination: string | null,
+    options?: DestinationUpdateOptions
+  ) => {
+    if (options?.moveMirror) {
+      // Transfer the mirror on the destination and record where it went (issue #400).
+      const response = await fetch(`${withBase("/api/repositories")}/${repoId}/move-mirror`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ destinationOrg: newDestination }),
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        success?: boolean;
+        error?: string;
+        transfer?: { outcome: string; message: string };
+      };
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || "Failed to move the mirror");
+      }
+      const message = data.transfer?.message ?? "Destination updated";
+      if (data.transfer?.outcome === "pending") {
+        toast.info(message);
+      } else {
+        toast.success(message);
+      }
+      if (onRefresh) {
+        await onRefresh();
+      }
+      return;
+    }
+
     // Call API to update repository destination
     const response = await fetch(`${withBase("/api/repositories")}/${repoId}`, {
       method: "PATCH",

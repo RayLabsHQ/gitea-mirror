@@ -65,6 +65,14 @@ export interface GiteaRepoInfo {
   // skip writes that would not change anything.
   description?: string;
   topics?: string[];
+  // Set while a transfer waits for the new owner to accept it (issue #400).
+  repo_transfer?: { recipient?: { login?: string; username?: string } | null } | null;
+}
+
+export interface GiteaTransferResult {
+  /** True when the destination wants an owner of the target to accept before the move happens. */
+  pending: boolean;
+  repo: GiteaRepoInfo;
 }
 
 interface SyncTargetCandidate {
@@ -156,6 +164,104 @@ export async function getGiteaRepoInfo({
     }
     throw error;
   }
+}
+
+const SEARCH_PAGE_SIZE = 50;
+const SEARCH_MAX_PAGES = 4;
+
+/**
+ * Ask the server for a mirror of this repository's source anywhere the token
+ * can see, for when the recorded and the expected location both came up
+ * empty: someone transferred the mirror to another owner in Gitea (issue
+ * #400). The keyword search is by name, so the match is decided on
+ * `original_url`, never on the name alone; a hit without a source URL is
+ * ignored rather than guessed at.
+ */
+export async function findGiteaMirrorBySource({
+  config,
+  repository,
+}: {
+  config: Partial<Config>;
+  repository: Pick<Repository, "name" | "cloneUrl" | "url">;
+}): Promise<GiteaRepoInfo | null> {
+  if (!config.giteaConfig?.url || !config.giteaConfig?.token) {
+    throw new Error("Gitea config is required.");
+  }
+
+  const ownSources = [repository.cloneUrl, repository.url]
+    .filter((u): u is string => typeof u === "string" && u.trim() !== "")
+    .map(normalizeSourceUrl);
+  if (ownSources.length === 0) return null;
+
+  const decryptedConfig = decryptConfigTokens(config as Config);
+  const headers = { Authorization: `token ${decryptedConfig.giteaConfig.token}` };
+  const keyword = encodeURIComponent(repository.name);
+
+  for (let page = 1; page <= SEARCH_MAX_PAGES; page += 1) {
+    const response = await httpGet<{ data?: GiteaRepoInfo[] }>(
+      `${config.giteaConfig.url}/api/v1/repos/search?q=${keyword}&mode=mirror&limit=${SEARCH_PAGE_SIZE}&page=${page}`,
+      headers
+    );
+    const hits = Array.isArray(response.data?.data) ? response.data.data : [];
+    for (const hit of hits) {
+      if (!hit.mirror) continue;
+      const original = typeof hit.original_url === "string" ? hit.original_url.trim() : "";
+      if (original && ownSources.includes(normalizeSourceUrl(original))) {
+        return hit;
+      }
+    }
+    if (hits.length < SEARCH_PAGE_SIZE) break;
+  }
+
+  return null;
+}
+
+/**
+ * Transfer a repository to another owner on the destination (issue #400).
+ *
+ * Gitea completes the transfer at once when the token may create
+ * repositories under the new owner, and otherwise records a pending transfer
+ * that an owner of the target has to accept. It answers 202 for a completed
+ * transfer and 201 for a pending one; the owner in the body is checked as
+ * well, so a server that numbers them differently still lands in the right
+ * branch. Errors (409 transfer in progress, 422 name taken, 403, 404) are
+ * left to the caller as HttpError.
+ */
+export async function transferGiteaRepo({
+  config,
+  owner,
+  repoName,
+  newOwner,
+}: {
+  config: Partial<Config>;
+  owner: string;
+  repoName: string;
+  newOwner: string;
+}): Promise<GiteaTransferResult> {
+  if (!config.giteaConfig?.url || !config.giteaConfig?.token) {
+    throw new Error("Gitea config is required.");
+  }
+
+  const decryptedConfig = decryptConfigTokens(config as Config);
+  const response = await httpPost<GiteaRepoInfo>(
+    `${config.giteaConfig.url}/api/v1/repos/${owner}/${repoName}/transfer`,
+    { new_owner: newOwner },
+    { Authorization: `token ${decryptedConfig.giteaConfig.token}` }
+  );
+
+  const repo = (response.data ?? {}) as GiteaRepoInfo;
+  const landedOwner = typeof repo.owner === "string" ? repo.owner : repo.owner?.login ?? "";
+
+  let pending: boolean;
+  if (repo.repo_transfer) {
+    pending = true;
+  } else if (landedOwner) {
+    pending = landedOwner.toLowerCase() !== newOwner.toLowerCase();
+  } else {
+    pending = response.status === 201;
+  }
+
+  return { pending, repo };
 }
 
 /**
@@ -456,6 +562,35 @@ export async function syncGiteaRepoEnhanced({
       repoName = candidateInfo.name || target.repoName;
       repoInfo = candidateInfo;
       break;
+    }
+
+    // Neither the recorded nor the expected location holds the mirror. Before
+    // failing, ask the server whether a mirror of this source exists under
+    // another owner: someone may have transferred it in Gitea (issue #400).
+    // A hit is adopted like any other candidate, and the success path below
+    // records its location so the next run goes straight there.
+    if (!repoInfo) {
+      try {
+        const relocated = await findGiteaMirrorBySource({ config, repository });
+        const relocatedOwner =
+          typeof relocated?.owner === "string" ? relocated.owner : relocated?.owner?.login;
+        if (relocated && relocatedOwner) {
+          console.log(
+            `[Sync] ${repository.name} is not at ${candidateTargets
+              .map((t) => `${t.owner}/${t.repoName}`)
+              .join(", ")}; found its mirror at ${relocatedOwner}/${relocated.name}, recording the new location`
+          );
+          repoOwner = relocatedOwner;
+          repoName = relocated.name || repository.name;
+          repoInfo = relocated;
+        }
+      } catch (error) {
+        console.warn(
+          `[Sync] Could not search the destination for a moved mirror of ${repository.name}: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+      }
     }
 
     if (!repoInfo) {

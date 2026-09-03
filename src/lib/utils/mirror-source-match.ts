@@ -120,6 +120,9 @@ export interface ExistingMirrorMatch {
  *      differs from the current naming strategy (handles strategy changes — #309).
  *   2. The provided candidate owner/name — if that resolves to a live mirror of
  *      THIS source, reuse it (handles the self-collision that drove suffixing — #315).
+ *   3. When the row was mirrored before and both came up empty, a keyword
+ *      search of the destination for a mirror of THIS source (handles a
+ *      transfer to another owner in Gitea — #400).
  *
  * Returns null when no live same-source mirror is found (caller should create
  * a fresh mirror, generating a unique name if the candidate name is taken by a
@@ -131,6 +134,7 @@ export async function findExistingMirror({
   candidateOwner,
   candidateName,
   getRepoInfo,
+  searchBySource,
 }: {
   repository: Repository;
   config: Partial<Config>;
@@ -141,6 +145,11 @@ export async function findExistingMirror({
     config: Partial<Config>;
     owner: string;
     repoName: string;
+  }) => Promise<GiteaRepoInfo | null>;
+  // Injectable for testing; defaults to the real Gitea keyword search.
+  searchBySource?: (args: {
+    config: Partial<Config>;
+    repository: Repository;
   }) => Promise<GiteaRepoInfo | null>;
 }): Promise<ExistingMirrorMatch | null> {
   const lookup =
@@ -207,6 +216,37 @@ export async function findExistingMirror({
         repoInfo: repoInfo as GiteaRepoInfo,
       };
     }
+  }
+
+  // 3. Nothing at either place, yet the row says it was mirrored before: the
+  //    mirror may have been transferred to another owner in Gitea (#400). Ask
+  //    the server for a mirror of this source before creating a fresh one,
+  //    which would leave two copies. Never-mirrored rows skip this so a bulk
+  //    import does not pay a search per repository.
+  if (!(repository.mirroredLocation ?? "").trim()) return null;
+
+  const search =
+    searchBySource ??
+    (async (args: { config: Partial<Config>; repository: Repository }) => {
+      const { findGiteaMirrorBySource } = await import("@/lib/gitea-enhanced");
+      return findGiteaMirrorBySource(args);
+    });
+
+  try {
+    const hit = await search({ config, repository });
+    const owner = typeof hit?.owner === "string" ? hit.owner : hit?.owner?.login;
+    if (hit && owner && hit.name && isMirrorOfSource(hit, sourceCloneUrl)) {
+      console.log(
+        `[Mirror] ${repository.fullName} is no longer at its recorded location; reusing its mirror at ${owner}/${hit.name}`
+      );
+      return { owner, repoName: hit.name, repoInfo: hit };
+    }
+  } catch (error) {
+    console.warn(
+      `[Mirror] Could not search the destination for a moved mirror of ${repository.fullName}: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
   }
 
   return null;

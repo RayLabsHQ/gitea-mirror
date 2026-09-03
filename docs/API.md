@@ -121,15 +121,16 @@ Starts mirroring in the background and returns straight away. Poll the list endp
 
 `POST /api/cleanup/reconcile`
 
-Compares what the destination (Gitea or Forgejo) holds with the repositories this account tracks, and reports three groups: mirrors on the destination that the database does not know about, rows marked mirrored whose repository is gone, and a healthy count. Only mirrors whose source URL points at the configured source count as this app's. Native repositories and mirrors of other hosts are listed under `notManaged` and never touched. Useful after a lost or restored database (issue #284).
+Compares what the destination (Gitea or Forgejo) holds with the repositories this account tracks, and reports four groups: mirrors on the destination that the database does not know about, rows whose mirror was moved to another owner, rows marked mirrored whose repository is gone, and a healthy count. Only mirrors whose source URL points at the configured source count as this app's. Native repositories, mirrors of other hosts and second copies of a tracked mirror are listed under `notManaged` and never touched. Useful after a lost or restored database (issue #284) or after transferring mirrors between owners in Gitea (issue #400).
 
 ```json
-{ "dryRun": true, "adoptUntracked": false, "resetMissing": false }
+{ "dryRun": true, "adoptUntracked": false, "relocateMoved": false, "resetMissing": false }
 ```
 
 The body is optional and every field defaults to the value above, so an empty `POST` is a dry run. With `dryRun: false`:
 
 - `adoptUntracked: true` creates a row for each untracked mirror from its source URL, so scheduled sync and the cleanup service include it from then on. The row keeps the mirror where it is, even when the strategy would put it elsewhere.
+- `relocateMoved: true` points each moved row at the owner that holds its mirror now, so sync follows the transfer instead of failing. A row that failed because its mirror was not at the recorded place goes back to `mirrored`. Nothing changes on the destination.
 - `resetMissing: true` sets each missing row back to `imported` so the next mirror run recreates the mirror. Rows are never deleted.
 
 Nothing is deleted or archived on either side by this call; the cleanup service keeps its own rules.
@@ -141,15 +142,16 @@ Nothing is deleted or archived on either side by this call; the cleanup service 
   "report": {
     "untracked": [{ "location": "github-mirrors/hello-world", "originalUrl": "https://github.com/octocat/hello-world.git", "sourcePath": "octocat/hello-world", "isPrivate": false }],
     "missing": [{ "id": "9b2f...", "fullName": "octocat/gone", "location": "github-mirrors/gone" }],
+    "moved": [{ "id": "c41a...", "fullName": "octocat/tools", "from": "github-mirrors/tools", "to": "archive/tools" }],
     "notManaged": [{ "location": "me/notes", "reason": "not a mirror" }],
     "unverified": [],
-    "healthyCount": 41,
+    "healthyCount": 40,
     "elsewhereCount": 0,
-    "scannedOwners": ["e2e_admin", "github-mirrors"],
+    "scannedOwners": ["e2e_admin", "github-mirrors", "archive"],
     "skippedOwners": ["starred"],
     "totalOnDestination": 43
   },
-  "applied": { "adopted": 1, "reset": 1, "skipped": 0 }
+  "applied": { "adopted": 1, "reset": 1, "relocated": 1, "skipped": 0 }
 }
 ```
 
@@ -160,6 +162,56 @@ Nothing is deleted or archived on either side by this call; the cleanup service 
 | `200` | Report computed, and applied when asked. |
 | `400` | A field has the wrong type, or the destination is not configured yet. |
 | `404` | No configuration for this account. |
+
+### Move a mirror to another owner
+
+`POST /api/repositories/{id}/move-mirror`
+
+```json
+{ "destinationOrg": "archive" }
+```
+
+Changes the repository's destination and transfers its existing mirror there on the destination (Gitea or Forgejo), for issue #400. `PATCH /api/repositories/{id}` with `destinationOrg` only changes the label: the mirror stays where it is and the new destination applies if the mirror is ever created again. Send `null` to remove the override and move the mirror back to where the strategy puts it.
+
+The mirror is looked for at its recorded location first, then anywhere on the destination in case someone transferred it by hand. A target organization that does not exist is created, the way a mirror run creates one. When a mirror of the same source already sits under the target, the row is pointed at it and the old copy is left alone. The row is only written once the destination has accepted the transfer, so a refused move changes nothing.
+
+```json
+{
+  "success": true,
+  "destinationOrg": "archive",
+  "mirroredLocation": "archive/hello-world",
+  "transfer": {
+    "outcome": "moved",
+    "from": "github-mirrors/hello-world",
+    "to": "archive/hello-world",
+    "message": "Moved octocat/hello-world from github-mirrors/hello-world to archive/hello-world."
+  }
+}
+```
+
+| `transfer.outcome` | Meaning |
+| --- | --- |
+| `moved` | The destination moved the repository. `mirroredLocation` is the new place. |
+| `pending` | The token cannot create repositories under the new owner, so the destination waits for one of its owners to accept. The mirror keeps syncing where it is, and sync follows it once accepted. |
+| `recorded` | A mirror of the same source already sat under the target; the row now points at it. |
+| `not-mirrored` | The row has never been mirrored, so only the destination changed. |
+
+| Status | Meaning |
+| --- | --- |
+| `200` | Done, see `transfer`. |
+| `400` | Bad owner name, destination not configured, or a GitHub or GitLab destination (`destination-unsupported`). |
+| `403` | The destination token may not transfer the repository (`forbidden`). |
+| `404` | The repository or the configuration does not belong to this account. |
+| `409` | Nothing changed. `code` says why: `not-on-destination`, `name-taken`, `transfer-pending`, or `destination-mismatch` for a row mirrored to another host. |
+| `502` | The destination refused for another reason (`destination-error`). |
+
+`POST /api/organizations/{id}/move-mirrors` does the same for every mirrored repository of an organization:
+
+```json
+{ "destinationOrg": "archive", "dryRun": true }
+```
+
+`dryRun` defaults to `true` and answers with `plan.moves` (`id`, `fullName`, `from`, `to`) and `plan.skipped` (`fullName`, `reason`) without touching anything. Repositories with their own destination, starred repositories, rows that are not mirrored yet and rows in a running mirror or sync are skipped. With `dryRun: false` each planned move runs, the organization's `destinationOrg` is written, and the answer lists `moved`, `pending`, `recorded` and `failed` (`fullName`, `error`). A failed repository keeps syncing where it is.
 
 ## A complete example
 
