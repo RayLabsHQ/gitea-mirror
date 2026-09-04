@@ -34,6 +34,10 @@ RUN apt-get update && apt-get -y upgrade && apt-get install -y --no-install-reco
   && rm -rf /var/lib/apt/lists/*
 ARG GO_VERSION=1.25.14
 ARG GIT_LFS_VERSION=3.7.1
+# Pinned rather than @latest: a cached layer kept an old @latest resolution
+# after golang.org/x/crypto 0.56.0 fixed CVE-2026-56855 and CVE-2026-78662.
+ARG GO_X_CRYPTO_VERSION=v0.56.0
+ARG GO_X_NET_VERSION=v0.58.0
 RUN ARCH="$(dpkg --print-architecture)" \
   && wget -qO /tmp/go.tar.gz "https://go.dev/dl/go${GO_VERSION}.linux-${ARCH}.tar.gz" \
   && tar -C /usr/local -xzf /tmp/go.tar.gz \
@@ -43,8 +47,8 @@ ENV PATH="/usr/local/go/bin:/root/go/bin:${PATH}"
 ENV GOTOOLCHAIN=local
 RUN git clone --branch "v${GIT_LFS_VERSION}" --depth 1 https://github.com/git-lfs/git-lfs.git /tmp/git-lfs \
   && cd /tmp/git-lfs \
-  && go get golang.org/x/crypto@latest \
-  && go get golang.org/x/net@latest \
+  && go get "golang.org/x/crypto@${GO_X_CRYPTO_VERSION}" \
+  && go get "golang.org/x/net@${GO_X_NET_VERSION}" \
   && go mod tidy \
   && make \
   && install -m 755 /tmp/git-lfs/bin/git-lfs /usr/local/bin/git-lfs
