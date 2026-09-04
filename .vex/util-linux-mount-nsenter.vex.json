@@ -1,0 +1,58 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://github.com/RayLabsHQ/gitea-mirror/blob/main/.vex/util-linux-mount-nsenter.vex.json",
+  "author": "developer@arunavoray.dev",
+  "role": "Gitea Mirror maintainer",
+  "timestamp": "2026-09-04T01:30:00Z",
+  "version": 1,
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "CVE-2026-78408",
+        "description": "util-linux nsenter --join-cgroup keeps a root-opened cgroup.procs descriptor across namespace and credential changes."
+      },
+      "timestamp": "2026-09-04T01:30:00Z",
+      "products": [
+        { "@id": "pkg:docker/raylabshq/gitea-mirror" },
+        { "@id": "pkg:docker/ghcr.io/raylabshq/gitea-mirror" },
+        { "@id": "pkg:docker/gitea-mirror" },
+        { "@id": "pkg:docker/library/gitea-mirror" }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "nsenter is never run inside this image. The application runs as the unprivileged gitea-mirror user and only executes bun, git and git-lfs. The --join-cgroup path needs a privileged operator to run nsenter against a target, which happens on the host with the host's own nsenter, not with the copy in this container. Debian rates the issue minor and ships no fix for trixie (util-linux 2.41.5-0+deb13u1); the fix is only in unstable (2.42.3-1)."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-78409",
+        "description": "util-linux mount(8) X-mount.subdir follows intermediate symlinks on Linux 6.15 and later, letting an fstab-authorized user attach a host path."
+      },
+      "timestamp": "2026-09-04T01:30:00Z",
+      "products": [
+        { "@id": "pkg:docker/raylabshq/gitea-mirror" },
+        { "@id": "pkg:docker/ghcr.io/raylabshq/gitea-mirror" },
+        { "@id": "pkg:docker/gitea-mirror" },
+        { "@id": "pkg:docker/library/gitea-mirror" }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The flaw needs a setuid mount(8) and an fstab entry with X-mount.subdir that authorizes an unprivileged user. The image ships no user-mountable fstab entries, the runner stage strips the setuid and setgid bit from every binary, and the application runs as an unprivileged user that never calls mount. Debian rates the issue minor and ships no fix for trixie."
+    },
+    {
+      "vulnerability": {
+        "name": "CVE-2026-78410",
+        "description": "util-linux mount(8) does not pin the source of a restricted bind mount before the privileged mount, so a user who can replace the source can redirect it."
+      },
+      "timestamp": "2026-09-04T01:30:00Z",
+      "products": [
+        { "@id": "pkg:docker/raylabshq/gitea-mirror" },
+        { "@id": "pkg:docker/ghcr.io/raylabshq/gitea-mirror" },
+        { "@id": "pkg:docker/gitea-mirror" },
+        { "@id": "pkg:docker/library/gitea-mirror" }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The flaw needs a setuid mount(8) and an fstab bind entry an unprivileged user is allowed to mount. The image ships no such entries, the runner stage strips the setuid and setgid bit from every binary, and the application runs as an unprivileged user that never calls mount. Debian rates the issue minor and ships no fix for trixie."
+    }
+  ]
+}

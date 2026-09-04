@@ -55,6 +55,13 @@ WORKDIR /app
 RUN apt-get update && apt-get -y upgrade && apt-get install -y --no-install-recommends \
   git wget sqlite3 openssl ca-certificates \
   && rm -rf /var/lib/apt/lists/*
+# The app runs as an unprivileged user and never calls a setuid helper.
+# Dropping the bits closes the path CVE-2026-78409 and CVE-2026-78410 need
+# in mount(8); Debian ships no trixie fix for them. See .vex/README.md.
+RUN find / -xdev -type f -perm /6000 -exec chmod a-s '{}' +
+# OpenVEX statements for CVEs this image cannot reach, so that
+# `docker scout cves` on the published image reports them as not affected.
+COPY .vex/*.vex.json /var/lib/db/
 COPY --from=git-lfs-builder /usr/local/bin/git-lfs /usr/local/bin/git-lfs
 RUN git lfs install
 COPY --from=pruner /app/node_modules ./node_modules

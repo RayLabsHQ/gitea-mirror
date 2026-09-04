@@ -228,6 +228,12 @@ jobs:
           summary: true
           exit-code: false
           only-severities: critical,high
+          # OpenVEX statements in .vex/ mark CVEs the image cannot reach as
+          # not affected (see .vex/README.md). Scout only accepts statements
+          # from authors listed here; the default is *@docker.com.
+          vex-location: .vex
+          vex-author: developer@arunavoray.dev
+          only-vex-affected: true
           write-comment: true
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -246,6 +252,9 @@ jobs:
           summary: true
           exit-code: false
           only-severities: critical,high
+          vex-location: .vex
+          vex-author: developer@arunavoray.dev
+          only-vex-affected: true
           write-comment: true
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
