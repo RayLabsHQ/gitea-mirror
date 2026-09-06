@@ -143,12 +143,13 @@ if (process.env.NODE_ENV !== "test") {
 export { db };
 
 // Export all table definitions from schema
-export { 
-  users, 
-  events, 
-  configs, 
-  repositories, 
-  mirrorJobs, 
+export {
+  users,
+  events,
+  configs,
+  sources,
+  repositories,
+  mirrorJobs,
   organizations,
   sessions,
   accounts,

@@ -230,6 +230,27 @@ export const configSchema = z.object({
   updatedAt: z.coerce.date(),
 });
 
+// One connected source host per row of the sources table. Parses leniently
+// for reads (defaults like githubConfigSchema); the write path in
+// src/lib/sources.ts validates strictly.
+export const sourceSchema = z.object({
+  id: z.string(),
+  userId: z.string(),
+  name: z.string(),
+  // Which host the repositories come from. "gitea" also covers Forgejo.
+  provider: z.enum(SOURCE_PROVIDER_KINDS).default("github"),
+  // Normalized base URL of the instance; the provider default is resolved
+  // on write so the empty string is never stored.
+  url: z.string().default(""),
+  username: z.string().default(""),
+  // AES-256-GCM encrypted at rest, same convention as
+  // configs.githubConfig.token. Null means public-only access.
+  token: z.string().nullable().optional(),
+  enabled: z.boolean().default(true),
+  createdAt: z.coerce.date(),
+  updatedAt: z.coerce.date(),
+});
+
 export const repositorySchema = z.object({
   id: z.string(),
   userId: z.string(),
@@ -242,6 +263,7 @@ export const repositorySchema = z.object({
   owner: z.string(),
   sourceProvider: z.string().optional(),
   sourceUrl: z.string().optional(),
+  sourceId: z.string().optional().nullable(),
   destinationProvider: z.string().optional(),
   destinationUrl: z.string().optional(),
   organization: z.string().optional().nullable(),
@@ -450,6 +472,44 @@ export const configs = sqliteTable("configs", {
     .default(sql`(unixepoch())`),
 }, (_table) => []);
 
+// One connected source host per user. Multiple rows per user are allowed
+// (github.com plus a GHES instance, or GitLab plus Gitea, ...); the first
+// row by createdAt is the "primary" source mirrored into the legacy
+// configs.githubConfig connection fields for backward compatibility.
+export const sources = sqliteTable("sources", {
+  id: text("id").primaryKey(),
+  userId: text("user_id")
+    .notNull()
+    .references(() => users.id),
+  // Display label for the sources list. Auto-derived ("GitHub (octocat)")
+  // by src/lib/sources.ts when the caller leaves it blank.
+  name: text("name").notNull(),
+  provider: text("provider")
+    .$type<SourceProviderKind>()
+    .notNull(),
+  // Normalized instance base URL. The provider default is resolved on write
+  // so the empty string is never stored, which keeps the unique index below
+  // meaningful for default-instance rows.
+  url: text("url").notNull(),
+  // The account the token belongs to (the legacy config's "owner").
+  username: text("username").notNull().default(""),
+  // AES-256-GCM encrypted at rest, same convention as
+  // configs.githubConfig.token. Null means public-only access.
+  token: text("token"),
+  enabled: integer("enabled", { mode: "boolean" })
+    .notNull()
+    .default(true),
+  createdAt: integer("created_at", { mode: "timestamp" })
+    .notNull()
+    .default(sql`(unixepoch())`),
+  updatedAt: integer("updated_at", { mode: "timestamp" })
+    .notNull()
+    .default(sql`(unixepoch())`),
+}, (table) => [
+  index("idx_sources_user_id").on(table.userId),
+  uniqueIndex("uniq_sources_user_provider_url_username").on(table.userId, table.provider, table.url, table.username),
+]);
+
 export const repositories = sqliteTable("repositories", {
   id: text("id").primaryKey(),
   userId: text("user_id")
@@ -471,6 +531,11 @@ export const repositories = sqliteTable("repositories", {
     .notNull()
     .default("github"),
   sourceUrl: text("source_url").notNull().default("https://github.com"),
+  // The sources row this repository was imported from. Nullable and
+  // deliberately without a foreign key: legacy rows may reference sources
+  // that were deleted later ("switched source" state), and those rows keep
+  // their dangling id on purpose. NULL means "not linked (yet)".
+  sourceId: text("source_id"),
   // Where the mirror lives: the destination kind and base URL recorded when
   // the row was imported or mirrored. An empty URL means "not recorded yet".
   destinationProvider: text("destination_provider")
@@ -539,8 +604,12 @@ export const repositories = sqliteTable("repositories", {
   index("idx_repositories_is_fork").on(table.isForked),
   index("idx_repositories_is_starred").on(table.isStarred),
   index("idx_repositories_user_imported_at").on(table.userId, table.importedAt),
-  uniqueIndex("uniq_repositories_user_full_name").on(table.userId, table.fullName),
-  uniqueIndex("uniq_repositories_user_normalized_full_name").on(table.userId, table.normalizedFullName),
+  // Full names are unique per source: the same "owner/repo" can legitimately
+  // exist on two connected hosts (e.g. github.com and a GHES instance).
+  // SQLite treats NULLs as distinct in unique indexes, so unlinked legacy
+  // rows (source_id NULL) never collide with each other.
+  uniqueIndex("uniq_repositories_user_full_name").on(table.userId, table.sourceId, table.fullName),
+  uniqueIndex("uniq_repositories_user_normalized_full_name").on(table.userId, table.sourceId, table.normalizedFullName),
   index("idx_repositories_mirrored_location").on(table.userId, table.mirroredLocation),
 ]);
 
@@ -1023,6 +1092,7 @@ export const rateLimits = sqliteTable("rate_limits", {
 // Export type definitions
 export type User = z.infer<typeof userSchema>;
 export type Config = z.infer<typeof configSchema>;
+export type Source = z.infer<typeof sourceSchema>;
 export type Repository = z.infer<typeof repositorySchema>;
 export type MirrorJob = z.infer<typeof mirrorJobSchema>;
 export type Organization = z.infer<typeof organizationSchema>;

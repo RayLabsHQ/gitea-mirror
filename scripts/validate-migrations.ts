@@ -657,6 +657,149 @@ function verify0018Migration(db: any) {
   );
 }
 
+function seedPre0019Database(db: any) {
+  // Migrations 0000-0018 have run; the sources table does not exist yet.
+  // Seed one user per connection flavor: a plain GitHub config, a GitLab
+  // config without an instance URL (provider default must apply), a
+  // "forgejo" alias with a trailing-slash URL (must normalize to the gitea
+  // kind and the slashed URL), and an empty config (must create no source).
+  for (const [id, email, name] of [
+    ["u-gh", "gh19@example.com", "GitHub Nineteen"],
+    ["u-gl", "gl19@example.com", "GitLab Nineteen"],
+    ["u-fj", "fj19@example.com", "Forgejo Nineteen"],
+    ["u-none", "none19@example.com", "No Source Nineteen"],
+  ] as const) {
+    db.run("INSERT INTO users (id, email, username, name) VALUES (?, ?, ?, ?)", [id, email, id.slice(2), name]);
+  }
+
+  db.run(
+    "INSERT INTO configs (id, user_id, name, is_active, github_config, gitea_config, schedule_config, cleanup_config) " +
+      "VALUES ('cfg-gh19', 'u-gh', 'Default', 1, '{\"provider\":\"github\",\"owner\":\"octocat\",\"token\":\"gh-encrypted-token\",\"type\":\"personal\"}', '{}', '{}', '{}')",
+  );
+  db.run(
+    "INSERT INTO configs (id, user_id, name, is_active, github_config, gitea_config, schedule_config, cleanup_config) " +
+      "VALUES ('cfg-gl19', 'u-gl', 'Default', 1, '{\"provider\":\"gitlab\",\"owner\":\"greta\",\"token\":\"gl-encrypted-token\",\"type\":\"personal\"}', '{}', '{}', '{}')",
+  );
+  db.run(
+    "INSERT INTO configs (id, user_id, name, is_active, github_config, gitea_config, schedule_config, cleanup_config) " +
+      "VALUES ('cfg-fj19', 'u-fj', 'Default', 1, '{\"provider\":\"forgejo\",\"owner\":\"cbuser\",\"url\":\"https://codeberg.org/\",\"token\":\"\",\"type\":\"personal\"}', '{}', '{}', '{}')",
+  );
+  db.run(
+    "INSERT INTO configs (id, user_id, name, is_active, github_config, gitea_config, schedule_config, cleanup_config) " +
+      "VALUES ('cfg-none19', 'u-none', 'Default', 1, '{\"owner\":\"\",\"token\":\"\"}', '{}', '{}', '{}')",
+  );
+
+  const insertRepo = (id: string, userId: string, configId: string, fullName: string, provider: string, url: string) =>
+    db.run(
+      "INSERT INTO repositories (id, user_id, config_id, name, full_name, normalized_full_name, url, clone_url, owner, default_branch, source_provider, source_url) " +
+        `VALUES ('${id}', '${userId}', '${configId}', '${fullName.split("/")[1]}', '${fullName}', '${fullName}', 'https://example.com/${fullName}', 'https://example.com/${fullName}.git', '${fullName.split("/")[0]}', 'main', '${provider}', '${url}')`,
+    );
+
+  // Matches the config's connection -> backfilled.
+  insertRepo("repo-gh19", "u-gh", "cfg-gh19", "octocat/tool", "github", "https://github.com");
+  // From a host the user has no source for -> stays NULL ("switched source").
+  insertRepo("repo-other19", "u-gh", "cfg-gh19", "octocat/legacy", "gitlab", "https://gitlab.com");
+  // Trailing slash in the repo's source_url still matches the trimmed source url.
+  insertRepo("repo-cb19", "u-fj", "cfg-fj19", "cbuser/tool", "gitea", "https://codeberg.org/");
+}
+
+function verify0019Migration(db: any) {
+  // The sources table and its indexes.
+  const sourceCount = db.query("SELECT COUNT(*) AS count FROM sources").get() as { count: number };
+  assert(sourceCount.count === 3, `Expected 3 seeded source rows, got ${sourceCount.count}`);
+  for (const indexName of ["idx_sources_user_id", "uniq_sources_user_provider_url_username"]) {
+    const index = db
+      .query("SELECT name FROM sqlite_master WHERE type='index' AND name = ?")
+      .get(indexName) as { name: string } | null;
+    assert(index, `Expected ${indexName} index to exist after migration`);
+  }
+
+  const byUser = Object.fromEntries(
+    (db.query("SELECT user_id, name, provider, url, username, token, enabled FROM sources").all() as Array<{
+      user_id: string;
+      name: string;
+      provider: string;
+      url: string;
+      username: string;
+      token: string | null;
+      enabled: number;
+    }>).map((row) => [row.user_id, row]),
+  );
+
+  assert(
+    byUser["u-gh"]?.provider === "github" &&
+      byUser["u-gh"].url === "https://github.com" &&
+      byUser["u-gh"].username === "octocat" &&
+      byUser["u-gh"].token === "gh-encrypted-token" &&
+      byUser["u-gh"].name === "GitHub (octocat)" &&
+      byUser["u-gh"].enabled === 1,
+    `Expected the GitHub config to seed a matching source row, got ${JSON.stringify(byUser["u-gh"])}`,
+  );
+  assert(
+    byUser["u-gl"]?.provider === "gitlab" && byUser["u-gl"].url === "https://gitlab.com",
+    `Expected a GitLab config without a URL to take the provider default, got ${JSON.stringify(byUser["u-gl"])}`,
+  );
+  assert(
+    byUser["u-fj"]?.provider === "gitea" &&
+      byUser["u-fj"].url === "https://codeberg.org" &&
+      byUser["u-fj"].token === null &&
+      byUser["u-fj"].name === "Gitea / Forgejo (cbuser)",
+    `Expected the forgejo alias to normalize to gitea with a trimmed URL and NULL token, got ${JSON.stringify(byUser["u-fj"])}`,
+  );
+  assert(!byUser["u-none"], "Expected an empty config to seed no source row");
+
+  // The repositories.source_id column exists, nullable, no default.
+  const repoCols = db.query("PRAGMA table_info(repositories)").all() as TableInfoRow[];
+  const sourceIdCol = repoCols.find((column) => column.name === "source_id");
+  assert(sourceIdCol, "Expected repositories.source_id column to exist after migration");
+  assert(sourceIdCol.notnull === 0, "Expected repositories.source_id to be nullable");
+  assert(sourceIdCol.dflt_value === null, `Expected repositories.source_id to have no default, got ${sourceIdCol.dflt_value}`);
+
+  // Backfill: matching repos linked, unmatched legacy repo left NULL.
+  const linked = db
+    .query(
+      "SELECT repositories.source_id FROM repositories JOIN sources ON sources.id = repositories.source_id WHERE repositories.id = 'repo-gh19'",
+    )
+    .get() as { source_id: string } | null;
+  assert(linked, "Expected the GitHub repository to be linked to its source row");
+  const cbLinked = db
+    .query(
+      "SELECT repositories.source_id FROM repositories JOIN sources ON sources.id = repositories.source_id WHERE repositories.id = 'repo-cb19'",
+    )
+    .get() as { source_id: string } | null;
+  assert(cbLinked, "Expected the trailing-slash Codeberg repository to be linked to its source row");
+  const unlinked = db
+    .query("SELECT source_id FROM repositories WHERE id = 'repo-other19'")
+    .get() as { source_id: string | null } | null;
+  assert(unlinked?.source_id === null, `Expected a repository from an unconnected host to keep NULL source_id, got ${JSON.stringify(unlinked)}`);
+
+  // Full names are now unique per source: the same owner/repo can exist once
+  // per connected source, and still only once per source.
+  db.run(
+    "INSERT INTO sources (id, user_id, name, provider, url, username) VALUES ('src-gl19', 'u-gh', 'GitLab (octocat)', 'gitlab', 'https://gitlab.com', 'octocat')",
+  );
+  const ghSourceId = (db.query("SELECT id FROM sources WHERE user_id = 'u-gh' AND provider = 'github'").get() as { id: string }).id;
+  db.run(
+    "INSERT INTO repositories (id, user_id, config_id, name, full_name, normalized_full_name, url, clone_url, owner, default_branch, source_id) " +
+      `VALUES ('repo-dup-gh', 'u-gh', 'cfg-gh19', 'dup-tool', 'octocat/dup-tool', 'octocat/dup-tool', 'https://github.com/octocat/dup-tool', 'https://github.com/octocat/dup-tool.git', 'octocat', 'main', '${ghSourceId}')`,
+  );
+  db.run(
+    "INSERT INTO repositories (id, user_id, config_id, name, full_name, normalized_full_name, url, clone_url, owner, default_branch, source_id) " +
+      `VALUES ('repo-dup-gl', 'u-gh', 'cfg-gh19', 'dup-tool', 'octocat/dup-tool', 'octocat/dup-tool', 'https://gitlab.com/octocat/dup-tool', 'https://gitlab.com/octocat/dup-tool.git', 'octocat', 'main', 'src-gl19')`,
+  );
+
+  let rejected = false;
+  try {
+    db.run(
+      "INSERT INTO repositories (id, user_id, config_id, name, full_name, normalized_full_name, url, clone_url, owner, default_branch, source_id) " +
+        `VALUES ('repo-dup-gh2', 'u-gh', 'cfg-gh19', 'dup-tool', 'octocat/dup-tool', 'octocat/dup-tool', 'https://github.com/octocat/dup-tool', 'https://github.com/octocat/dup-tool.git', 'octocat', 'main', '${ghSourceId}')`,
+    );
+  } catch {
+    rejected = true;
+  }
+  assert(rejected, "Expected the same full name under the same source to still be rejected");
+}
+
 const MIGRATION_0012_TIMESTAMP = 1774062000000;
 const MIGRATION_0013_TIMESTAMP = 1780377747526;
 
@@ -855,6 +998,10 @@ const latestUpgradeFixtures: Record<string, UpgradeFixture> = {
   "0018_destination_columns": {
     seed: seedPre0018Database,
     verify: verify0018Migration,
+  },
+  "0019_multi_source": {
+    seed: seedPre0019Database,
+    verify: verify0019Migration,
   },
 };
 
