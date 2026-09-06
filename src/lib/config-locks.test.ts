@@ -40,11 +40,19 @@ describe("hasSourceChanged", () => {
     expect(hasSourceChanged({ provider: "github" }, { provider: "gitea" })).toBe(true);
   });
 
-  test("sourceIdentity describes GitHub with its fixed URL", () => {
+  test("sourceIdentity defaults GitHub to github.com and preserves a GitHub Enterprise URL", () => {
     expect(sourceIdentity({ provider: "github", url: "https://ghe.example.com" })).toEqual({
+      provider: "github",
+      url: "https://ghe.example.com",
+    });
+    expect(sourceIdentity({ provider: "github" })).toEqual({
       provider: "github",
       url: "https://github.com",
     });
+    expect(hasSourceChanged(
+      { provider: "github", url: "https://ghe1.example.com" },
+      { provider: "github", url: "https://ghe2.example.com" }
+    )).toBe(true);
   });
 });
 

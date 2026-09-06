@@ -11,7 +11,6 @@
  */
 import type { ConfigLockState } from "@/types/config";
 import {
-  SOURCE_PROVIDER_DEFAULT_URLS,
   SOURCE_PROVIDER_LABELS,
   normalizeSourceProviderKind,
   normalizeSourceUrl,
@@ -49,15 +48,17 @@ export const UNLOCKED_CONFIG: ConfigLockState = computeConfigLocks({
   mirroredCount: 0,
 });
 
-/** The host a source config points at, normalized so cosmetic edits do not count as a change. */
+/**
+ * The host a source config points at, normalized so cosmetic edits do not
+ * count as a change. An empty or missing URL resolves to the provider's
+ * default instance; a custom GitHub Enterprise URL is preserved so host
+ * switches on locked sources still need confirmation.
+ */
 export function sourceIdentity(config: SourceLike | null | undefined): SourceIdentity {
   const provider = normalizeSourceProviderKind(config?.provider);
   return {
     provider,
-    url:
-      provider === "github"
-        ? SOURCE_PROVIDER_DEFAULT_URLS.github
-        : normalizeSourceUrl(config?.url, provider),
+    url: normalizeSourceUrl(config?.url, provider),
   };
 }
 
@@ -184,10 +185,27 @@ export async function loadConfigLocks(userId: string): Promise<ConfigLockState> 
         )
       );
 
-    return computeConfigLocks({
-      repositoryCount: Number(all?.count ?? 0),
-      mirroredCount: Number(mirrored?.count ?? 0),
+    // Per-source lock state: how many imported repositories belong to each
+    // connected source row. The null bucket (repositories whose sourceId is
+    // missing or dangling) counts toward no source's lock, exactly like the
+    // "switched source" rows it contains.
+    const perSourceRows = await db
+      .select({ sourceId: repositories.sourceId, count: sql<number>`count(*)` })
+      .from(repositories)
+      .where(eq(repositories.userId, userId))
+      .groupBy(repositories.sourceId);
+    const perSource = perSourceRows.map((row) => {
+      const count = Number(row.count ?? 0);
+      return { sourceId: row.sourceId ?? null, locked: count > 0, repositoryCount: count };
     });
+
+    return {
+      ...computeConfigLocks({
+        repositoryCount: Number(all?.count ?? 0),
+        mirroredCount: Number(mirrored?.count ?? 0),
+      }),
+      sources: perSource,
+    };
   } catch (error) {
     console.warn(
       `[Config] Could not compute source/destination locks for user ${userId}; treating as unlocked: ${

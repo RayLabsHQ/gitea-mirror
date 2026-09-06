@@ -113,6 +113,26 @@ export interface AdvancedOptions {
 export interface ConfigLockState {
   source: { locked: boolean; repositoryCount: number };
   destination: { locked: boolean; mirroredCount: number };
+  /**
+   * Per-source lock state for multi-source: one entry per distinct
+   * repositories.source_id, plus a null entry for repositories whose source
+   * row is gone or was never linked (those count toward no source's lock).
+   * Absent when the counts could not be read. `source` above keeps
+   * reflecting the TOTAL repository count for backward compatibility.
+   */
+  sources?: Array<{ sourceId: string | null; locked: boolean; repositoryCount: number }>;
+}
+
+export interface SourceApiRecord {
+  id: string;
+  name: string;
+  provider: SourceProvider;
+  url: string;
+  username: string;
+  token: string;
+  enabled: boolean;
+  repositoryCount: number;
+  locked: boolean;
 }
 
 export interface SaveConfigApiRequest {
@@ -194,5 +214,6 @@ export interface ConfigApiResponse {
   createdAt: Date;
   updatedAt: Date;
   locks?: ConfigLockState;
+  sources?: SourceApiRecord[];
   error?: string;
 }
