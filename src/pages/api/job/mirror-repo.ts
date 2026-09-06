@@ -1,6 +1,12 @@
 import type { APIRoute } from "astro";
 import type { Octokit } from "@octokit/rest";
-import { resolveSourceProviderKind } from "@/lib/source-providers";
+import type { SourceRecord } from "@/lib/sources";
+import {
+  decryptSourceToken,
+  findSourceForRepository,
+  listSources,
+  resolveGitHubApiBaseUrl,
+} from "@/lib/sources";
 import type { MirrorRepoRequest, MirrorRepoResponse } from "@/types/mirror";
 import { db, configs, repositories } from "@/lib/db";
 import { and, eq, inArray, sql } from "drizzle-orm";
@@ -8,7 +14,6 @@ import { repositoryVisibilityEnum, repoStatusEnum } from "@/types/Repository";
 import { getGiteaRepoOwnerAsync } from "@/lib/gitea";
 import { mirrorRepositoryToDestination } from "@/lib/mirror-dispatch";
 import { createGitHubClient } from "@/lib/github";
-import { getDecryptedGitHubToken } from "@/lib/utils/config-encryption";
 import { processWithResilience } from "@/lib/utils/concurrency";
 import { createSecureErrorResponse } from "@/lib/utils";
 import { requireAuthenticatedUserId } from "@/lib/auth-guards";
@@ -85,13 +90,21 @@ export const POST: APIRoute = async ({ request, locals }) => {
       }
 
       // Only GitHub sources need an API client while mirroring (metadata).
-      // Other hosts get code-only mirrors through Gitea.
-      let octokit: Octokit | null = null;
-      if (resolveSourceProviderKind(config) === "github") {
-        const decryptedToken = getDecryptedGitHubToken(config);
-        const githubUsername = config.githubConfig?.owner || undefined;
-        octokit = createGitHubClient(decryptedToken, userId, githubUsername);
-      }
+      // Other hosts get code-only mirrors through Gitea. The selected
+      // repositories can come from different sources, so the client is
+      // built per repository from its own source, never one for the batch.
+      const sources = await listSources(userId);
+      const octokitForSource = (source: SourceRecord | null): Octokit | null => {
+        if (!source || source.provider !== "github") return null;
+        const token = decryptSourceToken(source.token);
+        if (!token) return null;
+        return createGitHubClient(
+          token,
+          userId,
+          source.username || undefined,
+          resolveGitHubApiBaseUrl(source.url)
+        );
+      };
 
       // Define the concurrency limit - adjust based on API rate limits
       const CONCURRENCY_LIMIT = 3;
@@ -115,10 +128,13 @@ export const POST: APIRoute = async ({ request, locals }) => {
           // Log the start of mirroring
           console.log(`Starting mirror for repository: ${repo.name}`);
 
+          const repoSource = findSourceForRepository(repo, sources);
+
           // Determine where the repository should be mirrored (with organization overrides)
           const owner = await getGiteaRepoOwnerAsync({
             config,
             repository: repoData,
+            sourceUsername: repoSource?.username,
           });
 
           console.log(`Repository ${repo.name} will be mirrored to owner: ${owner}`);
@@ -136,7 +152,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
           // pushed by the engine. The dispatcher picks the path.
           await mirrorRepositoryToDestination({
             config,
-            octokit,
+            octokit: octokitForSource(repoSource),
             repository: repoData,
             orgName: shouldUseOrgMirror ? owner : undefined,
           });

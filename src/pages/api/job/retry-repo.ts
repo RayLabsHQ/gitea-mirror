@@ -1,5 +1,11 @@
 import type { APIRoute } from "astro";
-import { resolveSourceProviderKind } from "@/lib/source-providers";
+import type { SourceRecord } from "@/lib/sources";
+import {
+  decryptSourceToken,
+  findSourceForRepository,
+  listSources,
+  resolveGitHubApiBaseUrl,
+} from "@/lib/sources";
 import { db, configs, repositories } from "@/lib/db";
 import { and, eq, inArray, sql } from "drizzle-orm";
 import { getGiteaRepoOwnerAsync, isRepoPresentInGitea } from "@/lib/gitea";
@@ -11,7 +17,6 @@ import type { RetryRepoRequest, RetryRepoResponse } from "@/types/retry";
 import { processWithRetry } from "@/lib/utils/concurrency";
 import { createMirrorJob } from "@/lib/helpers";
 import { createSecureErrorResponse } from "@/lib/utils";
-import { getDecryptedGitHubToken } from "@/lib/utils/config-encryption";
 import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 
 export const POST: APIRoute = async ({ request, locals }) => {
@@ -81,16 +86,22 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     // Start background retry with parallel processing
     setTimeout(async () => {
-      // Create a single Octokit instance to be reused if needed with rate limit tracking
-      const decryptedToken = config.githubConfig.token
-        ? getDecryptedGitHubToken(config)
-        : null;
-      const githubUsername = config.githubConfig?.owner || undefined;
       // Only GitHub sources need an API client while mirroring (metadata).
-      const octokit =
-        decryptedToken && resolveSourceProviderKind(config) === "github"
-          ? createGitHubClient(decryptedToken, userId, githubUsername)
-          : null;
+      // Other hosts get code-only mirrors through Gitea. The retried
+      // repositories can come from different sources, so the client is
+      // built per repository from its own source.
+      const sources = await listSources(userId);
+      const octokitForSource = (source: SourceRecord | null) => {
+        if (!source || source.provider !== "github") return null;
+        const token = decryptSourceToken(source.token);
+        if (!token) return null;
+        return createGitHubClient(
+          token,
+          userId,
+          source.username || undefined,
+          resolveGitHubApiBaseUrl(source.url)
+        );
+      };
 
       // Define the concurrency limit - adjust based on API rate limits
       const CONCURRENCY_LIMIT = 3;
@@ -112,6 +123,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
             forkedFrom: repo.forkedFrom ?? undefined,
             mirroredLocation: repo.mirroredLocation || "",
           };
+
+          const repoSource = findSourceForRepository(repo, sources);
+          const octokit = octokitForSource(repoSource);
 
           // Log the start of retry operation
           console.log(`Starting retry for repository: ${repo.name}`);
@@ -138,6 +152,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
           let owner = await getGiteaRepoOwnerAsync({
             config,
             repository: repoData,
+            sourceUsername: repoSource?.username,
           });
 
           const present = await isRepoPresentInGitea({

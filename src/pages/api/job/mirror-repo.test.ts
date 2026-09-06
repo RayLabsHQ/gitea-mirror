@@ -97,6 +97,43 @@ mock.module("@/lib/github", () => ({
   createGitHubClient: mockCreateGitHubClient
 }));
 
+// The route builds the GitHub client per repository from its own source row.
+// One GitHub source mirrors the pre-multi-source fixtures (same token).
+mock.module("@/lib/sources", () => ({
+  listSources: mock(async (userId: string) =>
+    userId === "user-id"
+      ? [
+          {
+            id: "source-1",
+            userId,
+            name: "GitHub",
+            provider: "github",
+            url: "https://github.com",
+            username: "",
+            token: "github-token",
+            enabled: true,
+            createdAt: new Date(0),
+            updatedAt: new Date(0),
+          },
+        ]
+      : []
+  ),
+  findSourceForRepository: (repo: any, list: any[]) => {
+    if (repo.sourceId) {
+      const byId = list.find((source) => source.id === repo.sourceId);
+      if (byId) return byId;
+    }
+    const normalized = "https://github.com";
+    return list.find((candidate: any) => candidate.provider === "github" && candidate.url === normalized) ?? null;
+  },
+  decryptSourceToken: (token: string | null | undefined) => token ?? "",
+  resolveGitHubApiBaseUrl: (url: string | null | undefined) => {
+    const trimmed = url?.trim().replace(/\/+$/, "") ?? "";
+    if (!trimmed || trimmed === "https://github.com") return undefined;
+    return `${trimmed}/api/v3`;
+  },
+}));
+
 // Mock the concurrency module
 const mockProcessWithResilience = mock(() => Promise.resolve([]));
 

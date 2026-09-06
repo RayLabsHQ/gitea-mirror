@@ -1,6 +1,13 @@
 import type { APIRoute } from "astro";
 import type { Octokit } from "@octokit/rest";
-import { resolveSourceProviderKind } from "@/lib/source-providers";
+import type { Repository } from "@/lib/db/schema";
+import type { SourceRecord } from "@/lib/sources";
+import {
+  decryptSourceToken,
+  findSourceForRepository,
+  listSources,
+  resolveGitHubApiBaseUrl,
+} from "@/lib/sources";
 import type { MirrorOrgRequest, MirrorOrgResponse } from "@/types/mirror";
 import { db, configs, organizations } from "@/lib/db";
 import { and, eq, inArray, sql } from "drizzle-orm";
@@ -11,7 +18,6 @@ import { type MembershipRole } from "@/types/organizations";
 import { createSecureErrorResponse } from "@/lib/utils";
 import { processWithResilience } from "@/lib/utils/concurrency";
 import { v4 as uuidv4 } from "uuid";
-import { getDecryptedGitHubToken } from "@/lib/utils/config-encryption";
 import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 
 export const POST: APIRoute = async ({ request, locals }) => {
@@ -86,13 +92,23 @@ export const POST: APIRoute = async ({ request, locals }) => {
       }
 
       // Only GitHub sources need an API client while mirroring (metadata).
-      // Other hosts get code-only mirrors through Gitea.
-      let octokit: Octokit | null = null;
-      if (resolveSourceProviderKind(config) === "github") {
-        const decryptedToken = getDecryptedGitHubToken(config);
-        const githubUsername = config.githubConfig?.owner || undefined;
-        octokit = createGitHubClient(decryptedToken, userId, githubUsername);
-      }
+      // Other hosts get code-only mirrors through Gitea. An organization is
+      // shared across sources, so its repositories can come from different
+      // hosts: the resolver hands each one a client built from its own
+      // source instead of one client for the whole batch.
+      const sources = await listSources(userId);
+      const resolveRepositoryOctokit = (repository: Repository): Octokit | null => {
+        const source = findSourceForRepository(repository, sources);
+        if (!source || source.provider !== "github") return null;
+        const token = decryptSourceToken(source.token);
+        if (!token) return null;
+        return createGitHubClient(
+          token,
+          userId,
+          source.username || undefined,
+          resolveGitHubApiBaseUrl(source.url)
+        );
+      };
 
       // Define the concurrency limit - adjust based on API rate limits
       // Using a lower concurrency for organizations since each org might contain many repos
@@ -120,7 +136,8 @@ export const POST: APIRoute = async ({ request, locals }) => {
           // Mirror the organization
           await mirrorGitHubOrgToGitea({
             config,
-            octokit,
+            octokit: null,
+            resolveRepositoryOctokit,
             organization: orgData,
           });
 
