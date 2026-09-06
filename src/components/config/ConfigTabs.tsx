@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { GitHubConfigForm } from './GitHubConfigForm';
 import { GiteaConfigForm } from './GiteaConfigForm';
+import { SourcesCard } from './SourcesCard';
 import { GitHubMirrorSettings } from './GitHubMirrorSettings';
 import { AutomationSettings } from './AutomationSettings';
 import { SSOSettings } from './SSOSettings';
@@ -18,6 +19,7 @@ import type {
   AdvancedOptions,
   NotificationConfig,
   ConfigLockState,
+  SourceApiRecord,
 } from '@/types/config';
 import { Button } from '../ui/button';
 import { useAuth } from '@/hooks/useAuth';
@@ -113,6 +115,8 @@ export function ConfigTabs() {
   const [isSyncing, setIsSyncing] = useState<boolean>(false);
   // Source and destination locks from the API; null until the config is loaded.
   const [locks, setLocks] = useState<ConfigLockState | null>(null);
+  // Connected sources; the source of truth for the source side of the page.
+  const [sources, setSources] = useState<SourceApiRecord[]>([]);
 
   const [isAutoSavingSchedule, setIsAutoSavingSchedule] = useState<boolean>(false);
   const [isAutoSavingCleanup, setIsAutoSavingCleanup] = useState<boolean>(false);
@@ -125,22 +129,28 @@ export function ConfigTabs() {
   const autoSaveGiteaTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const autoSaveNotificationTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Sources are the source of truth for the source connection; the legacy
+  // githubConfig check only covers APIs that predate multi-source support.
+  const isSourceConnected = (): boolean => {
+    if (sources.length > 0) {
+      return sources.some((source) => Boolean(source.token && source.token.trim()));
+    }
+    const { githubConfig } = config;
+    return !!(githubConfig.username.trim() && githubConfig.token.trim());
+  };
+
   const isConfigFormValid = (): boolean => {
-    const { githubConfig, giteaConfig } = config;
-    const isGitHubValid = !!(
-      githubConfig.username.trim() && githubConfig.token.trim()
-    );
+    const { giteaConfig } = config;
     const isGiteaValid = !!(
       giteaConfig.url.trim() &&
       giteaConfig.username.trim() &&
       giteaConfig.token.trim()
     );
-    return isGitHubValid && isGiteaValid;
+    return isSourceConnected() && isGiteaValid;
   };
 
   const isGitHubConfigValid = (): boolean => {
-    const { githubConfig } = config;
-    return !!(githubConfig.username.trim() && githubConfig.token.trim());
+    return isSourceConnected();
   };
 
   // Removed the problematic useEffect that was causing circular dependencies
@@ -565,53 +575,58 @@ export function ConfigTabs() {
     };
   }, []);
 
+  // Loads (or reloads) the config: fills the forms, locks and the sources
+  // list. SourcesCard calls this after every source mutation; only the
+  // initial load shows the page skeleton.
+  const loadConfig = useCallback(async () => {
+    if (!user?.id) return;
+
+    try {
+      const response = await apiRequest<ConfigApiResponse>(
+        `/config?userId=${user.id}`,
+        { method: 'GET' },
+      );
+      if (response && !response.error) {
+        setLocks(response.locks ?? null);
+        setSources(response.sources ?? []);
+        setConfig(prev => ({
+          githubConfig: {
+            ...prev.githubConfig,
+            ...response.githubConfig, // Merge so a response without provider keeps the default
+          },
+          giteaConfig:
+            response.giteaConfig || prev.giteaConfig,
+          scheduleConfig:
+            response.scheduleConfig || prev.scheduleConfig,
+          cleanupConfig: {
+            ...prev.cleanupConfig,
+            ...response.cleanupConfig, // Merge to preserve all fields
+          },
+          mirrorOptions: {
+            ...prev.mirrorOptions,
+            ...response.mirrorOptions, // Merge to preserve all fields including new mirrorLFS
+          },
+          advancedOptions:
+            response.advancedOptions || prev.advancedOptions,
+          notificationConfig:
+            (response as any).notificationConfig || prev.notificationConfig,
+        }));
+
+      }
+    } catch (error) {
+      console.warn(
+        'Could not fetch configuration, using defaults:',
+        error,
+      );
+    }
+  }, [user?.id]);
+
   useEffect(() => {
     if (!user?.id) return;
 
-    const fetchConfig = async () => {
-      setIsLoading(true);
-      try {
-        const response = await apiRequest<ConfigApiResponse>(
-          `/config?userId=${user.id}`,
-          { method: 'GET' },
-        );
-        if (response && !response.error) {
-          setLocks(response.locks ?? null);
-          setConfig({
-            githubConfig: {
-              ...config.githubConfig,
-              ...response.githubConfig, // Merge so a response without provider keeps the default
-            },
-            giteaConfig:
-              response.giteaConfig || config.giteaConfig,
-            scheduleConfig:
-              response.scheduleConfig || config.scheduleConfig,
-            cleanupConfig: {
-              ...config.cleanupConfig,
-              ...response.cleanupConfig, // Merge to preserve all fields
-            },
-            mirrorOptions: {
-              ...config.mirrorOptions,
-              ...response.mirrorOptions, // Merge to preserve all fields including new mirrorLFS
-            },
-            advancedOptions:
-              response.advancedOptions || config.advancedOptions,
-            notificationConfig:
-              (response as any).notificationConfig || config.notificationConfig,
-          });
-
-        }
-      } catch (error) {
-        console.warn(
-          'Could not fetch configuration, using defaults:',
-          error,
-        );
-      }
-      setIsLoading(false);
-    };
-
-    fetchConfig();
-  }, [user?.id]); // Only depend on user.id, not the entire user object
+    setIsLoading(true);
+    loadConfig().finally(() => setIsLoading(false));
+  }, [loadConfig]); // Only depend on user.id, not the entire user object
 
   function ConfigCardSkeleton() {
     return (
@@ -799,7 +814,7 @@ export function ConfigTabs() {
               <>
                 {/* Connection cards share a stretched row so they stay equal height */}
                 <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-                  <GitHubConfigForm {...githubFormProps} part="connection" />
+                  <SourcesCard sources={sources} onRefresh={loadConfig} />
                   <GiteaConfigForm {...giteaFormProps} part="connection" />
                 </div>
                 <div className="grid grid-cols-1 gap-6 md:grid-cols-2 md:items-start">
