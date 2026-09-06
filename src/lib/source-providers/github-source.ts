@@ -14,6 +14,7 @@ import {
   getGithubRepositories,
   getGithubStarredRepositories,
 } from "@/lib/github";
+import { resolveGitHubApiBaseUrl } from "@/lib/sources";
 import type { GitRepo, RepositoryVisibility } from "@/types/Repository";
 import type { GitOrg } from "@/types/organizations";
 import { toDate } from "./http";
@@ -112,13 +113,17 @@ export class GitHubSourceProvider implements SourceProvider {
   readonly octokit: Octokit;
 
   constructor(readonly connection: SourceConnection) {
+    // A GitHub Enterprise source URL drives the API base; github.com (the
+    // default) keeps the GH_API_URL env default.
+    const apiBaseUrl = resolveGitHubApiBaseUrl(connection.url);
     this.octokit = connection.token.trim()
       ? createGitHubClient(
           connection.token,
           connection.userId,
-          connection.username || undefined
+          connection.username || undefined,
+          apiBaseUrl
         )
-      : new Octokit({ baseUrl: githubApiBaseUrl() });
+      : new Octokit({ baseUrl: apiBaseUrl || githubApiBaseUrl() });
   }
 
   private stamp(repos: GitRepo[]): GitRepo[] {

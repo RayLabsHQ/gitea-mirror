@@ -35,6 +35,7 @@ export function createGitHubClient(
   token: string,
   userId?: string,
   username?: string,
+  apiBaseUrl?: string,
 ): Octokit {
   // Create a proper User-Agent to identify our application
   // This helps GitHub understand our traffic patterns and can provide better rate limits
@@ -42,9 +43,11 @@ export function createGitHubClient(
     ? `gitea-mirror/3.5.4 (user:${username})`
     : "gitea-mirror/3.5.4";
 
-  // Support GH_API_URL (preferred) or GITHUB_API_URL (may conflict with GitHub Actions)
-  // GitHub Actions sets GITHUB_API_URL to https://api.github.com by default
-  const baseUrl = process.env.GH_API_URL || process.env.GITHUB_API_URL || "https://api.github.com";
+  // An explicit apiBaseUrl (a GitHub Enterprise source's /api/v3) replaces
+  // the env default; otherwise support GH_API_URL (preferred) or
+  // GITHUB_API_URL (may conflict with GitHub Actions, which sets it to
+  // https://api.github.com by default).
+  const baseUrl = apiBaseUrl || process.env.GH_API_URL || process.env.GITHUB_API_URL || "https://api.github.com";
 
   const octokit = new MyOctokit({
     auth: token, // Always use token for authentication (5000 req/hr vs 60 for unauthenticated)
