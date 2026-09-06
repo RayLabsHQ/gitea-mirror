@@ -16,9 +16,15 @@ import { decryptConfigTokens } from "./utils/config-encryption";
 import { formatDateShort } from "./utils";
 import { buildSourceAuthPayload } from "./utils/mirror-source-auth";
 import {
-  assertRepositoryMatchesConfiguredSource,
+  assertRepositoryMatchesConnectedSource,
   resolveSourceConnection,
+  sourceConnectionFromSource,
 } from "./source-providers";
+import {
+  decryptSourceToken,
+  findSourceForRepository,
+  listSources,
+} from "./sources";
 import {
   parseRepositoryMetadataState,
   serializeRepositoryMetadataState,
@@ -76,9 +82,12 @@ export const getOrganizationConfig = async ({
 export const getGiteaRepoOwnerAsync = async ({
   config,
   repository,
+  sourceUsername,
 }: {
   config: Partial<Config>;
   repository: Repository;
+  /** Account name of the repository's own source, when already resolved. */
+  sourceUsername?: string;
 }): Promise<string> => {
   if (!config.githubConfig || !config.giteaConfig) {
     throw new Error("GitHub or Gitea config is required.");
@@ -123,15 +132,18 @@ export const getGiteaRepoOwnerAsync = async ({
   // For personal repos (not organization repos), fall back to the default strategy
 
   // Fall back to existing strategy logic
-  return getGiteaRepoOwner({ config, repository });
+  return getGiteaRepoOwner({ config, repository, sourceUsername });
 };
 
 export const getGiteaRepoOwner = ({
   config,
   repository,
+  sourceUsername,
 }: {
   config: Partial<Config>;
   repository: Repository;
+  /** Account name of the repository's own source, when already resolved. */
+  sourceUsername?: string;
 }): string => {
   if (!config.githubConfig || !config.giteaConfig) {
     throw new Error("GitHub or Gitea config is required.");
@@ -153,14 +165,17 @@ export const getGiteaRepoOwner = ({
   // Get the mirror strategy - use preserveOrgStructure for backward compatibility
   const mirrorStrategy = config.githubConfig.mirrorStrategy || 
     (config.giteaConfig.preserveOrgStructure ? "preserve" : "flat-user");
-  const configuredGitHubOwner =
-    (
-      config.githubConfig.owner ||
-      (config.githubConfig as typeof config.githubConfig & { username?: string }).username ||
-      ""
-    )
-      .trim()
-      .toLowerCase();
+  // The account the repository's own source belongs to. Callers that
+  // resolved the source row pass its username; everyone else keeps the
+  // configured owner.
+  const configuredGitHubOwner = (
+    sourceUsername ??
+    config.githubConfig.owner ??
+    (config.githubConfig as typeof config.githubConfig & { username?: string }).username ??
+    ""
+  )
+    .trim()
+    .toLowerCase();
 
   switch (mirrorStrategy) {
     case "preserve":
@@ -651,24 +666,34 @@ export const mirrorGithubRepoToGitea = async ({
     // Decrypt config tokens for API usage
     const decryptedConfig = decryptConfigTokens(config as Config);
 
-    // Never send another host's token: the repository must come from the
-    // source that is configured now.
-    assertRepositoryMatchesConfiguredSource({ repository, config });
+    // Never send another host's token: the repository must come from one of
+    // the connected sources, and its own source provides the credentials.
+    const sources = await listSources(config.userId);
+    assertRepositoryMatchesConnectedSource({ repository, sources });
     if (usesPushEngine(config)) {
       throw new Error("The configured destination is a push target; the Gitea mirror path cannot serve it.");
     }
     // Nor to a different destination than the one the row was mirrored to.
     assertRepositoryMatchesConfiguredDestination({ repository, config });
 
+    // The source this repository came from. The assert above refused rows
+    // no connected source owns, so this practically always resolves; the
+    // config fallback only keeps the types honest.
+    const repoSource = findSourceForRepository(repository, sources);
+    const sourceConnection = repoSource
+      ? sourceConnectionFromSource(repoSource, { userId: config.userId })
+      : resolveSourceConnection(config);
+    const repoSourceToken = repoSource ? decryptSourceToken(repoSource.token) : "";
+
     // Get the correct owner based on the strategy (with organization overrides)
-    let repoOwner = await getGiteaRepoOwnerAsync({ config, repository });
+    let repoOwner = await getGiteaRepoOwnerAsync({
+      config,
+      repository,
+      sourceUsername: repoSource?.username,
+    });
     const mirrorStrategy = config.githubConfig.mirrorStrategy ||
       (config.giteaConfig.preserveOrgStructure ? "preserve" : "flat-user");
-    const configuredGitHubOwner = (
-      config.githubConfig.owner ||
-      (config.githubConfig as typeof config.githubConfig & { username?: string }).username ||
-      ""
-    )
+    const configuredGitHubOwner = (repoSource?.username ?? "")
       .trim()
       .toLowerCase();
     const normalizedRepoOwner = repository.owner.trim().toLowerCase();
@@ -987,14 +1012,14 @@ export const mirrorGithubRepoToGitea = async ({
 
     // Always send authentication credentials so Gitea/Forgejo stores them
     // for subsequent mirror fetches. This prevents "terminal prompts disabled"
-    // errors on public repos and raises GitHub API rate limits.
+    // errors on public repos and raises GitHub API rate limits. The token and
+    // account name belong to the repository's own source.
     {
-      const sourceConnection = resolveSourceConnection(config);
       Object.assign(
         migratePayload,
         buildSourceAuthPayload({
           provider: sourceConnection.provider,
-          token: decryptedConfig.githubConfig?.token,
+          token: repoSourceToken,
           username: sourceConnection.username,
           repositoryOwner: repository.owner,
         })
@@ -1507,14 +1532,24 @@ export async function mirrorGitHubRepoToGiteaOrg({
     // Decrypt config tokens for API usage
     const decryptedConfig = decryptConfigTokens(config as Config);
 
-    // Never send another host's token: the repository must come from the
-    // source that is configured now.
-    assertRepositoryMatchesConfiguredSource({ repository, config });
+    // Never send another host's token: the repository must come from one of
+    // the connected sources, and its own source provides the credentials.
+    const sources = await listSources(config.userId);
+    assertRepositoryMatchesConnectedSource({ repository, sources });
     if (usesPushEngine(config)) {
       throw new Error("The configured destination is a push target; the Gitea mirror path cannot serve it.");
     }
     // Nor to a different destination than the one the row was mirrored to.
     assertRepositoryMatchesConfiguredDestination({ repository, config });
+
+    // The source this repository came from. The assert above refused rows
+    // no connected source owns, so this practically always resolves; the
+    // config fallback only keeps the types honest.
+    const repoSource = findSourceForRepository(repository, sources);
+    const sourceConnection = repoSource
+      ? sourceConnectionFromSource(repoSource, { userId: config.userId })
+      : resolveSourceConnection(config);
+    const repoSourceToken = repoSource ? decryptSourceToken(repoSource.token) : "";
 
     // Determine the actual repository name to use (handle duplicates for starred repos)
     let targetRepoName = repository.name;
@@ -1753,14 +1788,14 @@ export async function mirrorGitHubRepoToGiteaOrg({
 
     // Always send authentication credentials so Gitea/Forgejo stores them
     // for subsequent mirror fetches. This prevents "terminal prompts disabled"
-    // errors on public repos and raises GitHub API rate limits.
+    // errors on public repos and raises GitHub API rate limits. The token and
+    // account name belong to the repository's own source.
     {
-      const sourceConnection = resolveSourceConnection(config);
       Object.assign(
         migratePayload,
         buildSourceAuthPayload({
           provider: sourceConnection.provider,
-          token: decryptedConfig.githubConfig?.token,
+          token: repoSourceToken,
           username: sourceConnection.username,
           repositoryOwner: repository.owner,
         })
@@ -2065,10 +2100,18 @@ export async function mirrorGitHubOrgToGitea({
   organization,
   octokit,
   config,
+  resolveRepositoryOctokit,
 }: {
   organization: Organization;
   octokit: Octokit | null;
   config: Partial<Config>;
+  /**
+   * GitHub client for one repository, built from that repository's own
+   * source. Organizations are shared across sources, so the repos inside
+   * one org can come from different hosts; without a resolver every repo
+   * gets the single passed-in client.
+   */
+  resolveRepositoryOctokit?: (repository: Repository) => Octokit | null;
 }) {
   try {
     if (
@@ -2199,18 +2242,25 @@ export async function mirrorGitHubOrgToGitea({
             return repo;
           }
 
+          // Repos in one organization can come from different sources, so
+          // the GitHub client is resolved per repository when a resolver is
+          // available, and shared otherwise.
+          const repoOctokit = resolveRepositoryOctokit
+            ? resolveRepositoryOctokit(repoData)
+            : octokit;
+
           // Resolve per repo with the canonical precedence
           const owner = await getGiteaRepoOwnerAsync({ config, repository: repoData });
 
           if (owner === config.giteaConfig?.defaultOwner) {
             await mirrorGithubRepoToGitea({
-              octokit,
+              octokit: repoOctokit,
               repository: repoData,
               config,
             });
           } else if (owner === targetOrgName && giteaOrgId !== undefined) {
             await mirrorGitHubRepoToGiteaOrg({
-              octokit,
+              octokit: repoOctokit,
               config,
               repository: repoData,
               giteaOrgId,
@@ -2222,7 +2272,7 @@ export async function mirrorGitHubOrgToGitea({
               config,
             });
             await mirrorGitHubRepoToGiteaOrg({
-              octokit,
+              octokit: repoOctokit,
               config,
               repository: repoData,
               giteaOrgId: ownerOrgId,

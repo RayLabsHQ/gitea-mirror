@@ -1,5 +1,6 @@
 import { describe, test, expect, mock, beforeEach, afterEach } from "bun:test";
 import { createMockResponse, mockFetch } from "@/tests/mock-fetch";
+import { getRepositorySource } from "@/lib/source-providers/kinds";
 
 // Mock the helpers module before importing gitea-enhanced
 const mockCreateMirrorJob = mock(() => Promise.resolve("mock-job-id"));
@@ -54,6 +55,48 @@ mock.module("@/lib/utils/config-encryption", () => ({
   encryptConfigTokens: (config: any) => config,
   getDecryptedGitHubToken: (config: any) => config.githubConfig?.token || "",
   getDecryptedGiteaToken: (config: any) => config.giteaConfig?.token || ""
+}));
+
+// The sync path resolves the GitHub client from the repository's own source
+// row. One GitHub source mirrors the pre-multi-source fixtures (same token,
+// same account), with the real provider+host matching semantics.
+const sourceRows = [
+  {
+    id: "source-1",
+    userId: "user123",
+    name: "GitHub (testuser)",
+    provider: "github",
+    url: "https://github.com",
+    username: "testuser",
+    token: "github-token",
+    enabled: true,
+    createdAt: new Date(0),
+    updatedAt: new Date(0),
+  },
+];
+
+mock.module("@/lib/sources", () => ({
+  listSources: mock(async (userId: string) =>
+    sourceRows.filter((source) => source.userId === userId)
+  ),
+  findSourceForRepository: (repo: any, list: any[]) => {
+    if (repo.sourceId) {
+      const byId = list.find((source) => source.id === repo.sourceId);
+      if (byId) return byId;
+    }
+    const source = getRepositorySource(repo);
+    return (
+      list.find(
+        (candidate: any) => candidate.provider === source.provider && candidate.url === source.url
+      ) ?? null
+    );
+  },
+  decryptSourceToken: (token: string | null | undefined) => token ?? "",
+  resolveGitHubApiBaseUrl: (url: string | null | undefined) => {
+    const trimmed = url?.trim().replace(/\/+$/, "") ?? "";
+    if (!trimmed || trimmed === "https://github.com") return undefined;
+    return `${trimmed}/api/v3`;
+  },
 }));
 
 // Mock http-client

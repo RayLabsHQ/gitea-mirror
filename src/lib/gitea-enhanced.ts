@@ -7,7 +7,13 @@
  */
 
 import type { Config } from "@/types/config";
-import { normalizeSourceProviderKind } from "@/lib/source-providers/kinds";
+import { getRepositorySource } from "@/lib/source-providers/kinds";
+import {
+  decryptSourceToken,
+  findSourceForRepository,
+  listSources,
+  resolveGitHubApiBaseUrl,
+} from "@/lib/sources";
 import type { Repository } from "./db/schema";
 import type { Octokit } from "@octokit/rest";
 import { createGitHubClient } from "./github";
@@ -451,6 +457,14 @@ export async function syncGiteaRepoEnhanced({
 
     const decryptedConfig = decryptConfigTokens(config as Config);
 
+    // Metadata and force-push detection talk to the repository's own source,
+    // so the user's sources are loaded once and this repository's row drives
+    // every GitHub client below.
+    const sources = config.userId ? await listSources(config.userId) : [];
+    const repoSource = findSourceForRepository(repository, sources);
+    const repoSourceToken = repoSource ? decryptSourceToken(repoSource.token) : "";
+    const repoIsGitHub = getRepositorySource(repository).provider === "github";
+
     if (usesPushEngine(config)) {
       throw new Error("The configured destination is a push target; syncing goes through the push engine.");
     }
@@ -671,11 +685,16 @@ export async function syncGiteaRepoEnhanced({
       // (skip when called from approve-sync to avoid re-blocking)
       if (strategyNeedsDetection(backupStrategy) && !skipForcePushDetection) {
         try {
-          const decryptedGithubToken = decryptedConfig.githubConfig?.token;
           // Force-push detection compares branches through the GitHub API,
-          // so it only runs for GitHub sources.
-          if (decryptedGithubToken && normalizeSourceProviderKind(config.githubConfig?.provider) === "github") {
-            const fpOctokit = createGitHubClient(decryptedGithubToken);
+          // so it only runs for GitHub sources, with the repository's own
+          // source token.
+          if (repoSource && repoSourceToken && repoIsGitHub) {
+            const fpOctokit = createGitHubClient(
+              repoSourceToken,
+              config.userId || undefined,
+              repoSource.username || undefined,
+              resolveGitHubApiBaseUrl(repoSource.url)
+            );
             const detectionResult = await detectForcePush({
               giteaUrl: config.giteaConfig.url,
               giteaToken: decryptedConfig.giteaConfig.token,
@@ -897,15 +916,17 @@ export async function syncGiteaRepoEnhanced({
         if (metadataOctokit) {
           return metadataOctokit;
         }
-        // The token belongs to whichever host is configured; only GitHub's
-        // token can drive Octokit.
-        if (
-          !decryptedConfig.githubConfig?.token ||
-          normalizeSourceProviderKind(config.githubConfig?.provider) !== "github"
-        ) {
+        // Only the token of the repository's own GitHub source can drive
+        // Octokit; other hosts and public-only sources skip metadata.
+        if (!repoSource || !repoSourceToken || !repoIsGitHub) {
           return null;
         }
-        metadataOctokit = createGitHubClient(decryptedConfig.githubConfig.token);
+        metadataOctokit = createGitHubClient(
+          repoSourceToken,
+          config.userId || undefined,
+          repoSource.username || undefined,
+          resolveGitHubApiBaseUrl(repoSource.url)
+        );
         return metadataOctokit;
       };
 

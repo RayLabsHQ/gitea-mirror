@@ -11,6 +11,7 @@
  * where the mocks are safely contained.
  */
 import { describe, test, expect, mock, beforeEach } from "bun:test";
+import { getRepositorySource } from "@/lib/source-providers/kinds";
 
 const CHILD_FLAG = "GITEA_ORG_MIRROR_DEST_ISOLATED";
 const isChild = !!process.env[CHILD_FLAG];
@@ -113,6 +114,49 @@ mock.module("@/lib/db", () => {
 
 mock.module("@/lib/helpers", () => ({
   createMirrorJob: mock(async () => "job-id"),
+}));
+
+// The migrate paths resolve credentials from the repository's own source
+// row and refuse rows no connected source owns. One GitHub source mirrors
+// the pre-multi-source fixtures (same token, same account); matching keeps
+// the real provider+host semantics via getRepositorySource.
+mock.module("@/lib/sources", () => ({
+  listSources: mock(async (userId: string) =>
+    userId === "user-1"
+      ? [
+          {
+            id: "source-1",
+            userId,
+            name: "GitHub (me)",
+            provider: "github",
+            url: "https://github.com",
+            username: "me",
+            token: "gh-token",
+            enabled: true,
+            createdAt: new Date(0),
+            updatedAt: new Date(0),
+          },
+        ]
+      : []
+  ),
+  findSourceForRepository: (repo: any, list: any[]) => {
+    if (repo.sourceId) {
+      const byId = list.find((source) => source.id === repo.sourceId);
+      if (byId) return byId;
+    }
+    const source = getRepositorySource(repo);
+    return (
+      list.find(
+        (candidate: any) => candidate.provider === source.provider && candidate.url === source.url
+      ) ?? null
+    );
+  },
+  decryptSourceToken: (token: string | null | undefined) => token ?? "",
+  resolveGitHubApiBaseUrl: (url: string | null | undefined) => {
+    const trimmed = url?.trim().replace(/\/+$/, "") ?? "";
+    if (!trimmed || trimmed === "https://github.com") return undefined;
+    return `${trimmed}/api/v3`;
+  },
 }));
 
 const actualHttp = await import("./http-client");
