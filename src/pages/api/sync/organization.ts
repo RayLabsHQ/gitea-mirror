@@ -8,7 +8,7 @@ import type {
 } from "@/types/organizations";
 import type { RepoStatus } from "@/types/Repository";
 import { v4 as uuidv4 } from "uuid";
-import { createSourceProviderFromConfig } from "@/lib/source-providers";
+import { createSourceProviderFromConfig, isValidSourceOrgName } from "@/lib/source-providers";
 import { normalizeGitRepoToInsert, calcBatchSizeForInsert } from "@/lib/repo-utils";
 import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 
@@ -30,6 +30,17 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     const trimmedOrg = org.trim();
     const normalizedOrg = trimmedOrg.toLowerCase();
+
+    if (!isValidSourceOrgName(trimmedOrg)) {
+      return jsonResponse({
+        data: {
+          success: false,
+          error:
+            "Organization names cannot contain '/'. Add the top level group; nested groups flatten onto it.",
+        },
+        status: 400,
+      });
+    }
 
     // Check if org already exists (case-insensitive)
     const [existingOrg] = await db

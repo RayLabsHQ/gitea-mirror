@@ -44,6 +44,16 @@ export function isSourceProviderKind(value: unknown): value is SourceProviderKin
 }
 
 /**
+ * Org names are a single path segment on every source. GitLab nests groups,
+ * but projects flatten onto the top level group, so a nested name would
+ * import an organization whose repositories never match it.
+ */
+export function isValidSourceOrgName(name: string): boolean {
+  const trimmed = name.trim();
+  return trimmed.length > 0 && !trimmed.includes("/");
+}
+
+/**
  * Coerce an untrusted value to a provider kind, defaulting to GitHub.
  * "forgejo" and "codeberg" are accepted as spellings of the Gitea kind.
  */
