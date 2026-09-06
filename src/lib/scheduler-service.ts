@@ -15,6 +15,7 @@ import type { Octokit } from '@octokit/rest';
 import { repoStatusEnum, repositoryVisibilityEnum } from '@/types/Repository';
 import { mergeGitReposPreferStarred, normalizeGitRepoToInsert, calcBatchSizeForInsert } from '@/lib/repo-utils';
 import { isMirrorableGitHubRepo } from '@/lib/repo-eligibility';
+import { loadOrganizationForkPolicies, orgForkSkipDecision } from '@/lib/utils/mirror-overrides';
 import { createMirrorJob } from '@/lib/helpers';
 import { getNextScheduledRun, isCronExpression, normalizeTimezone } from '@/lib/utils/schedule-utils';
 import { resetStuckMirrorStatuses } from '@/lib/stuck-status-recovery';
@@ -108,9 +109,13 @@ async function runScheduledSync(config: any): Promise<void> {
         // The configured source host (GitHub honors GH_API_URL for GHES / GHEC)
         const sourceProvider = createSourceProviderFromConfig(config, { userId });
 
+        // Per-organization fork pins, so orgs opted out of forks stay that
+        // way during scheduled auto-import.
+        const orgForkOverrides = await loadOrganizationForkPolicies({ userId });
+
         // Fetch source data
         const [basicAndForkedRepos, starredRepos] = await Promise.all([
-          sourceProvider.listRepositories(config),
+          sourceProvider.listRepositories(config, { orgForkOverrides }),
           config.githubConfig?.includeStarred
             ? sourceProvider.listStarredRepositories(config)
             : Promise.resolve([]),
@@ -123,7 +128,7 @@ async function runScheduledSync(config: any): Promise<void> {
           .select({ normalizedFullName: repositories.normalizedFullName })
           .from(repositories)
           .where(eq(repositories.userId, userId));
-        
+
         const existingRepoNames = new Set(existingRepos.map(r => r.normalizedFullName));
         const newRepos = mirrorableGithubRepos.filter(r => !existingRepoNames.has(r.fullName.toLowerCase()));
         
@@ -236,6 +241,18 @@ async function runScheduledSync(config: any): Promise<void> {
         const skippedCount = beforeCount - reposNeedingMirror.length;
         if (skippedCount > 0) {
           console.log(`[Scheduler] Skipped ${skippedCount} repositories from auto-mirror (autoMirror=${autoMirrorOwned}, autoMirrorStarred=${autoMirrorStarred})`);
+        }
+
+        // Organization fork policies apply to already-imported rows too, so a
+        // fork that slipped in before its org opted out is not auto-mirrored.
+        const orgForkOverrides = await loadOrganizationForkPolicies({ userId });
+        const forkSkipFor = orgForkSkipDecision(orgForkOverrides, config);
+        const forkSkippedCount = reposNeedingMirror.length;
+        reposNeedingMirror = reposNeedingMirror.filter(
+          repo => !repo.isForked || !repo.organization || !forkSkipFor(repo.organization)
+        );
+        if (reposNeedingMirror.length !== forkSkippedCount) {
+          console.log(`[Scheduler] Skipped ${forkSkippedCount - reposNeedingMirror.length} forked repositories from auto-mirror (organization skip forks)`);
         }
 
         if (reposNeedingMirror.length > 0) {
@@ -521,23 +538,27 @@ async function performInitialAutoStart(): Promise<void> {
 
         // The configured source host (GitHub honors GH_API_URL for GHES / GHEC)
         const sourceProvider = createSourceProviderFromConfig(config, { userId: config.userId });
-        
+
+        // Per-organization fork pins, so orgs opted out of forks stay that
+        // way during boot auto-start imports.
+        const orgForkOverrides = await loadOrganizationForkPolicies({ userId: config.userId });
+
         // Fetch source data
         const [basicAndForkedRepos, starredRepos] = await Promise.all([
-          sourceProvider.listRepositories(config),
+          sourceProvider.listRepositories(config, { orgForkOverrides }),
           config.githubConfig?.includeStarred
             ? sourceProvider.listStarredRepositories(config)
             : Promise.resolve([]),
         ]);
         const allGithubRepos = mergeGitReposPreferStarred(basicAndForkedRepos, starredRepos);
         const mirrorableGithubRepos = allGithubRepos.filter(isMirrorableGitHubRepo);
-        
+
         // Check for new repositories
         const existingRepos = await db
           .select({ normalizedFullName: repositories.normalizedFullName })
           .from(repositories)
           .where(eq(repositories.userId, config.userId));
-        
+
         const existingRepoNames = new Set(existingRepos.map(r => r.normalizedFullName));
         const reposToImport = mirrorableGithubRepos.filter(r => !existingRepoNames.has(r.fullName.toLowerCase()));
         

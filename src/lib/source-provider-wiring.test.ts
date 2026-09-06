@@ -46,7 +46,7 @@ describe("discovery and housekeeping go through the source provider", () => {
   test("scheduler auto import, auto mirror and boot auto start", () => {
     const source = read("scheduler-service.ts");
     expect(count(source, "createSourceProviderFromConfig(config")).toBe(2);
-    expect(count(source, "sourceProvider.listRepositories(config)")).toBe(2);
+    expect(count(source, "sourceProvider.listRepositories(")).toBe(2);
     expect(source).not.toContain("getGithubRepositories(");
     // A GitHub client is built only for GitHub sources, in both mirror phases.
     expect(count(source, "resolveSourceProviderKind(config) === 'github'")).toBe(2);
