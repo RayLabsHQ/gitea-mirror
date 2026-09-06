@@ -15,8 +15,18 @@ import type { Config } from "@/types/config";
 import type { GitRepo } from "@/types/Repository";
 import { HttpError, httpGet } from "@/lib/http-client";
 import { getDecryptedGiteaToken } from "@/lib/utils/config-encryption";
-import { createSourceProviderFromConfig, resolveSourceConnection } from "@/lib/source-providers";
+import {
+  createSourceProviderFromSource,
+  resolveSourceConnection,
+  sourceHostOf,
+  type SourceProvider,
+} from "@/lib/source-providers";
 import { githubApiBaseUrl } from "@/lib/source-providers/github-source";
+import {
+  listSources,
+  resolveGitHubApiBaseUrl,
+  type SourceRecord,
+} from "@/lib/sources";
 import { getGiteaRepoOwnerAsync } from "@/lib/gitea";
 import { resolveDestinationIdentity } from "@/lib/destination-connection";
 import { normalizeGitRepoToInsert } from "@/lib/repo-utils";
@@ -192,7 +202,30 @@ export async function reconcileDestination(
 
   const baseUrl = giteaConfig.url.replace(/\/+$/, "");
   const headers = { Authorization: `token ${getDecryptedGiteaToken(config)}` };
+  // The configured connection is only the last-resort identity for mirrors
+  // whose host no connected source owns; adoption resolves each mirror to
+  // its own source row below.
   const connection = resolveSourceConnection(config);
+  const sources = await listSources(userId);
+  // Host a mirror's original URL can point at and still count as ours: any
+  // connected source, plus the API alias it is reached through. Stored
+  // clone URL hosts are added once the rows are loaded below.
+  const sourceByHost = new Map<string, SourceRecord>();
+  const knownHosts = new Set<string>();
+  for (const source of sources) {
+    const apiBaseUrl =
+      source.provider === "github"
+        ? resolveGitHubApiBaseUrl(source.url) ?? githubApiBaseUrl()
+        : null;
+    for (const host of [sourceHostOf(source.url), apiBaseUrl ? sourceHostOf(apiBaseUrl) : ""]) {
+      if (!host) continue;
+      knownHosts.add(host);
+      if (!sourceByHost.has(host)) sourceByHost.set(host, source);
+    }
+    for (const host of knownSourceHosts({ sourceUrl: source.url, apiUrl: apiBaseUrl, cloneUrls: [] })) {
+      knownHosts.add(host);
+    }
+  }
   const starredMode = githubConfig?.starredReposMode || "dedicated-org";
   const starredOrg = githubConfig?.starredReposOrg || "starred";
   const strategy =
@@ -203,6 +236,14 @@ export async function reconcileDestination(
     .select({ name: organizations.name, destinationOrg: organizations.destinationOrg })
     .from(organizations)
     .where(eq(organizations.userId, userId));
+
+  for (const host of knownSourceHosts({
+    sourceUrl: sources[0]?.url ?? "",
+    apiUrl: null,
+    cloneUrls: rows.map((row) => row.cloneUrl),
+  })) {
+    knownHosts.add(host);
+  }
 
   // Every owner the strategy or the database could have put a mirror under.
   const owners = collectDestinationOwners([
@@ -230,12 +271,6 @@ export async function reconcileDestination(
     scannedOwners.push(owner);
     destinationRepos.push(...repos);
   }
-
-  const knownHosts = knownSourceHosts({
-    sourceUrl: connection.url,
-    apiUrl: connection.provider === "github" ? githubApiBaseUrl() : null,
-    cloneUrls: rows.map((row) => row.cloneUrl),
-  });
 
   // Rows mirrored to a previous destination are neither healthy nor missing
   // here; they are left out of the comparison and only counted.
@@ -322,16 +357,43 @@ export async function reconcileDestination(
   let relocated = 0;
 
   if (options.adoptUntracked && classified.untracked.length > 0) {
-    const sourceProvider = createSourceProviderFromConfig(config, { userId });
+    // One provider instance per source row (the Gitea provider keeps an
+    // instance-local org cache), and one identity per mirror: the source
+    // its original URL points at.
+    const providersBySourceId = new Map<string, SourceProvider>();
+    const providerForSource = (source: SourceRecord): SourceProvider => {
+      let provider = providersBySourceId.get(source.id);
+      if (!provider) {
+        provider = createSourceProviderFromSource(source, { userId });
+        providersBySourceId.set(source.id, provider);
+      }
+      return provider;
+    };
     await processInParallel(
       classified.untracked,
       async (repo) => {
         try {
+          const origin = parseRepoUrl(repo.originalUrl);
+          const repoSource = origin ? sourceByHost.get(origin.host) ?? null : null;
+          if (!repoSource) {
+            // Same skip the cleanup service applies to rows outside the
+            // configured source: without the source row there is no token
+            // to check the upstream with, so the destination's own report
+            // is all the adoption can rely on.
+            console.log(
+              `[Reconcile] Skipping the source check for ${repo.fullName} - no connected source owns its host`
+            );
+          }
           const outcome = await adoptUntrackedMirror({
             config,
             repo,
-            lookup: (owner, name) => sourceProvider.getRepository(owner, name),
-            connection,
+            sourceId: repoSource?.id ?? null,
+            lookup: repoSource
+              ? (owner: string, name: string) => providerForSource(repoSource).getRepository(owner, name)
+              : async () => null,
+            connection: repoSource
+              ? { provider: repoSource.provider, url: repoSource.url }
+              : connection,
             starredOrg: starredMode === "preserve-owner" ? null : starredOrg,
           });
           if (outcome === "adopted") adopted += 1;
@@ -430,12 +492,17 @@ export async function reconcileDestination(
 async function adoptUntrackedMirror({
   config,
   repo,
+  sourceId,
   lookup,
   connection,
   starredOrg,
 }: {
   config: Config;
   repo: DestinationRepo;
+  // The connected source row the mirror's host belongs to, or null when no
+  // connected source owns it. Adoption must never attribute a repo to the
+  // config's source on a host mismatch — null keeps the row unattributed.
+  sourceId: string | null;
   lookup: (owner: string, name: string) => Promise<GitRepo | null>;
   connection: { provider: GitRepo["sourceProvider"]; url: string };
   starredOrg: string | null;
@@ -491,7 +558,7 @@ async function adoptUntrackedMirror({
     importedAt: now,
   };
 
-  const insert = normalizeGitRepoToInsert(gitRepo, { userId: config.userId!, configId: config.id! });
+  const insert = normalizeGitRepoToInsert(gitRepo, { userId: config.userId!, configId: config.id!, sourceId });
   // The normalizer always starts rows as imported; this one is already mirrored.
   insert.status = "mirrored";
   insert.mirroredLocation = repo.fullName;
@@ -515,7 +582,7 @@ async function adoptUntrackedMirror({
   const inserted = await db
     .insert(repositories)
     .values(insert)
-    .onConflictDoNothing({ target: [repositories.userId, repositories.normalizedFullName] })
+    .onConflictDoNothing({ target: [repositories.userId, repositories.sourceId, repositories.normalizedFullName] })
     .returning({ id: repositories.id });
 
   return inserted.length > 0 ? "adopted" : "skipped";
