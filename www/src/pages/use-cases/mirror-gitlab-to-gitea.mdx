@@ -59,11 +59,11 @@ The git side is complete. Code, every branch and tag, the wiki when enabled, and
 
 The metadata side is GitHub only for now. Issues, merge requests, labels, milestones and releases are not read from the GitLab API yet, so those switches are disabled on the Configuration page and the mirror step skips them. Force push detection also depends on the GitHub API and is unavailable for GitLab sources. The [issue and pull request playbook](/use-cases/mirror-github-issues-pull-requests/) only applies to GitHub sources.
 
-## One source at a time
+## Several sources at once
 
-An account has one source. When you switch from GitHub to GitLab, the repositories imported from GitHub are not touched. They keep syncing, because Gitea already holds their clone configuration, but the cleanup service ignores them and mirroring one of them again is refused with an error that names both hosts. If you need a GitHub repository re-mirrored after the switch, remove it and add it again from the current source.
+GitHub and GitLab sources can be connected at the same time, and each repository remembers the source it came from. Cleanup checks each source's own repositories, and mirroring a repository uses that source's credentials. Repositories whose source was later removed keep syncing on the Gitea side, because Gitea holds their clone configuration, but re-mirroring, metadata and cleanup skip them.
 
-The same lock applies in the other direction. Once projects are imported from GitLab, the source and instance URL lock until you confirm a change.
+Each source locks once repositories are imported from it. Its provider and instance URL stay fixed until you confirm a change.
 
 ## Environment variables
 

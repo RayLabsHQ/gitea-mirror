@@ -31,7 +31,7 @@ First user signup becomes admin. Configure GitHub and Gitea/Forgejo through the 
 ## ✨ Features
 
 - 🔁 Mirror public, private, and starred GitHub repos to Gitea/Forgejo
-- 🦊 **GitLab and Gitea/Forgejo sources (beta)** - Pick the source in the configuration card. gitlab.com, Codeberg and self hosted instances mirror code, tags, wiki and LFS (issues, pull requests and releases need a GitHub source). GitHub to Gitea is the supported default; every other source or destination is beta. See [docs/SOURCE_PROVIDERS.md](docs/SOURCE_PROVIDERS.md)
+- 🦊 **Multiple sources (GitLab and Gitea/Forgejo beta)** - Connect several sources at once: GitHub and GitHub Enterprise, GitLab, Gitea/Forgejo, and each repository keeps its source. gitlab.com, Codeberg and self hosted instances mirror code, tags, wiki and LFS (issues, pull requests and releases need a GitHub source). GitHub to Gitea is the supported default; every other source or destination is beta. See [docs/SOURCE_PROVIDERS.md](docs/SOURCE_PROVIDERS.md)
 - 🏛️ **GitHub Enterprise support** - Works with GHES and GHEC with data residency via `GH_API_URL`
 - 🚀 **Forgejo, GitHub and GitLab destinations (beta)** - Forgejo works like Gitea. Pick GitHub or GitLab and the app keeps a bare clone of each repository and pushes its branches and tags there. Code only, and the target is overwritten on every sync. See [docs/PUSH_TARGETS.md](docs/PUSH_TARGETS.md)
 - 🏢 Mirror entire organizations with flexible strategies

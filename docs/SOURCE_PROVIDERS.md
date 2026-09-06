@@ -2,7 +2,7 @@
 
 GitHub to Gitea is the supported default. Every other source and every other destination is marked **beta** in the dropdowns: they are tested end to end against real hosts, but have had less time in the field. The destination card has a matching **Destination** dropdown with Gitea, Forgejo (beta, same API as Gitea), GitHub (beta) and GitLab (beta); `DESTINATION_PROVIDER` sets it from the environment, and [PUSH_TARGETS.md](PUSH_TARGETS.md) covers the GitHub and GitLab targets.
 
-Gitea Mirror pulls repositories from one source host per user. GitHub is the default. GitLab and Gitea/Forgejo are available from the **Source** dropdown at the top of the connection card on the Configuration page.
+Gitea Mirror pulls repositories from as many source hosts as the user connects, github.com and a GitHub Enterprise instance included. The connection card on the Configuration page is a list of sources with add, edit and remove. GitHub is the default, and GitLab and Gitea/Forgejo are available from the **Source** dropdown when a source is added or edited.
 
 | Source | Covers | Default instance URL |
 |--------|--------|----------------------|
@@ -46,8 +46,8 @@ The GitHub only rows read the GitHub API. For other sources the corresponding sw
 
 ## Behaviour to know about
 
-- **The source locks once repositories are imported, and the destination locks once anything is mirrored.** The Source dropdown, the instance URL and the Gitea server URL then show a lock note and a **Change** button. Changing one is still possible, but only after confirming a dialog that spells out what happens to the existing repositories. Saves that try to switch a locked host without that confirmation are refused by the API, and an environment variable that disagrees with a locked host is ignored on boot with a warning.
-- **One source at a time.** Switching the source does not touch repositories that were imported from the previous host. They keep syncing, because Gitea already holds their clone credentials. The cleanup service ignores them, and mirroring one of them again is refused with an error naming both hosts. Remove the repository and add it again from the current source if you need to re-mirror it.
+- **Each source locks once repositories are imported from it, and the destination locks once anything is mirrored.** A locked source's **Source** dropdown and instance URL, and the Gitea server URL, then show a lock note and a **Change** button. Changing them is still possible, but only after confirming a dialog that spells out what happens to the existing repositories. Removing a source that has repositories needs an explicit confirmation too. Saves that try to switch a locked source without that confirmation are refused by the API, and an environment variable that disagrees with a locked source is ignored on boot with a warning.
+- **Sources run side by side.** Every connected source discovers, imports and mirrors independently, and each repository remembers which source it came from. Cleanup checks each source's own repositories, and mirroring a repository uses its own source's credentials. Repositories whose source was removed keep syncing on the Gitea side, because Gitea holds the stored clone credentials, but re-mirroring, metadata and cleanup skip them.
 - **GitLab groups are flattened.** A project under `group/subgroup/project` lands in the Gitea organization `group` (with the preserve strategy) and keeps its full path as the repository's full name. The "Limit to specific groups" filter matches the top level group.
 - **GitLab internal projects are treated as private** when the mirror is created, because they are not visible to anonymous users on the source either.
 - **Repository names come from the URL path**, not the display name, so a GitLab project called "My Widget" with path `my-widget` mirrors as `my-widget`.
@@ -62,8 +62,10 @@ The GitHub only rows read the GitHub API. For other sources the corresponding sw
 | `GITHUB_USERNAME` | Username on the selected host |
 | `GITHUB_TOKEN` | Token for the selected host |
 
+These variables initialize or update the first source connection, creating it when none exists, and never switch a source that is locked. A `GH_API_URL` set for a single GitHub Enterprise deployment keeps applying to sources that point at github.com, so adding a github.com source in such a deployment sends its token to the configured Enterprise API; connect the Enterprise host as its own source instead.
+
 See [ENVIRONMENT_VARIABLES.md](ENVIRONMENT_VARIABLES.md) for the full list.
 
 ## Not yet
 
-Several sources at once (the tracking issue is #375, the follow up is a list of sources in the card), hosts without a usable API, and issues, merge requests and releases from GitLab, Gitea or Forgejo sources. GitHub and GitLab as destinations shipped in 3.31.0 through the push engine, see [PUSH_TARGETS.md](PUSH_TARGETS.md).
+Hosts without a usable API, and issues, merge requests and releases from GitLab, Gitea or Forgejo sources. Discovery preferences are shared, so filters apply to all sources rather than per source, and the GitHub and GitLab rate limit buckets are shared per provider. GitHub and GitLab as destinations shipped in 3.31.0 through the push engine, see [PUSH_TARGETS.md](PUSH_TARGETS.md).

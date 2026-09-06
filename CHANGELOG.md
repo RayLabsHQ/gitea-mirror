@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Multi-source support: connect multiple source services per user (#375 follow-up)
+  - Sources list on the Configuration page with add, edit and remove per source
+  - Per-repository source attribution, with credentials resolved from each repository's own source
+  - Per-source locking, discovery, auto import and cleanup
 - Git LFS (Large File Storage) support for mirroring (#74)
   - New UI checkbox "Mirror LFS" in Mirror Options
   - Automatic LFS object transfer when enabled
