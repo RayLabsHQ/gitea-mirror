@@ -28,6 +28,7 @@ import {
   normalizeReleaseLimit,
   releaseGetsAssets,
   resolveMirrorOptionsForRepository,
+  resolveOrganizationSkipForks,
   type ResolvedMirrorOptions,
 } from "./utils/mirror-overrides";
 import { repositoryDestinationColumns } from "./repo-utils";
@@ -2160,13 +2161,29 @@ export async function mirrorGitHubOrgToGitea({
       .from(repositories)
       .where(eq(repositories.organization, organization.name));
 
-    if (orgRepos.length === 0) {
+    // The organization's fork policy (override -> global skipForks) drops
+    // forked repositories from the batch so they are neither mirrored here
+    // nor re-mirrored by later runs until the policy changes.
+    const skipOrgForks = resolveOrganizationSkipForks({
+      orgOverrides: organization.mirrorOverrides,
+      config,
+    });
+    const mirrorableOrgRepos = skipOrgForks
+      ? orgRepos.filter((repo) => !repo.isForked)
+      : orgRepos;
+    if (skipOrgForks && orgRepos.length !== mirrorableOrgRepos.length) {
+      console.log(
+        `Skipping ${orgRepos.length - mirrorableOrgRepos.length} forked repositories for organization ${organization.name} (skip forks is on)`
+      );
+    }
+
+    if (mirrorableOrgRepos.length === 0) {
       console.log(
         `No repositories found for organization ${organization.name} - marking as successfully mirrored`
       );
     } else {
       console.log(
-        `Mirroring ${orgRepos.length} repositories for organization ${organization.name}`
+        `Mirroring ${mirrorableOrgRepos.length} repositories for organization ${organization.name}`
       );
 
       // Import the processWithRetry function
@@ -2174,7 +2191,7 @@ export async function mirrorGitHubOrgToGitea({
 
       // Process repositories in parallel with concurrency control
       await processWithRetry(
-        orgRepos,
+        mirrorableOrgRepos,
         async (repo) => {
           // Prepare repository data
           const repoData = {

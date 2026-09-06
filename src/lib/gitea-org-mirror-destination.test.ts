@@ -373,3 +373,75 @@ describe.skipIf(!isChild)("mirrorGitHubOrgToGitea destination routing (#343)", (
     expect(orgCreateCalls.length).toBe(0);
   });
 });
+
+describe.skipIf(!isChild)("mirrorGitHubOrgToGitea fork policy", () => {
+  const forkRepo = makeRepo({ id: "repo-fork", name: "forked", fullName: "A/forked", isForked: true });
+  const normalRepo = makeRepo({ id: "repo-2", name: "r2", fullName: "A/r2", cloneUrl: "https://github.com/A/r2.git" });
+
+  test("a skip-forks override drops forked repositories from the batch", async () => {
+    const config = makeConfig({ githubConfig: { mirrorStrategy: "preserve" } });
+    const organization = makeOrg({ mirrorOverrides: { skipForks: true } });
+    orgRepoRows = [makeRepo(), forkRepo];
+    orgConfigRows = [organization];
+
+    await mirrorGitHubOrgToGitea({ organization, octokit: fakeOctokit, config });
+
+    const migrates = migrateCalls();
+    expect(migrates.length).toBe(1);
+    expect(migrates[0].payload.repo_name).toBe("r1");
+  });
+
+  test("the global skipForks switch applies to the org batch too", async () => {
+    const config = makeConfig({
+      githubConfig: { mirrorStrategy: "preserve", skipForks: true },
+    });
+    const organization = makeOrg();
+    orgRepoRows = [makeRepo(), forkRepo];
+    orgConfigRows = [organization];
+
+    await mirrorGitHubOrgToGitea({ organization, octokit: fakeOctokit, config });
+
+    const migrates = migrateCalls();
+    expect(migrates.length).toBe(1);
+    expect(migrates[0].payload.repo_name).toBe("r1");
+  });
+
+  test("a false org pin keeps forks despite the global switch", async () => {
+    const config = makeConfig({
+      githubConfig: { mirrorStrategy: "preserve", skipForks: true },
+    });
+    const organization = makeOrg({ mirrorOverrides: { skipForks: false } });
+    orgRepoRows = [makeRepo(), forkRepo];
+    orgConfigRows = [organization];
+
+    await mirrorGitHubOrgToGitea({ organization, octokit: fakeOctokit, config });
+
+    const migrates = migrateCalls();
+    expect(migrates.length).toBe(2);
+  });
+
+  test("forks are mirrored when nothing opts out (regression)", async () => {
+    const config = makeConfig({ githubConfig: { mirrorStrategy: "preserve" } });
+    const organization = makeOrg();
+    orgRepoRows = [normalRepo, forkRepo];
+    orgConfigRows = [organization];
+
+    await mirrorGitHubOrgToGitea({ organization, octokit: fakeOctokit, config });
+
+    const migrates = migrateCalls();
+    expect(migrates.length).toBe(2);
+  });
+
+  test("a fork-only organization with skip forks mirrors nothing and still succeeds", async () => {
+    const config = makeConfig({
+      githubConfig: { mirrorStrategy: "preserve", skipForks: true },
+    });
+    const organization = makeOrg();
+    orgRepoRows = [forkRepo];
+    orgConfigRows = [organization];
+
+    await mirrorGitHubOrgToGitea({ organization, octokit: fakeOctokit, config });
+
+    expect(migrateCalls().length).toBe(0);
+  });
+});
