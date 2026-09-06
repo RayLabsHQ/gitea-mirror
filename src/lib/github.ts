@@ -3,6 +3,7 @@ import type { GitRepo, RepoStatus } from "@/types/Repository";
 import { Octokit } from "@octokit/rest";
 import { throttling } from "@octokit/plugin-throttling";
 import type { Config } from "@/types/config";
+import { orgForkSkipDecision } from "@/lib/utils/mirror-overrides";
 import {
   applyConditionalRequests,
   conditionalRequestTokenScope,
@@ -249,6 +250,7 @@ export async function getGithubRepositories({
   config,
   includeCollaboratorReposOverride,
   includeAllOrgsOverride,
+  orgForkOverrides,
 }: {
   octokit: Octokit;
   config: Partial<Config>;
@@ -260,6 +262,9 @@ export async function getGithubRepositories({
   // Used by the cleanup service so a previously-mirrored org repo isn't flagged
   // as orphaned just because the user narrowed the allowlist.
   includeAllOrgsOverride?: boolean;
+  // Per-organization fork pins (normalized org name -> skip forks). A fork
+  // owned by a pinned org follows the pin instead of the global skipForks.
+  orgForkOverrides?: Map<string, boolean>;
 }): Promise<GitRepo[]> {
   try {
     const includeCollab =
@@ -279,7 +284,7 @@ export async function getGithubRepositories({
       { per_page: 100, affiliation },
     );
 
-    const skipForks = config.githubConfig?.skipForks ?? false;
+    const forkSkipFor = orgForkSkipDecision(orgForkOverrides, config);
     const skipPersonalRepos = config.githubConfig?.skipPersonalRepos ?? false;
     // The authenticated user's login — used to identify personally-owned repos
     const authenticatedUserLogin = config.githubConfig?.owner ?? "";
@@ -295,6 +300,9 @@ export async function getGithubRepositories({
     );
 
     const filteredRepos = repos.filter((repo) => {
+      const skipForks = forkSkipFor(
+        repo.owner.type === "Organization" ? repo.owner.login : undefined
+      );
       const isForkAllowed = !skipForks || !repo.fork;
       // When skipPersonalRepos is true, drop repos owned by the authenticated user
       // (owner.type === "User" and owner.login matches the configured GitHub username).

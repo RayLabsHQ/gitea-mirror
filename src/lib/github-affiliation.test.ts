@@ -253,3 +253,47 @@ describe("getGithubRepositories - includeOrganizations allowlist", () => {
     expect(repos.map((r) => r.name)).toContain("noise");
   });
 });
+
+describe("getGithubRepositories - per-organization fork pins", () => {
+  const acmeFork = makeRepo({ name: "acme-fork", ownerLogin: "acme", ownerType: "Organization", fork: true });
+  const globexFork = makeRepo({ name: "globex-fork", ownerLogin: "globex", ownerType: "Organization", fork: true });
+  const ownFork = makeRepo({ name: "own-fork", ownerLogin: "octo", ownerType: "User", fork: true });
+  const plain = makeRepo({ name: "plain" });
+
+  async function listed(
+    config: Record<string, unknown>,
+    orgForkOverrides?: Map<string, boolean>
+  ) {
+    const { octokit } = makeOctokit([acmeFork, globexFork, ownFork, plain]);
+    const repos = await getGithubRepositories({
+      octokit,
+      config: { githubConfig: { owner: "octo", ...config } as any },
+      orgForkOverrides,
+    });
+    return repos.map((r) => r.name).sort();
+  }
+
+  test("a pinned org drops only its own forks", async () => {
+    expect(await listed({}, new Map([["acme", true]]))).toEqual([
+      "globex-fork",
+      "own-fork",
+      "plain",
+    ]);
+  });
+
+  test("a false pin keeps that org's forks when the global switch skips forks", async () => {
+    expect(await listed({ skipForks: true }, new Map([["globex", false]]))).toEqual([
+      "globex-fork",
+      "plain",
+    ]);
+  });
+
+  test("pins never apply to personal forks", async () => {
+    expect(await listed({}, new Map([["octo", true]]))).toEqual([
+      "acme-fork",
+      "globex-fork",
+      "own-fork",
+      "plain",
+    ]);
+  });
+});

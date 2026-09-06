@@ -138,6 +138,7 @@ export class GitHubSourceProvider implements SourceProvider {
       config,
       includeCollaboratorReposOverride: options.includeCollaboratorReposOverride,
       includeAllOrgsOverride: options.includeAllOrgsOverride,
+      orgForkOverrides: options.orgForkOverrides,
     });
     return this.stamp(repos);
   }
