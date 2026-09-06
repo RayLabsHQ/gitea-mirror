@@ -36,6 +36,7 @@ The mirror itself is done by Gitea's pull mirror, which treats every source as a
 | Cleanup of repositories deleted upstream | yes | yes | yes |
 | Starred repositories | yes | yes | yes |
 | Private repositories | yes | yes | yes |
+| Entire organizations (GitLab: top level groups) | yes | yes | yes |
 | Add a single repository by URL | yes | yes | yes |
 | Issues, pull requests, labels, milestones | yes | no | no |
 | Releases with assets | yes | no | no |
