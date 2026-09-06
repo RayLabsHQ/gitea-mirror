@@ -7,7 +7,6 @@
 import { db, configs, repositories } from '@/lib/db';
 import { eq, and, or, sql, not, inArray } from 'drizzle-orm';
 import {
-  createSourceProviderFromConfig,
   describeSource,
   getRepositorySource,
   isRepositoryFromConfiguredSource,
@@ -104,161 +103,190 @@ export function splitFullName(
 
 async function identifyOrphanedRepositories(config: any): Promise<any[]> {
   const userId = config.userId;
-  
+
   try {
-    // The configured source host (GitHub honors GH_API_URL and tracks rate limits)
-    const sourceProvider = createSourceProviderFromConfig(config, { userId });
-    const sourceConnection = sourceProvider.connection;
-    
-    let allGithubRepos = [];
-    let githubApiAccessible = true;
-    
-    try {
-      // Fetch GitHub data. Always include collaborator repos and bypass the
-      // organization allowlist here regardless of the user's import filters,
-      // otherwise repos previously mirrored as a collaborator or from an org the
-      // user later removed from the allowlist would be flagged as orphaned and
-      // archived/deleted as soon as the user narrows those filters.
-      const [basicAndForkedRepos, starredRepos] = await Promise.all([
-        sourceProvider.listRepositories(config, {
-          includeCollaboratorReposOverride: true,
-          includeAllOrgsOverride: true,
-        }),
-        config.githubConfig?.includeStarred
-          ? sourceProvider.listStarredRepositories(config)
-          : Promise.resolve([]),
-      ]);
-      
-      allGithubRepos = [...basicAndForkedRepos, ...starredRepos];
-    } catch (githubError: any) {
-      // Handle GitHub API errors gracefully
-      console.warn(`[Repository Cleanup] GitHub API error for user ${userId}: ${githubError.message}`);
-      
-      // Check if it's a critical error (like account deleted/banned)
-      if (githubError.status === 404 || githubError.status === 403) {
-        console.error(`[Repository Cleanup] CRITICAL: GitHub account may be deleted/banned. Skipping cleanup to prevent data loss.`);
-        console.error(`[Repository Cleanup] Consider using CLEANUP_ORPHANED_REPO_ACTION=archive instead of delete for safety.`);
-        
-        // Return empty array to skip cleanup entirely when GitHub account is inaccessible
-        return [];
-      }
-      
-      // For other errors, also skip cleanup to be safe
-      console.error(`[Repository Cleanup] Skipping cleanup due to GitHub API error. This prevents accidental deletion of backups.`);
-      return [];
-    }
-    
-    const githubReposByFullName = new Map(
-      allGithubRepos.map((repo) => [repo.fullName, repo] as const)
-    );
-    
-    // Get all repositories from our database
+    // Multi-source: each enabled source vouches for the repositories that
+    // were imported from it. Orphans found by the sources are aggregated
+    // (deduped by repository id).
+    const { listSources } = await import('@/lib/sources');
+    const { createSourceProviderFromSource } = await import('@/lib/source-providers');
+    const sources = (await listSources(userId)).filter(source => source.enabled);
+    const knownSourceIds = new Set(sources.map(source => source.id));
+
     const dbRepos = await db
       .select()
       .from(repositories)
       .where(eq(repositories.userId, userId));
-    
-    // Only identify repositories as orphaned if we successfully accessed GitHub
-    // This prevents false positives when GitHub is down or account is inaccessible.
-    //
-    // First pass (sync, cheap): filter down to repos that merely *look*
-    // orphaned based on map membership against the single bulk fetch above.
-    // This is the false-positive-prone signal — see resolveOrphanVerdict.
-    const candidateOrphans = dbRepos.filter(repo => {
-      // Skip repositories we've already archived/preserved
-      if (repo.status === 'archived' || repo.isArchived) {
-        console.log(`[Repository Cleanup] Skipping ${repo.fullName} - already archived`);
+
+    // Legacy rows without a source, and rows whose source was deleted
+    // (dangling source id), keep mirroring on the destination side but
+    // cleanup leaves them alone (the documented "switched source" behavior).
+    const sourceOwnedRepos = dbRepos.filter(repo => {
+      if (!repo.sourceId) {
+        console.log(`[Repository Cleanup] Skipping ${repo.fullName} - not tied to any source`);
         return false;
       }
-
-      // Only the configured source can vouch for a repository. Rows imported
-      // from another host (the source was switched since) are left alone.
-      if (!isRepositoryFromConfiguredSource(repo, sourceConnection)) {
-        console.log(
-          `[Repository Cleanup] Skipping ${repo.fullName} - imported from ${describeSource(getRepositorySource(repo))}, not the configured source`
-        );
+      if (!knownSourceIds.has(repo.sourceId)) {
+        console.log(`[Repository Cleanup] Skipping ${repo.fullName} - its source no longer exists`);
         return false;
       }
-
-      // If starred repos are not being fetched from GitHub, we can't determine
-      // if a starred repo is orphaned - skip it to prevent data loss
-      if (repo.isStarred && !config.githubConfig?.includeStarred) {
-        console.log(`[Repository Cleanup] Skipping starred repo ${repo.fullName} - starred repos not being fetched from GitHub`);
-        return false;
-      }
-
-      const githubRepo = githubReposByFullName.get(repo.fullName);
-      if (!githubRepo) {
-        // Missing from the bulk list — candidate for direct confirmation below,
-        // not yet a confirmed orphan.
-        return true;
-      }
-
-      if (!isMirrorableGitHubRepo(githubRepo)) {
-        console.log(`[Repository Cleanup] Preserving ${repo.fullName} - repository is disabled on GitHub`);
-        return false;
-      }
-
-      return false;
+      return true;
     });
 
-    if (candidateOrphans.length === 0) {
-      return [];
-    }
+    const orphanedById = new Map<string, any>();
 
-    // Second pass (async, targeted): confirm each candidate directly against
-    // GitHub before finalizing it as orphaned. This only adds extra API calls
-    // for the (presumably small) set of repos that look orphaned, not for
-    // every repo, so it shouldn't meaningfully increase rate-limit pressure
-    // in the common case (few or no orphans per run). Promise.allSettled so
-    // one repo's verification failure can't block the others.
-    const verificationOutcomes = await Promise.allSettled(
-      candidateOrphans.map(async (repo) => {
-        // Look the repository up by its full name: a GitLab project under a
-        // subgroup is stored with the top level group as owner, so owner/name
-        // would not resolve on the source host.
-        const upstreamPath = splitFullName(repo.fullName, repo.owner, repo.name);
+    for (const source of sources) {
+      // The source host with its token decrypted (GitHub honors GH_API_URL and tracks rate limits)
+      const sourceProvider = createSourceProviderFromSource(source, { userId });
+      const sourceConnection = sourceProvider.connection;
 
-        if (repo.isStarred) {
+      let allGithubRepos: any[] = [];
+
+      try {
+        // Fetch source data. Always include collaborator repos and bypass the
+        // organization allowlist here regardless of the user's import filters,
+        // otherwise repos previously mirrored as a collaborator or from an org the
+        // user later removed from the allowlist would be flagged as orphaned and
+        // archived/deleted as soon as the user narrows those filters.
+        const [basicAndForkedRepos, starredRepos] = await Promise.all([
+          sourceProvider.listRepositories(config, {
+            includeCollaboratorReposOverride: true,
+            includeAllOrgsOverride: true,
+          }),
+          config.githubConfig?.includeStarred
+            ? sourceProvider.listStarredRepositories(config)
+            : Promise.resolve([]),
+        ]);
+
+        allGithubRepos = [...basicAndForkedRepos, ...starredRepos];
+      } catch (githubError: any) {
+        // Handle source API errors gracefully
+        console.warn(`[Repository Cleanup] Source API error for user ${userId} on source ${source.name}: ${githubError.message}`);
+
+        // Check if it's a critical error (like account deleted/banned)
+        if (githubError.status === 404 || githubError.status === 403) {
+          console.error(`[Repository Cleanup] CRITICAL: the account on source ${source.name} may be deleted/banned. Skipping cleanup for this source to prevent data loss.`);
+          console.error(`[Repository Cleanup] Consider using CLEANUP_ORPHANED_REPO_ACTION=archive instead of delete for safety.`);
+        } else {
+          // For other errors, also skip this source to be safe
+          console.error(`[Repository Cleanup] Skipping cleanup of source ${source.name} due to a source API error. This prevents accidental deletion of backups.`);
+        }
+        continue;
+      }
+
+      const githubReposByFullName = new Map(
+        allGithubRepos.map((repo) => [repo.fullName, repo] as const)
+      );
+
+      // Only identify repositories as orphaned if we successfully accessed the
+      // source. This prevents false positives when the source is down or the
+      // account is inaccessible.
+      //
+      // First pass (sync, cheap): filter down to repos that merely *look*
+      // orphaned based on map membership against the single bulk fetch above.
+      // This is the false-positive-prone signal — see resolveOrphanVerdict.
+      const candidateOrphans = sourceOwnedRepos.filter(repo => {
+        // Skip repositories we've already archived/preserved
+        if (repo.status === 'archived' || repo.isArchived) {
+          console.log(`[Repository Cleanup] Skipping ${repo.fullName} - already archived`);
+          return false;
+        }
+
+        // Only this source can vouch for its own rows; other sources' rows
+        // are handled by their source's iteration.
+        if (repo.sourceId !== source.id) {
+          return false;
+        }
+
+        // The row must still match the source it was imported from (the
+        // source host cannot vouch for a repository imported from another
+        // provider/instance before it was switched).
+        if (!isRepositoryFromConfiguredSource(repo, sourceConnection)) {
+          console.log(
+            `[Repository Cleanup] Skipping ${repo.fullName} - imported from ${describeSource(getRepositorySource(repo))}, not from source ${source.name}`
+          );
+          return false;
+        }
+
+        // If starred repos are not being fetched from the source, we can't determine
+        // if a starred repo is orphaned - skip it to prevent data loss
+        if (repo.isStarred && !config.githubConfig?.includeStarred) {
+          console.log(`[Repository Cleanup] Skipping starred repo ${repo.fullName} - starred repos not being fetched from the source`);
+          return false;
+        }
+
+        const githubRepo = githubReposByFullName.get(repo.fullName);
+        if (!githubRepo) {
+          // Missing from the bulk list — candidate for direct confirmation below,
+          // not yet a confirmed orphan.
+          return true;
+        }
+
+        if (!isMirrorableGitHubRepo(githubRepo)) {
+          console.log(`[Repository Cleanup] Preserving ${repo.fullName} - repository is disabled on the source`);
+          return false;
+        }
+
+        return false;
+      });
+
+      if (candidateOrphans.length === 0) {
+        continue;
+      }
+
+      // Second pass (async, targeted): confirm each candidate directly against
+      // the source before finalizing it as orphaned. This only adds extra API
+      // calls for the (presumably small) set of repos that look orphaned, not
+      // for every repo, so it shouldn't meaningfully increase rate-limit
+      // pressure in the common case (few or no orphans per run).
+      // Promise.allSettled so one repo's verification failure can't block the
+      // others.
+      const verificationOutcomes = await Promise.allSettled(
+        candidateOrphans.map(async (repo) => {
+          // Look the repository up by its full name: a GitLab project under a
+          // subgroup is stored with the top level group as owner, so owner/name
+          // would not resolve on the source host.
+          const upstreamPath = splitFullName(repo.fullName, repo.owner, repo.name);
+
+          if (repo.isStarred) {
+            try {
+              const stillStarred = await sourceProvider.isRepositoryStarred(
+                upstreamPath.owner,
+                upstreamPath.name
+              );
+              // Still starred => the bulk star fetch missed it. Fail safe: do
+              // not treat as orphaned. A clean "not starred" confirms it.
+              return { repo, directCheckConfirmsGone: !stillStarred };
+            } catch (starError: any) {
+              console.warn(
+                `[Repository Cleanup] Direct star-check for ${repo.fullName} failed with a non-404 error; skipping this cycle to be safe: ${
+                  starError instanceof Error ? starError.message : String(starError)
+                }`
+              );
+              return { repo, directCheckConfirmsGone: false };
+            }
+          }
+
           try {
-            const stillStarred = await sourceProvider.isRepositoryStarred(
+            const upstream = await sourceProvider.getRepository(
               upstreamPath.owner,
               upstreamPath.name
             );
-            // Still starred => the bulk star fetch missed it. Fail safe: do
-            // not treat as orphaned. A clean "not starred" confirms it.
-            return { repo, directCheckConfirmsGone: !stillStarred };
-          } catch (starError: any) {
+            // Present => the bulk fetch missed it (e.g. an org-allowlist edge
+            // case). Fail safe: not orphaned. A clean 404 (null) confirms it.
+            return { repo, directCheckConfirmsGone: upstream === null };
+          } catch (repoError: any) {
             console.warn(
-              `[Repository Cleanup] Direct star-check for ${repo.fullName} failed with a non-404 error; skipping this cycle to be safe: ${
-                starError instanceof Error ? starError.message : String(starError)
+              `[Repository Cleanup] Direct existence check for ${repo.fullName} failed with a non-404 error; skipping this cycle to be safe: ${
+                repoError instanceof Error ? repoError.message : String(repoError)
               }`
             );
             return { repo, directCheckConfirmsGone: false };
           }
-        }
+        })
+      );
 
-        try {
-          const upstream = await sourceProvider.getRepository(
-            upstreamPath.owner,
-            upstreamPath.name
-          );
-          // Present => the bulk fetch missed it (e.g. an org-allowlist edge
-          // case). Fail safe: not orphaned. A clean 404 (null) confirms it.
-          return { repo, directCheckConfirmsGone: upstream === null };
-        } catch (repoError: any) {
-          console.warn(
-            `[Repository Cleanup] Direct existence check for ${repo.fullName} failed with a non-404 error; skipping this cycle to be safe: ${
-              repoError instanceof Error ? repoError.message : String(repoError)
-            }`
-          );
-          return { repo, directCheckConfirmsGone: false };
-        }
-      })
-    );
-
-    const orphanedRepos = verificationOutcomes
-      .map((outcome, index) => {
+      verificationOutcomes.forEach((outcome, index) => {
         if (outcome.status !== 'fulfilled') {
           const repo = candidateOrphans[index];
           console.warn(
@@ -266,7 +294,7 @@ async function identifyOrphanedRepositories(config: any): Promise<any[]> {
               outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason)
             }`
           );
-          return null;
+          return;
         }
 
         const { repo, directCheckConfirmsGone } = outcome.value;
@@ -276,16 +304,17 @@ async function identifyOrphanedRepositories(config: any): Promise<any[]> {
         });
 
         if (!isOrphaned) {
-          return null;
+          return;
         }
 
         console.log(
-          `[Repository Cleanup] Confirmed orphaned via direct GitHub check: ${repo.fullName}`
+          `[Repository Cleanup] Confirmed orphaned via direct source check: ${repo.fullName}`
         );
-        return repo;
-      })
-      .filter((repo): repo is (typeof dbRepos)[number] => repo !== null);
+        orphanedById.set(repo.id, repo);
+      });
+    }
 
+    const orphanedRepos = Array.from(orphanedById.values());
     if (orphanedRepos.length > 0) {
       console.log(`[Repository Cleanup] Found ${orphanedRepos.length} orphaned repositories for user ${userId}`);
     }

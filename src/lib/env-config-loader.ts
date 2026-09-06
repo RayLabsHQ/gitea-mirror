@@ -3,13 +3,14 @@
  * Loads configuration from environment variables and populates the database
  */
 
-import { db, configs, users } from '@/lib/db';
+import { db, configs, users, repositories } from '@/lib/db';
 import { eq, and, sql } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import { encrypt } from '@/lib/utils/encryption';
 import { isSourceProviderKind, type SourceProviderKind } from '@/lib/source-providers/kinds';
 import { DESTINATION_PROVIDER_DEFAULT_URLS, isDestinationProviderKind, type DestinationProviderKind } from '@/lib/destination-kinds';
 import { hasDestinationChanged, hasSourceChanged, loadConfigLocks } from '@/lib/config-locks';
+import type { SourceUpdateInput } from '@/lib/sources';
 import { normalizeReleaseAssetLimit } from '@/lib/utils/mirror-overrides';
 
 interface EnvConfig {
@@ -476,9 +477,87 @@ export async function initializeConfigFromEnv(): Promise<void> {
       });
     }
 
+    await syncFirstSourceFromEnv(userId, envConfig);
+
     console.log('[ENV Config Loader] Configuration initialized successfully from environment variables');
   } catch (error) {
     console.error('[ENV Config Loader] Failed to initialize configuration from environment:', error);
     // Don't throw - this is a non-critical initialization
   }
+}
+
+/**
+ * Keep the user's first (primary) source row in sync with the environment
+ * connection variables. The sources table is authoritative for connections;
+ * createSource/updateSource mirror the primary source back into the config's
+ * githubConfig connection fields (write-through). Never clears values the
+ * env did not set.
+ */
+async function syncFirstSourceFromEnv(userId: string, envConfig: EnvConfig): Promise<void> {
+  try {
+    const { createSource, listSources, updateSource } = await import('@/lib/sources');
+    const existingSources = await listSources(userId);
+
+    if (existingSources.length === 0) {
+      // Only mint a source row when the environment actually carries a
+      // connection; preference-only envs must not create an empty source.
+      if (envConfig.github.token || envConfig.github.username) {
+        await createSource(userId, {
+          provider: envConfig.github.provider ?? 'github',
+          url: envConfig.github.url,
+          username: envConfig.github.username ?? '',
+          token: envConfig.github.token ?? '',
+        });
+        console.log('[ENV Config Loader] Created the primary source from environment variables');
+      }
+      return;
+    }
+
+    const primary = existingSources[0];
+
+    const updates: SourceUpdateInput = {};
+    if (envConfig.github.provider !== undefined) {
+      updates.provider = envConfig.github.provider;
+    }
+    if (envConfig.github.url !== undefined) {
+      updates.url = envConfig.github.url;
+    }
+    if (envConfig.github.username !== undefined) {
+      updates.username = envConfig.github.username;
+    }
+    if (envConfig.github.token) {
+      updates.token = envConfig.github.token;
+    }
+
+    // A source with imported repositories is locked: environment variables
+    // cannot switch its host, mirroring the githubConfig check above.
+    const sourceRepoCount = await countRepositoriesForSource(userId, primary.id);
+    const incomingSource = {
+      provider: envConfig.github.provider ?? primary.provider,
+      url: envConfig.github.url ?? primary.url,
+    };
+    const lockedHostChange =
+      sourceRepoCount > 0 &&
+      (updates.provider !== undefined || updates.url !== undefined) &&
+      hasSourceChanged({ provider: primary.provider, url: primary.url }, incomingSource);
+    if (lockedHostChange) {
+      console.warn(
+        `[ENV Config Loader] Ignoring SOURCE_PROVIDER/SOURCE_URL: the source "${primary.name}" is locked because ${sourceRepoCount} repositories were imported from it. Change it on the Configuration page.`
+      );
+      delete updates.provider;
+      delete updates.url;
+    }
+
+    await updateSource(userId, primary.id, updates);
+  } catch (error) {
+    console.error('[ENV Config Loader] Failed to sync the primary source from environment variables:', error);
+  }
+}
+
+async function countRepositoriesForSource(userId: string, sourceId: string): Promise<number> {
+  const [row] = await db
+    .select({ count: sql<number>`count(*)` })
+    .from(repositories)
+    .where(and(eq(repositories.userId, userId), eq(repositories.sourceId, sourceId)));
+  return Number(row?.count ?? 0);
 }
