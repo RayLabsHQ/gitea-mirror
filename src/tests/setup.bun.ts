@@ -31,7 +31,11 @@ mock.module("@/lib/db", () => {
     select: () => ({
       from: () => ({
         where: () => ({
-          limit: () => Promise.resolve([])
+          limit: () => Promise.resolve([]),
+          // Sources queries order or group before awaiting; resolve to no
+          // rows so callers see an empty result.
+          orderBy: () => Promise.resolve([]),
+          groupBy: () => Promise.resolve([])
         })
       })
     }),
@@ -53,6 +57,7 @@ mock.module("@/lib/db", () => {
     users: {},
     events: {},
     configs: {},
+    sources: {},
     repositories: {},
     mirrorJobs: {},
     organizations: {},

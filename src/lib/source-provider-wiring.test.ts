@@ -2,11 +2,12 @@
  * Source regression tests for the source provider wiring (issue #375).
  *
  * The mirror pipeline, the scheduler, the cleanup service and the discovery
- * routes must go through the SourceProvider built from the configuration
- * instead of calling GitHub directly, and the two migrate sites must pick
- * clone credentials per provider and refuse a repository from another host.
- * These files need process-wide module mocks to exercise behaviorally, so
- * the wiring is asserted by reading the source (same convention as
+ * routes must go through the SourceProvider built from the user's connected
+ * source rows instead of calling GitHub directly, and the two migrate sites
+ * must pick clone credentials from the repository's own source and refuse a
+ * repository from a host that is not connected. These files need
+ * process-wide module mocks to exercise behaviorally, so the wiring is
+ * asserted by reading the source (same convention as
  * stuck-status-recovery.test.ts).
  */
 import { describe, expect, test } from "bun:test";
@@ -27,13 +28,18 @@ describe("gitea.ts migrate sites", () => {
     expect(count(source, "provider: sourceConnection.provider,")).toBe(2);
   });
 
-  test("both mirror paths refuse a repository from a different source before any side effect", () => {
-    expect(count(source, "assertRepositoryMatchesConfiguredSource({ repository, config });")).toBe(2);
+  test("both mirror paths refuse a repository from an unconnected source before any side effect", () => {
+    expect(count(source, "assertRepositoryMatchesConnectedSource({ repository, sources });")).toBe(2);
     const userPath = source.indexOf("export const mirrorGithubRepoToGitea");
-    const guard = source.indexOf("assertRepositoryMatchesConfiguredSource({ repository, config });", userPath);
+    const guard = source.indexOf("assertRepositoryMatchesConnectedSource({ repository, sources });", userPath);
     const mirroringWrite = source.indexOf('repoStatusEnum.parse("mirroring")', userPath);
     expect(guard).toBeGreaterThan(userPath);
     expect(guard).toBeLessThan(mirroringWrite);
+  });
+
+  test("both mirror paths resolve the repository's own source for clone credentials", () => {
+    expect(count(source, "findSourceForRepository(repository, sources)")).toBe(2);
+    expect(count(source, "sourceConnectionFromSource(repoSource, { userId: config.userId })")).toBe(2);
   });
 
   test("the mirror entry points accept a null GitHub client and skip metadata without one", () => {
@@ -43,18 +49,20 @@ describe("gitea.ts migrate sites", () => {
 });
 
 describe("discovery and housekeeping go through the source provider", () => {
-  test("scheduler auto import, auto mirror and boot auto start", () => {
+  test("scheduler auto import, auto mirror and boot auto start iterate the connected sources", () => {
     const source = read("scheduler-service.ts");
-    expect(count(source, "createSourceProviderFromConfig(config")).toBe(2);
-    expect(count(source, "sourceProvider.listRepositories(config)")).toBe(2);
+    expect(source).toContain("createSourceProviderFromSource(source, { userId })");
+    expect(source).toContain("sourceProvider.listRepositories(config)");
     expect(source).not.toContain("getGithubRepositories(");
-    // A GitHub client is built only for GitHub sources, in both mirror phases.
-    expect(count(source, "resolveSourceProviderKind(config) === 'github'")).toBe(2);
+    // Auto import, auto mirror and boot auto start each load the user's sources.
+    expect(count(source, "listSources(")).toBeGreaterThanOrEqual(3);
+    // A GitHub client is built per source (only for GitHub sources), cached per batch.
+    expect(source).toContain("source.provider === 'github'");
   });
 
   test("cleanup lists, filters and verifies through the provider", () => {
     const source = read("repository-cleanup-service.ts");
-    expect(source).toContain("createSourceProviderFromConfig(config, { userId })");
+    expect(source).toContain("createSourceProviderFromSource(source, { userId })");
     expect(source).toContain("isRepositoryFromConfiguredSource(repo, sourceConnection)");
     expect(source).toContain("sourceProvider.getRepository(");
     expect(source).toContain("sourceProvider.isRepositoryStarred(");
@@ -63,10 +71,13 @@ describe("discovery and housekeeping go through the source provider", () => {
     expect(source).toContain("splitFullName(repo.fullName, repo.owner, repo.name)");
   });
 
-  test("recovery and the sync path only build a GitHub client for GitHub sources", () => {
-    expect(read("recovery.ts")).toContain("resolveSourceProviderKind(config) === 'github'");
+  test("recovery and the sync path resolve the GitHub client from the repository's own source", () => {
+    const recovery = read("recovery.ts");
+    expect(recovery).toContain("findSourceForRepository(repo, sources)");
+    expect(recovery).toContain("repoSource?.provider === 'github'");
     const enhanced = read("gitea-enhanced.ts");
-    expect(count(enhanced, 'normalizeSourceProviderKind(config.githubConfig?.provider)')).toBe(2);
+    expect(enhanced).toContain("getRepositorySource(repository).provider === \"github\"");
+    expect(enhanced).toContain("findSourceForRepository(repository, sources)");
   });
 
   test("the metadata resolver clamps GitHub only options for other sources", () => {
@@ -75,12 +86,16 @@ describe("discovery and housekeeping go through the source provider", () => {
     expect(source).toContain('normalizeSourceProviderKind(repository.sourceProvider) !== "github"');
   });
 
-  test("the discovery routes use the provider and stamp the source on inserted rows", () => {
+  test("the discovery routes use the provider, match the pasted host against connected sources and stamp the source on inserted rows", () => {
     for (const route of ["index.ts", "organization.ts", "repository.ts"]) {
       const source = read("..", "pages", "api", "sync", route);
-      expect(source).toContain("createSourceProviderFromConfig(config, { userId })");
+      expect(source).toContain("createSourceProviderFromSource(source, { userId })");
       expect(source).not.toContain("createGitHubClient(");
     }
+    expect(read("..", "pages", "api", "sync", "repository.ts")).toContain(
+      "sourceHostOf(s.url) === pastedHost"
+    );
+    expect(read("..", "pages", "api", "sync", "index.ts")).toContain("sourceId: source.id");
     expect(read("repo-utils.ts")).toContain("repositorySourceColumns(repo)");
   });
 });
