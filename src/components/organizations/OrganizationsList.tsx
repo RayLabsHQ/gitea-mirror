@@ -3,7 +3,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Plus, RefreshCw, Building2, Check, AlertCircle, Clock, MoreVertical, Ban, SlidersHorizontal, Trash2 } from "lucide-react";
-import { SiGithub, SiGitea } from "react-icons/si";
+import { SiGithub, SiGitea, SiGitlab } from "react-icons/si";
 import type { MirrorOverrides, Organization } from "@/lib/db/schema";
 import type { FilterParams } from "@/types/filter";
 import Fuse from "fuse.js";
@@ -16,7 +16,14 @@ import type { OrganizationMoveResult } from "@/lib/destination-transfer";
 import { MirrorOverridesDialog } from "@/components/config/MirrorOverridesDialog";
 import { hasMirrorOverrides, mirrorOptionsToFlags } from "@/lib/utils/mirror-overrides";
 import { useGiteaConfig } from "@/hooks/useGiteaConfig";
+import { getCachedConfig } from "@/hooks/useConfigStatus";
 import { withBase } from "@/lib/base-path";
+import {
+  SOURCE_PROVIDER_LABELS,
+  SOURCE_PROVIDER_ORG_NOUNS,
+  normalizeSourceUrl,
+  type SourceProviderKind,
+} from "@/lib/source-providers/kinds";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -37,6 +44,7 @@ interface OrganizationListProps {
   onAddOrganization?: () => void;
   onRefresh?: () => Promise<void>;
   onDelete?: (orgId: string) => void;
+  sourceProvider?: SourceProviderKind;
 }
 
 // Helper function to get status badge variant and icon
@@ -68,9 +76,18 @@ export function OrganizationList({
   onAddOrganization,
   onRefresh,
   onDelete,
+  sourceProvider = "github",
 }: OrganizationListProps) {
   const { giteaConfig, mirrorOptions } = useGiteaConfig();
   const [overridesTarget, setOverridesTarget] = useState<Organization | null>(null);
+
+  const sourceLabel = SOURCE_PROVIDER_LABELS[sourceProvider];
+  const sourceUrl = normalizeSourceUrl(
+    getCachedConfig()?.githubConfig?.url,
+    sourceProvider
+  );
+  const sourceShortLabel = sourceProvider === "gitea" ? "Gitea" : sourceLabel;
+  const SourceIcon = { github: SiGithub, gitlab: SiGitlab, gitea: SiGitea }[sourceProvider];
 
   const handleUpdateMirrorOverrides = async (
     orgId: string,
@@ -206,7 +223,7 @@ export function OrganizationList({
       <p className="text-sm text-muted-foreground mt-1 mb-4 max-w-md">
         {hasAnyFilter
           ? "Try adjusting your search or filter criteria."
-          : "Add GitHub organizations to mirror their repositories."}
+          : `Add ${SOURCE_PROVIDER_LABELS[sourceProvider]} ${SOURCE_PROVIDER_ORG_NOUNS[sourceProvider]}s to mirror their repositories.`}
       </p>
       {hasAnyFilter ? (
         <Button
@@ -583,14 +600,14 @@ export function OrganizationList({
                 })()}
                 <Button variant="outline" size="default" asChild className="flex-1 h-10 min-w-0">
                   <a
-                    href={`https://github.com/${org.name}`}
+                    href={`${sourceUrl}/${org.name}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    title="View on GitHub"
+                    title={`View on ${sourceLabel}`}
                     className="flex items-center justify-center gap-2"
                   >
-                     <SiGithub className="h-4 w-4 flex-shrink-0" />
-                     <span className="text-xs">GitHub</span>
+                     <SourceIcon className="h-4 w-4 flex-shrink-0" />
+                     <span className="text-xs">{sourceShortLabel}</span>
                   </a>
                 </Button>
               </div>
@@ -759,13 +776,13 @@ export function OrganizationList({
                         className="rounded-none rounded-r-md"
                       >
                         <a
-                          href={`https://github.com/${org.name}`}
+                          href={`${sourceUrl}/${org.name}`}
                           target="_blank"
                           rel="noopener noreferrer"
-                          title="View on GitHub"
+                          title={`View on ${sourceLabel}`}
                         >
-                          <SiGithub className="h-4 w-4 mr-2" />
-                          GitHub
+                          <SourceIcon className="h-4 w-4 mr-2" />
+                          {sourceShortLabel}
                         </a>
                       </Button>
                     </div>
