@@ -26,6 +26,7 @@ import {
   UI_MIRROR_OVERRIDE_KEYS,
   type InheritedMirrorOptions,
   type MirrorOverrideKey,
+  type OrgSelectionOverrideKey,
 } from "@/lib/utils/mirror-overrides";
 
 /**
@@ -33,6 +34,8 @@ import {
  * which is what lets the next tier out supply the value.
  */
 type TriState = "inherit" | "on" | "off";
+
+type DialogOverrideKey = MirrorOverrideKey | OrgSelectionOverrideKey;
 
 function toTriState(value: boolean | null | undefined): TriState {
   if (value === true) return "on";
@@ -106,8 +109,18 @@ export function MirrorOverridesDialog({
   destinationProvider,
   onSave,
 }: MirrorOverridesDialogProps) {
-  const [draft, setDraft] = useState<Record<MirrorOverrideKey, TriState>>(
-    () => buildDraft(value)
+  // Skip forks steers which repositories an organization imports and mirrors
+  // at all, so it leads the list; it is meaningless for a single repository.
+  const dialogKeys = useMemo<DialogOverrideKey[]>(
+    () =>
+      targetKind === "organization"
+        ? ["skipForks", ...UI_MIRROR_OVERRIDE_KEYS]
+        : [...UI_MIRROR_OVERRIDE_KEYS],
+    [targetKind]
+  );
+
+  const [draft, setDraft] = useState<Record<DialogOverrideKey, TriState>>(
+    () => buildDraft(value, dialogKeys)
   );
   const [releaseLimitDraft, setReleaseLimitDraft] = useState(() =>
     buildReleaseLimitDraft(value)
@@ -121,11 +134,11 @@ export function MirrorOverridesDialog({
   // previous edit never leaks into the next one.
   useEffect(() => {
     if (open) {
-      setDraft(buildDraft(value));
+      setDraft(buildDraft(value, dialogKeys));
       setReleaseLimitDraft(buildReleaseLimitDraft(value));
       setReleaseAssetLimitDraft(buildReleaseAssetLimitDraft(value));
     }
-  }, [open, value]);
+  }, [open, value, dialogKeys]);
 
   // What each flag currently resolves to, including the in-progress edit.
   // Drives the labels and release-limit gates so they react live as issues
@@ -136,6 +149,8 @@ export function MirrorOverridesDialog({
       const pinned = fromTriState(draft[key]);
       next[key] = pinned ?? inheritedFrom?.[key] ?? false;
     }
+    next.skipForks =
+      fromTriState(draft.skipForks) ?? inheritedFrom?.skipForks ?? false;
     return next;
   }, [draft, inheritedFrom]);
 
@@ -178,6 +193,10 @@ export function MirrorOverridesDialog({
         const resolved = fromTriState(draft[key]);
         if (typeof resolved === "boolean") next[key] = resolved;
       }
+      if (targetKind === "organization") {
+        const resolved = fromTriState(draft.skipForks);
+        if (typeof resolved === "boolean") next.skipForks = resolved;
+      }
       if (pinnedReleaseLimit !== undefined) next.releaseLimit = pinnedReleaseLimit;
       if (pinnedReleaseAssetLimit !== undefined) {
         next.releaseAssetLimit = pinnedReleaseAssetLimit;
@@ -190,7 +209,7 @@ export function MirrorOverridesDialog({
   };
 
   const handleResetAll = () => {
-    setDraft(buildDraft(null));
+    setDraft(buildDraft(null, dialogKeys));
     setReleaseLimitDraft("");
     setReleaseAssetLimitDraft("");
   };
@@ -229,10 +248,11 @@ export function MirrorOverridesDialog({
         </DialogHeader>
 
         <div className="space-y-3 py-2">
-          {UI_MIRROR_OVERRIDE_KEYS.map((key) => {
+          {dialogKeys.map((key) => {
             const disabledReason = gating[key];
             const isDisabled = !!disabledReason;
-            const inherited = inheritedFrom?.[key];
+            const inherited =
+              key === "skipForks" ? inheritedFrom?.skipForks : inheritedFrom?.[key];
             const showHint =
               !inheritedLoading &&
               !isDisabled &&
@@ -424,10 +444,11 @@ export function MirrorOverridesDialog({
 }
 
 function buildDraft(
-  value: MirrorOverrides | null | undefined
-): Record<MirrorOverrideKey, TriState> {
-  const draft = {} as Record<MirrorOverrideKey, TriState>;
-  for (const key of UI_MIRROR_OVERRIDE_KEYS) {
+  value: MirrorOverrides | null | undefined,
+  keys: readonly DialogOverrideKey[]
+): Record<DialogOverrideKey, TriState> {
+  const draft = {} as Record<DialogOverrideKey, TriState>;
+  for (const key of keys) {
     draft[key] = toTriState(value?.[key]);
   }
   return draft;

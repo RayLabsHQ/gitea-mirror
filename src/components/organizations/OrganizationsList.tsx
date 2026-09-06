@@ -69,7 +69,7 @@ export function OrganizationList({
   onRefresh,
   onDelete,
 }: OrganizationListProps) {
-  const { giteaConfig, mirrorOptions } = useGiteaConfig();
+  const { giteaConfig, mirrorOptions, advancedOptions } = useGiteaConfig();
   const [overridesTarget, setOverridesTarget] = useState<Organization | null>(null);
 
   const handleUpdateMirrorOverrides = async (
@@ -786,7 +786,10 @@ export function OrganizationList({
         targetName={overridesTarget?.name ?? ""}
         value={overridesTarget?.mirrorOverrides ?? null}
         destinationProvider={giteaConfig?.provider}
-        inheritedFrom={mirrorOptionsToFlags(mirrorOptions)}
+        inheritedFrom={{
+          ...mirrorOptionsToFlags(mirrorOptions),
+          skipForks: !!advancedOptions?.skipForks,
+        }}
         inheritedLabel="global settings"
         onSave={async (overrides) => {
           if (overridesTarget?.id) {
