@@ -72,6 +72,13 @@ export const backupStrategyEnum = z.enum([
  * `releaseAssetLimit` follows the same rule (`normalizeReleaseAssetLimit`):
  * assets are uploaded only for the newest N mirrored releases. 0 is a real
  * value (notes only); null/absent means inherit.
+ *
+ * `skipForks` is organization-tier only: it opts an organization out of
+ * importing and mirroring forked repositories without touching the global
+ * `githubConfig.skipForks` switch. Null/absent inherits that global value.
+ * It is deliberately NOT part of `MIRROR_OVERRIDE_KEYS` in
+ * `mirror-overrides.ts` (those mirror `giteaConfigSchema` flags); see
+ * `ORG_SELECTION_OVERRIDE_KEYS` there.
  */
 export const mirrorOverridesSchema = z.object({
   lfs: z.boolean().nullable().optional(),
@@ -84,6 +91,7 @@ export const mirrorOverridesSchema = z.object({
   mirrorMilestones: z.boolean().nullable().optional(),
   releaseLimit: z.number().nullable().optional(),
   releaseAssetLimit: z.number().nullable().optional(),
+  skipForks: z.boolean().nullable().optional(),
 });
 
 export type MirrorOverrides = z.infer<typeof mirrorOverridesSchema>;
