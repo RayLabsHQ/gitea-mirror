@@ -27,12 +27,14 @@ export function normalizeGitRepoToInsert(
   {
     userId,
     configId,
-  }: { userId: string; configId: string }
+    sourceId = null,
+  }: { userId: string; configId: string; sourceId?: string | null }
 ): RepoInsert {
   return {
     id: uuidv4(),
     userId,
     configId,
+    sourceId,
     name: repo.name,
     fullName: repo.fullName,
     normalizedFullName: repo.fullName.toLowerCase(),
