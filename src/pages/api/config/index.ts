@@ -28,6 +28,10 @@ import { encrypt, decrypt } from "@/lib/utils/encryption";
 import { createDefaultConfig } from "@/lib/utils/config-defaults";
 import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 import { notificationConfigSchema } from "@/lib/db/schema";
+import {
+  loadSourceApiItems,
+  type SourceApiItem,
+} from "@/lib/sources-api";
 
 export const POST: APIRoute = async ({ request, locals }) => {
   try {
@@ -365,6 +369,24 @@ export const GET: APIRoute = async ({ request, locals }) => {
 
     const locks = await loadConfigLocks(userId);
 
+    // Sources for the Sources card: per-source repository counts, lock state
+    // and decrypted tokens, following the same convention as the config
+    // tokens below. A failure must not take the Configuration page down.
+    let sources: SourceApiItem[] = [];
+    try {
+      // Heal configs written outside the sources API (scripts, seeds):
+      // seed the first source row before listing.
+      const { ensureSourcesFromConfig } = await import("@/lib/sources");
+      await ensureSourcesFromConfig(userId);
+      sources = await loadSourceApiItems(userId);
+    } catch (sourcesError) {
+      console.warn(
+        `[Config] Could not load sources for user ${userId}: ${
+          sourcesError instanceof Error ? sourcesError.message : String(sourcesError)
+        }`
+      );
+    }
+
     if (config.length === 0) {
       // Create default configuration for the user
       const defaultConfig = await createDefaultConfig({ userId });
@@ -381,6 +403,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
           scheduleConfig: uiScheduleConfig,
           cleanupConfig: uiCleanupConfig,
           locks,
+          sources,
         }),
         {
           status: 200,
@@ -474,6 +497,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
         },
         notificationConfig,
         locks,
+        sources,
       }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
@@ -500,6 +524,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
         },
         notificationConfig: dbConfig.notificationConfig,
         locks,
+        sources,
       }), {
         status: 200,
         headers: { "Content-Type": "application/json" },
