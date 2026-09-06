@@ -12,8 +12,6 @@ import { createMirrorJob } from "@/lib/helpers";
 import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 import {
   SOURCE_PROVIDER_LABELS,
-  createSourceProviderFromConfig,
-  describeSource,
   sourceHostOf,
 } from "@/lib/source-providers";
 import { repositorySourceColumns } from "@/lib/repo-utils";
@@ -68,23 +66,43 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     const configId = config.id;
 
-    // The configured source host. Without a token GitHub still allows public
-    // lookups, so a missing token is not an error here.
-    const sourceProvider = createSourceProviderFromConfig(config, { userId });
-    const sourceConnection = sourceProvider.connection;
-    const sourceLabel = SOURCE_PROVIDER_LABELS[sourceProvider.kind];
+    // The source that serves this URL: when the request pastes a host, the
+    // connected source whose host matches it; otherwise the primary source.
+    // The URL shape cannot tell providers apart, so multiple sources on the
+    // same host resolve to the primary one.
+    const { listSources } = await import("@/lib/sources");
+    const { createSourceProviderFromSource } = await import("@/lib/source-providers");
+    const userSources = await listSources(userId);
 
-    // A pasted URL that names a different host cannot be served by this source.
-    const configuredHost = sourceHostOf(sourceConnection.url);
-    if (host && configuredHost && host.trim().toLowerCase() !== configuredHost) {
+    const pastedHost = host?.trim().toLowerCase() || "";
+    let source = userSources[0];
+    if (pastedHost) {
+      const hostMatches = userSources.filter((s) => sourceHostOf(s.url) === pastedHost);
+      if (hostMatches.length === 0) {
+        return jsonResponse({
+          data: {
+            success: false,
+            error: `No connected source matches host ${pastedHost}; add it on the Configuration page first`,
+          },
+          status: 400,
+        });
+      }
+      source = hostMatches.includes(userSources[0]) ? userSources[0] : hostMatches[0];
+    }
+
+    if (!source) {
       return jsonResponse({
         data: {
           success: false,
-          error: `That URL points at ${host}, but the configured source is ${describeSource(sourceConnection)}.`,
+          error: "No source is configured for this user; add one on the Configuration page first",
         },
         status: 400,
       });
     }
+
+    // A missing token still allows public lookups on every provider.
+    const sourceProvider = createSourceProviderFromSource(source, { userId });
+    const sourceLabel = SOURCE_PROVIDER_LABELS[sourceProvider.kind];
 
     // Prefer the pasted path segments: the source host knows how to split
     // them (GitLab nests groups, GitHub and Gitea do not).
@@ -95,13 +113,15 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     const normalizedFullName = `${resolvedPath.owner}/${resolvedPath.repo}`.toLowerCase();
 
-    // Check if repository with the same owner, name, and userId already exists
+    // A repository is unique per source: the same full name under another
+    // source is a different repository and may coexist.
     const [existingRepo] = await db
       .select()
       .from(repositories)
       .where(
         and(
           eq(repositories.userId, userId),
+          eq(repositories.sourceId, source.id),
           eq(repositories.normalizedFullName, normalizedFullName)
         )
       )
@@ -132,6 +152,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const baseMetadata = {
       userId,
       configId,
+      sourceId: source.id,
       name: repoData.name,
       fullName: repoData.fullName,
       normalizedFullName: repoData.fullName.toLowerCase(),
@@ -194,7 +215,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
     await db
       .insert(repositories)
       .values(metadata)
-      .onConflictDoNothing({ target: [repositories.userId, repositories.normalizedFullName] });
+      .onConflictDoNothing({
+        target: [repositories.userId, repositories.sourceId, repositories.normalizedFullName],
+      });
 
     createMirrorJob({
       userId,

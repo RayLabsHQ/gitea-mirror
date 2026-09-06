@@ -8,7 +8,6 @@ import type {
 } from "@/types/organizations";
 import type { RepoStatus } from "@/types/Repository";
 import { v4 as uuidv4 } from "uuid";
-import { createSourceProviderFromConfig } from "@/lib/source-providers";
 import { normalizeGitRepoToInsert, calcBatchSizeForInsert } from "@/lib/repo-utils";
 import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 
@@ -20,6 +19,8 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     const body: AddOrganizationApiRequest = await request.json();
     const { role, org, force = false } = body;
+    // Optional body field: which connected source to import from; defaults to the primary source.
+    const sourceId = (body as AddOrganizationApiRequest & { sourceId?: string }).sourceId?.trim() || undefined;
 
     if (!org || !role) {
       return jsonResponse({
@@ -106,8 +107,34 @@ export const POST: APIRoute = async ({ request, locals }) => {
       });
     }
 
-    // The configured source host, with its token decrypted
-    const sourceProvider = createSourceProviderFromConfig(config, { userId });
+    const { listSources } = await import("@/lib/sources");
+    const { createSourceProviderFromSource } = await import("@/lib/source-providers");
+    const userSources = await listSources(userId);
+    const source = sourceId
+      ? userSources.find((s) => s.id === sourceId)
+      : userSources[0];
+
+    if (sourceId && !source) {
+      return jsonResponse({
+        data: {
+          success: false,
+          error: `No source with id ${sourceId} belongs to this user`,
+        },
+        status: 400,
+      });
+    }
+
+    if (!source) {
+      return jsonResponse({
+        data: {
+          success: false,
+          error: "No source is configured for this user",
+        },
+        status: 400,
+      });
+    }
+
+    const sourceProvider = createSourceProviderFromSource(source, { userId });
 
     // Fetch org metadata
     const orgData = await sourceProvider.getOrganization(trimmedOrg);
@@ -129,7 +156,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const repoRecords = mirrorableRepos.map((repo) =>
       normalizeGitRepoToInsert(
         { ...repo, organization: repo.organization ?? orgData.name },
-        { userId, configId }
+        { userId, configId, sourceId: source.id }
       )
     );
 
@@ -143,7 +170,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
       await db
         .insert(repositories)
         .values(batch)
-        .onConflictDoNothing({ target: [repositories.userId, repositories.normalizedFullName] });
+        .onConflictDoNothing({
+          target: [repositories.userId, repositories.sourceId, repositories.normalizedFullName],
+        });
     }
 
     // Insert organization metadata
