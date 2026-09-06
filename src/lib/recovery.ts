@@ -10,11 +10,15 @@ import { eq, and, lt, inArray, sql } from 'drizzle-orm';
 import { mirrorRepositoryToDestination, syncRepositoryOnDestination } from './mirror-dispatch';
 import { createGitHubClient } from './github';
 import type { Octokit } from '@octokit/rest';
-import { resolveSourceProviderKind } from './source-providers';
+import {
+  decryptSourceToken,
+  findSourceForRepository,
+  listSources,
+  resolveGitHubApiBaseUrl,
+} from './sources';
 import { processWithResilience } from './utils/concurrency';
 import { repositoryVisibilityEnum, repoStatusEnum } from '@/types/Repository';
 import type { Repository } from './db/schema';
-import { getDecryptedGitHubToken } from './utils/config-encryption';
 
 // Recovery state tracking
 let recoveryInProgress = false;
@@ -275,17 +279,9 @@ async function recoverMirrorJob(job: any, remainingItemIds: string[]) {
 
     // Only GitHub sources use an API client while mirroring (metadata).
     // Other hosts get code-only mirrors through Gitea, so no client is built.
-    let octokit: Octokit | null = null;
-    if (resolveSourceProviderKind(config) === 'github') {
-      try {
-        const decryptedToken = getDecryptedGitHubToken(config);
-        const githubUsername = config.githubConfig?.owner || undefined;
-        const userId = config.userId || undefined;
-        octokit = createGitHubClient(decryptedToken, userId, githubUsername);
-      } catch (error) {
-        throw new Error(`Failed to create GitHub client: ${error instanceof Error ? error.message : String(error)}`);
-      }
-    }
+    // Repositories picked by bare id can span sources, so the sources are
+    // loaded once here and the client is resolved per repository below.
+    const sources = await listSources(job.userId);
 
     // Process repositories with resilience and reduced concurrency for recovery
     await processWithResilience(
@@ -302,6 +298,24 @@ async function recoverMirrorJob(job: any, remainingItemIds: string[]) {
           visibility: repositoryVisibilityEnum.parse(repo.visibility || "public"),
           mirroredLocation: repo.mirroredLocation || "",
         };
+
+        let octokit: Octokit | null = null;
+        const repoSource = findSourceForRepository(repo, sources);
+        if (repoSource?.provider === 'github') {
+          try {
+            const decryptedToken = decryptSourceToken(repoSource.token);
+            octokit = decryptedToken
+              ? createGitHubClient(
+                  decryptedToken,
+                  config.userId || undefined,
+                  repoSource.username || undefined,
+                  resolveGitHubApiBaseUrl(repoSource.url)
+                )
+              : null;
+          } catch (error) {
+            throw new Error(`Failed to create GitHub client: ${error instanceof Error ? error.message : String(error)}`);
+          }
+        }
 
         await mirrorRepositoryToDestination({
           octokit,

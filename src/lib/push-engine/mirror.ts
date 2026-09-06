@@ -11,10 +11,15 @@ import type { Config, Repository } from "@/lib/db/schema";
 import { createMirrorJob } from "@/lib/helpers";
 import { getGiteaRepoOwnerAsync } from "@/lib/gitea";
 import {
-  assertRepositoryMatchesConfiguredSource,
-  resolveSourceConnection,
+  assertRepositoryMatchesConnectedSource,
+  sourceConnectionFromSource,
 } from "@/lib/source-providers";
-import { getDecryptedGitHubToken } from "@/lib/utils/config-encryption";
+import type { SourceRecord } from "@/lib/sources";
+import {
+  decryptSourceToken,
+  findSourceForRepository,
+  listSources,
+} from "@/lib/sources";
 import { buildSourceAuthPayload } from "@/lib/utils/mirror-source-auth";
 import {
   assertRepositoryMatchesConfiguredDestination,
@@ -48,13 +53,22 @@ export function parseMirroredLocation(location: string | null | undefined): { ow
   return { owner: trimmed.slice(0, slash), name: trimmed.slice(slash + 1) };
 }
 
-/** The credentials git uses to fetch from the source, per source host. */
-export function resolveSourceCredentials(config: Partial<Config>, repository: Repository): GitCredentials | null {
-  const token = config.githubConfig?.token ? getDecryptedGitHubToken(config as Config) : "";
-  const connection = resolveSourceConnection(config, { token });
+/**
+ * The credentials git uses to fetch from the source, from the repository's
+ * own source row. Sources are loaded once per push by the caller and passed
+ * down so batches never query per repository.
+ */
+export function resolveSourceCredentials(
+  config: Partial<Config>,
+  repository: Repository,
+  sources: SourceRecord[]
+): GitCredentials | null {
+  const source = findSourceForRepository(repository, sources);
+  if (!source) return null;
+  const connection = sourceConnectionFromSource(source, { userId: config.userId });
   const payload = buildSourceAuthPayload({
     provider: connection.provider,
-    token,
+    token: decryptSourceToken(source.token),
     username: connection.username,
     repositoryOwner: repository.owner,
   });
@@ -89,8 +103,11 @@ export async function pushMirrorRepository({
   const label = DESTINATION_PROVIDER_LABELS[kind];
   const destination = resolveDestinationIdentity(config);
 
-  // Never send another host's token in either direction.
-  assertRepositoryMatchesConfiguredSource({ repository, config });
+  // Never send another host's token in either direction: the repository
+  // must come from one of the connected sources, and its own source's
+  // credentials are used below.
+  const sources = await listSources(config.userId);
+  assertRepositoryMatchesConnectedSource({ repository, sources });
   assertRepositoryMatchesConfiguredDestination({ repository, config });
 
   const recorded = parseMirroredLocation(repository.mirroredLocation);
@@ -131,7 +148,7 @@ export async function pushMirrorRepository({
     const outcome = await runPushMirror({
       clonePath: clonePathForRepository(repository),
       sourceCloneUrl: repository.cloneUrl,
-      sourceCredentials: resolveSourceCredentials(config, repository),
+      sourceCredentials: resolveSourceCredentials(config, repository, sources),
       target: target ?? createPushTargetFromConfig(config),
       owner,
       name,
