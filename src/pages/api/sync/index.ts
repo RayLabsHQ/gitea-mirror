@@ -10,6 +10,7 @@ import {
   normalizeGitRepoToInsert,
   calcBatchSizeForInsert,
 } from "@/lib/repo-utils";
+import { loadOrganizationForkPolicies } from "@/lib/utils/mirror-overrides";
 import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 import { isMirrorableGitHubRepo } from "@/lib/repo-eligibility";
 
@@ -53,9 +54,13 @@ export const POST: APIRoute = async ({ request, locals }) => {
       .where(and(eq(organizations.userId, userId), eq(organizations.status, "ignored")));
     const ignoredOrgNames = new Set(ignoredOrgRows.map((o) => o.normalizedName));
 
+    // Per-organization fork pins, so an org opted out of forks is not
+    // re-imported by this bulk pass even when the global switch is off.
+    const orgForkOverrides = await loadOrganizationForkPolicies({ userId });
+
     // Fetch source data in parallel
     const [basicAndForkedRepos, starredRepos, orgResult] = await Promise.all([
-      sourceProvider.listRepositories(config),
+      sourceProvider.listRepositories(config, { orgForkOverrides }),
       config.githubConfig?.includeStarred
         ? sourceProvider.listStarredRepositories(config)
         : Promise.resolve([]),

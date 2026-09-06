@@ -10,6 +10,7 @@ import type { RepoStatus } from "@/types/Repository";
 import { v4 as uuidv4 } from "uuid";
 import { createSourceProviderFromConfig } from "@/lib/source-providers";
 import { normalizeGitRepoToInsert, calcBatchSizeForInsert } from "@/lib/repo-utils";
+import { resolveOrganizationSkipForks } from "@/lib/utils/mirror-overrides";
 import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 
 export const POST: APIRoute = async ({ request, locals }) => {
@@ -123,7 +124,13 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     // Fetch every repository the token can see in the organization
     const orgRepos = await sourceProvider.listOrganizationRepositories(trimmedOrg);
-    const mirrorableRepos = orgRepos.filter((repo) => repo.isDisabled !== true);
+
+    // Both existing-org branches above returned, so this organization is new
+    // and has no overrides: the fork policy resolves from the global switch.
+    const skipOrgForks = resolveOrganizationSkipForks({ orgOverrides: null, config });
+    const mirrorableRepos = orgRepos.filter(
+      (repo) => repo.isDisabled !== true && !(skipOrgForks && repo.isForked)
+    );
 
     // Insert repositories. The normalizer stamps the source provider and URL.
     const repoRecords = mirrorableRepos.map((repo) =>
