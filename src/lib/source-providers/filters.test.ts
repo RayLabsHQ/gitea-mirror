@@ -91,3 +91,48 @@ describe("filterSourceRepositories", () => {
     expect(kept).toHaveLength(5);
   });
 });
+
+describe("filterSourceRepositories - per-organization fork pins", () => {
+  const acmeFork = repo({ owner: "acme", name: "forked-tool", organization: "acme", isForked: true });
+  const globexFork = repo({ owner: "globex", name: "forked-app", organization: "globex", isForked: true });
+  const repos = [own, acme, acmeFork, globexFork];
+
+  test("a pinned org drops only its own forks", () => {
+    const kept = filterSourceRepositories(repos, {
+      config: {},
+      options: { orgForkOverrides: new Map([["acme", true]]) },
+      username: "me",
+    });
+    expect(kept.map((r) => r.name).sort()).toEqual(["forked-app", "mine", "tool"]);
+  });
+
+  test("a false pin keeps that org's forks when the global switch skips forks", () => {
+    const kept = filterSourceRepositories(repos, {
+      config: { githubConfig: { skipForks: true } as any },
+      options: { orgForkOverrides: new Map([["globex", false]]) },
+      username: "me",
+    });
+    expect(kept.map((r) => r.name).sort()).toEqual(["forked-app", "mine", "tool"]);
+  });
+
+  test("pins do not affect non-fork repositories", () => {
+    const kept = filterSourceRepositories([acme, acmeFork], {
+      config: {},
+      options: { orgForkOverrides: new Map([["acme", true]]) },
+      username: "me",
+    });
+    expect(kept.map((r) => r.name)).toEqual(["tool"]);
+  });
+
+  test("a repository org name is matched against map keys case-insensitively", () => {
+    // Map keys come from organizations.normalizedName (lowercase); the repo's
+    // organization can carry any casing from the source host.
+    const casedFork = repo({ owner: "Acme", name: "forked-tool", organization: "Acme", isForked: true });
+    const kept = filterSourceRepositories([casedFork], {
+      config: {},
+      options: { orgForkOverrides: new Map([["acme", true]]) },
+      username: "me",
+    });
+    expect(kept).toHaveLength(0);
+  });
+});
