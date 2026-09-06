@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import RepositoryTable, { REPOSITORY_SORT_OPTIONS } from "./RepositoryTable";
 import type { MirrorJob, Repository } from "@/lib/db/schema";
 import { useAuth } from "@/hooks/useAuth";
@@ -51,13 +51,14 @@ import { useLiveRefresh } from "@/hooks/useLiveRefresh";
 import { useConfigStatus } from "@/hooks/useConfigStatus";
 import { useNavigation } from "@/components/layout/MainLayout";
 import { withBase } from "@/lib/base-path";
+import { getRepositorySource, normalizeSourceUrl } from "@/lib/source-providers/kinds";
 
 export default function Repository() {
   const [repositories, setRepositories] = useState<Repository[]>([]);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const { user } = useAuth();
   const { registerRefreshCallback, isLiveEnabled } = useLiveRefresh();
-  const { isGitHubConfigured, isFullyConfigured, autoMirrorStarred, githubOwner } = useConfigStatus();
+  const { isGitHubConfigured, isFullyConfigured, autoMirrorStarred, githubOwner, sources } = useConfigStatus();
   const { navigationKey } = useNavigation();
   const { filter, setFilter } = useFilterParams({
     searchTerm: "",
@@ -228,6 +229,27 @@ export default function Repository() {
     }
   };
 
+  const usernameBySourceId = useMemo(
+    () => new Map(sources.map((source) => [source.id, source.username.toLowerCase()])),
+    [sources]
+  );
+
+  // Mirrors the scheduler's starred classification: a starred repo counts as
+  // "own" when its owner matches the username of the repository's own source
+  // (falling back to the configured owner only when no source resolves).
+  const sourceOwnerOf = useCallback(
+    (repo: Repository): string => {
+      const byId = repo.sourceId ? usernameBySourceId.get(repo.sourceId) : undefined;
+      if (byId !== undefined) return byId;
+      const repoSource = getRepositorySource({ sourceProvider: repo.sourceProvider, sourceUrl: repo.sourceUrl });
+      const matched = sources.find(
+        (source) => source.provider === repoSource.provider && normalizeSourceUrl(source.url, source.provider) === repoSource.url
+      );
+      return matched?.username.toLowerCase() ?? githubOwner.toLowerCase();
+    },
+    [usernameBySourceId, sources, githubOwner]
+  );
+
   const handleMirrorAllRepos = async () => {
     try {
       if (!user || !user.id || repositories.length === 0) {
@@ -242,7 +264,7 @@ export default function Repository() {
           repo.status !== "ignored" && // Skip ignored repositories
           repo.id &&
           // Skip starred repos from other owners when autoMirrorStarred is disabled
-          !(repo.isStarred && !autoMirrorStarred && repo.owner !== githubOwner)
+          !(repo.isStarred && !autoMirrorStarred && repo.owner.toLowerCase() !== sourceOwnerOf(repo))
       );
 
       if (eligibleRepos.length === 0) {

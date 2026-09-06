@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, useRef } from 'react';
 import { useAuth } from './useAuth';
 import { apiRequest } from '@/lib/utils';
-import type { ConfigApiResponse } from '@/types/config';
+import type { ConfigApiResponse, SourceApiRecord } from '@/types/config';
 
 interface ConfigStatus {
   isGitHubConfigured: boolean;
@@ -11,6 +11,7 @@ interface ConfigStatus {
   error: string | null;
   autoMirrorStarred: boolean;
   githubOwner: string;
+  sources: SourceApiRecord[];
 }
 
 // Cache to prevent duplicate API calls across components
@@ -37,6 +38,7 @@ export function useConfigStatus(): ConfigStatus {
     error: null,
     autoMirrorStarred: false,
     githubOwner: '',
+    sources: [],
   });
 
   // Track if this hook has already checked config to prevent multiple calls
@@ -52,6 +54,7 @@ export function useConfigStatus(): ConfigStatus {
         error: 'No user found',
         autoMirrorStarred: false,
         githubOwner: '',
+        sources: [],
       });
       return;
     }
@@ -88,6 +91,7 @@ export function useConfigStatus(): ConfigStatus {
         error: null,
         autoMirrorStarred: configResponse?.advancedOptions?.autoMirrorStarred ?? false,
         githubOwner: configResponse?.githubConfig?.username ?? '',
+        sources: configResponse?.sources ?? [],
       });
       return;
     }
@@ -133,6 +137,7 @@ export function useConfigStatus(): ConfigStatus {
         error: null,
         autoMirrorStarred: configResponse?.advancedOptions?.autoMirrorStarred ?? false,
         githubOwner: configResponse?.githubConfig?.username ?? '',
+        sources: configResponse?.sources ?? [],
       });
 
       hasCheckedRef.current = true;
@@ -145,6 +150,7 @@ export function useConfigStatus(): ConfigStatus {
         error: error instanceof Error ? error.message : 'Failed to check configuration',
         autoMirrorStarred: false,
         githubOwner: '',
+        sources: [],
       });
       hasCheckedRef.current = true;
     }

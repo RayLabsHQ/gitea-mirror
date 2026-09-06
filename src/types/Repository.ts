@@ -55,6 +55,8 @@ export interface GitRepo {
   /** Host the repository came from. Absent means GitHub. */
   sourceProvider?: SourceProviderKind;
   sourceUrl?: string;
+  /** Source row this repository belongs to; dangling (or null) after the source was removed. */
+  sourceId?: string | null;
   destinationOrg?: string | null;
 
   isPrivate: boolean;
