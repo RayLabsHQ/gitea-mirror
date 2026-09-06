@@ -2,6 +2,11 @@ import { useCallback, useEffect, useState, useRef } from 'react';
 import { useAuth } from './useAuth';
 import { apiRequest } from '@/lib/utils';
 import type { ConfigApiResponse } from '@/types/config';
+import {
+  DEFAULT_SOURCE_PROVIDER,
+  normalizeSourceProviderKind,
+  type SourceProviderKind,
+} from '@/lib/source-providers/kinds';
 
 interface ConfigStatus {
   isGitHubConfigured: boolean;
@@ -11,6 +16,7 @@ interface ConfigStatus {
   error: string | null;
   autoMirrorStarred: boolean;
   githubOwner: string;
+  sourceProvider: SourceProviderKind;
 }
 
 // Cache to prevent duplicate API calls across components
@@ -37,6 +43,7 @@ export function useConfigStatus(): ConfigStatus {
     error: null,
     autoMirrorStarred: false,
     githubOwner: '',
+    sourceProvider: DEFAULT_SOURCE_PROVIDER,
   });
 
   // Track if this hook has already checked config to prevent multiple calls
@@ -52,6 +59,7 @@ export function useConfigStatus(): ConfigStatus {
         error: 'No user found',
         autoMirrorStarred: false,
         githubOwner: '',
+        sourceProvider: DEFAULT_SOURCE_PROVIDER,
       });
       return;
     }
@@ -88,6 +96,7 @@ export function useConfigStatus(): ConfigStatus {
         error: null,
         autoMirrorStarred: configResponse?.advancedOptions?.autoMirrorStarred ?? false,
         githubOwner: configResponse?.githubConfig?.username ?? '',
+        sourceProvider: normalizeSourceProviderKind(configResponse?.githubConfig?.provider),
       });
       return;
     }
@@ -133,6 +142,7 @@ export function useConfigStatus(): ConfigStatus {
         error: null,
         autoMirrorStarred: configResponse?.advancedOptions?.autoMirrorStarred ?? false,
         githubOwner: configResponse?.githubConfig?.username ?? '',
+        sourceProvider: normalizeSourceProviderKind(configResponse?.githubConfig?.provider),
       });
 
       hasCheckedRef.current = true;
@@ -145,6 +155,7 @@ export function useConfigStatus(): ConfigStatus {
         error: error instanceof Error ? error.message : 'Failed to check configuration',
         autoMirrorStarred: false,
         githubOwner: '',
+        sourceProvider: DEFAULT_SOURCE_PROVIDER,
       });
       hasCheckedRef.current = true;
     }
