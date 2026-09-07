@@ -45,6 +45,8 @@ interface OrganizationListProps {
   onRefresh?: () => Promise<void>;
   onDelete?: (orgId: string) => void;
   sourceProvider?: SourceProviderKind;
+  /** Normalized instance URL of the configured source; falls back to the cached config. */
+  sourceUrl?: string;
 }
 
 // Helper function to get status badge variant and icon
@@ -77,15 +79,15 @@ export function OrganizationList({
   onRefresh,
   onDelete,
   sourceProvider = "github",
+  sourceUrl: sourceUrlProp,
 }: OrganizationListProps) {
   const { giteaConfig, mirrorOptions, advancedOptions } = useGiteaConfig();
   const [overridesTarget, setOverridesTarget] = useState<Organization | null>(null);
 
   const sourceLabel = SOURCE_PROVIDER_LABELS[sourceProvider];
-  const sourceUrl = normalizeSourceUrl(
-    getCachedConfig()?.githubConfig?.url,
-    sourceProvider
-  );
+  const sourceUrl =
+    sourceUrlProp ??
+    normalizeSourceUrl(getCachedConfig()?.githubConfig?.url, sourceProvider);
   const sourceShortLabel = sourceProvider === "gitea" ? "Gitea" : sourceLabel;
   const SourceIcon = { github: SiGithub, gitlab: SiGitlab, gitea: SiGitea }[sourceProvider];
 

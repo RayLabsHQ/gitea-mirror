@@ -88,6 +88,14 @@ describe("parseGitHubOwnerReference", () => {
     expect(parseGitHubOwnerReference("")).toBeNull();
     expect(parseGitHubOwnerReference("   ")).toBeNull();
   });
+
+  it("follows the looser account naming of other hosts", () => {
+    expect(parseGitHubOwnerReference("https://gitlab.example.com/my_group")).toBe("my_group");
+    expect(parseGitHubOwnerReference("https://codeberg.org/acme.io")).toBe("acme.io");
+    expect(parseGitHubOwnerReference("https://gitlab.com/groups/acme/-/issues")).toBe("acme");
+    // github.com keeps GitHub's rule.
+    expect(parseGitHubOwnerReference("https://github.com/my_org")).toBeNull();
+  });
 });
 
 describe("looksLikeUrl", () => {

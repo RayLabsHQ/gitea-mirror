@@ -37,6 +37,8 @@ interface AddOrganizationDialogProps {
     force?: boolean;
   }) => Promise<void>;
   sourceProvider?: SourceProviderKind;
+  /** Normalized instance URL of the configured source, for the placeholder. */
+  sourceUrl?: string;
 }
 
 export default function AddOrganizationDialog({
@@ -44,6 +46,7 @@ export default function AddOrganizationDialog({
   setIsDialogOpen,
   onAddOrganization,
   sourceProvider = "github",
+  sourceUrl,
 }: AddOrganizationDialogProps) {
   const [url, setUrl] = useState<string>("");
   const [org, setOrg] = useState<string>("");
@@ -54,7 +57,10 @@ export default function AddOrganizationDialog({
   const providerLabel = SOURCE_PROVIDER_LABELS[sourceProvider];
   const orgNoun = SOURCE_PROVIDER_ORG_NOUNS[sourceProvider];
   const orgNounCapitalized = orgNoun.charAt(0).toUpperCase() + orgNoun.slice(1);
-  const urlPlaceholder = `${SOURCE_PROVIDER_DEFAULT_URLS[sourceProvider]}/your-${orgNoun}`;
+  // "an organization" but "a group".
+  const orgNounWithArticle = `${/^[aeiou]/i.test(orgNoun) ? "an" : "a"} ${orgNoun}`;
+  const instanceUrl = (sourceUrl || SOURCE_PROVIDER_DEFAULT_URLS[sourceProvider]).replace(/\/+$/, "");
+  const urlPlaceholder = `${instanceUrl}/your-${orgNoun}`;
 
   const resetForm = () => {
     setError("");
@@ -161,8 +167,8 @@ export default function AddOrganizationDialog({
               />
               <p className="mt-1.5 text-xs text-muted-foreground">
                 {urlIsUnparsed
-                  ? "Could not read an organization from that."
-                  : `Paste a ${orgNoun} URL and the name below fills in.`}
+                  ? `Could not read ${orgNounWithArticle} from that.`
+                  : `Paste ${orgNounWithArticle} URL and the name below fills in.`}
               </p>
             </div>
 

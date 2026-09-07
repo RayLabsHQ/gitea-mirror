@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, test } from "bun:test";
 import {
   decryptSourceToken,
   deriveSourceName,
@@ -137,6 +137,11 @@ describe("selectRepositoriesToRelink", () => {
 });
 
 describe("decryptSourceToken", () => {
+  beforeAll(() => {
+    // encrypt() needs a secret; do not depend on the environment or on test order.
+    process.env.ENCRYPTION_SECRET ??= "sources-test-encryption-secret";
+  });
+
   test("round-trips an encrypted token", () => {
     expect(decryptSourceToken(encrypt("ghp-secret"))).toBe("ghp-secret");
   });

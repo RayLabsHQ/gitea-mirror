@@ -708,7 +708,7 @@ export function ConfigTabs() {
             Configuration
           </h1>
           <p className="text-sm text-muted-foreground">
-            Configure your GitHub and Gitea connections, and set up automatic
+            Connect your sources and destination, and set up automatic
             mirroring.
           </p>
         </div>
@@ -718,10 +718,10 @@ export function ConfigTabs() {
             disabled={isSyncing || !isGitHubConfigValid()}
             title={
               !isGitHubConfigValid()
-                ? 'Please fill GitHub username and token fields'
+                ? 'Connect a source with a token first'
                 : isSyncing
                 ? 'Import in progress'
-                : 'Import GitHub Data'
+                : `Import ${sourceLabel} Data`
             }
             className="w-full bg-indigo-500 text-white hover:bg-indigo-600 disabled:bg-muted disabled:text-muted-foreground md:w-auto"
           >
@@ -824,6 +824,7 @@ export function ConfigTabs() {
                     <GitHubMirrorSettings
                       part="content"
                       githubConfig={config.githubConfig}
+                      sources={sources}
                       destinationProvider={config.giteaConfig.provider}
                       mirrorOptions={config.mirrorOptions}
                       advancedOptions={config.advancedOptions}

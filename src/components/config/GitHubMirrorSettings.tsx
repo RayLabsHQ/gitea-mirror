@@ -83,6 +83,11 @@ interface GitHubMirrorSettingsProps {
   onAdvancedOptionsChange: (options: AdvancedOptions) => void;
   /** Which card to render; defaults to both. */
   part?: "selection" | "content" | "both";
+  /**
+   * Connected sources. The GitHub-only switches stay available while any of
+   * them is GitHub; `githubConfig.provider` alone only describes the primary.
+   */
+  sources?: ReadonlyArray<{ provider: string }>;
 }
 
 export function GitHubMirrorSettings({
@@ -94,6 +99,7 @@ export function GitHubMirrorSettings({
   onAdvancedOptionsChange,
   destinationProvider,
   part = "both",
+  sources,
 }: GitHubMirrorSettingsProps) {
   // A GitHub or GitLab destination is pushed by the engine: branches and
   // tags only, so every content switch is off and disabled for it.
@@ -103,7 +109,11 @@ export function GitHubMirrorSettings({
   // Star lists, issues, pull requests, releases, labels and milestones all
   // read the GitHub API, so they are only offered for GitHub sources.
   const sourceProvider = githubConfig.provider ?? "github";
-  const isGithubSource = sourceProvider === "github" && !isPushTarget;
+  const hasGithubSource =
+    sources && sources.length > 0
+      ? sources.some((source) => source.provider === "github")
+      : sourceProvider === "github";
+  const isGithubSource = hasGithubSource && !isPushTarget;
   const sourceLabel = SOURCE_PROVIDER_LABELS[sourceProvider];
   const orgNoun = SOURCE_PROVIDER_ORG_NOUNS[sourceProvider];
   const [starListsOpen, setStarListsOpen] = React.useState(false);

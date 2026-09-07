@@ -51,7 +51,7 @@ export function Organization() {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isDialogOpen, setIsDialogOpen] = useState<boolean>(false);
   const { user } = useAuth();
-  const { isGitHubConfigured, sourceProvider } = useConfigStatus();
+  const { isGitHubConfigured, sourceProvider, sourceUrl } = useConfigStatus();
   const { navigationKey } = useNavigation();
   const { registerRefreshCallback } = useLiveRefresh();
   const { filter, setFilter } = useFilterParams({
@@ -887,6 +887,7 @@ export function Organization() {
           await fetchOrganizations(false);
         }}
         sourceProvider={sourceProvider}
+        sourceUrl={sourceUrl}
       />
 
       <AddOrganizationDialog
@@ -894,6 +895,7 @@ export function Organization() {
         isDialogOpen={isDialogOpen}
         setIsDialogOpen={setIsDialogOpen}
         sourceProvider={sourceProvider}
+        sourceUrl={sourceUrl}
       />
 
       <Dialog open={isDuplicateOrgDialogOpen} onOpenChange={(open) => {

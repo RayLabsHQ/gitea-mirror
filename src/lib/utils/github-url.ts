@@ -88,10 +88,6 @@ export function parseRepoReferenceParts(input: string): RepoReferenceParts | nul
   return segments.length > 0 ? { host, segments } : null;
 }
 
-function toPathSegments(input: string): string[] | null {
-  return parseRepoReferenceParts(input)?.segments ?? null;
-}
-
 /** Segments that start the "rest of the page" after owner/repo on a flat host. */
 const FLAT_HOST_DEEP_LINK_MARKERS = new Set([
   "-",
@@ -140,6 +136,16 @@ function isUsableAccount(segment: string | undefined): segment is string {
   return /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(segment);
 }
 
+/**
+ * Account names on GitLab and Gitea/Forgejo may also contain underscores and
+ * dots (`my_group`, `acme.io`), which GitHub does not allow.
+ */
+function isUsableForgeAccount(segment: string | undefined): segment is string {
+  if (!segment) return false;
+  if (RESERVED_ROOT_SEGMENTS.has(segment.toLowerCase())) return false;
+  return /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$/.test(segment);
+}
+
 function isUsableRepoName(segment: string | undefined): segment is string {
   if (!segment) return false;
   return /^[A-Za-z0-9._-]+$/.test(segment);
@@ -179,13 +185,20 @@ export function parseGitHubRepoReference(
  * Accepts the profile URL, the /orgs/ form, and a bare name.
  */
 export function parseGitHubOwnerReference(input: string): string | null {
-  const segments = toPathSegments(input);
-  if (!segments) return null;
+  const parts = parseRepoReferenceParts(input);
+  if (!parts) return null;
+  const { host, segments } = parts;
 
-  const candidate =
-    segments[0]?.toLowerCase() === "orgs" ? segments[1] : segments[0];
+  // GitHub lists organizations under /orgs/<name>, GitLab under /groups/<path>.
+  const root = segments[0]?.toLowerCase();
+  const candidate = root === "orgs" || root === "groups" ? segments[1] : segments[0];
 
-  return isUsableAccount(candidate) ? candidate : null;
+  // Only github.com gets GitHub's account rule; a URL pasted from another
+  // host follows that host's looser naming.
+  const isGitHubHost =
+    host === null || host === "github.com" || host.endsWith(".github.com");
+  const usable = isGitHubHost ? isUsableAccount(candidate) : isUsableForgeAccount(candidate);
+  return usable ? candidate : null;
 }
 
 /** True when the input looks like a URL rather than a plain name. */
