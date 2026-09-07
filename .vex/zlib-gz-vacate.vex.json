@@ -1,0 +1,26 @@
+{
+  "@context": "https://openvex.dev/ns/v0.2.0",
+  "@id": "https://github.com/RayLabsHQ/gitea-mirror/blob/main/.vex/zlib-gz-vacate.vex.json",
+  "author": "developer@arunavoray.dev",
+  "role": "Gitea Mirror maintainer",
+  "timestamp": "2026-09-07T01:20:00Z",
+  "version": 1,
+  "statements": [
+    {
+      "vulnerability": {
+        "name": "CVE-2026-85091",
+        "description": "zlib gz_vacate() heap buffer overflow: a non-blocking gzwrite() that stalls leaves a stale external buffer pointer, and a later gzprintf() or gzvprintf() moves more bytes than the internal input buffer holds."
+      },
+      "timestamp": "2026-09-07T01:20:00Z",
+      "products": [
+        { "@id": "pkg:docker/raylabshq/gitea-mirror" },
+        { "@id": "pkg:docker/ghcr.io/raylabshq/gitea-mirror" },
+        { "@id": "pkg:docker/gitea-mirror" },
+        { "@id": "pkg:docker/library/gitea-mirror" }
+      ],
+      "status": "not_affected",
+      "justification": "vulnerable_code_not_in_execute_path",
+      "impact_statement": "The flaw sits in zlib's gz* file writing API (gzwrite, gzprintf, gzvprintf) and needs a gz stream opened for writing on a non-blocking descriptor that stalls. Nothing in this image writes gzip files through that API: git links only the deflate and inflate stream entry points for its objects and packs, git-lfs is a Go binary with its own compress/flate, and Bun's zlib bindings expose stream compression only. The application itself never opens gz streams. Debian ships zlib 1:1.3.dfsg+really1.3.1-1 in trixie and has no fix in any release (bug #1146895); upstream describes the affected range as 1.3.1.2 through 1.3.2."
+    }
+  ]
+}

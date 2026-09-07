@@ -37,6 +37,7 @@ import {
   SOURCE_PROVIDER_DEFAULT_URLS,
   SOURCE_PROVIDER_LABELS,
   isBetaSourceProvider,
+  isValidSourceUrl,
 } from "@/lib/source-providers/kinds";
 import { invalidateConfigCache } from "@/hooks/useConfigStatus";
 import { HostLockNotice } from "./HostLockNotice";
@@ -125,6 +126,25 @@ function sourceHost(source: SourceApiRecord): string {
   return url.replace(/^https?:\/\//, "").replace(/\/+$/, "");
 }
 
+/**
+ * The token settings page of an instance, or null when the URL is not an
+ * http(s) URL. The link is built scheme first from constant strings and the
+ * parsed host and path, never from the typed text itself, so a pasted
+ * `javascript:` URL can never become the link target.
+ */
+function tokenSettingsUrlFor(instanceUrl: string, settingsPath: string): string | null {
+  if (!isValidSourceUrl(instanceUrl)) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(instanceUrl);
+  } catch {
+    return null;
+  }
+  const scheme = parsed.protocol === "http:" ? "http://" : "https://";
+  const basePath = parsed.pathname.replace(/\/+$/, "");
+  return scheme + parsed.host + basePath + settingsPath;
+}
+
 function repositoryNoun(count: number): string {
   return `${count} ${count === 1 ? "repository" : "repositories"}`;
 }
@@ -181,7 +201,11 @@ export function SourcesCard({ sources, onRefresh }: SourcesCardProps) {
   const providerLabel = providerMeta.label;
   const defaultInstanceUrl = SOURCE_PROVIDER_DEFAULT_URLS[provider];
   const instanceUrl = (editor?.url ?? "").trim() || defaultInstanceUrl;
-  const tokenSettingsUrl = `${instanceUrl.replace(/\/+$/, "")}${providerMeta.tokenSettingsPath}`;
+  // Falls back to the provider default while the typed URL is not usable yet.
+  const tokenSettingsUrl =
+    tokenSettingsUrlFor(instanceUrl, providerMeta.tokenSettingsPath) ??
+    tokenSettingsUrlFor(defaultInstanceUrl, providerMeta.tokenSettingsPath) ??
+    defaultInstanceUrl;
   // An empty token field while editing keeps the stored one, so testing
   // and saving both fall back to it.
   const effectiveToken = editor?.token.trim() || editing?.token || "";
@@ -573,7 +597,7 @@ export function SourcesCard({ sources, onRefresh }: SourcesCardProps) {
         {sources.length === 0 && !editor ? (
           <div className="flex flex-col items-center justify-center gap-3 rounded-lg border border-dashed border-border px-4 py-8 text-center">
             <p className="text-sm text-muted-foreground">
-              No sources connected yet — add one to start mirroring.
+              No sources connected yet. Add one to start mirroring.
             </p>
             <Button type="button" variant="outline" size="sm" onClick={openAddEditor}>
               <Plus className="mr-1.5 h-3.5 w-3.5" />

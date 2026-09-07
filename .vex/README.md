@@ -36,3 +36,4 @@ different user model. Debian's status for a CVE is at
 | File | CVEs | Package | Why |
 | --- | --- | --- | --- |
 | `util-linux-mount-nsenter.vex.json` | CVE-2026-78408, CVE-2026-78409, CVE-2026-78410 | util-linux 2.41.5-0+deb13u1 (trixie, no fix planned) | nsenter and setuid mount(8) are never used; the runner stage strips setuid bits and the app runs unprivileged. |
+| `zlib-gz-vacate.vex.json` | CVE-2026-85091 | zlib 1:1.3.dfsg+really1.3.1-1 (trixie, unfixed in every Debian release) | The gz* write API (gzwrite, gzprintf) is never used: git, git-lfs and Bun only use the deflate and inflate stream functions. |
