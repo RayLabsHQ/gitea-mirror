@@ -360,6 +360,11 @@ export const organizationSchema = z.object({
   name: z.string(),
   normalizedName: z.string(),
   avatarUrl: z.string(),
+  // The sources row this organization mirrors from, matching
+  // repositories.sourceId below: NULL means "not pinned" (repos of the same
+  // org name from every connected source), a dangling id falls back the same
+  // way, and no foreign key is deliberate.
+  sourceId: z.string().optional().nullable(),
   membershipRole: z.enum(["member", "admin", "owner", "billing_manager"]).default("member"),
   isIncluded: z.boolean().default(true),
   destinationOrg: z.string().optional().nullable(),
@@ -672,6 +677,12 @@ export const organizations = sqliteTable("organizations", {
   normalizedName: text("normalized_name").notNull(),
 
   avatarUrl: text("avatar_url").notNull(),
+
+  // The sources row this organization mirrors from, matching
+  // repositories.sourceId above: NULL means "not pinned" (repos of the same
+  // org name from every connected source), a dangling id falls back the same
+  // way, and no foreign key is deliberate.
+  sourceId: text("source_id"),
 
   membershipRole: text("membership_role").notNull().default("member"),
 

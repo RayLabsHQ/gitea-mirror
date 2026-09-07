@@ -957,12 +957,12 @@ function validateStranded0016Repair() {
     db.close();
   }
 }
-
 const latestUpgradeFixtures: Record<string, UpgradeFixture> = {
   "0009_nervous_tyger_tiger": {
     seed: seedPre0009Database,
     verify: verify0009Migration,
   },
+
   "0010_mirrored_location_index": {
     seed: seedPre0010Database,
     verify: verify0010Migration,
@@ -1003,7 +1003,70 @@ const latestUpgradeFixtures: Record<string, UpgradeFixture> = {
     seed: seedPre0019Database,
     verify: verify0019Migration,
   },
+  "0020_org_source": {
+    seed: seedPre0020Database,
+    verify: verify0020Migration,
+  },
 };
+
+function seedPre0020Database(db: any) {
+  // Migrations 0000-0019 have run: repositories carry source_id,
+  // organizations have none yet. Seed two sources and three organizations:
+  // one whose repos all come from a single source (must be pinned), one
+  // whose repos span both sources (must stay unpinned), and one without
+  // repos (must stay unpinned).
+  db.run("INSERT INTO users (id, email, username, name) VALUES ('u-org20', 'org20@example.com', 'org20', 'Org Twenty')");
+  db.run(
+    "INSERT INTO configs (id, user_id, name, is_active, github_config, gitea_config, schedule_config, cleanup_config) " +
+      "VALUES ('cfg-org20', 'u-org20', 'Default', 1, '{\"provider\":\"github\",\"owner\":\"octocat\",\"token\":\"gh-token\",\"type\":\"personal\"}', '{}', '{}', '{}')",
+  );
+  db.run(
+    "INSERT INTO sources (id, user_id, name, provider, url, username) VALUES ('src-a20', 'u-org20', 'GitHub (octocat)', 'github', 'https://github.com', 'octocat')",
+  );
+  db.run(
+    "INSERT INTO sources (id, user_id, name, provider, url, username) VALUES ('src-b20', 'u-org20', 'GitLab (octocat)', 'gitlab', 'https://gitlab.com', 'octocat')",
+  );
+
+  const insertOrg = (id: string, name: string) =>
+    db.run(
+      "INSERT INTO organizations (id, user_id, config_id, name, normalized_name, avatar_url) " +
+        `VALUES ('${id}', 'u-org20', 'cfg-org20', '${name}', '${name.toLowerCase()}', 'https://example.com/${name}.png')`,
+    );
+  insertOrg("org-acme20", "acme");
+  insertOrg("org-mixed20", "mixed");
+  insertOrg("org-empty20", "empty");
+
+  const insertRepo = (id: string, org: string, sourceId: string | null) =>
+    db.run(
+      "INSERT INTO repositories (id, user_id, config_id, name, full_name, normalized_full_name, url, clone_url, owner, default_branch, organization, source_id) " +
+        `VALUES ('${id}', 'u-org20', 'cfg-org20', '${id}', '${org}/${id}', '${org}/${id}', 'https://example.com/${org}/${id}', 'https://example.com/${org}/${id}.git', '${org}', 'main', '${org}', ${sourceId ? `'${sourceId}'` : "NULL"})`,
+    );
+  insertRepo("repo-acme1-20", "acme", "src-a20");
+  insertRepo("repo-acme2-20", "acme", "src-a20");
+  insertRepo("repo-mixed1-20", "mixed", "src-a20");
+  insertRepo("repo-mixed2-20", "mixed", "src-b20");
+}
+
+function verify0020Migration(db: any) {
+  const orgCols = db.query("PRAGMA table_info(organizations)").all() as TableInfoRow[];
+  const sourceIdCol = orgCols.find((column) => column.name === "source_id");
+  assert(sourceIdCol, "Expected organizations.source_id column to exist after migration");
+  assert(sourceIdCol.notnull === 0, "Expected organizations.source_id to be nullable");
+  assert(sourceIdCol.dflt_value === null, `Expected organizations.source_id to have no default, got ${sourceIdCol.dflt_value}`);
+
+  const byName = Object.fromEntries(
+    (db.query("SELECT name, source_id FROM organizations").all() as Array<{ name: string; source_id: string | null }>).map(
+      (row) => [row.name, row.source_id],
+    ),
+  );
+  assert(byName["acme"] === "src-a20", `Expected the single-source organization to be pinned, got ${JSON.stringify(byName["acme"])}`);
+  assert(byName["mixed"] === null, `Expected the multi-source organization to stay unpinned, got ${JSON.stringify(byName["mixed"])}`);
+  assert(byName["empty"] === null, `Expected the repo-less organization to stay unpinned, got ${JSON.stringify(byName["empty"])}`);
+
+  db.run("UPDATE organizations SET source_id = 'src-b20' WHERE name = 'acme'");
+  const repinned = db.query("SELECT source_id FROM organizations WHERE name = 'acme'").get() as { source_id: string | null } | null;
+  assert(repinned?.source_id === "src-b20", `Expected a manual pin to round-trip, got ${JSON.stringify(repinned)}`);
+}
 
 function lintMigrations(selectedMigrations: Migration[]) {
   const violations: string[] = [];
