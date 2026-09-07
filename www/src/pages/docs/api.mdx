@@ -121,6 +121,14 @@ Starts mirroring in the background and returns straight away. Poll the list endp
 
 `role` is the account's role in that organization (`member`, `admin`, `owner` or `billing_manager`). `409` means it is already tracked; `force: true` refreshes it. Then `POST /api/job/mirror-org` with `{ "organizationIds": ["..."] }` mirrors its repositories.
 
+When several sources are connected, an optional `sourceId` picks which one the organization imports and mirrors from (the first connected source is the default):
+
+```json
+{ "org": "my-org", "role": "member", "sourceId": "…" }
+```
+
+`PATCH /api/organizations/:id` with `{ "sourceId": "…" }` re-pins an existing organization to another source, and `{ "sourceId": null }` clears the pin so the organization follows every source's repositories of the same name again. A pin whose source was removed falls back the same way.
+
 ### Run cleanup
 
 `POST /api/cleanup/trigger` runs the [repository cleanup](./cleanup-and-reconcile.md) now, with the account's saved cleanup settings, and returns how many orphaned repositories were found and processed and any errors. `GET /api/cleanup/trigger` returns the cleanup configuration and the last and next run times.
