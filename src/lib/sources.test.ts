@@ -2,6 +2,7 @@ import { beforeAll, describe, expect, test } from "bun:test";
 import {
   decryptSourceToken,
   deriveSourceName,
+  findSourceForOrganization,
   findSourceForRepository,
   primarySource,
   resolveGitHubApiBaseUrl,
@@ -90,6 +91,33 @@ describe("findSourceForRepository", () => {
   test("returns null when nothing is connected", () => {
     const repo = { sourceProvider: "github", sourceUrl: "https://github.com" };
     expect(findSourceForRepository(repo, [])).toBeNull();
+  });
+});
+
+describe("findSourceForOrganization", () => {
+  const github = source();
+  const gitlab = source({
+    id: "src-2",
+    provider: "gitlab",
+    url: "https://gitlab.com",
+    username: "me",
+  });
+
+  test("matches by the stored source id", () => {
+    expect(findSourceForOrganization({ sourceId: "src-2" }, [github, gitlab])?.id).toBe("src-2");
+  });
+
+  test("returns null for an unpinned organization", () => {
+    expect(findSourceForOrganization({}, [github, gitlab])).toBeNull();
+    expect(findSourceForOrganization({ sourceId: null }, [github, gitlab])).toBeNull();
+  });
+
+  test("returns null for a dangling pin instead of another source", () => {
+    expect(findSourceForOrganization({ sourceId: "deleted-source" }, [github, gitlab])).toBeNull();
+  });
+
+  test("returns null when nothing is connected", () => {
+    expect(findSourceForOrganization({ sourceId: "src-1" }, [])).toBeNull();
   });
 });
 

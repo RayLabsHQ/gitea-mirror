@@ -420,6 +420,21 @@ export function findSourceForRepository(
 }
 
 /**
+ * The source an organization is pinned to: the stored sourceId when it still
+ * resolves. Null for unpinned organizations and for pins whose source was
+ * deleted (both fall back to the pre-multi-source behavior of following
+ * every source's repositories of the same org name), so callers only scope
+ * their queries when this returns a row.
+ */
+export function findSourceForOrganization(
+  org: { sourceId?: string | null },
+  list: SourceRecord[]
+): SourceRecord | null {
+  if (!org.sourceId) return null;
+  return list.find((source) => source.id === org.sourceId) ?? null;
+}
+
+/**
  * Decrypt a source token for API use. Unlike getDecryptedGitHubToken this
  * never throws: empty or missing means public-only access, which every
  * source kind supports.
