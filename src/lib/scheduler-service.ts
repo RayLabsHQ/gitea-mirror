@@ -15,6 +15,7 @@ import type { Octokit } from '@octokit/rest';
 import { repoStatusEnum, repositoryVisibilityEnum } from '@/types/Repository';
 import { mergeGitReposPreferStarred, normalizeGitRepoToInsert, calcBatchSizeForInsert } from '@/lib/repo-utils';
 import { isMirrorableGitHubRepo } from '@/lib/repo-eligibility';
+import { loadOrganizationForkPolicies, orgForkSkipDecision } from '@/lib/utils/mirror-overrides';
 import { createMirrorJob } from '@/lib/helpers';
 import { getNextScheduledRun, isCronExpression, normalizeTimezone } from '@/lib/utils/schedule-utils';
 import { resetStuckMirrorStatuses } from '@/lib/stuck-status-recovery';
@@ -96,6 +97,10 @@ async function importRepositoriesFromSources(
   await ensureSourcesFromConfig(userId);
   const sources = (await listSources(userId)).filter(source => source.enabled);
 
+  // Per-organization fork pins, so orgs opted out of forks stay that way
+  // during auto import. Loaded once; the pins apply to every source.
+  const orgForkOverrides = await loadOrganizationForkPolicies({ userId });
+
   const existingRepos = await db
     .select({ normalizedFullName: repositories.normalizedFullName, sourceId: repositories.sourceId })
     .from(repositories)
@@ -111,7 +116,7 @@ async function importRepositoriesFromSources(
       const sourceProvider = createSourceProviderFromSource(source, { userId });
 
       const [basicAndForkedRepos, starredRepos] = await Promise.all([
-        sourceProvider.listRepositories(config),
+        sourceProvider.listRepositories(config, { orgForkOverrides }),
         config.githubConfig?.includeStarred
           ? sourceProvider.listStarredRepositories(config)
           : Promise.resolve([]),
@@ -339,6 +344,18 @@ async function runScheduledSync(config: any): Promise<void> {
         const skippedCount = beforeCount - reposNeedingMirror.length;
         if (skippedCount > 0) {
           console.log(`[Scheduler] Skipped ${skippedCount} repositories from auto-mirror (autoMirror=${autoMirrorOwned}, autoMirrorStarred=${autoMirrorStarred})`);
+        }
+
+        // Organization fork policies apply to already-imported rows too, so a
+        // fork that slipped in before its org opted out is not auto-mirrored.
+        const orgForkOverrides = await loadOrganizationForkPolicies({ userId });
+        const forkSkipFor = orgForkSkipDecision(orgForkOverrides, config);
+        const forkSkippedCount = reposNeedingMirror.length;
+        reposNeedingMirror = reposNeedingMirror.filter(
+          repo => !repo.isForked || !repo.organization || !forkSkipFor(repo.organization)
+        );
+        if (reposNeedingMirror.length !== forkSkippedCount) {
+          console.log(`[Scheduler] Skipped ${forkSkippedCount - reposNeedingMirror.length} forked repositories from auto-mirror (organization skip forks)`);
         }
 
         if (reposNeedingMirror.length > 0) {

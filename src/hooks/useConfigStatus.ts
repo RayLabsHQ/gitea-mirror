@@ -2,6 +2,12 @@ import { useCallback, useEffect, useState, useRef } from 'react';
 import { useAuth } from './useAuth';
 import { apiRequest } from '@/lib/utils';
 import type { ConfigApiResponse, SourceApiRecord } from '@/types/config';
+import type { ConfigApiResponse } from '@/types/config';
+import {
+  DEFAULT_SOURCE_PROVIDER,
+  normalizeSourceProviderKind,
+  type SourceProviderKind,
+} from '@/lib/source-providers/kinds';
 
 interface ConfigStatus {
   isGitHubConfigured: boolean;
@@ -12,6 +18,7 @@ interface ConfigStatus {
   autoMirrorStarred: boolean;
   githubOwner: string;
   sources: SourceApiRecord[];
+  sourceProvider: SourceProviderKind;
 }
 
 // Cache to prevent duplicate API calls across components
@@ -39,6 +46,7 @@ export function useConfigStatus(): ConfigStatus {
     autoMirrorStarred: false,
     githubOwner: '',
     sources: [],
+    sourceProvider: DEFAULT_SOURCE_PROVIDER,
   });
 
   // Track if this hook has already checked config to prevent multiple calls
@@ -55,6 +63,7 @@ export function useConfigStatus(): ConfigStatus {
         autoMirrorStarred: false,
         githubOwner: '',
         sources: [],
+        sourceProvider: DEFAULT_SOURCE_PROVIDER,
       });
       return;
     }
@@ -92,6 +101,7 @@ export function useConfigStatus(): ConfigStatus {
         autoMirrorStarred: configResponse?.advancedOptions?.autoMirrorStarred ?? false,
         githubOwner: configResponse?.githubConfig?.username ?? '',
         sources: configResponse?.sources ?? [],
+        sourceProvider: normalizeSourceProviderKind(configResponse?.githubConfig?.provider),
       });
       return;
     }
@@ -138,6 +148,7 @@ export function useConfigStatus(): ConfigStatus {
         autoMirrorStarred: configResponse?.advancedOptions?.autoMirrorStarred ?? false,
         githubOwner: configResponse?.githubConfig?.username ?? '',
         sources: configResponse?.sources ?? [],
+        sourceProvider: normalizeSourceProviderKind(configResponse?.githubConfig?.provider),
       });
 
       hasCheckedRef.current = true;
@@ -151,6 +162,7 @@ export function useConfigStatus(): ConfigStatus {
         autoMirrorStarred: false,
         githubOwner: '',
         sources: [],
+        sourceProvider: DEFAULT_SOURCE_PROVIDER,
       });
       hasCheckedRef.current = true;
     }

@@ -191,6 +191,34 @@ describe("GiteaSourceProvider", () => {
     ]);
   });
 
+  test("getOrganization reads an org with its repo count and returns null on 404", async () => {
+    installFetch((url) => {
+      if (url.endsWith("/api/v1/orgs/acme")) return json({ username: "acme", avatar_url: "https://a/acme.png" });
+      if (url.includes("/api/v1/orgs/acme/repos?limit=1")) return json([{}], { headers: { "x-total-count": "7" } });
+      if (url.endsWith("/api/v1/orgs/missing")) return json({ message: "404" }, { status: 404 });
+      return json({ message: "unexpected" }, { status: 500 });
+    });
+    const provider = new GiteaSourceProvider(connection);
+
+    const org = await provider.getOrganization("acme");
+    expect(org).toEqual(expect.objectContaining({ name: "acme", repositoryCount: 7 }));
+    expect(await provider.getOrganization("missing")).toBeNull();
+  });
+
+  test("listOrganizationRepositories pages through the organization's repositories", async () => {
+    installFetch((url) => {
+      if (url.endsWith("&page=1")) return json([repo({ name: "tool", owner: "acme" })], { headers: { "x-total-count": "1" } });
+      return json({ message: "unexpected" }, { status: 500 });
+    });
+
+    const repos = await new GiteaSourceProvider(connection).listOrganizationRepositories("acme");
+
+    expect(calls[0].url).toBe("https://codeberg.org/api/v1/orgs/acme/repos?limit=50&page=1");
+    expect(repos.map((r) => r.fullName)).toEqual(["acme/tool"]);
+    expect(repos[0].organization).toBe("acme");
+    expect(repos[0].sourceProvider).toBe("gitea");
+  });
+
   test("testConnection reads /user", async () => {
     installFetch(() => json({ login: "me", full_name: "Me", avatar_url: "https://a/me.png" }));
     const account = await new GiteaSourceProvider(connection).testConnection();

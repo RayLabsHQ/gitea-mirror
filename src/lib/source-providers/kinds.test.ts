@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   isBetaSourceProvider,
+  isValidSourceOrgName,
   SOURCE_PROVIDER_DEFAULT_URLS,
   getRepositorySource,
   isRepositoryFromConfiguredSource,
@@ -16,6 +17,21 @@ describe("isBetaSourceProvider", () => {
     expect(isBetaSourceProvider("github")).toBe(false);
     expect(isBetaSourceProvider("gitlab")).toBe(true);
     expect(isBetaSourceProvider("gitea")).toBe(true);
+  });
+});
+
+describe("isValidSourceOrgName", () => {
+  test("accepts plain org and group names", () => {
+    expect(isValidSourceOrgName("acme")).toBe(true);
+    expect(isValidSourceOrgName("  acme  ")).toBe(true);
+    expect(isValidSourceOrgName("my-org")).toBe(true);
+  });
+
+  test("rejects nested paths and empty names", () => {
+    expect(isValidSourceOrgName("acme/tools")).toBe(false);
+    expect(isValidSourceOrgName("group/subgroup/deep")).toBe(false);
+    expect(isValidSourceOrgName("/acme")).toBe(false);
+    expect(isValidSourceOrgName("   ")).toBe(false);
   });
 });
 

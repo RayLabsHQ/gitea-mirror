@@ -14,6 +14,12 @@ import type { MembershipRole } from "@/types/organizations";
 import { RadioGroup, RadioGroupItem } from "../ui/radio";
 import { Label } from "../ui/label";
 import { parseGitHubOwnerReference } from "@/lib/utils/github-url";
+import {
+  SOURCE_PROVIDER_DEFAULT_URLS,
+  SOURCE_PROVIDER_LABELS,
+  SOURCE_PROVIDER_ORG_NOUNS,
+  type SourceProviderKind,
+} from "@/lib/source-providers/kinds";
 
 const inputClassName =
   "w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
@@ -30,18 +36,25 @@ interface AddOrganizationDialogProps {
     role: MembershipRole;
     force?: boolean;
   }) => Promise<void>;
+  sourceProvider?: SourceProviderKind;
 }
 
 export default function AddOrganizationDialog({
   isDialogOpen,
   setIsDialogOpen,
   onAddOrganization,
+  sourceProvider = "github",
 }: AddOrganizationDialogProps) {
   const [url, setUrl] = useState<string>("");
   const [org, setOrg] = useState<string>("");
   const [role, setRole] = useState<MembershipRole>("member");
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>("");
+
+  const providerLabel = SOURCE_PROVIDER_LABELS[sourceProvider];
+  const orgNoun = SOURCE_PROVIDER_ORG_NOUNS[sourceProvider];
+  const orgNounCapitalized = orgNoun.charAt(0).toUpperCase() + orgNoun.slice(1);
+  const urlPlaceholder = `${SOURCE_PROVIDER_DEFAULT_URLS[sourceProvider]}/your-${orgNoun}`;
 
   const resetForm = () => {
     setError("");
@@ -91,8 +104,8 @@ export default function AddOrganizationDialog({
     if (!org || org.trim() === "") {
       setError(
         urlIsUnparsed
-          ? "That does not look like a GitHub organization URL."
-          : "Please enter a valid organization name."
+          ? `That does not look like a ${providerLabel} ${orgNoun} URL.`
+          : `Please enter a valid ${orgNoun} name.`
       );
       return;
     }
@@ -121,9 +134,9 @@ export default function AddOrganizationDialog({
 
       <DialogContent className="w-[calc(100%-2rem)] sm:max-w-[425px] gap-0 gap-y-6 mx-4 sm:mx-0">
         <DialogHeader>
-          <DialogTitle>Add Organization</DialogTitle>
+          <DialogTitle>Add {orgNounCapitalized}</DialogTitle>
           <DialogDescription>
-            You can add public organizations
+            {`You can add public ${orgNoun}s`}
           </DialogDescription>
         </DialogHeader>
 
@@ -134,7 +147,7 @@ export default function AddOrganizationDialog({
                 htmlFor="organizationUrl"
                 className="block text-sm font-medium mb-1.5"
               >
-                GitHub URL
+                {providerLabel} URL
               </label>
               <input
                 id="organizationUrl"
@@ -142,14 +155,14 @@ export default function AddOrganizationDialog({
                 value={url}
                 onChange={(e) => handleUrlChange(e.target.value)}
                 className={inputClassName}
-                placeholder="https://github.com/microsoft"
+                placeholder={urlPlaceholder}
                 autoComplete="off"
                 autoFocus
               />
               <p className="mt-1.5 text-xs text-muted-foreground">
                 {urlIsUnparsed
                   ? "Could not read an organization from that."
-                  : "Paste an organization URL and the name below fills in."}
+                  : `Paste a ${orgNoun} URL and the name below fills in.`}
               </p>
             </div>
 
@@ -169,7 +182,7 @@ export default function AddOrganizationDialog({
                 htmlFor="organizationName"
                 className="block text-sm font-medium mb-1.5"
               >
-                Organization Name
+                {orgNounCapitalized} Name
               </label>
               <input
                 id="organizationName"
@@ -178,7 +191,7 @@ export default function AddOrganizationDialog({
                 onChange={(e) => setOrg(e.target.value)}
                 onPaste={handleReferencePaste}
                 className={inputClassName}
-                placeholder="e.g., microsoft"
+                placeholder={`e.g., your-${orgNoun}`}
                 autoComplete="off"
                 required
               />
@@ -202,10 +215,12 @@ export default function AddOrganizationDialog({
                   <RadioGroupItem value="admin" id="r2" />
                   <Label htmlFor="r2">Admin</Label>
                 </div>
-                <div className="flex items-center space-x-2">
-                  <RadioGroupItem value="billing_manager" id="r3" />
-                  <Label htmlFor="r3">Billing Manager</Label>
-                </div>
+                {sourceProvider === "github" && (
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="billing_manager" id="r3" />
+                    <Label htmlFor="r3">Billing Manager</Label>
+                  </div>
+                )}
               </RadioGroup>
             </div>
 
@@ -225,7 +240,7 @@ export default function AddOrganizationDialog({
               {isLoading ? (
                 <LoaderCircle className="h-4 w-4 animate-spin" />
               ) : (
-                "Add Organization"
+                `Add ${orgNounCapitalized}`
               )}
             </Button>
           </div>

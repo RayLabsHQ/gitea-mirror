@@ -52,7 +52,8 @@ describe("discovery and housekeeping go through the source provider", () => {
   test("scheduler auto import, auto mirror and boot auto start iterate the connected sources", () => {
     const source = read("scheduler-service.ts");
     expect(source).toContain("createSourceProviderFromSource(source, { userId })");
-    expect(source).toContain("sourceProvider.listRepositories(config)");
+    // Auto import passes the per-organization fork pins through every source.
+    expect(source).toContain("sourceProvider.listRepositories(config, { orgForkOverrides })");
     expect(source).not.toContain("getGithubRepositories(");
     // Auto import, auto mirror and boot auto start each load the user's sources.
     expect(count(source, "listSources(")).toBeGreaterThanOrEqual(3);

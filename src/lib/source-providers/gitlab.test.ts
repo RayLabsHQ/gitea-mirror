@@ -217,6 +217,43 @@ describe("GitLabSourceProvider", () => {
     expect(failedOrgs).toEqual([]);
   });
 
+  test("getOrganization reads a group by path and counts its projects, null on 404", async () => {
+    installFetch((url) => {
+      if (url.endsWith("/api/v4/groups/acme")) return json({ id: 7, full_path: "acme" });
+      if (url.includes("/api/v4/groups/7/projects?")) return json([{}], { headers: { "x-total": "12" } });
+      if (url.endsWith("/api/v4/groups/missing")) return json({ message: "404 Not Found" }, { status: 404 });
+      return json({ message: "unexpected" }, { status: 500 });
+    });
+    const provider = new GitLabSourceProvider(connection);
+
+    const org = await provider.getOrganization("acme");
+    expect(org?.name).toBe("acme");
+    expect(org?.repositoryCount).toBe(12);
+    expect(await provider.getOrganization("missing")).toBeNull();
+  });
+
+  test("listOrganizationRepositories includes subgroups and flattens them onto the group", async () => {
+    installFetch((url) => {
+      if (url.includes("/api/v4/groups/acme/projects?")) {
+        return json([
+          project({
+            path: "tool",
+            path_with_namespace: "acme/tools/tool",
+            namespace: { kind: "group", path: "tools", full_path: "acme/tools" },
+          }),
+        ]);
+      }
+      return json({ message: "unexpected" }, { status: 500 });
+    });
+
+    const repos = await new GitLabSourceProvider(connection).listOrganizationRepositories("acme");
+
+    expect(calls[0].url).toContain("include_subgroups=true");
+    expect(repos.map((r) => r.fullName)).toEqual(["acme/tools/tool"]);
+    expect(repos[0].organization).toBe("acme");
+    expect(repos[0].sourceProvider).toBe("gitlab");
+  });
+
   test("isRepositoryStarred matches the full path among starred search results", async () => {
     installFetch(() =>
       json([project({ path_with_namespace: "other/widget" }), project({ path_with_namespace: "Acme/Widget" })])

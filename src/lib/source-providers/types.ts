@@ -21,6 +21,12 @@ export interface ListRepositoriesOptions {
   includeCollaboratorReposOverride?: boolean;
   /** Ignore the organization allowlist and return every org repository. */
   includeAllOrgsOverride?: boolean;
+  /**
+   * Per-organization fork pins (normalized org name -> skip forks), from
+   * `loadOrganizationForkPolicies`. An org-repository fork follows its org's
+   * pin; repositories of unpinned orgs follow the global `skipForks`.
+   */
+  orgForkOverrides?: Map<string, boolean>;
 }
 
 export interface SourceFailedOrganization {

@@ -12,9 +12,11 @@ import {
   normalizeMirrorOverrides,
   normalizeReleaseAssetLimit,
   normalizeReleaseLimit,
+  orgForkSkipDecision,
   parseMirrorOverrides,
   releaseGetsAssets,
   resolveMirrorOptions,
+  resolveOrganizationSkipForks,
   STARRED_CLAMPED_KEYS,
   UI_MIRROR_OVERRIDE_KEYS,
 } from "./mirror-overrides";
@@ -1063,5 +1065,79 @@ describe("release asset limit (#311)", () => {
       });
       expect(gating.releaseAssetLimit).toBeUndefined();
     });
+  });
+});
+
+describe("organization skip forks policy", () => {
+  test("resolveOrganizationSkipForks defaults to the global switch", () => {
+    expect(
+      resolveOrganizationSkipForks({ orgOverrides: null, config: makeConfig({}, {}) })
+    ).toBe(false);
+    expect(
+      resolveOrganizationSkipForks({
+        orgOverrides: null,
+        config: makeConfig({}, { skipForks: true }),
+      })
+    ).toBe(true);
+  });
+
+  test("an organization pin beats the global switch in either direction", () => {
+    expect(
+      resolveOrganizationSkipForks({
+        orgOverrides: { skipForks: true },
+        config: makeConfig({}, { skipForks: false }),
+      })
+    ).toBe(true);
+    expect(
+      resolveOrganizationSkipForks({
+        orgOverrides: { skipForks: false },
+        config: makeConfig({}, { skipForks: true }),
+      })
+    ).toBe(false);
+  });
+
+  test("a null pin means inherit, not false", () => {
+    expect(
+      resolveOrganizationSkipForks({
+        orgOverrides: { skipForks: null },
+        config: makeConfig({}, { skipForks: true }),
+      })
+    ).toBe(true);
+  });
+
+  test("orgForkSkipDecision resolves per organization, case-insensitively", () => {
+    const decide = orgForkSkipDecision(
+      new Map([["acme", true], ["globex", false]]),
+      makeConfig({}, { skipForks: false })
+    );
+    expect(decide("Acme")).toBe(true);
+    expect(decide("GLOBEX")).toBe(false);
+    expect(decide("umbrella")).toBe(false);
+    expect(decide(undefined)).toBe(false);
+  });
+
+  test("orgForkSkipDecision falls back to a global skip when no org is pinned", () => {
+    const decide = orgForkSkipDecision(undefined, makeConfig({}, { skipForks: true }));
+    expect(decide("acme")).toBe(true);
+    expect(decide(undefined)).toBe(true);
+    expect(decide("")).toBe(true);
+  });
+
+  test("skip forks participates in the storage helpers like any other pin", () => {
+    expect(hasMirrorOverrides({ skipForks: true })).toBe(true);
+    expect(listOverriddenKeys({ skipForks: true })).toEqual(["skipForks"]);
+    expect(normalizeMirrorOverrides({ skipForks: true, lfs: null })).toEqual({
+      skipForks: true,
+    });
+    expect(MIRROR_OVERRIDE_LABELS.skipForks).toBe("Skip forks");
+  });
+
+  test("skip forks is not part of the gitea mirror flag set the resolver walks", () => {
+    expect(MIRROR_OVERRIDE_KEYS).not.toContain("skipForks");
+    const resolved = resolveMirrorOptions({
+      config: makeConfig({}),
+      repository: makeRepo({ mirrorOverrides: { skipForks: true } as any }),
+    });
+    expect((resolved as any).skipForks).toBeUndefined();
   });
 });

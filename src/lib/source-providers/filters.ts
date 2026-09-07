@@ -1,5 +1,6 @@
 import type { Config } from "@/lib/db/schema";
 import type { GitRepo } from "@/types/Repository";
+import { orgForkSkipDecision } from "@/lib/utils/mirror-overrides";
 import type { ListRepositoriesOptions } from "./types";
 
 /**
@@ -11,6 +12,8 @@ import type { ListRepositoriesOptions } from "./types";
  * - skipPersonalRepos drops repos the configured account owns
  * - includeCollaboratorRepos=false drops personal repos of other users
  * - includeOrganizations, when non-empty, keeps only org repos from listed orgs
+ * - options.orgForkOverrides pins skipForks per organization: a fork owned by
+ *   a pinned org follows the pin instead of the global skipForks
  */
 export function filterSourceRepositories(
   repos: GitRepo[],
@@ -28,7 +31,7 @@ export function filterSourceRepositories(
     options.includeCollaboratorReposOverride ??
     config.githubConfig?.includeCollaboratorRepos ??
     true;
-  const skipForks = config.githubConfig?.skipForks ?? false;
+  const forkSkipFor = orgForkSkipDecision(options.orgForkOverrides, config);
   const skipPersonalRepos = config.githubConfig?.skipPersonalRepos ?? false;
   const includeOrgs = options.includeAllOrgsOverride
     ? []
@@ -39,12 +42,12 @@ export function filterSourceRepositories(
   const me = username.trim().toLowerCase();
 
   return repos.filter((repo) => {
-    if (skipForks && repo.isForked) return false;
-
     const ownerKey = repo.owner.trim().toLowerCase();
     const orgKey = (repo.organization ?? "").trim().toLowerCase();
     const isOrgRepo = orgKey.length > 0;
     const isOwnRepo = !isOrgRepo && me.length > 0 && ownerKey === me;
+
+    if (forkSkipFor(repo.organization) && repo.isForked) return false;
 
     if (skipPersonalRepos && isOwnRepo) return false;
     if (!includeCollab && !isOrgRepo && !isOwnRepo) return false;

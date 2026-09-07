@@ -35,6 +35,18 @@ export const MIRROR_OVERRIDE_LIMIT_KEYS = ["releaseLimit", "releaseAssetLimit"] 
 
 export type MirrorOverrideLimitKey = (typeof MIRROR_OVERRIDE_LIMIT_KEYS)[number];
 
+/**
+ * Organization-tier selection overrides: per-organization switches that steer
+ * which source repositories are imported and mirrored, not what a mirror
+ * contains. They are kept apart from `MIRROR_OVERRIDE_KEYS` because that list
+ * mirrors `giteaConfigSchema` flag names so the resolver can read the global
+ * tier with the same key — the global tier for these lives on
+ * `githubConfig` instead, and they are meaningless at the repository tier.
+ */
+export const ORG_SELECTION_OVERRIDE_KEYS = ["skipForks"] as const;
+
+export type OrgSelectionOverrideKey = (typeof ORG_SELECTION_OVERRIDE_KEYS)[number];
+
 /** Matches `giteaConfigSchema.releaseLimit`'s default. */
 export const DEFAULT_RELEASE_LIMIT = 10;
 
@@ -56,6 +68,7 @@ export type ResolvedMirrorOptions = Record<MirrorOverrideKey, boolean> & {
 export type InheritedMirrorOptions = Partial<Record<MirrorOverrideKey, boolean>> & {
   releaseLimit?: number;
   releaseAssetLimit?: number | null;
+  skipForks?: boolean;
 };
 
 /**
@@ -256,7 +269,10 @@ export const MIRROR_GATING_REASONS = {
 
 /** key -> reason it cannot take effect. Absent key means editable. */
 export type MirrorOverrideGating = Partial<
-  Record<MirrorOverrideKey | MirrorOverrideLimitKey, string>
+  Record<
+    MirrorOverrideKey | MirrorOverrideLimitKey | OrgSelectionOverrideKey,
+    string
+  >
 >;
 
 /**
@@ -337,7 +353,7 @@ export function getMirrorOverrideGating({
 }
 
 export const MIRROR_OVERRIDE_LABELS: Record<
-  MirrorOverrideKey | MirrorOverrideLimitKey,
+  MirrorOverrideKey | MirrorOverrideLimitKey | OrgSelectionOverrideKey,
   string
 > = {
   lfs: "Git LFS files",
@@ -350,6 +366,7 @@ export const MIRROR_OVERRIDE_LABELS: Record<
   mirrorMilestones: "Milestones",
   releaseLimit: "Release limit",
   releaseAssetLimit: "Release asset limit",
+  skipForks: "Skip forks",
 };
 
 /**
@@ -392,7 +409,7 @@ export function hasMirrorOverrides(value: unknown): boolean {
 /** The keys an overrides object pins, for badges and summaries. */
 export function listOverriddenKeys(
   value: unknown
-): (MirrorOverrideKey | MirrorOverrideLimitKey)[] {
+): (MirrorOverrideKey | MirrorOverrideLimitKey | OrgSelectionOverrideKey)[] {
   const overrides = parseMirrorOverrides(value);
   if (!overrides) return [];
   return [
@@ -400,6 +417,7 @@ export function listOverriddenKeys(
     ...MIRROR_OVERRIDE_LIMIT_KEYS.filter(
       (key) => LIMIT_NORMALIZERS[key](overrides[key]) !== undefined
     ),
+    ...ORG_SELECTION_OVERRIDE_KEYS.filter((key) => overrides[key] != null),
   ];
 }
 
@@ -423,6 +441,10 @@ export function normalizeMirrorOverrides(
   for (const key of MIRROR_OVERRIDE_LIMIT_KEYS) {
     const limit = LIMIT_NORMALIZERS[key](overrides[key]);
     if (limit !== undefined) cleaned[key] = limit;
+  }
+  for (const key of ORG_SELECTION_OVERRIDE_KEYS) {
+    const flag = overrides[key];
+    if (typeof flag === "boolean") cleaned[key] = flag;
   }
 
   return Object.keys(cleaned).length > 0 ? cleaned : null;
@@ -523,6 +545,89 @@ export function resolveMirrorOptions({
   }
 
   return resolved;
+}
+
+/**
+ * Resolve the fork policy for one organization.
+ *
+ * Precedence: organization override -> global `githubConfig.skipForks` ->
+ * false. An organization pinning `false` keeps its forks even when the
+ * global switch skips forks everywhere else, and vice versa.
+ */
+export function resolveOrganizationSkipForks({
+  orgOverrides,
+  config,
+}: {
+  orgOverrides: unknown;
+  config: Partial<Config>;
+}): boolean {
+  const org = parseMirrorOverrides(orgOverrides);
+  if (typeof org?.skipForks === "boolean") return org.skipForks;
+  return config.githubConfig?.skipForks ?? false;
+}
+
+/**
+ * Build the per-repository fork decision for bulk paths that hold the fork
+ * pin map from `loadOrganizationForkPolicies` instead of one org row. The
+ * returned predicate applies the same precedence as
+ * `resolveOrganizationSkipForks`: a pinned org wins over the global switch,
+ * unpinned orgs and personal repos follow it.
+ */
+export function orgForkSkipDecision(
+  orgForkOverrides: Map<string, boolean> | undefined,
+  config: Partial<Config>
+): (organizationName: string | null | undefined) => boolean {
+  const globalSkipForks = config.githubConfig?.skipForks ?? false;
+  return (organizationName) => {
+    const key = (organizationName ?? "").trim().toLowerCase();
+    if (key && orgForkOverrides?.has(key)) return orgForkOverrides.get(key)!;
+    return globalSkipForks;
+  };
+}
+
+/**
+ * Load every organization that pins a fork policy, keyed by normalized name.
+ *
+ * Bulk import paths consult this per repository: an org-repository fork is
+ * dropped or kept according to its org's pin, while repos of unpinned orgs
+ * fall back to the global `skipForks`. Failures degrade to an empty map so a
+ * DB hiccup cannot fail the import.
+ */
+export async function loadOrganizationForkPolicies({
+  userId,
+}: {
+  userId?: string;
+}): Promise<Map<string, boolean>> {
+  const policies = new Map<string, boolean>();
+  if (!userId) return policies;
+
+  try {
+    const { db, organizations } = await import("@/lib/db");
+    const { eq } = await import("drizzle-orm");
+
+    const rows = await db
+      .select({
+        normalizedName: organizations.normalizedName,
+        mirrorOverrides: organizations.mirrorOverrides,
+      })
+      .from(organizations)
+      .where(eq(organizations.userId, userId));
+
+    for (const row of rows) {
+      const overrides = parseMirrorOverrides(row.mirrorOverrides);
+      if (typeof overrides?.skipForks === "boolean") {
+        policies.set(row.normalizedName, overrides.skipForks);
+      }
+    }
+  } catch (error) {
+    console.error(
+      `[MirrorOverrides] Failed to load organization fork policies: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+  }
+
+  return policies;
 }
 
 /**
