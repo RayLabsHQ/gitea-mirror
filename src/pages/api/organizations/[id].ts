@@ -14,6 +14,7 @@ import { normalizeMirrorOverrides } from "@/lib/utils/mirror-overrides";
 const patchBodySchema = z.object({
   destinationOrg: z.string().nullable().optional(),
   mirrorOverrides: mirrorOverridesSchema.nullable().optional(),
+  sourceId: z.string().nullable().optional(),
 });
 
 export const PATCH: APIRoute = async (context) => {
@@ -72,6 +73,25 @@ export const PATCH: APIRoute = async (context) => {
       updates.mirrorOverrides = normalizeMirrorOverrides(body.mirrorOverrides);
     }
 
+    if ("sourceId" in body) {
+      const nextSourceId = body.sourceId?.trim() || null;
+      if (nextSourceId) {
+        const { listSources } = await import("@/lib/sources");
+        const owned = (await listSources(userId)).some(
+          (source) => source.id === nextSourceId
+        );
+        if (!owned) {
+          return new Response(
+            JSON.stringify({
+              error: `No source with id ${nextSourceId} belongs to this user`,
+            }),
+            { status: 400, headers: { "Content-Type": "application/json" } }
+          );
+        }
+      }
+      updates.sourceId = nextSourceId;
+    }
+
     await db
       .update(organizations)
       .set(updates)
@@ -81,6 +101,7 @@ export const PATCH: APIRoute = async (context) => {
       .select({
         destinationOrg: organizations.destinationOrg,
         mirrorOverrides: organizations.mirrorOverrides,
+        sourceId: organizations.sourceId,
       })
       .from(organizations)
       .where(eq(organizations.id, orgId))
@@ -92,6 +113,7 @@ export const PATCH: APIRoute = async (context) => {
         message: "Organization updated successfully",
         destinationOrg: updated?.destinationOrg ?? null,
         mirrorOverrides: updated?.mirrorOverrides ?? null,
+        sourceId: updated?.sourceId ?? null,
       }),
       {
         status: 200,
@@ -137,12 +159,23 @@ export const DELETE: APIRoute = async (context) => {
       );
     }
 
-    await db.delete(repositories).where(
-      and(
-        eq(repositories.userId, userId),
-        eq(repositories.organization, existingOrg.name)
-      )
-    );
+    // A pinned organization only owns its source's repositories of the name;
+    // unpinned ones keep deleting every repository with that org name.
+    const deleteRepoConditions = [
+      eq(repositories.userId, userId),
+      eq(repositories.organization, existingOrg.name),
+    ];
+    if (existingOrg.sourceId) {
+      const { listSources } = await import("@/lib/sources");
+      const pinned = (await listSources(userId)).some(
+        (source) => source.id === existingOrg.sourceId
+      );
+      if (pinned) {
+        deleteRepoConditions.push(eq(repositories.sourceId, existingOrg.sourceId));
+      }
+    }
+
+    await db.delete(repositories).where(and(...deleteRepoConditions));
 
     await db
       .delete(organizations)
