@@ -21,8 +21,13 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     const body: AddOrganizationApiRequest = await request.json();
     const { role, org, force = false } = body;
-    // Optional body field: which connected source to import from; defaults to the primary source.
-    const sourceId = (body as AddOrganizationApiRequest & { sourceId?: string }).sourceId?.trim() || undefined;
+    if (body.sourceId !== undefined && typeof body.sourceId !== "string") {
+      return jsonResponse({
+        data: { success: false, error: "sourceId must be a string" },
+        status: 400,
+      });
+    }
+    const sourceId = body.sourceId?.trim() || undefined;
 
     if (!org || !role) {
       return jsonResponse({
@@ -33,6 +38,23 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     const trimmedOrg = org.trim();
     const normalizedOrg = trimmedOrg.toLowerCase();
+
+    // The force re-add branch returns before the source resolution further
+    // down, so a pin has to be ownership-checked up front or it would skip
+    // validation entirely.
+    if (sourceId) {
+      const { listSources } = await import("@/lib/sources");
+      const owned = (await listSources(userId)).some((s) => s.id === sourceId);
+      if (!owned) {
+        return jsonResponse({
+          data: {
+            success: false,
+            error: `No source with id ${sourceId} belongs to this user`,
+          },
+          status: 400,
+        });
+      }
+    }
 
     if (!isValidSourceOrgName(trimmedOrg)) {
       return jsonResponse({
@@ -73,6 +95,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
         .set({
           membershipRole: role,
           normalizedName: normalizedOrg,
+          ...(sourceId ? { sourceId } : {}),
           updatedAt: new Date(),
         })
         .where(eq(organizations.id, existingOrg.id))
@@ -204,6 +227,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       avatarUrl: orgData.avatarUrl,
       membershipRole: role,
       isIncluded: false,
+      sourceId: source.id,
       status: "imported" as RepoStatus,
       repositoryCount: orgRepos.length,
       createdAt: orgData.createdAt,

@@ -46,6 +46,8 @@ export interface AddOrganizationApiRequest {
   org: string;
   role: MembershipRole;
   force?: boolean;
+  /** Which connected source to import from; defaults to the primary source. */
+  sourceId?: string;
 }
 
 export interface AddOrganizationApiResponse {
