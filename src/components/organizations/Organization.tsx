@@ -51,7 +51,7 @@ export function Organization() {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isDialogOpen, setIsDialogOpen] = useState<boolean>(false);
   const { user } = useAuth();
-  const { isGitHubConfigured, sourceProvider, sourceUrl } = useConfigStatus();
+  const { isGitHubConfigured, sourceProvider, sourceUrl, sources } = useConfigStatus();
   const { navigationKey } = useNavigation();
   const { registerRefreshCallback } = useLiveRefresh();
   const { filter, setFilter } = useFilterParams({
@@ -63,6 +63,7 @@ export function Organization() {
   const [duplicateOrgCandidate, setDuplicateOrgCandidate] = useState<{
     org: string;
     role: MembershipRole;
+    sourceId?: string;
   } | null>(null);
   const [isDuplicateOrgDialogOpen, setIsDuplicateOrgDialogOpen] = useState(false);
   const [isProcessingDuplicateOrg, setIsProcessingDuplicateOrg] = useState(false);
@@ -274,10 +275,12 @@ export function Organization() {
     org,
     role,
     force = false,
+    sourceId,
   }: {
     org: string;
     role: MembershipRole;
     force?: boolean;
+    sourceId?: string;
   }) => {
     if (!user || !user.id) {
       return;
@@ -298,7 +301,7 @@ export function Organization() {
 
       if (alreadyExists) {
         toast.warning("Organization already exists.");
-        setDuplicateOrgCandidate({ org: trimmedOrg, role });
+        setDuplicateOrgCandidate({ org: trimmedOrg, role, sourceId });
         setIsDuplicateOrgDialogOpen(true);
         throw new Error("Organization already exists");
       }
@@ -312,6 +315,7 @@ export function Organization() {
         org: trimmedOrg,
         role,
         force,
+        sourceId,
       };
 
       const response = await apiRequest<AddOrganizationApiResponse>(
@@ -360,6 +364,7 @@ export function Organization() {
       await handleAddOrganization({
         org: duplicateOrgCandidate.org,
         role: duplicateOrgCandidate.role,
+        sourceId: duplicateOrgCandidate.sourceId,
         force: true,
       });
       setIsDialogOpen(false);
@@ -888,6 +893,7 @@ export function Organization() {
         }}
         sourceProvider={sourceProvider}
         sourceUrl={sourceUrl}
+        sources={sources}
       />
 
       <AddOrganizationDialog
@@ -896,6 +902,7 @@ export function Organization() {
         setIsDialogOpen={setIsDialogOpen}
         sourceProvider={sourceProvider}
         sourceUrl={sourceUrl}
+        sources={sources}
       />
 
       <Dialog open={isDuplicateOrgDialogOpen} onOpenChange={(open) => {

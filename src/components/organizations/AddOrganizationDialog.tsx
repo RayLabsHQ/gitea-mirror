@@ -10,16 +10,35 @@ import {
   DialogTrigger,
 } from "../ui/dialog";
 import { LoaderCircle, Plus } from "lucide-react";
+import { SiGithub, SiGitea, SiGitlab } from "react-icons/si";
 import type { MembershipRole } from "@/types/organizations";
+import type { SourceApiRecord } from "@/types/config";
 import { RadioGroup, RadioGroupItem } from "../ui/radio";
 import { Label } from "../ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "../ui/select";
 import { parseGitHubOwnerReference } from "@/lib/utils/github-url";
 import {
   SOURCE_PROVIDER_DEFAULT_URLS,
   SOURCE_PROVIDER_LABELS,
   SOURCE_PROVIDER_ORG_NOUNS,
+  normalizeSourceUrl,
   type SourceProviderKind,
 } from "@/lib/source-providers/kinds";
+
+const SOURCE_PROVIDER_ICONS: Record<
+  SourceProviderKind,
+  React.ComponentType<{ className?: string }>
+> = {
+  github: SiGithub,
+  gitlab: SiGitlab,
+  gitea: SiGitea,
+};
 
 const inputClassName =
   "w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
@@ -31,14 +50,18 @@ interface AddOrganizationDialogProps {
     org,
     role,
     force,
+    sourceId,
   }: {
     org: string;
     role: MembershipRole;
     force?: boolean;
+    sourceId?: string;
   }) => Promise<void>;
   sourceProvider?: SourceProviderKind;
   /** Normalized instance URL of the configured source, for the placeholder. */
   sourceUrl?: string;
+  /** Connected sources; with more than one, the dialog asks which one to add from. */
+  sources?: SourceApiRecord[];
 }
 
 export default function AddOrganizationDialog({
@@ -47,19 +70,35 @@ export default function AddOrganizationDialog({
   onAddOrganization,
   sourceProvider = "github",
   sourceUrl,
+  sources,
 }: AddOrganizationDialogProps) {
   const [url, setUrl] = useState<string>("");
   const [org, setOrg] = useState<string>("");
   const [role, setRole] = useState<MembershipRole>("member");
+  const [sourceId, setSourceId] = useState<string>("");
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>("");
 
-  const providerLabel = SOURCE_PROVIDER_LABELS[sourceProvider];
-  const orgNoun = SOURCE_PROVIDER_ORG_NOUNS[sourceProvider];
+  const hasMultipleSources = !!sources && sources.length > 1;
+  // With several connected sources, the chosen one drives every
+  // provider-dependent label; otherwise the global source props do.
+  const selectedSource = hasMultipleSources
+    ? sources.find((source) => source.id === sourceId) ?? sources[0]
+    : undefined;
+  const effectiveProvider: SourceProviderKind =
+    selectedSource?.provider ?? sourceProvider;
+  const effectiveSourceUrl = selectedSource
+    ? normalizeSourceUrl(selectedSource.url, selectedSource.provider)
+    : sourceUrl;
+
+  const providerLabel = SOURCE_PROVIDER_LABELS[effectiveProvider];
+  const orgNoun = SOURCE_PROVIDER_ORG_NOUNS[effectiveProvider];
   const orgNounCapitalized = orgNoun.charAt(0).toUpperCase() + orgNoun.slice(1);
   // "an organization" but "a group".
   const orgNounWithArticle = `${/^[aeiou]/i.test(orgNoun) ? "an" : "a"} ${orgNoun}`;
-  const instanceUrl = (sourceUrl || SOURCE_PROVIDER_DEFAULT_URLS[sourceProvider]).replace(/\/+$/, "");
+  const instanceUrl = (
+    effectiveSourceUrl || SOURCE_PROVIDER_DEFAULT_URLS[effectiveProvider]
+  ).replace(/\/+$/, "");
   const urlPlaceholder = `${instanceUrl}/your-${orgNoun}`;
 
   const resetForm = () => {
@@ -67,6 +106,7 @@ export default function AddOrganizationDialog({
     setUrl("");
     setOrg("");
     setRole("member");
+    setSourceId("");
   };
 
   useEffect(() => {
@@ -74,6 +114,17 @@ export default function AddOrganizationDialog({
       resetForm();
     }
   }, [isDialogOpen]);
+
+  // Default the picker to the primary source (oldest first) whenever the
+  // selection is empty or points at a removed source.
+  useEffect(() => {
+    if (!hasMultipleSources) {
+      return;
+    }
+    if (!sources.some((source) => source.id === sourceId)) {
+      setSourceId(sources[0].id);
+    }
+  }, [hasMultipleSources, sources, sourceId]);
 
   /** Fill the name field from anything that names an account. */
   const applyReference = (value: string): boolean => {
@@ -119,7 +170,11 @@ export default function AddOrganizationDialog({
     try {
       setIsLoading(true);
 
-      await onAddOrganization({ org, role });
+      await onAddOrganization({
+        org,
+        role,
+        sourceId: selectedSource?.id,
+      });
 
       resetForm();
       setIsDialogOpen(false);
@@ -148,6 +203,36 @@ export default function AddOrganizationDialog({
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-y-6">
           <div className="space-y-4">
+            {hasMultipleSources && (
+              <div>
+                <label
+                  htmlFor="organizationSource"
+                  className="block text-sm font-medium mb-1.5"
+                >
+                  Source
+                </label>
+                <Select value={sourceId} onValueChange={setSourceId}>
+                  <SelectTrigger id="organizationSource" className="w-full">
+                    <SelectValue placeholder="Select source" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {sources.map((source) => {
+                      const SourceIcon =
+                        SOURCE_PROVIDER_ICONS[source.provider] ?? SiGithub;
+                      return (
+                        <SelectItem key={source.id} value={source.id}>
+                          <span className="flex items-center gap-2">
+                            <SourceIcon className="h-3.5 w-3.5" />
+                            {source.name}
+                          </span>
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
             <div>
               <label
                 htmlFor="organizationUrl"
@@ -221,7 +306,7 @@ export default function AddOrganizationDialog({
                   <RadioGroupItem value="admin" id="r2" />
                   <Label htmlFor="r2">Admin</Label>
                 </div>
-                {sourceProvider === "github" && (
+                {effectiveProvider === "github" && (
                   <div className="flex items-center space-x-2">
                     <RadioGroupItem value="billing_manager" id="r3" />
                     <Label htmlFor="r3">Billing Manager</Label>

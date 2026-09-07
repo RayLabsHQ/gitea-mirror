@@ -2,10 +2,12 @@ import { useMemo, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Plus, RefreshCw, Building2, Check, AlertCircle, Clock, MoreVertical, Ban, SlidersHorizontal, Trash2 } from "lucide-react";
+import { Plus, RefreshCw, Building2, Check, AlertCircle, Clock, MoreVertical, Ban, SlidersHorizontal, Trash2, Layers } from "lucide-react";
 import { SiGithub, SiGitea, SiGitlab } from "react-icons/si";
+import { toast } from "sonner";
 import type { MirrorOverrides, Organization } from "@/lib/db/schema";
 import type { FilterParams } from "@/types/filter";
+import type { SourceApiRecord } from "@/types/config";
 import Fuse from "fuse.js";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
@@ -25,6 +27,13 @@ import {
   type SourceProviderKind,
 } from "@/lib/source-providers/kinds";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -32,6 +41,15 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+
+const SOURCE_PROVIDER_ICONS: Record<
+  SourceProviderKind,
+  React.ComponentType<{ className?: string }>
+> = {
+  github: SiGithub,
+  gitlab: SiGitlab,
+  gitea: SiGitea,
+};
 
 interface OrganizationListProps {
   organizations: Organization[];
@@ -47,6 +65,8 @@ interface OrganizationListProps {
   sourceProvider?: SourceProviderKind;
   /** Normalized instance URL of the configured source; falls back to the cached config. */
   sourceUrl?: string;
+  /** Connected sources; with more than one, each card shows and edits its own source. */
+  sources?: SourceApiRecord[];
 }
 
 // Helper function to get status badge variant and icon
@@ -67,6 +87,67 @@ const getStatusBadge = (status: string | null) => {
   }
 };
 
+// Radix reserves the empty string as a Select value, so unpinned
+// organizations use this sentinel instead.
+const EVERY_SOURCE_VALUE = "every-source";
+
+function OrganizationSourceEditor({
+  sources,
+  value,
+  disabled = false,
+  onUpdateSource,
+}: {
+  sources: SourceApiRecord[];
+  value?: string | null;
+  disabled?: boolean;
+  onUpdateSource: (sourceId: string | null) => Promise<void>;
+}) {
+  const [isUpdating, setIsUpdating] = useState(false);
+
+  const handleValueChange = async (next: string) => {
+    setIsUpdating(true);
+    try {
+      await onUpdateSource(next === EVERY_SOURCE_VALUE ? null : next);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to update source");
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-2 w-full">
+      <span className="flex items-center gap-1.5 text-xs text-muted-foreground shrink-0">
+        <Layers className="h-3 w-3" />
+        Source
+      </span>
+      <Select
+        value={value ?? EVERY_SOURCE_VALUE}
+        onValueChange={(next) => void handleValueChange(next)}
+        disabled={disabled || isUpdating}
+      >
+        <SelectTrigger className="h-8 min-w-0 flex-1 text-xs">
+          <SelectValue placeholder="Source" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={EVERY_SOURCE_VALUE}>Every source</SelectItem>
+          {sources.map((source) => {
+            const SourceIcon = SOURCE_PROVIDER_ICONS[source.provider];
+            return (
+              <SelectItem key={source.id} value={source.id}>
+                <span className="flex items-center gap-2">
+                  <SourceIcon className="h-3.5 w-3.5" />
+                  {source.name}
+                </span>
+              </SelectItem>
+            );
+          })}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
 export function OrganizationList({
   organizations,
   isLoading,
@@ -80,16 +161,15 @@ export function OrganizationList({
   onDelete,
   sourceProvider = "github",
   sourceUrl: sourceUrlProp,
+  sources,
 }: OrganizationListProps) {
   const { giteaConfig, mirrorOptions, advancedOptions } = useGiteaConfig();
   const [overridesTarget, setOverridesTarget] = useState<Organization | null>(null);
 
-  const sourceLabel = SOURCE_PROVIDER_LABELS[sourceProvider];
+  const hasMultipleSources = !!sources && sources.length > 1;
   const sourceUrl =
     sourceUrlProp ??
     normalizeSourceUrl(getCachedConfig()?.githubConfig?.url, sourceProvider);
-  const sourceShortLabel = sourceProvider === "gitea" ? "Gitea" : sourceLabel;
-  const SourceIcon = { github: SiGithub, gitlab: SiGitlab, gitea: SiGitea }[sourceProvider];
 
   const handleUpdateMirrorOverrides = async (
     orgId: string,
@@ -146,6 +226,27 @@ export function OrganizationList({
     }
 
     // Refresh organizations data
+    if (onRefresh) {
+      await onRefresh();
+    }
+  };
+
+  // Pin an organization to one source, or clear the pin with null (the org
+  // then follows every connected source).
+  const handleUpdateSource = async (orgId: string, sourceId: string | null) => {
+    const response = await fetch(`${withBase("/api/organizations")}/${orgId}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ sourceId }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      throw new Error(errorData.error || "Failed to update organization");
+    }
+
     if (onRefresh) {
       await onRefresh();
     }
@@ -252,6 +353,16 @@ export function OrganizationList({
         const isLoading = loadingOrgIds.has(org.id ?? "");
         const statusBadge = getStatusBadge(org.status);
         const StatusIcon = statusBadge.icon;
+        const orgSources = sources ?? [];
+        const pinnedSource =
+          orgSources.find((source) => source.id === org.sourceId) ?? null;
+        const orgProvider: SourceProviderKind = pinnedSource?.provider ?? sourceProvider;
+        const orgSourceUrl = pinnedSource
+          ? normalizeSourceUrl(pinnedSource.url, pinnedSource.provider)
+          : sourceUrl;
+        const orgSourceLabel = SOURCE_PROVIDER_LABELS[orgProvider];
+        const orgSourceShortLabel = orgProvider === "gitea" ? "Gitea" : orgSourceLabel;
+        const OrgSourceIcon = SOURCE_PROVIDER_ICONS[orgProvider];
 
         return (
           <Card 
@@ -294,6 +405,16 @@ export function OrganizationList({
                     >
                       {org.membershipRole}
                     </span>
+                    {hasMultipleSources && (
+                      <Badge
+                        variant="outline"
+                        className="gap-1 px-1.5 font-normal text-[11px]"
+                        title={`Source: ${pinnedSource?.name ?? orgSourceLabel}`}
+                      >
+                        <OrgSourceIcon className="h-3 w-3" />
+                        {pinnedSource?.name ?? orgSourceShortLabel}
+                      </Badge>
+                    )}
                   </div>
                   <div className="text-xs text-muted-foreground">
                     <span className="font-semibold">{org.repositoryCount}</span>
@@ -340,6 +461,18 @@ export function OrganizationList({
                   isUpdating={isLoading}
                 />
               </div>
+
+              {/* Source picker (multi-source only) */}
+              {hasMultipleSources && (
+                <div>
+                  <OrganizationSourceEditor
+                    sources={orgSources}
+                    value={org.sourceId}
+                    disabled={isLoading}
+                    onUpdateSource={(newSourceId) => handleUpdateSource(org.id!, newSourceId)}
+                  />
+                </div>
+              )}
             </div>
 
             {/* Desktop Layout */}
@@ -367,6 +500,16 @@ export function OrganizationList({
                 
                 {/* Status badge */}
                 <div className="flex items-center gap-2">
+                  {hasMultipleSources && (
+                    <Badge
+                      variant="outline"
+                      className="gap-1 px-1.5 font-normal text-[11px]"
+                      title={`Source: ${pinnedSource?.name ?? orgSourceLabel}`}
+                    >
+                      <OrgSourceIcon className="h-3 w-3" />
+                      {pinnedSource?.name ?? orgSourceShortLabel}
+                    </Badge>
+                  )}
                   {hasMirrorOverrides(org.mirrorOverrides) && (
                     <Badge
                       variant="outline"
@@ -402,6 +545,18 @@ export function OrganizationList({
                   isUpdating={isLoading}
                 />
               </div>
+
+              {/* Source picker (multi-source only) */}
+              {hasMultipleSources && (
+                <div className="mb-4">
+                  <OrganizationSourceEditor
+                    sources={orgSources}
+                    value={org.sourceId}
+                    disabled={isLoading}
+                    onUpdateSource={(newSourceId) => handleUpdateSource(org.id!, newSourceId)}
+                  />
+                </div>
+              )}
 
               {/* Error message for failed orgs */}
               {org.status === "failed" && org.errorMessage && (
@@ -602,14 +757,14 @@ export function OrganizationList({
                 })()}
                 <Button variant="outline" size="default" asChild className="flex-1 h-10 min-w-0">
                   <a
-                    href={`${sourceUrl}/${org.name}`}
+                    href={`${orgSourceUrl}/${org.name}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    title={`View on ${sourceLabel}`}
+                    title={`View on ${orgSourceLabel}`}
                     className="flex items-center justify-center gap-2"
                   >
-                     <SourceIcon className="h-4 w-4 flex-shrink-0" />
-                     <span className="text-xs">{sourceShortLabel}</span>
+                    <OrgSourceIcon className="h-4 w-4 flex-shrink-0" />
+                    <span className="text-xs">{orgSourceShortLabel}</span>
                   </a>
                 </Button>
               </div>
@@ -771,20 +926,20 @@ export function OrganizationList({
                           </>
                         )}
                       </Button>
-                      <Button 
-                        variant="ghost" 
-                        size="sm" 
+                      <Button
+                        variant="ghost"
+                        size="sm"
                         asChild
                         className="rounded-none rounded-r-md"
                       >
                         <a
-                          href={`${sourceUrl}/${org.name}`}
+                          href={`${orgSourceUrl}/${org.name}`}
                           target="_blank"
                           rel="noopener noreferrer"
-                          title={`View on ${sourceLabel}`}
+                          title={`View on ${orgSourceLabel}`}
                         >
-                          <SourceIcon className="h-4 w-4 mr-2" />
-                          {sourceShortLabel}
+                          <OrgSourceIcon className="h-4 w-4 mr-2" />
+                          {orgSourceShortLabel}
                         </a>
                       </Button>
                     </div>
