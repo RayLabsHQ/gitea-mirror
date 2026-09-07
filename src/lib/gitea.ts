@@ -22,6 +22,7 @@ import {
 } from "./source-providers";
 import {
   decryptSourceToken,
+  findSourceForOrganization,
   findSourceForRepository,
   listSources,
 } from "./sources";
@@ -2198,11 +2199,28 @@ export async function mirrorGitHubOrgToGitea({
       targetOrgName = config.giteaConfig?.defaultOwner || "";
     }
 
-    //query the db with the org name and get the repos
-    const orgRepos = await db
-      .select()
-      .from(repositories)
-      .where(eq(repositories.organization, organization.name));
+    // Query the db with the org name and get the repos. An organization
+    // pinned to one source only mirrors that source's repositories of the
+    // name; unpinned organizations (and pins whose source is gone) keep the
+    // pre-multi-source behavior of following every connected source.
+    const pinnedSource = findSourceForOrganization(
+      organization,
+      await listSources(config.userId)
+    );
+    const orgRepos = pinnedSource
+      ? await db
+          .select()
+          .from(repositories)
+          .where(
+            and(
+              eq(repositories.organization, organization.name),
+              eq(repositories.sourceId, pinnedSource.id)
+            )
+          )
+      : await db
+          .select()
+          .from(repositories)
+          .where(eq(repositories.organization, organization.name));
 
     // The organization's fork policy (override -> global skipForks) drops
     // forked repositories from the batch so they are neither mirrored here

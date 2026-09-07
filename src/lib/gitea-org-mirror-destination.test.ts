@@ -42,6 +42,24 @@ let orgRepoRows: any[] = [];
 let orgConfigRows: any[] = [];
 /** Counts selects against the repositories table. */
 let repoSelectCount = 0;
+/** Leaf values referenced by each repositories select's where() condition. */
+let repoSelectWhereValues: unknown[][] = [];
+
+/**
+ * Drizzle conditions are cyclic (JSON.stringify throws) and the mocked
+ * tables have no column objects, so scoping assertions walk queryChunks
+ * and collect the primitive leaves (the compared values) they mention.
+ */
+function conditionLeafValues(node: any, depth = 0): unknown[] {
+  if (node == null || depth > 8) return [];
+  if (typeof node !== "object") return [node];
+  const leaves: unknown[] = [];
+  if (Array.isArray(node.value)) leaves.push(...node.value);
+  for (const chunk of node.queryChunks ?? []) {
+    leaves.push(...conditionLeafValues(chunk, depth + 1));
+  }
+  return leaves;
+}
 /** Every httpPost call: { url, payload }. */
 let httpPostCalls: Array<{ url: string; payload: any }> = [];
 /** Every org get-or-create: orgName -> deterministic id. */
@@ -80,6 +98,7 @@ mock.module("@/lib/db", () => {
         where: (_cond: any) => {
           if (table === repositoriesTable) {
             repoSelectCount++;
+            repoSelectWhereValues.push(conditionLeafValues(_cond));
             // First repositories select in mirrorGitHubOrgToGitea is the
             // orgRepos query; everything after (idempotency checks, name
             // claims) must see no rows.
@@ -141,7 +160,7 @@ mock.module("@/lib/sources", () => ({
   ),
   findSourceForRepository: (repo: any, list: any[]) => {
     if (repo.sourceId) {
-      const byId = list.find((source) => source.id === repo.sourceId);
+      const byId = list.find((source: any) => source.id === repo.sourceId);
       if (byId) return byId;
     }
     const source = getRepositorySource(repo);
@@ -151,6 +170,8 @@ mock.module("@/lib/sources", () => ({
       ) ?? null
     );
   },
+  findSourceForOrganization: (org: { sourceId?: string | null }, list: any[]) =>
+    org.sourceId ? list.find((source: any) => source.id === org.sourceId) ?? null : null,
   decryptSourceToken: (token: string | null | undefined) => token ?? "",
   resolveGitHubApiBaseUrl: (url: string | null | undefined) => {
     const trimmed = url?.trim().replace(/\/+$/, "") ?? "";
@@ -290,6 +311,7 @@ beforeEach(() => {
   orgRepoRows = [];
   orgConfigRows = [];
   repoSelectCount = 0;
+  repoSelectWhereValues = [];
   httpPostCalls = [];
   orgCreateCalls = [];
 });
@@ -487,5 +509,50 @@ describe.skipIf(!isChild)("mirrorGitHubOrgToGitea fork policy", () => {
     await mirrorGitHubOrgToGitea({ organization, octokit: fakeOctokit, config });
 
     expect(migrateCalls().length).toBe(0);
+  });
+});
+
+describe.skipIf(!isChild)("mirrorGitHubOrgToGitea source scoping", () => {
+  // The mock db ignores where() conditions, so the scoping is asserted on
+  // the compared values of the orgRepos query (the first repositories
+  // select) rather than on filtered rows.
+  function orgRepoQueryMentions(value: unknown): boolean {
+    return (repoSelectWhereValues[0] ?? []).includes(value);
+  }
+
+  test("an organization pinned to a source scopes the orgRepos query to it", async () => {
+    const config = makeConfig({ githubConfig: { mirrorStrategy: "preserve" } });
+    const organization = makeOrg({ sourceId: "source-1" });
+    orgRepoRows = [makeRepo()];
+    orgConfigRows = [organization];
+
+    await mirrorGitHubOrgToGitea({ organization, octokit: fakeOctokit, config });
+
+    expect(orgRepoQueryMentions("source-1")).toBe(true);
+    expect(migrateCalls().length).toBe(1);
+  });
+
+  test("an unpinned organization keeps the name-only orgRepos query", async () => {
+    const config = makeConfig({ githubConfig: { mirrorStrategy: "preserve" } });
+    const organization = makeOrg();
+    orgRepoRows = [makeRepo()];
+    orgConfigRows = [organization];
+
+    await mirrorGitHubOrgToGitea({ organization, octokit: fakeOctokit, config });
+
+    expect(orgRepoQueryMentions("source-1")).toBe(false);
+    expect(migrateCalls().length).toBe(1);
+  });
+
+  test("a pin whose source was deleted falls back to the name-only query", async () => {
+    const config = makeConfig({ githubConfig: { mirrorStrategy: "preserve" } });
+    const organization = makeOrg({ sourceId: "source-deleted" });
+    orgRepoRows = [makeRepo()];
+    orgConfigRows = [organization];
+
+    await mirrorGitHubOrgToGitea({ organization, octokit: fakeOctokit, config });
+
+    expect(orgRepoQueryMentions("source-deleted")).toBe(false);
+    expect(migrateCalls().length).toBe(1);
   });
 });
