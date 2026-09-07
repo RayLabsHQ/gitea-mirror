@@ -106,6 +106,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
           avatarUrl: org.avatarUrl,
           membershipRole: org.membershipRole,
           isIncluded: false,
+          sourceId: source.id,
           status: org.status,
           repositoryCount: org.repositoryCount,
           createdAt: new Date(),
@@ -122,6 +123,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
           avatarUrl: org.avatarUrl,
           membershipRole: "member" as const,
           isIncluded: false,
+          sourceId: source.id,
           status: "failed" as const,
           errorMessage: org.reason,
           repositoryCount: 0,
@@ -163,7 +165,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
           );
           insertedOrgs = newOrgs.filter((o) => !existingOrgMap.has(o.normalizedName));
 
-          // Update previously failed orgs that now succeeded
+          // Update previously failed orgs that now succeeded. The pin must
+          // follow the recovering source, or the org mirror keeps scoping
+          // to the source the failure was recorded under.
           const recoveredOrgs = newOrgs.filter(
             (o) => existingOrgMap.get(o.normalizedName) === "failed"
           );
@@ -176,6 +180,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
                 repositoryCount: org.repositoryCount,
                 avatarUrl: org.avatarUrl,
                 membershipRole: org.membershipRole,
+                sourceId: org.sourceId,
                 updatedAt: new Date(),
               })
               .where(

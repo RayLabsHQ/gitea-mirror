@@ -45,6 +45,11 @@ export const GET: APIRoute = async ({ request, locals }) => {
       .where(eq(organizations.userId, userId))
       .orderBy(sql`name COLLATE NOCASE`);
 
+    const { listSources } = await import("@/lib/sources");
+    const connectedSourceIds = new Set(
+      (await listSources(userId)).map((source) => source.id)
+    );
+
     // Calculate repository breakdowns for each organization
     const orgsWithBreakdown = await Promise.all(
       rawOrgs.map(async (org) => {
@@ -53,6 +58,13 @@ export const GET: APIRoute = async ({ request, locals }) => {
           eq(repositories.userId, userId),
           eq(repositories.organization, org.name)
         ];
+
+        // A pinned organization only counts its source's repositories of
+        // the name; dangling pins (source deleted) fall back to every
+        // source, the same rule the org mirror applies.
+        if (org.sourceId && connectedSourceIds.has(org.sourceId)) {
+          baseConditions.push(eq(repositories.sourceId, org.sourceId));
+        }
 
         if (!githubConfig.mirrorStarred) {
           baseConditions.push(eq(repositories.isStarred, false));
