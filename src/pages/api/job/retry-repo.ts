@@ -11,7 +11,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { getGiteaRepoOwnerAsync, isRepoPresentInGitea } from "@/lib/gitea";
 import { mirrorRepositoryToDestination, syncRepositoryOnDestination } from "@/lib/mirror-dispatch";
 import { usesPushEngine } from "@/lib/destination-connection";
-import { createGitHubClient } from "@/lib/github";
+import { createGitHubClient, createPublicGitHubClient } from "@/lib/github";
 import { repoStatusEnum, repositoryVisibilityEnum } from "@/types/Repository";
 import type { RetryRepoRequest, RetryRepoResponse } from "@/types/retry";
 import { processWithRetry } from "@/lib/utils/concurrency";
@@ -59,9 +59,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     const config = configResult[0];
 
-    if (!config || !config.githubConfig.token || !config.giteaConfig?.token) {
+    if (!config || !config.giteaConfig?.token) {
       return new Response(
-        JSON.stringify({ error: "Missing GitHub or Gitea configuration." }),
+        JSON.stringify({ error: "Missing destination configuration." }),
         { status: 400, headers: { "Content-Type": "application/json" } }
       );
     }
@@ -94,13 +94,17 @@ export const POST: APIRoute = async ({ request, locals }) => {
       const octokitForSource = (source: SourceRecord | null) => {
         if (!source || source.provider !== "github") return null;
         const token = decryptSourceToken(source.token);
-        if (!token) return null;
-        return createGitHubClient(
-          token,
-          userId,
-          source.username || undefined,
-          resolveGitHubApiBaseUrl(source.url)
-        );
+        // A tokenless GitHub source still gets an anonymous public client
+        // (60 req/hr) so public-repo metadata mirrors; an empty token must
+        // never reach createGitHubClient, which would send `auth: ""`.
+        return token
+          ? createGitHubClient(
+              token,
+              userId,
+              source.username || undefined,
+              resolveGitHubApiBaseUrl(source.url)
+            )
+          : createPublicGitHubClient(resolveGitHubApiBaseUrl(source.url));
       };
 
       // Define the concurrency limit - adjust based on API rate limits
@@ -166,15 +170,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
             await syncRepositoryOnDestination({ config, repository: repoData });
             console.log(`Synced existing repo: ${repo.name}`);
           } else {
-            // If the repository doesn't exist, mirror it
-            if (!config.githubConfig.token) {
-              throw new Error("GitHub token is missing.");
-            }
-
-            if (!octokit) {
-              throw new Error("Octokit client is not initialized.");
-            }
-
+            // If the repository doesn't exist, mirror it. GitHub sources
+            // pass their own client (anonymous for tokenless public ones);
+            // other hosts mirror code-only with a null client.
             console.log(`Importing repo: ${repo.name} to owner: ${owner}`);
 
             // For single-org strategy, or when mirroring to an org,
