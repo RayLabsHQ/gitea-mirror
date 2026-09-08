@@ -30,6 +30,106 @@ const MyOctokit: any = (Octokit as any)?.plugin?.call
   : (Octokit as any);
 
 /**
+ * Throttling and rate-limit handling shared by every Octokit this module
+ * builds, authenticated or anonymous. `userId` is optional: without it the
+ * handlers only log and schedule the retry — there is no per-user
+ * rate-limit state or UI event to update for a tokenless source.
+ */
+function githubThrottleOptions(userId?: string) {
+  return {
+    onRateLimit: async (
+      retryAfter: number,
+      options: any,
+      octokit: any,
+      retryCount: number,
+    ) => {
+      const isSearch = options.url.includes("/search/");
+      const maxRetries = isSearch ? 5 : 3; // Search endpoints get more retries
+
+      console.warn(
+        `[GitHub] Rate limit hit for ${options.method} ${options.url}. Retry ${retryCount + 1}/${maxRetries}`,
+      );
+
+      // Update rate limit status and notify UI (if available)
+      if (userId && RateLimitManager) {
+        await RateLimitManager.updateFromResponse(userId, {
+          "retry-after": retryAfter.toString(),
+          "x-ratelimit-remaining": "0",
+          "x-ratelimit-reset": (Date.now() / 1000 + retryAfter).toString(),
+        });
+      }
+
+      if (userId && publishEvent) {
+        await publishEvent({
+          userId,
+          channel: "rate-limit",
+          payload: {
+            type: "rate-limited",
+            provider: "github",
+            retryAfter,
+            retryCount,
+            endpoint: options.url,
+            message: `Rate limit hit. Waiting ${retryAfter}s before retry ${retryCount + 1}/${maxRetries}...`,
+          },
+        });
+      }
+
+      // Retry with exponential backoff
+      if (retryCount < maxRetries) {
+        console.log(`[GitHub] Waiting ${retryAfter}s before retry...`);
+        return true;
+      }
+
+      // Max retries reached
+      console.error(
+        `[GitHub] Max retries (${maxRetries}) reached for ${options.url}`,
+      );
+      return false;
+    },
+    onSecondaryRateLimit: async (
+      retryAfter: number,
+      options: any,
+      octokit: any,
+      retryCount: number,
+    ) => {
+      console.warn(
+        `[GitHub] Secondary rate limit hit for ${options.method} ${options.url}`,
+      );
+
+      // Update status and notify UI (if available)
+      if (userId && publishEvent) {
+        await publishEvent({
+          userId,
+          channel: "rate-limit",
+          payload: {
+            type: "secondary-limited",
+            provider: "github",
+            retryAfter,
+            retryCount,
+            endpoint: options.url,
+            message: `Secondary rate limit hit. Waiting ${retryAfter}s...`,
+          },
+        });
+      }
+
+      // Retry up to 2 times for secondary rate limits
+      if (retryCount < 2) {
+        console.log(
+          `[GitHub] Waiting ${retryAfter}s for secondary rate limit...`,
+        );
+        return true;
+      }
+
+      return false;
+    },
+    // Throttle options to prevent hitting limits
+    fallbackSecondaryRateRetryAfter: 60, // Wait 60s on secondary rate limit
+    minimumSecondaryRateRetryAfter: 5, // Min 5s wait
+    retryAfterBaseValue: 1000, // Base retry in ms
+  };
+}
+
+/**
  * Creates an authenticated Octokit instance with rate limit tracking and throttling
  */
 export function createGitHubClient(
@@ -67,97 +167,7 @@ export function createGitHubClient(
         "x-github-api-version": "2022-11-28", // Use a stable API version
       },
     },
-    throttle: {
-      onRateLimit: async (
-        retryAfter: number,
-        options: any,
-        octokit: any,
-        retryCount: number,
-      ) => {
-        const isSearch = options.url.includes("/search/");
-        const maxRetries = isSearch ? 5 : 3; // Search endpoints get more retries
-
-        console.warn(
-          `[GitHub] Rate limit hit for ${options.method} ${options.url}. Retry ${retryCount + 1}/${maxRetries}`,
-        );
-
-        // Update rate limit status and notify UI (if available)
-        if (userId && RateLimitManager) {
-          await RateLimitManager.updateFromResponse(userId, {
-            "retry-after": retryAfter.toString(),
-            "x-ratelimit-remaining": "0",
-            "x-ratelimit-reset": (Date.now() / 1000 + retryAfter).toString(),
-          });
-        }
-
-        if (userId && publishEvent) {
-          await publishEvent({
-            userId,
-            channel: "rate-limit",
-            payload: {
-              type: "rate-limited",
-              provider: "github",
-              retryAfter,
-              retryCount,
-              endpoint: options.url,
-              message: `Rate limit hit. Waiting ${retryAfter}s before retry ${retryCount + 1}/${maxRetries}...`,
-            },
-          });
-        }
-
-        // Retry with exponential backoff
-        if (retryCount < maxRetries) {
-          console.log(`[GitHub] Waiting ${retryAfter}s before retry...`);
-          return true;
-        }
-
-        // Max retries reached
-        console.error(
-          `[GitHub] Max retries (${maxRetries}) reached for ${options.url}`,
-        );
-        return false;
-      },
-      onSecondaryRateLimit: async (
-        retryAfter: number,
-        options: any,
-        octokit: any,
-        retryCount: number,
-      ) => {
-        console.warn(
-          `[GitHub] Secondary rate limit hit for ${options.method} ${options.url}`,
-        );
-
-        // Update status and notify UI (if available)
-        if (userId && publishEvent) {
-          await publishEvent({
-            userId,
-            channel: "rate-limit",
-            payload: {
-              type: "secondary-limited",
-              provider: "github",
-              retryAfter,
-              retryCount,
-              endpoint: options.url,
-              message: `Secondary rate limit hit. Waiting ${retryAfter}s...`,
-            },
-          });
-        }
-
-        // Retry up to 2 times for secondary rate limits
-        if (retryCount < 2) {
-          console.log(
-            `[GitHub] Waiting ${retryAfter}s for secondary rate limit...`,
-          );
-          return true;
-        }
-
-        return false;
-      },
-      // Throttle options to prevent hitting limits
-      fallbackSecondaryRateRetryAfter: 60, // Wait 60s on secondary rate limit
-      minimumSecondaryRateRetryAfter: 5, // Min 5s wait
-      retryAfterBaseValue: 1000, // Base retry in ms
-    },
+    throttle: githubThrottleOptions(userId),
   });
 
   // Add rate limit tracking hooks if userId is provided and RateLimitManager is available
@@ -219,6 +229,44 @@ export function createGitHubClient(
   });
 
   return octokit;
+}
+
+/**
+ * Creates an unauthenticated Octokit instance for public-only GitHub sources.
+ *
+ * GitHub serves anonymous clients a 60 req/hr budget instead of the
+ * 5000 req/hr an authenticated client gets, so the throttling options of
+ * createGitHubClient must be attached here too: a metadata sync fires
+ * dozens of requests, and without the onRateLimit/onSecondaryRateLimit
+ * backoff an exhausted budget fails the sync instead of waiting out
+ * x-ratelimit-reset. There is no userId, so the handlers only log and
+ * schedule retries. Never pass an empty token to createGitHubClient
+ * instead — Octokit treats `auth: ""` as an invalid credential header.
+ */
+export function createPublicGitHubClient(apiBaseUrl?: string): Octokit {
+  // Same base URL resolution as createGitHubClient: an explicit apiBaseUrl
+  // (a GitHub Enterprise source's /api/v3) replaces the env default;
+  // otherwise support GH_API_URL (preferred) or GITHUB_API_URL (may conflict
+  // with GitHub Actions, which sets it to https://api.github.com by default).
+  const baseUrl = apiBaseUrl || process.env.GH_API_URL || process.env.GITHUB_API_URL || "https://api.github.com";
+
+  return new MyOctokit({
+    userAgent: "gitea-mirror/3.5.4",
+    baseUrl, // Configurable for E2E testing
+    log: {
+      debug: () => {},
+      info: console.log,
+      warn: console.warn,
+      error: console.error,
+    },
+    request: {
+      headers: {
+        accept: "application/vnd.github.v3+json",
+        "x-github-api-version": "2022-11-28", // Use a stable API version
+      },
+    },
+    throttle: githubThrottleOptions(),
+  });
 }
 
 /**

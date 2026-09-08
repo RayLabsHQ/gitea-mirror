@@ -6,10 +6,11 @@
  * back to an unauthenticated client, which is enough to add public
  * repositories by URL.
  */
-import { Octokit } from "@octokit/rest";
+import type { Octokit } from "@octokit/rest";
 import type { Config } from "@/lib/db/schema";
 import {
   createGitHubClient,
+  createPublicGitHubClient,
   getGithubOrganizations,
   getGithubRepositories,
   getGithubStarredRepositories,
@@ -116,6 +117,8 @@ export class GitHubSourceProvider implements SourceProvider {
     // A GitHub Enterprise source URL drives the API base; github.com (the
     // default) keeps the GH_API_URL env default.
     const apiBaseUrl = resolveGitHubApiBaseUrl(connection.url);
+    // Tokenless: the throttled public client, never an empty token — anonymous
+    // GitHub runs at 60 req/hr, so the onRateLimit backoff must stay attached.
     this.octokit = connection.token.trim()
       ? createGitHubClient(
           connection.token,
@@ -123,7 +126,7 @@ export class GitHubSourceProvider implements SourceProvider {
           connection.username || undefined,
           apiBaseUrl
         )
-      : new Octokit({ baseUrl: apiBaseUrl || githubApiBaseUrl() });
+      : createPublicGitHubClient(apiBaseUrl);
   }
 
   private stamp(repos: GitRepo[]): GitRepo[] {
@@ -184,16 +187,33 @@ export class GitHubSourceProvider implements SourceProvider {
     // the token can reach through several paths is only imported once.
     const seen = new Set<number>();
     const collected: GithubRestRepository[] = [];
-    for (const type of ["public", "private", "member"] as const) {
-      const page = await this.octokit.paginate(this.octokit.repos.listForOrg, {
-        org: name,
-        type,
-        per_page: 100,
-      });
-      for (const repo of page) {
-        if (seen.has(repo.id)) continue;
-        seen.add(repo.id);
-        collected.push(repo as GithubRestRepository);
+    // An unauthenticated client can only reach the public listing, so the
+    // private/member passes would 401 by design; skip them entirely. With a
+    // token, an org that refuses those listings must not cost us the public
+    // repos either.
+    const types = this.connection.token.trim()
+      ? (["public", "private", "member"] as const)
+      : (["public"] as const);
+    for (const type of types) {
+      try {
+        const page = await this.octokit.paginate(this.octokit.repos.listForOrg, {
+          org: name,
+          type,
+          per_page: 100,
+        });
+        for (const repo of page) {
+          if (seen.has(repo.id)) continue;
+          seen.add(repo.id);
+          collected.push(repo as GithubRestRepository);
+        }
+      } catch (error) {
+        // A token that cannot see this org's private/member listings (401
+        // expired/insufficient token, 403 SAML-protected or blocked) must
+        // not lose the public repos. Any other failure, including on the
+        // public pass, is a real error.
+        const status = statusOf(error);
+        if (type !== "public" && (status === 401 || status === 403)) continue;
+        throw error;
       }
     }
     return collected
