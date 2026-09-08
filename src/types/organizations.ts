@@ -1,6 +1,7 @@
 import type { Organization } from "@/lib/db/schema";
 import { z } from "zod";
 import type { RepoStatus } from "./Repository";
+import type { SourceProviderKind } from "@/lib/source-providers/kinds";
 
 export const membershipRoleEnum = z.enum([
   "member",
@@ -48,6 +49,10 @@ export interface AddOrganizationApiRequest {
   force?: boolean;
   /** Which connected source to import from; defaults to the primary source. */
   sourceId?: string;
+  /** Public mode: import from this provider without any configured source. */
+  provider?: SourceProviderKind;
+  /** Instance URL for the provider; defaults to the provider's canonical host. */
+  sourceUrl?: string;
 }
 
 export interface AddOrganizationApiResponse {

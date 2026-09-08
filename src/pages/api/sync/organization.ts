@@ -5,10 +5,16 @@ import { jsonResponse, createSecureErrorResponse } from "@/lib/utils";
 import type {
   AddOrganizationApiRequest,
   AddOrganizationApiResponse,
+  GitOrg,
 } from "@/types/organizations";
-import type { RepoStatus } from "@/types/Repository";
 import { v4 as uuidv4 } from "uuid";
-import { isValidSourceOrgName } from "@/lib/source-providers";
+import {
+  SOURCE_PROVIDER_KINDS,
+  isSourceProviderKind,
+  isValidSourceOrgName,
+  normalizeSourceUrl,
+} from "@/lib/source-providers/kinds";
+import type { SourceRecord } from "@/lib/sources";
 import { normalizeGitRepoToInsert, calcBatchSizeForInsert } from "@/lib/repo-utils";
 import { resolveOrganizationSkipForks } from "@/lib/utils/mirror-overrides";
 import { requireAuthenticatedUserId } from "@/lib/auth-guards";
@@ -29,6 +35,19 @@ export const POST: APIRoute = async ({ request, locals }) => {
     }
     const sourceId = body.sourceId?.trim() || undefined;
 
+    // Public mode sends a provider (and optionally an instance URL) instead
+    // of a sourceId. Unknown providers are rejected up front; falling through
+    // to the primary source would silently import from the wrong host.
+    if (body.provider !== undefined && !isSourceProviderKind(body.provider)) {
+      return jsonResponse({
+        data: {
+          success: false,
+          error: `Unsupported provider. Supported providers: ${SOURCE_PROVIDER_KINDS.join(", ")}.`,
+        },
+        status: 400,
+      });
+    }
+
     if (!org || !role) {
       return jsonResponse({
         data: { success: false, error: "Missing org or role" },
@@ -39,9 +58,8 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const trimmedOrg = org.trim();
     const normalizedOrg = trimmedOrg.toLowerCase();
 
-    // The force re-add branch returns before the source resolution further
-    // down, so a pin has to be ownership-checked up front or it would skip
-    // validation entirely.
+    // A sourceId pin is ownership-checked before any branch that could store
+    // it, so neither the force re-pin nor a full import skips validation.
     if (sourceId) {
       const { listSources } = await import("@/lib/sources");
       const owned = (await listSources(userId)).some((s) => s.id === sourceId);
@@ -89,13 +107,61 @@ export const POST: APIRoute = async ({ request, locals }) => {
       });
     }
 
+    const { listSources, createSource, DuplicateSourceError } = await import("@/lib/sources");
+    const { createSourceProviderFromSource } = await import("@/lib/source-providers");
+
+    // Resolve the source to import from: an explicit pin, the provider named
+    // in the request (find-or-create a tokenless row so public organizations
+    // import with nothing configured), or the primary source as before. The
+    // force branch below also re-pins from this resolution, so it runs before
+    // that branch; it needs no config.
+    let userSources = await listSources(userId);
+    let source: SourceRecord | undefined;
+    if (sourceId) {
+      source = userSources.find((s) => s.id === sourceId);
+    } else if (body.provider && isSourceProviderKind(body.provider)) {
+      const provider = body.provider;
+      const url = normalizeSourceUrl(body.sourceUrl, provider);
+      const findTokenless = (rows: SourceRecord[]) =>
+        rows.find((s) => s.provider === provider && s.url === url && !s.username);
+      source = findTokenless(userSources);
+      if (!source) {
+        try {
+          source = await createSource(userId, {
+            provider,
+            url,
+            username: "",
+            token: "",
+          });
+        } catch (error) {
+          if (!(error instanceof DuplicateSourceError)) throw error;
+          // A concurrent request created the same tokenless row; reuse it.
+          userSources = await listSources(userId);
+          source = findTokenless(userSources);
+        }
+      }
+    } else {
+      // May be tokenless: providers then see public listings only.
+      source = userSources[0];
+    }
+
+    if (sourceId && !source) {
+      return jsonResponse({
+        data: {
+          success: false,
+          error: `No source with id ${sourceId} belongs to this user`,
+        },
+        status: 400,
+      });
+    }
+
     if (existingOrg && force) {
       const [updatedOrg] = await db
         .update(organizations)
         .set({
           membershipRole: role,
           normalizedName: normalizedOrg,
-          ...(sourceId ? { sourceId } : {}),
+          ...(source ? { sourceId: source.id } : {}),
           updatedAt: new Date(),
         })
         .where(eq(organizations.id, existingOrg.id))
@@ -136,30 +202,6 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     const configId = config.id;
 
-    if (!config.githubConfig?.token) {
-      return jsonResponse({
-        data: { error: "Source token not configured" },
-        status: 401,
-      });
-    }
-
-    const { listSources } = await import("@/lib/sources");
-    const { createSourceProviderFromSource } = await import("@/lib/source-providers");
-    const userSources = await listSources(userId);
-    const source = sourceId
-      ? userSources.find((s) => s.id === sourceId)
-      : userSources[0];
-
-    if (sourceId && !source) {
-      return jsonResponse({
-        data: {
-          success: false,
-          error: `No source with id ${sourceId} belongs to this user`,
-        },
-        status: 400,
-      });
-    }
-
     if (!source) {
       return jsonResponse({
         data: {
@@ -172,9 +214,17 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     const sourceProvider = createSourceProviderFromSource(source, { userId });
 
-    // Fetch org metadata
-    const orgData = await sourceProvider.getOrganization(trimmedOrg);
-    if (!orgData) {
+    // Fetch org metadata. Tokenless sources can be rate limited (403/429) on
+    // this call while the repository listing below still works, so a throw
+    // falls back to a minimal record; only a null result (not found) aborts.
+    let orgMetadata: GitOrg | null = null;
+    let metadataFetched = true;
+    try {
+      orgMetadata = await sourceProvider.getOrganization(trimmedOrg);
+    } catch {
+      metadataFetched = false;
+    }
+    if (!orgMetadata && metadataFetched) {
       return jsonResponse({
         data: {
           success: false,
@@ -184,8 +234,19 @@ export const POST: APIRoute = async ({ request, locals }) => {
       });
     }
 
-    // Fetch every repository the token can see in the organization
+    // Fetch every repository the source can see in the organization
     const orgRepos = await sourceProvider.listOrganizationRepositories(trimmedOrg);
+
+    const orgData: GitOrg = orgMetadata ?? {
+      name: trimmedOrg,
+      avatarUrl: "",
+      membershipRole: role,
+      isIncluded: false,
+      status: "imported",
+      repositoryCount: orgRepos.length,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
 
     // Both existing-org branches above returned, so this organization is new
     // and has no overrides: the fork policy resolves from the global switch.
@@ -224,11 +285,12 @@ export const POST: APIRoute = async ({ request, locals }) => {
       configId,
       name: orgData.name,
       normalizedName: normalizedOrg,
-      avatarUrl: orgData.avatarUrl,
+      // Column is NOT NULL; the rate-limit fallback record carries "".
+      avatarUrl: orgData.avatarUrl || "",
       membershipRole: role,
       isIncluded: false,
       sourceId: source.id,
-      status: "imported" as RepoStatus,
+      status: "imported" as const,
       repositoryCount: orgRepos.length,
       createdAt: orgData.createdAt,
       updatedAt: orgData.updatedAt,
