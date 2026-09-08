@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from "../ui/select";
 import type { MirrorOrgRequest, MirrorOrgResponse } from "@/types/mirror";
+import type { SourceProviderKind } from "@/lib/source-providers/kinds";
 import { useSSE } from "@/hooks/useSEE";
 import { useFilterParams } from "@/hooks/useFilterParams";
 import { toast } from "sonner";
@@ -51,7 +52,7 @@ export function Organization() {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isDialogOpen, setIsDialogOpen] = useState<boolean>(false);
   const { user } = useAuth();
-  const { isGitHubConfigured, sourceProvider, sourceUrl, sources } = useConfigStatus();
+  const { sourceProvider, sourceUrl, sources } = useConfigStatus();
   const { navigationKey } = useNavigation();
   const { registerRefreshCallback } = useLiveRefresh();
   const { filter, setFilter } = useFilterParams({
@@ -64,6 +65,8 @@ export function Organization() {
     org: string;
     role: MembershipRole;
     sourceId?: string;
+    provider?: SourceProviderKind;
+    sourceUrl?: string;
   } | null>(null);
   const [isDuplicateOrgDialogOpen, setIsDuplicateOrgDialogOpen] = useState(false);
   const [isProcessingDuplicateOrg, setIsProcessingDuplicateOrg] = useState(false);
@@ -92,14 +95,6 @@ export function Organization() {
 
   const fetchOrganizations = useCallback(async (isLiveRefresh = false) => {
     if (!user?.id) {
-      return false;
-    }
-
-    // Don't fetch organizations if GitHub is not configured
-    if (!isGitHubConfigured) {
-      if (!isLiveRefresh) {
-        setIsLoading(false);
-      }
       return false;
     }
 
@@ -136,7 +131,7 @@ export function Organization() {
         setIsLoading(false);
       }
     }
-  }, [user?.id, isGitHubConfigured]); // Only depend on user.id, not entire user object
+  }, [user?.id]); // Only depend on user.id, not entire user object
 
   useEffect(() => {
     // Reset loading state when component becomes active
@@ -146,17 +141,12 @@ export function Organization() {
 
   // Register with global live refresh system
   useEffect(() => {
-    // Only register for live refresh if GitHub is configured
-    if (!isGitHubConfigured) {
-      return;
-    }
-
     const unregister = registerRefreshCallback(() => {
       fetchOrganizations(true); // Live refresh
     });
 
     return unregister;
-  }, [registerRefreshCallback, fetchOrganizations, isGitHubConfigured]);
+  }, [registerRefreshCallback, fetchOrganizations]);
 
   const handleRefresh = async () => {
     const success = await fetchOrganizations(false);
@@ -276,11 +266,15 @@ export function Organization() {
     role,
     force = false,
     sourceId,
+    provider,
+    sourceUrl,
   }: {
     org: string;
     role: MembershipRole;
     force?: boolean;
     sourceId?: string;
+    provider?: SourceProviderKind;
+    sourceUrl?: string;
   }) => {
     if (!user || !user.id) {
       return;
@@ -301,7 +295,7 @@ export function Organization() {
 
       if (alreadyExists) {
         toast.warning("Organization already exists.");
-        setDuplicateOrgCandidate({ org: trimmedOrg, role, sourceId });
+        setDuplicateOrgCandidate({ org: trimmedOrg, role, sourceId, provider, sourceUrl });
         setIsDuplicateOrgDialogOpen(true);
         throw new Error("Organization already exists");
       }
@@ -316,6 +310,8 @@ export function Organization() {
         role,
         force,
         sourceId,
+        provider,
+        sourceUrl,
       };
 
       const response = await apiRequest<AddOrganizationApiResponse>(
@@ -365,6 +361,8 @@ export function Organization() {
         org: duplicateOrgCandidate.org,
         role: duplicateOrgCandidate.role,
         sourceId: duplicateOrgCandidate.sourceId,
+        provider: duplicateOrgCandidate.provider,
+        sourceUrl: duplicateOrgCandidate.sourceUrl,
         force: true,
       });
       setIsDialogOpen(false);

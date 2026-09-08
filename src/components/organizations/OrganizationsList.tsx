@@ -348,6 +348,7 @@ export function OrganizationList({
         const orgSources = sources ?? [];
         const pinnedSource =
           orgSources.find((source) => source.id === org.sourceId) ?? null;
+        const isPublicOnlySource = pinnedSource?.token === "";
         const orgProvider: SourceProviderKind = pinnedSource?.provider ?? sourceProvider;
         const orgSourceUrl = pinnedSource
           ? normalizeSourceUrl(pinnedSource.url, pinnedSource.provider)
@@ -405,6 +406,15 @@ export function OrganizationList({
                       >
                         {pinnedSource ? <OrgSourceIcon className="h-3 w-3" /> : <Layers className="h-3 w-3" />}
                         {pinnedSource?.name ?? "Every source"}
+                      </Badge>
+                    )}
+                    {isPublicOnlySource && (
+                      <Badge
+                        variant="secondary"
+                        className="px-1.5 font-normal text-[11px]"
+                        title="Mirrors public repositories only; its source has no account"
+                      >
+                        Public only
                       </Badge>
                     )}
                   </div>
@@ -500,6 +510,15 @@ export function OrganizationList({
                     >
                       {pinnedSource ? <OrgSourceIcon className="h-3 w-3" /> : <Layers className="h-3 w-3" />}
                       {pinnedSource?.name ?? "Every source"}
+                    </Badge>
+                  )}
+                  {isPublicOnlySource && (
+                    <Badge
+                      variant="secondary"
+                      className="px-1.5 font-normal text-[11px]"
+                      title="Mirrors public repositories only; its source has no account"
+                    >
+                      Public only
                     </Badge>
                   )}
                   {hasMirrorOverrides(org.mirrorOverrides) && (

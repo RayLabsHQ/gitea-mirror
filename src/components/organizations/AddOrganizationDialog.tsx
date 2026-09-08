@@ -24,9 +24,12 @@ import {
 } from "../ui/select";
 import { parseGitHubOwnerReference } from "@/lib/utils/github-url";
 import {
+  DEFAULT_SOURCE_PROVIDER,
   SOURCE_PROVIDER_DEFAULT_URLS,
+  SOURCE_PROVIDER_KINDS,
   SOURCE_PROVIDER_LABELS,
   SOURCE_PROVIDER_ORG_NOUNS,
+  isBetaSourceProvider,
   normalizeSourceUrl,
   type SourceProviderKind,
 } from "@/lib/source-providers/kinds";
@@ -34,6 +37,10 @@ import { SOURCE_PROVIDER_ICONS } from "@/lib/source-providers/icons";
 
 const inputClassName =
   "w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
+
+/** Where the organization is imported from: a connected source, or any
+ * provider's public repositories without an account. */
+type AddOrganizationMode = "connected" | "public";
 
 interface AddOrganizationDialogProps {
   isDialogOpen: boolean;
@@ -43,11 +50,15 @@ interface AddOrganizationDialogProps {
     role,
     force,
     sourceId,
+    provider,
+    sourceUrl,
   }: {
     org: string;
     role: MembershipRole;
     force?: boolean;
     sourceId?: string;
+    provider?: SourceProviderKind;
+    sourceUrl?: string;
   }) => Promise<void>;
   sourceProvider?: SourceProviderKind;
   /** Normalized instance URL of the configured source, for the placeholder. */
@@ -68,9 +79,16 @@ export default function AddOrganizationDialog({
   const [org, setOrg] = useState<string>("");
   const [role, setRole] = useState<MembershipRole>("member");
   const [sourceId, setSourceId] = useState<string>("");
+  const [mode, setMode] = useState<AddOrganizationMode>(
+    sources && sources.length > 0 ? "connected" : "public"
+  );
+  const [publicProvider, setPublicProvider] =
+    useState<SourceProviderKind>(DEFAULT_SOURCE_PROVIDER);
+  const [instanceUrl, setInstanceUrl] = useState<string>("");
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string>("");
 
+  const hasSources = !!sources && sources.length > 0;
   const hasMultipleSources = !!sources && sources.length > 1;
   // With several connected sources, the chosen one drives every
   // provider-dependent label; otherwise the global source props do.
@@ -78,20 +96,25 @@ export default function AddOrganizationDialog({
     ? sources.find((source) => source.id === sourceId) ?? sources[0]
     : undefined;
   const effectiveProvider: SourceProviderKind =
-    selectedSource?.provider ?? sourceProvider;
-  const effectiveSourceUrl = selectedSource
-    ? normalizeSourceUrl(selectedSource.url, selectedSource.provider)
-    : sourceUrl;
+    mode === "public"
+      ? publicProvider
+      : selectedSource?.provider ?? sourceProvider;
+  const effectiveSourceUrl =
+    mode === "public"
+      ? instanceUrl.trim() || undefined
+      : selectedSource
+        ? normalizeSourceUrl(selectedSource.url, selectedSource.provider)
+        : sourceUrl;
 
   const providerLabel = SOURCE_PROVIDER_LABELS[effectiveProvider];
   const orgNoun = SOURCE_PROVIDER_ORG_NOUNS[effectiveProvider];
   const orgNounCapitalized = orgNoun.charAt(0).toUpperCase() + orgNoun.slice(1);
   // "an organization" but "a group".
   const orgNounWithArticle = `${/^[aeiou]/i.test(orgNoun) ? "an" : "a"} ${orgNoun}`;
-  const instanceUrl = (
+  const exampleInstanceUrl = (
     effectiveSourceUrl || SOURCE_PROVIDER_DEFAULT_URLS[effectiveProvider]
   ).replace(/\/+$/, "");
-  const urlPlaceholder = `${instanceUrl}/your-${orgNoun}`;
+  const urlPlaceholder = `${exampleInstanceUrl}/your-${orgNoun}`;
 
   const resetForm = () => {
     setError("");
@@ -99,6 +122,8 @@ export default function AddOrganizationDialog({
     setOrg("");
     setRole("member");
     setSourceId("");
+    setPublicProvider(DEFAULT_SOURCE_PROVIDER);
+    setInstanceUrl("");
   };
 
   useEffect(() => {
@@ -106,6 +131,16 @@ export default function AddOrganizationDialog({
       resetForm();
     }
   }, [isDialogOpen]);
+
+  // Re-pick the default mode each time the dialog opens, once the source
+  // list has settled: connected when a source exists, public otherwise.
+  const wasOpenRef = React.useRef(false);
+  useEffect(() => {
+    if (isDialogOpen && !wasOpenRef.current) {
+      setMode(hasSources ? "connected" : "public");
+    }
+    wasOpenRef.current = isDialogOpen;
+  }, [isDialogOpen, hasSources]);
 
   // Default the picker to the primary source (oldest first) whenever the
   // selection is empty or points at a removed source.
@@ -162,11 +197,20 @@ export default function AddOrganizationDialog({
     try {
       setIsLoading(true);
 
-      await onAddOrganization({
-        org,
-        role,
-        sourceId: selectedSource?.id,
-      });
+      await onAddOrganization(
+        mode === "public"
+          ? {
+              org,
+              role,
+              provider: publicProvider,
+              sourceUrl: instanceUrl.trim() || undefined,
+            }
+          : {
+              org,
+              role,
+              sourceId: selectedSource?.id,
+            }
+      );
 
       resetForm();
       setIsDialogOpen(false);
@@ -195,7 +239,43 @@ export default function AddOrganizationDialog({
 
         <form onSubmit={handleSubmit} className="flex flex-col gap-y-6">
           <div className="space-y-4">
-            {hasMultipleSources && (
+            <div>
+              <label className="block text-sm font-medium mb-1.5">
+                Add from
+              </label>
+              <RadioGroup
+                value={mode}
+                onValueChange={(val) => setMode(val as AddOrganizationMode)}
+                className="flex flex-col gap-y-2"
+              >
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem
+                    value="connected"
+                    id="add-mode-connected"
+                    disabled={!hasSources}
+                  />
+                  <Label htmlFor="add-mode-connected">
+                    Connected source
+                    {!hasSources && (
+                      <span className="ml-1.5 text-xs text-muted-foreground">
+                        (none configured)
+                      </span>
+                    )}
+                  </Label>
+                </div>
+                <div className="flex items-center space-x-2">
+                  <RadioGroupItem value="public" id="add-mode-public" />
+                  <Label htmlFor="add-mode-public">Public only</Label>
+                </div>
+              </RadioGroup>
+              {mode === "public" && (
+                <p className="mt-1.5 text-xs text-muted-foreground">
+                  {`Mirror public ${orgNoun}s without connecting an account. Private ${orgNoun}s and personal repositories are skipped.`}
+                </p>
+              )}
+            </div>
+
+            {mode === "connected" && hasMultipleSources && (
               <div>
                 <label
                   htmlFor="organizationSource"
@@ -223,6 +303,71 @@ export default function AddOrganizationDialog({
                   </SelectContent>
                 </Select>
               </div>
+            )}
+
+            {mode === "public" && (
+              <>
+                <div>
+                  <label
+                    htmlFor="organizationProvider"
+                    className="block text-sm font-medium mb-1.5"
+                  >
+                    Provider
+                  </label>
+                  <Select
+                    value={publicProvider}
+                    onValueChange={(value) =>
+                      setPublicProvider(value as SourceProviderKind)
+                    }
+                  >
+                    <SelectTrigger id="organizationProvider" className="w-full">
+                      <SelectValue placeholder="Select provider" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {SOURCE_PROVIDER_KINDS.map((kind) => {
+                        const ProviderIcon = SOURCE_PROVIDER_ICONS[kind];
+                        return (
+                          <SelectItem key={kind} value={kind}>
+                            <span className="flex items-center gap-2">
+                              <ProviderIcon className="h-3.5 w-3.5" />
+                              {SOURCE_PROVIDER_LABELS[kind]}
+                              {isBetaSourceProvider(kind) && (
+                                <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-semibold tracking-wider text-muted-foreground">
+                                  BETA
+                                </span>
+                              )}
+                            </span>
+                          </SelectItem>
+                        );
+                      })}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="organizationInstanceUrl"
+                    className="block text-sm font-medium mb-1.5"
+                  >
+                    Instance URL{" "}
+                    <span className="font-normal text-muted-foreground">
+                      (optional)
+                    </span>
+                  </label>
+                  <input
+                    id="organizationInstanceUrl"
+                    type="url"
+                    value={instanceUrl}
+                    onChange={(e) => setInstanceUrl(e.target.value)}
+                    className={inputClassName}
+                    placeholder={SOURCE_PROVIDER_DEFAULT_URLS[publicProvider]}
+                    autoComplete="off"
+                  />
+                  <p className="mt-1.5 text-xs text-muted-foreground">
+                    {`Leave empty for ${SOURCE_PROVIDER_DEFAULT_URLS[publicProvider].replace(/^https?:\/\//, "")}. Only self-hosted or custom instances need a URL.`}
+                  </p>
+                </div>
+              </>
             )}
 
             <div>
