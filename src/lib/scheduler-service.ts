@@ -4,7 +4,7 @@
  * based on the configured schedule
  */
 
-import { db, configs, repositories } from '@/lib/db';
+import { db, configs, repositories, organizations } from '@/lib/db';
 import { eq, and, or } from 'drizzle-orm';
 import { mirrorRepositoryToDestination, syncRepositoryOnDestination } from '@/lib/mirror-dispatch';
 import { usesPushEngine } from '@/lib/destination-connection';
@@ -15,7 +15,7 @@ import type { Octokit } from '@octokit/rest';
 import { repoStatusEnum, repositoryVisibilityEnum } from '@/types/Repository';
 import { mergeGitReposPreferStarred, normalizeGitRepoToInsert, calcBatchSizeForInsert } from '@/lib/repo-utils';
 import { isMirrorableGitHubRepo } from '@/lib/repo-eligibility';
-import { loadOrganizationForkPolicies, orgForkSkipDecision } from '@/lib/utils/mirror-overrides';
+import { loadOrganizationForkPolicies, orgForkSkipDecision, resolveOrganizationSkipForks } from '@/lib/utils/mirror-overrides';
 import { createMirrorJob } from '@/lib/helpers';
 import { getNextScheduledRun, isCronExpression, normalizeTimezone } from '@/lib/utils/schedule-utils';
 import { resetStuckMirrorStatuses } from '@/lib/stuck-status-recovery';
@@ -89,7 +89,7 @@ async function importRepositoriesFromSources(
   userId: string,
   phase: 'scheduled sync' | 'auto-start'
 ): Promise<void> {
-  const { listSources, ensureSourcesFromConfig } = await import('@/lib/sources');
+  const { listSources, ensureSourcesFromConfig, decryptSourceToken } = await import('@/lib/sources');
   const { createSourceProviderFromSource } = await import('@/lib/source-providers');
   // Configs written outside the sources API must still import: seed the
   // first source row when the config carries connection fields but no
@@ -113,6 +113,14 @@ async function importRepositoriesFromSources(
 
   for (const source of sources) {
     try {
+      // A public-only source has no token, so the personal user/starred
+      // listings would 401 on every call. Its organizations are picked up
+      // by rediscoverOrganizationRepositories instead.
+      if (decryptSourceToken(source.token) === "") {
+        console.log(`[Scheduler] Source ${source.name} for user ${userId} is a public-only source: skipping personal discovery`);
+        continue;
+      }
+
       const sourceProvider = createSourceProviderFromSource(source, { userId });
 
       const [basicAndForkedRepos, starredRepos] = await Promise.all([
@@ -173,6 +181,86 @@ async function importRepositoriesFromSources(
 }
 
 /**
+ * Re-discover organization repositories: an organization pinned to a source
+ * can gain newly published upstream repositories at any time, and a
+ * public-only (tokenless) source never runs the personal listings that
+ * would otherwise surface them. Each tick re-lists every included
+ * organization whose pin resolves to an existing enabled source and inserts
+ * the repositories it does not have yet (onConflictDoNothing keeps repeats
+ * idempotent). Unpinned organizations and pins whose source is gone keep
+ * the legacy DB-only behavior — no behavior change for existing users.
+ *
+ * Repositories missing from the listing are deliberately NOT removed:
+ * a tokenless listing only shows public repositories, so cleanup stays
+ * membership-based (repository-cleanup-service).
+ */
+async function rediscoverOrganizationRepositories(
+  config: any,
+  userId: string,
+  phase: 'scheduled sync' | 'auto-start'
+): Promise<void> {
+  const { listSources, findSourceForOrganization } = await import('@/lib/sources');
+  const { createSourceProviderFromSource } = await import('@/lib/source-providers');
+  const sources = (await listSources(userId)).filter(source => source.enabled);
+
+  const includedOrgs = await db
+    .select()
+    .from(organizations)
+    .where(
+      and(
+        eq(organizations.userId, userId),
+        eq(organizations.isIncluded, true)
+      )
+    );
+
+  for (const org of includedOrgs) {
+    try {
+      const source = findSourceForOrganization(org, sources);
+      if (!source) continue;
+
+      const sourceProvider = createSourceProviderFromSource(source, { userId });
+      const orgRepos = await sourceProvider.listOrganizationRepositories(org.name);
+
+      // The organization's fork policy (override -> global skipForks), the
+      // same resolution the organization mirror path applies.
+      const skipOrgForks = resolveOrganizationSkipForks({ orgOverrides: org.mirrorOverrides, config });
+      const mirrorableRepos = orgRepos.filter(
+        repo => repo.isDisabled !== true && !(skipOrgForks && repo.isForked)
+      );
+
+      if (mirrorableRepos.length > 0) {
+        const repoRecords = mirrorableRepos.map(repo =>
+          normalizeGitRepoToInsert(
+            { ...repo, organization: repo.organization ?? org.name },
+            { userId, configId: config.id, sourceId: source.id }
+          )
+        );
+
+        // Batch insert to avoid SQLite parameter limit
+        const sample = repoRecords[0];
+        const columnCount = Object.keys(sample ?? {}).length || 1;
+        const BATCH_SIZE = calcBatchSizeForInsert(columnCount);
+        for (let i = 0; i < repoRecords.length; i += BATCH_SIZE) {
+          const batch = repoRecords.slice(i, i + BATCH_SIZE);
+          await db
+            .insert(repositories)
+            .values(batch)
+            .onConflictDoNothing({ target: [repositories.userId, repositories.sourceId, repositories.normalizedFullName] });
+        }
+        console.log(`[Scheduler] Re-discovered ${mirrorableRepos.length} repositories for organization ${org.name} on source ${source.name} for user ${userId} during ${phase}`);
+      }
+
+      await db
+        .update(organizations)
+        .set({ repositoryCount: orgRepos.length, updatedAt: new Date() })
+        .where(eq(organizations.id, org.id));
+    } catch (orgError) {
+      console.error(`[Scheduler] Failed to re-discover repositories for organization ${org.name} for user ${userId} during ${phase}:`, orgError);
+    }
+  }
+}
+
+/**
  * Resolve the GitHub API client for a repository's own source. Only GitHub
  * sources need a client while mirroring (metadata); other hosts get
  * code-only mirrors. Repositories whose source row no longer resolves keep
@@ -186,7 +274,7 @@ async function createOctokitResolverForSources(
   sources: SourceRecord[]
 ): Promise<(repo: { sourceId?: string | null }) => Promise<Octokit | null>> {
   const { decryptSourceToken, resolveGitHubApiBaseUrl } = await import('@/lib/sources');
-  const { createGitHubClient } = await import('@/lib/github');
+  const { createGitHubClient, createPublicGitHubClient } = await import('@/lib/github');
 
   const sourcesById = new Map(sources.map(source => [source.id, source]));
   const clientsBySourceId = new Map<string, Octokit | null>();
@@ -197,9 +285,10 @@ async function createOctokitResolverForSources(
     if (source) {
       if (!clientsBySourceId.has(source.id)) {
         if (source.provider === 'github') {
-          // A tokenless source has no usable client: auth:"" 401s on every
-          // metadata call. Return null so the loop skips these repos, the
-          // same way the job and recovery resolvers do.
+          // A tokenless source still gets the anonymous public client
+          // (60 req/hr) so public-repo metadata mirrors; an empty token
+          // must never reach createGitHubClient, which would send
+          // `auth: ""` and 401 on every call.
           const sourceToken = decryptSourceToken(source.token);
           clientsBySourceId.set(
             source.id,
@@ -210,7 +299,7 @@ async function createOctokitResolverForSources(
                   source.username,
                   resolveGitHubApiBaseUrl(source.url)
                 )
-              : null
+              : createPublicGitHubClient(resolveGitHubApiBaseUrl(source.url))
           );
         } else {
           clientsBySourceId.set(source.id, null);
@@ -247,19 +336,21 @@ async function runScheduledSync(config: any): Promise<void> {
   console.log(`[Scheduler] Running scheduled sync for user ${userId}`);
   
   try {
-    // Check if tokens are configured before proceeding
-    if (!config.githubConfig?.token || !config.giteaConfig?.token) {
-      console.log(`[Scheduler] Skipping sync for user ${userId}: GitHub or Gitea tokens not configured`);
+    // Check that the destination is configured before proceeding. The
+    // source side may be a public-only (tokenless) source, so only the
+    // destination token is required here.
+    if (!config.giteaConfig?.token) {
+      console.log(`[Scheduler] Skipping sync for user ${userId}: Destination token not configured`);
       return;
     }
-    
+
     // Update lastRun timestamp
     const currentTime = new Date();
     const scheduleConfig = config.scheduleConfig || {};
     const { source, timezone } = resolveScheduleSettings(config);
     console.log(`[Scheduler] Using schedule source for user ${userId}: ${String(source)} (timezone=${timezone})`);
     await persistScheduleRunState(config, currentTime);
-    
+
     // Auto-discovery: Check for new repositories on every enabled source
     if (scheduleConfig.autoImport !== false) {
       console.log(`[Scheduler] Checking for new source repositories for user ${userId}...`);
@@ -267,6 +358,14 @@ async function runScheduledSync(config: any): Promise<void> {
         await importRepositoriesFromSources(config, userId, 'scheduled sync');
       } catch (error) {
         console.error(`[Scheduler] Failed to auto-import repositories for user ${userId}:`, error);
+      }
+      // Organizations pinned to a source can gain newly published upstream
+      // repositories at any time; re-list them so the next mirror picks
+      // them up. A failure must not block the rest of the sync.
+      try {
+        await rediscoverOrganizationRepositories(config, userId, 'scheduled sync');
+      } catch (error) {
+        console.error(`[Scheduler] Failed to re-discover organization repositories for user ${userId}:`, error);
       }
     }
     
@@ -608,9 +707,10 @@ async function performInitialAutoStart(): Promise<void> {
       .where(eq(configs.isActive, true));
     
     for (const config of activeConfigs) {
-      // Skip if tokens are not configured
-      if (!config.githubConfig?.token || !config.giteaConfig?.token) {
-        console.log(`[Scheduler] Skipping auto-start for user ${config.userId}: tokens not configured`);
+      // Skip when the destination is not configured. Tokenless public
+      // sources start too; personal discovery skips them on its own.
+      if (!config.giteaConfig?.token) {
+        console.log(`[Scheduler] Skipping auto-start for user ${config.userId}: destination token not configured`);
         continue;
       }
       
@@ -778,9 +878,10 @@ async function performInitialAutoStart(): Promise<void> {
 }
 
 /**
- * Main scheduler loop
+ * Main scheduler loop. Exported for the behavioral test suite, which drives
+ * one loop iteration against mocked sources in an isolated process.
  */
-async function schedulerLoop(): Promise<void> {
+export async function schedulerLoop(): Promise<void> {
   if (isSchedulerRunning) {
     console.log('[Scheduler] Scheduler is already running, skipping this cycle');
     return;
@@ -815,21 +916,22 @@ async function schedulerLoop(): Promise<void> {
       config.scheduleConfig?.enabled === true
     );
     
-    // Further filter configs that have valid tokens
+    // Further filter configs that have a valid destination token. The
+    // source side may be a public-only (tokenless) source, so only the
+    // destination token is required.
     const validConfigs = enabledConfigs.filter(config => {
-      const hasGitHubToken = !!config.githubConfig?.token;
-      const hasGiteaToken = !!config.giteaConfig?.token;
-      
-      if (!hasGitHubToken || !hasGiteaToken) {
-        console.log(`[Scheduler] User ${config.userId}: Scheduling enabled but tokens missing (GitHub: ${hasGitHubToken}, Gitea: ${hasGiteaToken})`);
+      const hasDestinationToken = !!config.giteaConfig?.token;
+
+      if (!hasDestinationToken) {
+        console.log(`[Scheduler] User ${config.userId}: Scheduling enabled but destination token not configured`);
         return false;
       }
       return true;
     });
-    
+
     if (validConfigs.length === 0) {
       if (enabledConfigs.length > 0) {
-        console.log(`[Scheduler] ${enabledConfigs.length} config(s) have scheduling enabled but lack required tokens`);
+        console.log(`[Scheduler] ${enabledConfigs.length} config(s) have scheduling enabled but lack the destination token`);
       } else {
         console.log(`[Scheduler] No configurations with scheduling enabled (found ${activeConfigs.length} active configs)`);
         

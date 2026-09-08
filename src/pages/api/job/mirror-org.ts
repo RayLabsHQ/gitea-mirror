@@ -11,7 +11,7 @@ import {
 import type { MirrorOrgRequest, MirrorOrgResponse } from "@/types/mirror";
 import { db, configs, organizations } from "@/lib/db";
 import { and, eq, inArray, sql } from "drizzle-orm";
-import { createGitHubClient } from "@/lib/github";
+import { createGitHubClient, createPublicGitHubClient } from "@/lib/github";
 import { mirrorGitHubOrgToGitea } from "@/lib/gitea";
 import { repoStatusEnum } from "@/types/Repository";
 import { type MembershipRole } from "@/types/organizations";
@@ -60,9 +60,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     const config = configResult[0];
 
-    if (!config || !config.githubConfig.token) {
+    if (!config || !config.giteaConfig?.token) {
       return new Response(
-        JSON.stringify({ error: "Config missing for the user or token." }),
+        JSON.stringify({ error: "Config missing for the user or destination token." }),
         { status: 400, headers: { "Content-Type": "application/json" } }
       );
     }
@@ -87,8 +87,8 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     // Fire async mirroring without blocking response, using parallel processing with resilience
     setTimeout(async () => {
-      if (!config.githubConfig.token) {
-        throw new Error("GitHub token is missing in config.");
+      if (!config.giteaConfig?.token) {
+        throw new Error("Destination token is missing in config.");
       }
 
       // Only GitHub sources need an API client while mirroring (metadata).
@@ -101,13 +101,17 @@ export const POST: APIRoute = async ({ request, locals }) => {
         const source = findSourceForRepository(repository, sources);
         if (!source || source.provider !== "github") return null;
         const token = decryptSourceToken(source.token);
-        if (!token) return null;
-        return createGitHubClient(
-          token,
-          userId,
-          source.username || undefined,
-          resolveGitHubApiBaseUrl(source.url)
-        );
+        // A tokenless GitHub source still gets an anonymous public client
+        // (60 req/hr) so public-repo metadata mirrors; an empty token must
+        // never reach createGitHubClient, which would send `auth: ""`.
+        return token
+          ? createGitHubClient(
+              token,
+              userId,
+              source.username || undefined,
+              resolveGitHubApiBaseUrl(source.url)
+            )
+          : createPublicGitHubClient(resolveGitHubApiBaseUrl(source.url));
       };
 
       // Define the concurrency limit - adjust based on API rate limits

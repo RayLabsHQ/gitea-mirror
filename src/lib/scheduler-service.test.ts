@@ -1,6 +1,35 @@
-import { describe, test, expect, mock } from "bun:test";
+import { describe, test, expect, mock, beforeEach } from "bun:test";
 import { repoStatusEnum } from "@/types/Repository";
 import type { Repository } from "./db/schema";
+
+// ---------------------------------------------------------------------------
+// Isolated behavioral suite for public-only sources (WP4).
+//
+// The scheduler reads and writes the db through drizzle and talks to every
+// enabled source through the source provider; exercising the real module
+// needs process-wide module mocks, which (like
+// gitea-org-mirror-destination.test.ts) would poison other test files. So
+// this file re-runs itself in an isolated child process where the mocks are
+// safely contained.
+// ---------------------------------------------------------------------------
+const CHILD_FLAG = "SCHEDULER_PUBLIC_SOURCE_ISOLATED";
+const isChild = !!process.env[CHILD_FLAG];
+
+if (!isChild) {
+  test("public-only scheduled sync — isolated child suite", () => {
+    const res = Bun.spawnSync({
+      cmd: [process.execPath, "test", import.meta.path],
+      env: { ...process.env, [CHILD_FLAG]: "1" },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    if (res.exitCode !== 0) {
+      console.error(res.stdout.toString());
+      console.error(res.stderr.toString());
+    }
+    expect(res.exitCode).toBe(0);
+  }, 60_000);
+}
 
 describe("Scheduler Service - Ignored Repository Handling", () => {
   test("should skip repositories with 'ignored' status", async () => {
@@ -138,12 +167,304 @@ describe("Scheduler Service - Ignored Repository Handling", () => {
       "deleting",
       "deleted"
     ];
-    
+
     validStatuses.forEach(status => {
       expect(() => repoStatusEnum.parse(status)).not.toThrow();
     });
-    
+
     // Test invalid status
     expect(() => repoStatusEnum.parse("invalid-status")).toThrow();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Child-process mocks and behavioral tests (see the banner at the top).
+// ---------------------------------------------------------------------------
+
+const repositoriesTable = { __table: "repositories" } as any;
+const organizationsTable = { __table: "organizations" } as any;
+const configsTable = { __table: "configs" } as any;
+
+let configRows: any[] = [];
+let orgRows: any[] = [];
+let repoRows: any[] = [];
+let orgUpdates: Array<Record<string, any>> = [];
+let repoInsertAttempts = 0;
+
+const publicOnlySource = {
+  id: "source-public",
+  userId: "user-1",
+  name: "GitHub (public orgs)",
+  provider: "github",
+  url: "https://github.com",
+  username: "",
+  token: "",
+  enabled: true,
+  createdAt: new Date(0),
+  updatedAt: new Date(0),
+};
+
+const mockListRepositories = mock(async () => {
+  throw new Error("personal discovery must not run for a public-only source");
+});
+const mockListStarredRepositories = mock(async () => []);
+const orgRepoListings = new Map<string, any[]>();
+const mockListOrganizationRepositories = mock(async (name: string) =>
+  orgRepoListings.get(name) ?? []
+);
+const mockCreateSourceProviderFromSource = mock(() => ({
+  listRepositories: mockListRepositories,
+  listStarredRepositories: mockListStarredRepositories,
+  listOrganizationRepositories: mockListOrganizationRepositories,
+}));
+
+if (isChild) {
+  mock.module("@/lib/db", () => {
+    const mockDb = {
+      // Projection selects (existing-key lookups, stuck-status recovery)
+      // see the in-memory rows; full selects feed the mirror/sync pools,
+      // which stay empty in these scenarios.
+      select: (fields?: any) => ({
+        from: (table: any) => ({
+          where: (_cond: any) => {
+            if (table === configsTable) return Promise.resolve(configRows);
+            if (table === organizationsTable) return Promise.resolve(orgRows);
+            if (table === repositoriesTable) {
+              return Promise.resolve(fields ? repoRows : []);
+            }
+            return Promise.resolve([]);
+          },
+        }),
+      }),
+      insert: (table: any) => ({
+        values: (rows: any) => ({
+          // Simulates the uniq (userId, sourceId, normalizedFullName) index
+          // behind onConflictDoNothing: conflicting rows are dropped.
+          onConflictDoNothing: () => {
+            if (table === repositoriesTable) {
+              repoInsertAttempts++;
+              const keys = new Set(
+                repoRows.map((r) => `${r.userId}|${r.sourceId}|${r.normalizedFullName}`)
+              );
+              for (const row of Array.isArray(rows) ? rows : [rows]) {
+                const key = `${row.userId}|${row.sourceId}|${row.normalizedFullName}`;
+                if (!keys.has(key)) {
+                  repoRows.push(row);
+                  keys.add(key);
+                }
+              }
+            }
+            return Promise.resolve();
+          },
+        }),
+      }),
+      update: (table: any) => ({
+        set: (data: any) => ({
+          where: (_cond: any) => {
+            if (table === organizationsTable) orgUpdates.push(data);
+            return Promise.resolve();
+          },
+        }),
+      }),
+    };
+    return {
+      db: mockDb,
+      configs: configsTable,
+      repositories: repositoriesTable,
+      organizations: organizationsTable,
+      users: {},
+      events: {},
+      mirrorJobs: {},
+      sessions: {},
+      accounts: {},
+      ssoProviders: {},
+    };
+  });
+
+  mock.module("@/lib/sources", () => ({
+    listSources: mock(async (userId: string) =>
+      publicOnlySource.userId === userId ? [publicOnlySource] : []
+    ),
+    ensureSourcesFromConfig: mock(async () => {}),
+    decryptSourceToken: (token: string | null | undefined) => token ?? "",
+    findSourceForRepository: () => null,
+    findSourceForOrganization: (
+      org: { sourceId?: string | null },
+      list: any[]
+    ) => (org.sourceId ? list.find((source) => source.id === org.sourceId) ?? null : null),
+    resolveGitHubApiBaseUrl: (url: string | null | undefined) => {
+      const trimmed = url?.trim().replace(/\/+$/, "") ?? "";
+      if (!trimmed || trimmed === "https://github.com") return undefined;
+      return `${trimmed}/api/v3`;
+    },
+  }));
+
+  mock.module("@/lib/source-providers", () => ({
+    createSourceProviderFromSource: mockCreateSourceProviderFromSource,
+    resolveSourceProviderKind: () => "github",
+  }));
+
+  mock.module("@/lib/mirror-dispatch", () => ({
+    mirrorRepositoryToDestination: mock(async () => {}),
+    syncRepositoryOnDestination: mock(async () => {}),
+  }));
+}
+
+const { schedulerLoop } = isChild
+  ? await import("@/lib/scheduler-service")
+  : { schedulerLoop: undefined as any };
+
+function makeSchedulerConfig(): any {
+  return {
+    id: "config-1",
+    userId: "user-1",
+    isActive: true,
+    githubConfig: { token: "" },
+    giteaConfig: { url: "https://gitea.test", token: "gitea-token" },
+    scheduleConfig: { enabled: true, interval: "1h" },
+  };
+}
+
+function makeOrgRow(overrides: Record<string, any> = {}): any {
+  return {
+    id: "org-pinned",
+    userId: "user-1",
+    configId: "config-1",
+    name: "pinned-org",
+    normalizedName: "pinned-org",
+    avatarUrl: "",
+    membershipRole: "member",
+    isIncluded: true,
+    sourceId: "source-public",
+    mirrorOverrides: { skipForks: true },
+    status: "imported",
+    repositoryCount: 1,
+    createdAt: new Date(0),
+    updatedAt: new Date(0),
+    ...overrides,
+  };
+}
+
+function makeGitRepo(name: string, overrides: Record<string, any> = {}): any {
+  return {
+    name,
+    fullName: `pinned-org/${name}`,
+    url: `https://github.com/pinned-org/${name}`,
+    cloneUrl: `https://github.com/pinned-org/${name}.git`,
+    owner: "pinned-org",
+    organization: "pinned-org",
+    isPrivate: false,
+    isForked: false,
+    hasIssues: true,
+    isStarred: false,
+    isArchived: false,
+    size: 0,
+    hasLFS: false,
+    hasSubmodules: false,
+    defaultBranch: "main",
+    visibility: "public",
+    status: "imported",
+    isDisabled: false,
+    importedAt: new Date(0),
+    createdAt: new Date(0),
+    updatedAt: new Date(0),
+    ...overrides,
+  };
+}
+
+describe.skipIf(!isChild)("Scheduler public-only sources (WP4)", () => {
+  let originalConsoleLog: typeof console.log;
+  let originalConsoleError: typeof console.error;
+  let consoleLines: string[];
+
+  beforeEach(() => {
+    originalConsoleLog = console.log;
+    originalConsoleError = console.error;
+    consoleLines = [];
+    console.log = mock((...args: unknown[]) => {
+      consoleLines.push(args.map((arg) => (typeof arg === "string" ? arg : String(arg))).join(" "));
+    }) as any;
+    console.error = mock((...args: unknown[]) => {
+      consoleLines.push(args.map((arg) => (typeof arg === "string" ? arg : String(arg))).join(" "));
+    }) as any;
+
+    configRows = [makeSchedulerConfig()];
+    orgRows = [
+      makeOrgRow(),
+      makeOrgRow({
+        id: "org-unpinned",
+        name: "unpinned-org",
+        normalizedName: "unpinned-org",
+        sourceId: null,
+        mirrorOverrides: null,
+      }),
+    ];
+    repoRows = [];
+    orgUpdates = [];
+    repoInsertAttempts = 0;
+    orgRepoListings.clear();
+    mockListRepositories.mockClear();
+    mockListStarredRepositories.mockClear();
+    mockListOrganizationRepositories.mockClear();
+    mockCreateSourceProviderFromSource.mockClear();
+  });
+
+  test("a destination-only config runs the scheduled sync instead of skipping it", async () => {
+    orgRepoListings.set("pinned-org", [makeGitRepo("existing")]);
+
+    await schedulerLoop();
+
+    expect(consoleLines.some((line) => line.includes("[Scheduler] Running scheduled sync for user user-1"))).toBe(true);
+    expect(consoleLines.some((line) => line.includes("Skipping sync for user user-1"))).toBe(false);
+    expect(mockListOrganizationRepositories).toHaveBeenCalledWith("pinned-org");
+  });
+
+  test("personal discovery is skipped for public-only sources while pinned organizations are re-discovered", async () => {
+    orgRepoListings.set("pinned-org", [makeGitRepo("existing")]);
+
+    await schedulerLoop();
+
+    expect(mockListRepositories).not.toHaveBeenCalled();
+    expect(mockListStarredRepositories).not.toHaveBeenCalled();
+    expect(consoleLines.some((line) => line.includes("public-only source: skipping personal discovery"))).toBe(true);
+    expect(mockListOrganizationRepositories).toHaveBeenCalledTimes(1);
+    expect(mockListOrganizationRepositories).toHaveBeenCalledWith("pinned-org");
+    expect(mockListOrganizationRepositories).not.toHaveBeenCalledWith("unpinned-org");
+  });
+
+  test("re-discovery imports newly published org repos once and never duplicates them", async () => {
+    repoRows.push({
+      userId: "user-1",
+      sourceId: "source-public",
+      name: "existing",
+      fullName: "pinned-org/existing",
+      normalizedFullName: "pinned-org/existing",
+      organization: "pinned-org",
+      status: "imported",
+    });
+    orgRepoListings.set("pinned-org", [
+      makeGitRepo("existing"),
+      makeGitRepo("newly-published"),
+      makeGitRepo("some-fork", { isForked: true }),
+    ]);
+
+    await schedulerLoop();
+
+    const orgRepoNames = repoRows
+      .filter((row) => row.normalizedFullName?.startsWith("pinned-org/"))
+      .map((row) => row.name);
+    expect(orgRepoNames).toEqual(["existing", "newly-published"]);
+    expect(orgUpdates.some((data) => data.repositoryCount === 3)).toBe(true);
+
+    const attemptsAfterFirstRun = repoInsertAttempts;
+    expect(attemptsAfterFirstRun).toBeGreaterThan(0);
+
+    await schedulerLoop();
+
+    const orgRepoNamesAfterSecondRun = repoRows
+      .filter((row) => row.normalizedFullName?.startsWith("pinned-org/"))
+      .map((row) => row.name);
+    expect(orgRepoNamesAfterSecondRun).toEqual(["existing", "newly-published"]);
+    expect(repoInsertAttempts).toBeGreaterThan(attemptsAfterFirstRun);
   });
 });
