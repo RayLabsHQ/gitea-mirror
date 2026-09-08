@@ -58,7 +58,7 @@ export default function Repository() {
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const { user } = useAuth();
   const { registerRefreshCallback, isLiveEnabled } = useLiveRefresh();
-  const { isGitHubConfigured, isFullyConfigured, autoMirrorStarred, githubOwner, sources } = useConfigStatus();
+  const { isGitHubConfigured, isFullyConfigured, hasAnySource, autoMirrorStarred, githubOwner, sources } = useConfigStatus();
   const { navigationKey } = useNavigation();
   const { filter, setFilter } = useFilterParams({
     searchTerm: "",
@@ -115,8 +115,9 @@ export default function Repository() {
   const fetchRepositories = useCallback(async (isLiveRefresh = false) => {
     if (!user?.id) return;
 
-    // Don't fetch repositories if GitHub is not configured or still loading config
-    if (!isGitHubConfigured) {
+    // Don't fetch repositories if no source exists at all (public-only
+    // sources count) or while the config is still loading.
+    if (!isGitHubConfigured && !hasAnySource) {
       setIsInitialLoading(false);
       return false;
     }
@@ -155,7 +156,7 @@ export default function Repository() {
         setIsInitialLoading(false);
       }
     }
-  }, [user?.id, isGitHubConfigured]); // Only depend on user.id, not entire user object
+  }, [user?.id, isGitHubConfigured, hasAnySource]); // Only depend on user.id, not entire user object
 
   useEffect(() => {
     // Reset loading state when component becomes active
@@ -165,8 +166,8 @@ export default function Repository() {
 
   // Register with global live refresh system
   useEffect(() => {
-    // Only register for live refresh if GitHub is configured
-    if (!isGitHubConfigured) {
+    // Only register for live refresh when a source can own repositories
+    if (!isGitHubConfigured && !hasAnySource) {
       return;
     }
 
@@ -175,7 +176,7 @@ export default function Repository() {
     });
 
     return unregister;
-  }, [registerRefreshCallback, fetchRepositories, isGitHubConfigured]);
+  }, [registerRefreshCallback, fetchRepositories, isGitHubConfigured, hasAnySource]);
 
   const handleRefresh = async () => {
     const success = await fetchRepositories(false); // Manual refresh, show loading skeleton
@@ -1559,11 +1560,11 @@ export default function Repository() {
         </div>
       )}
 
-      {!isGitHubConfigured ? (
+      {!isGitHubConfigured && !hasAnySource ? (
         <div className="flex flex-col items-center justify-center p-8 border border-dashed rounded-md">
-          <h3 className="text-xl font-semibold mb-2">GitHub Not Configured</h3>
+          <h3 className="text-xl font-semibold mb-2">No Source Configured</h3>
           <p className="text-muted-foreground text-center mb-4">
-            You need to configure your GitHub credentials before you can fetch and mirror repositories.
+            Connect a GitHub, GitLab or Gitea source — or add a public organization without an account — to start mirroring repositories.
           </p>
           <Button
             variant="default"

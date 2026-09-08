@@ -13,6 +13,7 @@ import {
 import {
   Activity,
   ExternalLink,
+  Globe,
   KeyRound,
   Layers,
   Lock,
@@ -209,6 +210,8 @@ export function SourcesCard({ sources, onRefresh }: SourcesCardProps) {
   // An empty token field while editing keeps the stored one, so testing
   // and saving both fall back to it.
   const effectiveToken = editor?.token.trim() || editing?.token || "";
+  const isPublicOnlyDraft =
+    !!editor && !editor.username.trim() && !effectiveToken;
 
   const refreshSources = async () => {
     setIsRefreshing(true);
@@ -493,8 +496,13 @@ export function SourcesCard({ sources, onRefresh }: SourcesCardProps) {
                 value={editor.username}
                 onChange={handleFieldChange}
                 placeholder={providerMeta.usernamePlaceholder}
-                required
               />
+              {isPublicOnlyDraft && (
+                <p className="text-[11px] text-muted-foreground/80">
+                  Both empty means public only: this source mirrors public
+                  repositories without an account.
+                </p>
+              )}
             </div>
 
             <div className="space-y-1.5">
@@ -582,7 +590,9 @@ export function SourcesCard({ sources, onRefresh }: SourcesCardProps) {
                   type="button"
                   size="sm"
                   onClick={() => handleSave(false)}
-                  disabled={isSaving || !editor.username.trim()}
+                  disabled={
+                    isSaving || (!editor.username.trim() && !!editor.token.trim())
+                  }
                 >
                   {isSaving ? "Saving..." : editing ? "Save changes" : "Add source"}
                 </Button>
@@ -626,6 +636,12 @@ export function SourcesCard({ sources, onRefresh }: SourcesCardProps) {
                       {meta.badge && (
                         <span className="rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-semibold tracking-wider text-muted-foreground">
                           {meta.badge}
+                        </span>
+                      )}
+                      {source.token === "" && (
+                        <span className="inline-flex items-center gap-1 rounded-full border border-border bg-muted/40 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
+                          <Globe className="h-3 w-3" />
+                          Public only
                         </span>
                       )}
                       {source.locked && (

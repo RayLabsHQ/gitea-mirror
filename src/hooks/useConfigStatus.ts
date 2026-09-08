@@ -18,6 +18,8 @@ interface ConfigStatus {
   autoMirrorStarred: boolean;
   githubOwner: string;
   sources: SourceApiRecord[];
+  /** Any source row exists, including tokenless public-only sources. */
+  hasAnySource: boolean;
   /** The configured (primary) source kind and its normalized instance URL. */
   sourceProvider: SourceProviderKind;
   sourceUrl: string;
@@ -48,6 +50,7 @@ export function useConfigStatus(): ConfigStatus {
     autoMirrorStarred: false,
     githubOwner: '',
     sources: [],
+    hasAnySource: false,
     sourceProvider: DEFAULT_SOURCE_PROVIDER,
     sourceUrl: normalizeSourceUrl(undefined, DEFAULT_SOURCE_PROVIDER),
   });
@@ -66,6 +69,7 @@ export function useConfigStatus(): ConfigStatus {
         autoMirrorStarred: false,
         githubOwner: '',
         sources: [],
+        hasAnySource: false,
         sourceProvider: DEFAULT_SOURCE_PROVIDER,
     sourceUrl: normalizeSourceUrl(undefined, DEFAULT_SOURCE_PROVIDER),
       });
@@ -96,6 +100,8 @@ export function useConfigStatus(): ConfigStatus {
 
       const isFullyConfigured = isGitHubConfigured && isGiteaConfigured;
 
+      const sources = configResponse?.sources ?? [];
+
       setConfigStatus({
         isGitHubConfigured,
         isGiteaConfigured,
@@ -104,7 +110,8 @@ export function useConfigStatus(): ConfigStatus {
         error: null,
         autoMirrorStarred: configResponse?.advancedOptions?.autoMirrorStarred ?? false,
         githubOwner: configResponse?.githubConfig?.username ?? '',
-        sources: configResponse?.sources ?? [],
+        sources,
+        hasAnySource: sources.length > 0,
         sourceProvider: normalizeSourceProviderKind(configResponse?.githubConfig?.provider),
         sourceUrl: normalizeSourceUrl(
           configResponse?.githubConfig?.url,
@@ -147,6 +154,8 @@ export function useConfigStatus(): ConfigStatus {
 
       const isFullyConfigured = isGitHubConfigured && isGiteaConfigured;
 
+      const sources = configResponse?.sources ?? [];
+
       setConfigStatus({
         isGitHubConfigured,
         isGiteaConfigured,
@@ -155,7 +164,8 @@ export function useConfigStatus(): ConfigStatus {
         error: null,
         autoMirrorStarred: configResponse?.advancedOptions?.autoMirrorStarred ?? false,
         githubOwner: configResponse?.githubConfig?.username ?? '',
-        sources: configResponse?.sources ?? [],
+        sources,
+        hasAnySource: sources.length > 0,
         sourceProvider: normalizeSourceProviderKind(configResponse?.githubConfig?.provider),
         sourceUrl: normalizeSourceUrl(
           configResponse?.githubConfig?.url,
@@ -174,6 +184,7 @@ export function useConfigStatus(): ConfigStatus {
         autoMirrorStarred: false,
         githubOwner: '',
         sources: [],
+        hasAnySource: false,
         sourceProvider: DEFAULT_SOURCE_PROVIDER,
     sourceUrl: normalizeSourceUrl(undefined, DEFAULT_SOURCE_PROVIDER),
       });
