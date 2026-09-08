@@ -147,7 +147,11 @@ export const POST: APIRoute = async ({ request, locals }) => {
               .from(repositories)
               .where(eq(repositories.userId, userId)),
             tx
-              .select({ normalizedName: organizations.normalizedName, status: organizations.status })
+              .select({
+                normalizedName: organizations.normalizedName,
+                status: organizations.status,
+                sourceId: organizations.sourceId,
+              })
               .from(organizations)
               .where(eq(organizations.userId, userId)),
           ]);
@@ -156,7 +160,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
           const existingRepoKeys = new Set(
             existingRepos.map((r) => `${r.sourceId ?? ""}|${r.normalizedFullName}`)
           );
-          const existingOrgMap = new Map(existingOrgs.map((o) => [o.normalizedName, o.status]));
+          const existingOrgMap = new Map(
+            existingOrgs.map((o) => [o.normalizedName, { status: o.status, sourceId: o.sourceId }])
+          );
 
           insertedRepos = newRepos.filter(
             (r) =>
@@ -169,7 +175,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
           // follow the recovering source, or the org mirror keeps scoping
           // to the source the failure was recorded under.
           const recoveredOrgs = newOrgs.filter(
-            (o) => existingOrgMap.get(o.normalizedName) === "failed"
+            (o) => existingOrgMap.get(o.normalizedName)?.status === "failed"
           );
           for (const org of recoveredOrgs) {
             await tx
@@ -192,10 +198,37 @@ export const POST: APIRoute = async ({ request, locals }) => {
           }
           recoveredOrgCount = recoveredOrgs.length;
 
+          // An org that a second source also lists must not stay pinned to
+          // the first one: the mirror and the card counts would drop the
+          // other source's repositories. Clearing the pin matches migration
+          // 0020, which leaves orgs spanning multiple sources unpinned.
+          // Failed orgs are excluded — their pin follows the recovering
+          // source in the update above.
+          const crossSourceOrgs = newOrgs.filter((o) => {
+            const existing = existingOrgMap.get(o.normalizedName);
+            return (
+              existing !== undefined &&
+              existing.status !== "failed" &&
+              existing.sourceId != null &&
+              existing.sourceId !== source.id
+            );
+          });
+          for (const org of crossSourceOrgs) {
+            await tx
+              .update(organizations)
+              .set({ sourceId: null, updatedAt: new Date() })
+              .where(
+                and(
+                  eq(organizations.userId, userId),
+                  eq(organizations.normalizedName, org.normalizedName),
+                )
+              );
+          }
+
           // Insert or update failed orgs (only update orgs already in "failed" state — don't overwrite good state)
           insertedFailedOrgs = failedOrgRecords.filter((o) => !existingOrgMap.has(o.normalizedName));
           const stillFailedOrgs = failedOrgRecords.filter(
-            (o) => existingOrgMap.get(o.normalizedName) === "failed"
+            (o) => existingOrgMap.get(o.normalizedName)?.status === "failed"
           );
           for (const org of stillFailedOrgs) {
             await tx
