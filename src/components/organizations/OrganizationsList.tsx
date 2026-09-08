@@ -3,7 +3,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Plus, RefreshCw, Building2, Check, AlertCircle, Clock, MoreVertical, Ban, SlidersHorizontal, Trash2, Layers } from "lucide-react";
-import { SiGithub, SiGitea, SiGitlab } from "react-icons/si";
+import { SiGitea } from "react-icons/si";
 import { toast } from "sonner";
 import type { MirrorOverrides, Organization } from "@/lib/db/schema";
 import type { FilterParams } from "@/types/filter";
@@ -26,6 +26,7 @@ import {
   normalizeSourceUrl,
   type SourceProviderKind,
 } from "@/lib/source-providers/kinds";
+import { SOURCE_PROVIDER_ICONS } from "@/lib/source-providers/icons";
 import {
   Select,
   SelectContent,
@@ -41,15 +42,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-
-const SOURCE_PROVIDER_ICONS: Record<
-  SourceProviderKind,
-  React.ComponentType<{ className?: string }>
-> = {
-  github: SiGithub,
-  gitlab: SiGitlab,
-  gitea: SiGitea,
-};
 
 interface OrganizationListProps {
   organizations: Organization[];
@@ -409,10 +401,10 @@ export function OrganizationList({
                       <Badge
                         variant="outline"
                         className="gap-1 px-1.5 font-normal text-[11px]"
-                        title={`Source: ${pinnedSource?.name ?? orgSourceLabel}`}
+                        title={`Source: ${pinnedSource?.name ?? "Every source"}`}
                       >
-                        <OrgSourceIcon className="h-3 w-3" />
-                        {pinnedSource?.name ?? orgSourceShortLabel}
+                        {pinnedSource ? <OrgSourceIcon className="h-3 w-3" /> : <Layers className="h-3 w-3" />}
+                        {pinnedSource?.name ?? "Every source"}
                       </Badge>
                     )}
                   </div>
@@ -467,7 +459,7 @@ export function OrganizationList({
                 <div>
                   <OrganizationSourceEditor
                     sources={orgSources}
-                    value={org.sourceId}
+                    value={pinnedSource?.id ?? null}
                     disabled={isLoading}
                     onUpdateSource={(newSourceId) => handleUpdateSource(org.id!, newSourceId)}
                   />
@@ -504,10 +496,10 @@ export function OrganizationList({
                     <Badge
                       variant="outline"
                       className="gap-1 px-1.5 font-normal text-[11px]"
-                      title={`Source: ${pinnedSource?.name ?? orgSourceLabel}`}
+                      title={`Source: ${pinnedSource?.name ?? "Every source"}`}
                     >
-                      <OrgSourceIcon className="h-3 w-3" />
-                      {pinnedSource?.name ?? orgSourceShortLabel}
+                      {pinnedSource ? <OrgSourceIcon className="h-3 w-3" /> : <Layers className="h-3 w-3" />}
+                      {pinnedSource?.name ?? "Every source"}
                     </Badge>
                   )}
                   {hasMirrorOverrides(org.mirrorOverrides) && (
@@ -551,7 +543,7 @@ export function OrganizationList({
                 <div className="mb-4">
                   <OrganizationSourceEditor
                     sources={orgSources}
-                    value={org.sourceId}
+                    value={pinnedSource?.id ?? null}
                     disabled={isLoading}
                     onUpdateSource={(newSourceId) => handleUpdateSource(org.id!, newSourceId)}
                   />

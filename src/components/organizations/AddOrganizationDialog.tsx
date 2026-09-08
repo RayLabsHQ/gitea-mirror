@@ -10,7 +10,7 @@ import {
   DialogTrigger,
 } from "../ui/dialog";
 import { LoaderCircle, Plus } from "lucide-react";
-import { SiGithub, SiGitea, SiGitlab } from "react-icons/si";
+import { SiGithub } from "react-icons/si";
 import type { MembershipRole } from "@/types/organizations";
 import type { SourceApiRecord } from "@/types/config";
 import { RadioGroup, RadioGroupItem } from "../ui/radio";
@@ -30,15 +30,7 @@ import {
   normalizeSourceUrl,
   type SourceProviderKind,
 } from "@/lib/source-providers/kinds";
-
-const SOURCE_PROVIDER_ICONS: Record<
-  SourceProviderKind,
-  React.ComponentType<{ className?: string }>
-> = {
-  github: SiGithub,
-  gitlab: SiGitlab,
-  gitea: SiGitea,
-};
+import { SOURCE_PROVIDER_ICONS } from "@/lib/source-providers/icons";
 
 const inputClassName =
   "w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
