@@ -16,7 +16,7 @@ import {
 } from "@/lib/sources";
 import type { Repository } from "./db/schema";
 import type { Octokit } from "@octokit/rest";
-import { createGitHubClient } from "./github";
+import { createGitHubClient, createPublicGitHubClient } from "./github";
 import { createMirrorJob } from "./helpers";
 import { assertRepositoryMatchesConfiguredDestination, usesPushEngine } from "./destination-connection";
 import { decryptConfigTokens } from "./utils/config-encryption";
@@ -916,17 +916,24 @@ export async function syncGiteaRepoEnhanced({
         if (metadataOctokit) {
           return metadataOctokit;
         }
-        // Only the token of the repository's own GitHub source can drive
-        // Octokit; other hosts and public-only sources skip metadata.
-        if (!repoSource || !repoSourceToken || !repoIsGitHub) {
+        // Only the repository's own GitHub source can drive Octokit; other
+        // hosts skip metadata. A GitHub source without a token gets an
+        // anonymous public client (60 req/hr) so public-repo metadata still
+        // mirrors — an empty token must never reach createGitHubClient,
+        // which would send `auth: ""`.
+        if (!repoSource || !repoIsGitHub) {
           return null;
         }
-        metadataOctokit = createGitHubClient(
-          repoSourceToken,
-          config.userId || undefined,
-          repoSource.username || undefined,
-          resolveGitHubApiBaseUrl(repoSource.url)
-        );
+        metadataOctokit = repoSourceToken
+          ? createGitHubClient(
+              repoSourceToken,
+              config.userId || undefined,
+              repoSource.username || undefined,
+              resolveGitHubApiBaseUrl(repoSource.url)
+            )
+          : createPublicGitHubClient(
+              resolveGitHubApiBaseUrl(repoSource.url)
+            );
         return metadataOctokit;
       };
 

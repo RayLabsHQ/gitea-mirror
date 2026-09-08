@@ -1526,6 +1526,151 @@ describe("Enhanced Gitea Operations", () => {
       expect(mockMirrorGitRepoLabelsToGitea).not.toHaveBeenCalled();
       expect(mockMirrorGitRepoMilestonesToGitea).toHaveBeenCalledTimes(1);
     });
+
+    test("mirrors metadata through an anonymous client for a tokenless GitHub source", async () => {
+      // WP2: a GitHub source connected without a token still drives metadata
+      // mirroring. ensureOctokit falls back to an anonymous public client
+      // (60 req/hr) instead of skipping metadata entirely.
+      const originalToken = sourceRows[0].token;
+      sourceRows[0].token = null;
+      try {
+        const config: Partial<Config> = {
+          userId: "user123",
+          githubConfig: {
+            username: "testuser",
+            token: "github-token",
+            privateRepositories: false,
+            mirrorStarred: true,
+          },
+          giteaConfig: {
+            url: "https://gitea.example.com",
+            token: "encrypted-token",
+            defaultOwner: "testuser",
+            mirrorReleases: true,
+          },
+        };
+
+        const repository: Repository = {
+          id: "repo456",
+          name: "mirror-repo",
+          fullName: "user/mirror-repo",
+          owner: "user",
+          cloneUrl: "https://github.com/user/mirror-repo.git",
+          isPrivate: false,
+          isStarred: true,
+          status: repoStatusEnum.parse("mirrored"),
+          visibility: "public",
+          userId: "user123",
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+
+        const result = await syncGiteaRepoEnhanced(
+          { config, repository },
+          {
+            getGiteaRepoOwnerAsync: mockGetGiteaRepoOwnerAsync,
+            mirrorGitHubReleasesToGitea: mockMirrorGitHubReleasesToGitea,
+            mirrorGitRepoIssuesToGitea: mockMirrorGitRepoIssuesToGitea,
+            mirrorGitRepoPullRequestsToGitea: mockMirrorGitRepoPullRequestsToGitea,
+            mirrorGitRepoLabelsToGitea: mockMirrorGitRepoLabelsToGitea,
+            mirrorGitRepoMilestonesToGitea: mockMirrorGitRepoMilestonesToGitea,
+            syncRepositoryMetadataToGitea: mockSyncRepositoryMetadataToGitea,
+          }
+        );
+
+        expect(result).toEqual({ success: true });
+        // The metadata reconciliation and the release mirror both received
+        // a non-null client resolved from the tokenless GitHub source.
+        expect(mockSyncRepositoryMetadataToGitea).toHaveBeenCalledTimes(1);
+        const metadataCall = mockSyncRepositoryMetadataToGitea.mock.calls[0][0];
+        expect(metadataCall.octokit).not.toBeNull();
+        expect(mockMirrorGitHubReleasesToGitea).toHaveBeenCalledTimes(1);
+        expect(
+          mockMirrorGitHubReleasesToGitea.mock.calls[0][0].octokit
+        ).toBeDefined();
+      } finally {
+        sourceRows[0].token = originalToken;
+      }
+    });
+
+    test("skips GitHub metadata for a repository pinned to a GitLab source", async () => {
+      // WP2 guard: only GitHub sources get an Octokit. A repository pinned
+      // to a GitLab source resolves no client and metadata stays skipped.
+      const originalRows = sourceRows.splice(
+        0,
+        sourceRows.length,
+        {
+          id: "source-gitlab",
+          userId: "user123",
+          name: "GitLab",
+          provider: "gitlab",
+          url: "https://gitlab.com",
+          username: "",
+          token: "gitlab-token",
+          enabled: true,
+          createdAt: new Date(0),
+          updatedAt: new Date(0),
+        }
+      );
+      try {
+        const config: Partial<Config> = {
+          userId: "user123",
+          githubConfig: {
+            username: "testuser",
+            token: "github-token",
+            privateRepositories: false,
+            mirrorStarred: false,
+          },
+          giteaConfig: {
+            url: "https://gitea.example.com",
+            token: "encrypted-token",
+            defaultOwner: "testuser",
+            mirrorReleases: true,
+          },
+        };
+
+        const repository: Repository = {
+          id: "repo794",
+          name: "mirror-repo",
+          fullName: "group/mirror-repo",
+          owner: "group",
+          cloneUrl: "https://gitlab.com/group/mirror-repo.git",
+          isPrivate: false,
+          isStarred: false,
+          status: repoStatusEnum.parse("mirrored"),
+          visibility: "public",
+          userId: "user123",
+          sourceId: "source-gitlab",
+          sourceProvider: "gitlab",
+          sourceUrl: "https://gitlab.com",
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+
+        const result = await syncGiteaRepoEnhanced(
+          { config, repository },
+          {
+            getGiteaRepoOwnerAsync: mockGetGiteaRepoOwnerAsync,
+            mirrorGitHubReleasesToGitea: mockMirrorGitHubReleasesToGitea,
+            mirrorGitRepoIssuesToGitea: mockMirrorGitRepoIssuesToGitea,
+            mirrorGitRepoPullRequestsToGitea: mockMirrorGitRepoPullRequestsToGitea,
+            mirrorGitRepoLabelsToGitea: mockMirrorGitRepoLabelsToGitea,
+            mirrorGitRepoMilestonesToGitea: mockMirrorGitRepoMilestonesToGitea,
+            syncRepositoryMetadataToGitea: mockSyncRepositoryMetadataToGitea,
+          }
+        );
+
+        expect(result).toEqual({ success: true });
+        // No GitHub client for a GitLab source: metadata reconciliation is
+        // handed a null octokit and the GitHub-only mirrors never run.
+        expect(mockSyncRepositoryMetadataToGitea).toHaveBeenCalledTimes(1);
+        const metadataCall = mockSyncRepositoryMetadataToGitea.mock.calls[0][0];
+        expect(metadataCall.octokit).toBeNull();
+        expect(mockMirrorGitHubReleasesToGitea).not.toHaveBeenCalled();
+      } finally {
+        sourceRows.splice(0, sourceRows.length, ...originalRows);
+      }
+    });
   });
 
   describe("handleExistingNonMirrorRepo", () => {

@@ -2119,10 +2119,9 @@ export async function mirrorGitHubOrgToGitea({
     if (
       !config.userId ||
       !config.id ||
-      !config.githubConfig?.token ||
       !config.giteaConfig?.url
     ) {
-      throw new Error("Config, GitHub token and Gitea URL are required.");
+      throw new Error("Config and Gitea URL are required.");
     }
 
     console.log(`Mirroring organization ${organization.name}`);

@@ -559,3 +559,30 @@ describe.skipIf(!isChild)("mirrorGitHubOrgToGitea source scoping", () => {
     expect(migrateCalls().length).toBe(1);
   });
 });
+
+describe.skipIf(!isChild)("mirrorGitHubOrgToGitea config gate (public org mirroring)", () => {
+  test("an empty source token does not fail the gate when the destination is configured", async () => {
+    // WP4: the gate is destination-only. A public-org user has a gitea token
+    // but no legacy GitHub token; the org mirror must proceed.
+    const config = makeConfig({ githubConfig: { token: "" } });
+    const organization = makeOrg();
+    orgRepoRows = [makeRepo()];
+    orgConfigRows = [organization];
+
+    await mirrorGitHubOrgToGitea({ organization, octokit: fakeOctokit, config });
+
+    const migrates = migrateCalls();
+    expect(migrates.length).toBe(1);
+    expect(migrates[0].payload.repo_name).toBe("r1");
+  });
+
+  test("a missing destination url still fails the gate", async () => {
+    const config = makeConfig({ giteaConfig: { url: "" } });
+    const organization = makeOrg();
+
+    await expect(
+      mirrorGitHubOrgToGitea({ organization, octokit: fakeOctokit, config })
+    ).rejects.toThrow();
+    expect(migrateCalls().length).toBe(0);
+  });
+});
