@@ -4,6 +4,7 @@ import {
   deriveSourceName,
   findSourceForOrganization,
   findSourceForRepository,
+  selectSameRunPinsToClear,
   primarySource,
   resolveGitHubApiBaseUrl,
   selectRepositoriesToRelink,
@@ -118,6 +119,32 @@ describe("findSourceForOrganization", () => {
 
   test("returns null when nothing is connected", () => {
     expect(findSourceForOrganization({ sourceId: "src-1" }, [])).toBeNull();
+  });
+});
+
+describe("selectSameRunPinsToClear", () => {
+  const discovered = [{ normalizedName: "acme" }, { normalizedName: "tools" }];
+
+  test("clears a pin an earlier source in the same run created", () => {
+    const pinnedThisRun = new Map([["acme", "src-1"]]);
+    expect(selectSameRunPinsToClear(discovered, pinnedThisRun, "src-2")).toEqual(["acme"]);
+  });
+
+  test("leaves organizations the run has not pinned alone", () => {
+    // "tools" was pinned before the run (or never), so it is not in the map.
+    const pinnedThisRun = new Map([["other", "src-1"]]);
+    expect(selectSameRunPinsToClear(discovered, pinnedThisRun, "src-2")).toEqual([]);
+  });
+
+  test("keeps a pin the same source created", () => {
+    const pinnedThisRun = new Map([["acme", "src-2"]]);
+    expect(selectSameRunPinsToClear(discovered, pinnedThisRun, "src-2")).toEqual([]);
+  });
+
+  test("names each organization once", () => {
+    const pinnedThisRun = new Map([["acme", "src-1"]]);
+    const twice = [...discovered, { normalizedName: "acme" }];
+    expect(selectSameRunPinsToClear(twice, pinnedThisRun, "src-2")).toEqual(["acme"]);
   });
 });
 

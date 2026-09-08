@@ -40,7 +40,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     // is the primary source). A source without a token still lists public
     // repositories through its provider. Configs written outside the sources
     // API get their first source row seeded here.
-    const { listSources, ensureSourcesFromConfig } = await import("@/lib/sources");
+    const { listSources, ensureSourcesFromConfig, selectSameRunPinsToClear } = await import("@/lib/sources");
     const { createSourceProviderFromSource } = await import("@/lib/source-providers");
     await ensureSourcesFromConfig(userId);
     const sources = (await listSources(userId)).filter((source) => source.enabled);
@@ -70,6 +70,12 @@ export const POST: APIRoute = async ({ request, locals }) => {
     let totalSkippedDisabled = 0;
     const failedOrgNames: string[] = [];
     const failedSourceNames: string[] = [];
+
+    // Organization pins this run set itself (inserted, or re-pinned on
+    // recovery), by normalized name. A later source listing the same name
+    // clears only these; pins that existed before the run are a stored
+    // choice and stay as they are. See selectSameRunPinsToClear.
+    const pinnedThisRun = new Map<string, string>();
 
     for (const source of sources) {
       try {
@@ -135,6 +141,11 @@ export const POST: APIRoute = async ({ request, locals }) => {
         let insertedOrgs: typeof newOrgs = [];
         let insertedFailedOrgs: typeof failedOrgRecords = [];
         let recoveredOrgCount = 0;
+        // Names whose pin this source set or cleared; applied to pinnedThisRun
+        // only after the transaction commits, so a rolled-back source leaves
+        // the run's pin bookkeeping untouched.
+        let pinnedOrgNames: string[] = [];
+        let clearedOrgNames: string[] = [];
 
         // Transaction to insert only new items
         await db.transaction(async (tx) => {
@@ -147,11 +158,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
               .from(repositories)
               .where(eq(repositories.userId, userId)),
             tx
-              .select({
-                normalizedName: organizations.normalizedName,
-                status: organizations.status,
-                sourceId: organizations.sourceId,
-              })
+              .select({ normalizedName: organizations.normalizedName, status: organizations.status })
               .from(organizations)
               .where(eq(organizations.userId, userId)),
           ]);
@@ -160,9 +167,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
           const existingRepoKeys = new Set(
             existingRepos.map((r) => `${r.sourceId ?? ""}|${r.normalizedFullName}`)
           );
-          const existingOrgMap = new Map(
-            existingOrgs.map((o) => [o.normalizedName, { status: o.status, sourceId: o.sourceId }])
-          );
+          const existingOrgMap = new Map(existingOrgs.map((o) => [o.normalizedName, o.status]));
 
           insertedRepos = newRepos.filter(
             (r) =>
@@ -175,7 +180,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
           // follow the recovering source, or the org mirror keeps scoping
           // to the source the failure was recorded under.
           const recoveredOrgs = newOrgs.filter(
-            (o) => existingOrgMap.get(o.normalizedName)?.status === "failed"
+            (o) => existingOrgMap.get(o.normalizedName) === "failed"
           );
           for (const org of recoveredOrgs) {
             await tx
@@ -198,29 +203,20 @@ export const POST: APIRoute = async ({ request, locals }) => {
           }
           recoveredOrgCount = recoveredOrgs.length;
 
-          // An org that a second source also lists must not stay pinned to
-          // the first one: the mirror and the card counts would drop the
-          // other source's repositories. Clearing the pin matches migration
-          // 0020, which leaves orgs spanning multiple sources unpinned.
-          // Failed orgs are excluded — their pin follows the recovering
-          // source in the update above.
-          const crossSourceOrgs = newOrgs.filter((o) => {
-            const existing = existingOrgMap.get(o.normalizedName);
-            return (
-              existing !== undefined &&
-              existing.status !== "failed" &&
-              existing.sourceId != null &&
-              existing.sourceId !== source.id
-            );
-          });
-          for (const org of crossSourceOrgs) {
+          // An organization that an earlier source in this run pinned and
+          // that this source lists as well spans several sources, so its pin
+          // is cleared, the same rule migration 0020 applies. Only pins this
+          // run created are touched: an org the user pinned on purpose keeps
+          // its pin even when another source lists the same name.
+          clearedOrgNames = selectSameRunPinsToClear(newOrgs, pinnedThisRun, source.id);
+          for (const normalizedName of clearedOrgNames) {
             await tx
               .update(organizations)
               .set({ sourceId: null, updatedAt: new Date() })
               .where(
                 and(
                   eq(organizations.userId, userId),
-                  eq(organizations.normalizedName, org.normalizedName),
+                  eq(organizations.normalizedName, normalizedName),
                 )
               );
           }
@@ -228,7 +224,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
           // Insert or update failed orgs (only update orgs already in "failed" state — don't overwrite good state)
           insertedFailedOrgs = failedOrgRecords.filter((o) => !existingOrgMap.has(o.normalizedName));
           const stillFailedOrgs = failedOrgRecords.filter(
-            (o) => existingOrgMap.get(o.normalizedName)?.status === "failed"
+            (o) => existingOrgMap.get(o.normalizedName) === "failed"
           );
           for (const org of stillFailedOrgs) {
             await tx
@@ -270,7 +266,15 @@ export const POST: APIRoute = async ({ request, locals }) => {
               await tx.insert(organizations).values(batch);
             }
           }
+          pinnedOrgNames = [...recoveredOrgs, ...insertedOrgs].map((org) => org.normalizedName);
         });
+
+        for (const normalizedName of pinnedOrgNames) {
+          pinnedThisRun.set(normalizedName, source.id);
+        }
+        for (const normalizedName of clearedOrgNames) {
+          pinnedThisRun.delete(normalizedName);
+        }
 
         // Create mirror jobs only for newly inserted items
         const mirrorJobPromises = [

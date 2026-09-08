@@ -144,6 +144,29 @@ export type DanglingRepositoryRow = {
   updatedAt: Date | string | null;
 };
 
+/**
+ * Normalized names among `discovered` whose pin the current bulk import run
+ * created itself (`pinnedThisRun`, name -> source id) from a different source
+ * than `sourceId`. Such an organization spans several sources, the ambiguous
+ * case migration 0020 leaves unpinned, so the caller clears the pin and drops
+ * the name from the map. Pins that existed before the run (set through the
+ * picker or the add dialog) are a stored choice and never appear in the map.
+ */
+export function selectSameRunPinsToClear(
+  discovered: ReadonlyArray<{ normalizedName: string }>,
+  pinnedThisRun: ReadonlyMap<string, string>,
+  sourceId: string
+): string[] {
+  const names: string[] = [];
+  for (const org of discovered) {
+    const pinnedBy = pinnedThisRun.get(org.normalizedName);
+    if (pinnedBy !== undefined && pinnedBy !== sourceId && !names.includes(org.normalizedName)) {
+      names.push(org.normalizedName);
+    }
+  }
+  return names;
+}
+
 // Repositories whose sourceId no longer resolves (or was never set) but whose
 // provider and host match the given source: exactly the rows a deleted and
 // re-added source must take back. Without the re-link, the next import sees

@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Organizations remember which source they import and mirror from; migration 0020 backfills the pin from each organization's repositories when they agree on one
   - Source picker in the add-organization dialog and on organization cards when more than one source is connected
   - `POST /api/sync/organization` persists `sourceId`, and `PATCH /api/organizations/:id` sets or clears it
+  - The bulk import only clears a pin it created itself in the same run when a second source lists the same organization; pins set through the picker or the add dialog are kept
 - Multi-source support: connect multiple source services per user (#375 follow-up)
   - Sources list on the Configuration page with add, edit and remove per source
   - Per-repository source attribution, with credentials resolved from each repository's own source
