@@ -45,6 +45,41 @@ The mirror itself is done by Gitea's pull mirror, which treats every source as a
 
 The GitHub only rows read the GitHub API. For other sources the corresponding switches are disabled on the Configuration page, and the mirror step skips them.
 
+Entire organizations also mirror without a token on every source; the next section covers public mode.
+
+## Public organizations (no source connection)
+
+An organization or group can be mirrored without any source account. Gitea Mirror lists the public repositories of a GitHub organization, a GitLab group or a Gitea/Forgejo organization on github.com, gitlab.com, a self hosted GitLab instance or a Gitea/Forgejo instance, and mirrors code, branches, tags, wiki and LFS objects through an anonymous mirror clone.
+
+On the Organizations page, **Add organization** has a public mode, which is the default when no source is connected: pick the provider, fill in the instance URL for a self hosted GitLab or Gitea/Forgejo host (empty means the default instance), and enter the organization name. Saving creates a public only source row for that instance automatically, so the sources card does not have to be visited first. The row appears in the sources card with a public only indicator and can be edited or removed like any other source. New repositories added to the organization upstream are discovered on the next scheduled run.
+
+Public mode degrades in known ways:
+
+- **GitHub metadata is best effort.** Anonymous requests run under GitHub's 60 requests per hour limit, so a large organization can end up with partial metadata. Releases, description and topics mirror anonymously with no account at all. Issues, pull requests, labels and milestones are also fetched anonymously once any source in the account carries a token; with no token anywhere they are skipped, and the mirror itself is unaffected either way.
+- **GitLab and Gitea/Forgejo sources mirror code only.** Metadata remains GitHub only, as in the table above, and issues and merge requests from those sources stay a Not yet item with or without a token.
+- **Personal auto discovery and starred repositories need a token.** Neither runs for a public only source.
+- **Cleanup does not run.** Repositories deleted upstream are not detected for public only sources.
+
+Listing and metadata go through the source API and are rate limited by the host when anonymous:
+
+| Source | Anonymous API limit |
+|--------|---------------------|
+| GitHub | 60 requests per hour per IP address |
+| GitLab.com | 500 requests per minute per IP address. GitLab has announced a phased reduction to 60 requests per hour for unauthenticated API traffic, planned for late 2026 |
+| Gitea / Forgejo | No built in API rate limit. Instances may throttle or close anonymous API access on their own |
+
+The mirror itself is a plain git clone and does not consume API requests.
+
+Adding a username and token to the public only row on the Configuration page upgrades it to a regular source: private repositories, personal auto discovery and starred repositories start working, and GitHub metadata moves from the anonymous limit to the authenticated one. The public only row also enables adding a public repository by URL on that host, which needs a source row but no token.
+
+The API accepts the same fields. `POST /api/sync/organization` adds a public organization like this:
+
+```json
+{ "org": "acme", "role": "member", "provider": "gitlab", "sourceUrl": "https://gitlab.example.com" }
+```
+
+`provider` is `github`, `gitlab` or `gitea`. `sourceUrl` is optional and defaults to the provider's default instance from the table at the top.
+
 ## Behaviour to know about
 
 - **Each source locks once repositories are imported from it, and the destination locks once anything is mirrored.** A locked source's **Source** dropdown and instance URL, and the Gitea server URL, then show a lock note and a **Change** button. Changing them is still possible, but only after confirming a dialog that spells out what happens to the existing repositories. Removing a source that has repositories needs an explicit confirmation too. Saves that try to switch a locked source without that confirmation are refused by the API, and an environment variable that disagrees with a locked source is ignored on boot with a warning.
