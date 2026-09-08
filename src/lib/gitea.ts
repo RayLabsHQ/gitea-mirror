@@ -2213,6 +2213,7 @@ export async function mirrorGitHubOrgToGitea({
           .from(repositories)
           .where(
             and(
+              eq(repositories.userId, config.userId),
               eq(repositories.organization, organization.name),
               eq(repositories.sourceId, pinnedSource.id)
             )
@@ -2220,7 +2221,12 @@ export async function mirrorGitHubOrgToGitea({
       : await db
           .select()
           .from(repositories)
-          .where(eq(repositories.organization, organization.name));
+          .where(
+            and(
+              eq(repositories.userId, config.userId),
+              eq(repositories.organization, organization.name)
+            )
+          );
 
     // The organization's fork policy (override -> global skipForks) drops
     // forked repositories from the batch so they are neither mirrored here

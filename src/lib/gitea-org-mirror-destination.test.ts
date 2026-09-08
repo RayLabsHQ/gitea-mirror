@@ -529,6 +529,7 @@ describe.skipIf(!isChild)("mirrorGitHubOrgToGitea source scoping", () => {
     await mirrorGitHubOrgToGitea({ organization, octokit: fakeOctokit, config });
 
     expect(orgRepoQueryMentions("source-1")).toBe(true);
+    expect(orgRepoQueryMentions("user-1")).toBe(true);
     expect(migrateCalls().length).toBe(1);
   });
 
@@ -541,6 +542,7 @@ describe.skipIf(!isChild)("mirrorGitHubOrgToGitea source scoping", () => {
     await mirrorGitHubOrgToGitea({ organization, octokit: fakeOctokit, config });
 
     expect(orgRepoQueryMentions("source-1")).toBe(false);
+    expect(orgRepoQueryMentions("user-1")).toBe(true);
     expect(migrateCalls().length).toBe(1);
   });
 
@@ -553,6 +555,7 @@ describe.skipIf(!isChild)("mirrorGitHubOrgToGitea source scoping", () => {
     await mirrorGitHubOrgToGitea({ organization, octokit: fakeOctokit, config });
 
     expect(orgRepoQueryMentions("source-deleted")).toBe(false);
+    expect(orgRepoQueryMentions("user-1")).toBe(true);
     expect(migrateCalls().length).toBe(1);
   });
 });
