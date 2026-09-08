@@ -25,7 +25,7 @@ import type { SourceProviderKind } from "@/lib/source-providers/kinds";
 import { useSSE } from "@/hooks/useSEE";
 import { useFilterParams } from "@/hooks/useFilterParams";
 import { toast } from "sonner";
-import { useConfigStatus } from "@/hooks/useConfigStatus";
+import { invalidateConfigCache, useConfigStatus } from "@/hooks/useConfigStatus";
 import { useNavigation } from "@/components/layout/MainLayout";
 import { useLiveRefresh } from "@/hooks/useLiveRefresh";
 import {
@@ -328,6 +328,9 @@ export function Organization() {
           : "Organization added successfully";
         toast.success(message);
 
+        // Adding a public organization can create its tokenless source row;
+        // drop the config cache so source-aware UI updates immediately.
+        invalidateConfigCache();
         await fetchOrganizations(false);
 
         setFilter((prev) => ({
