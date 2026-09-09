@@ -454,6 +454,51 @@ describe.skipIf(!isChild)("POST /api/sync/organization public add-org", () => {
     expect(insertedRepoRows).toHaveLength(0);
   });
 
+  test("force:true without a named source leaves the existing pin alone", async () => {
+    const primary = makeSourceRow({
+      provider: "github",
+      url: "https://github.com",
+      username: "octocat",
+      token: "enc:gh-token",
+    });
+    const other = makeSourceRow({
+      provider: "gitlab",
+      url: "https://gitlab.com",
+      username: "release-bot",
+      token: "enc:gl-token",
+    });
+    sourceRows = [primary, other];
+    orgRows = [
+      {
+        id: "org-1",
+        userId: "user-1",
+        name: "acme",
+        normalizedName: "acme",
+        membershipRole: "admin",
+        sourceId: other.id,
+      },
+      {
+        id: "org-2",
+        userId: "user-1",
+        name: "widgets",
+        normalizedName: "widgets",
+        membershipRole: "admin",
+        sourceId: null,
+      },
+    ];
+
+    const pinned = await postOrg({ org: "acme", role: "member", force: true });
+    expect(pinned.status).toBe(200);
+    expect(orgRows[0].sourceId).toBe(other.id);
+
+    const unpinned = await postOrg({ org: "widgets", role: "member", force: true });
+    expect(unpinned.status).toBe(200);
+    expect(orgRows[1].sourceId).toBeNull();
+
+    // Nothing was created to hold a new pin either.
+    expect(sourceRows).toHaveLength(2);
+  });
+
   test("a rate-limited org metadata fetch (403) still imports with a fallback record", async () => {
     orgMetadataError = Object.assign(
       new Error("rate limit exceeded"),

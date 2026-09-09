@@ -34,6 +34,28 @@ let configCache: { data: ConfigApiResponse | null; timestamp: number; userId: st
 
 const CACHE_DURATION = 30000; // 30 seconds cache
 
+// Mounted hooks, so invalidating the cache refreshes what is on screen
+// instead of only clearing the store behind it.
+const cacheSubscribers = new Set<() => void>();
+
+// One in-flight GET shared by every mounted hook: an invalidation wakes all
+// of them at once, and without this each would fire its own request.
+let inFlightRequest: { userId: string; promise: Promise<ConfigApiResponse> } | null = null;
+
+function fetchConfigOnce(userId: string): Promise<ConfigApiResponse> {
+  if (inFlightRequest && inFlightRequest.userId === userId) {
+    return inFlightRequest.promise;
+  }
+  const promise = apiRequest<ConfigApiResponse>(`/config?userId=${userId}`, { method: 'GET' });
+  const tracked = promise.finally(() => {
+    if (inFlightRequest?.promise === tracked) {
+      inFlightRequest = null;
+    }
+  });
+  inFlightRequest = { userId, promise: tracked };
+  return tracked;
+}
+
 /**
  * Hook to check if GitHub and Gitea are properly configured
  * Returns configuration status and prevents unnecessary API calls when not configured
@@ -127,10 +149,7 @@ export function useConfigStatus(): ConfigStatus {
         setConfigStatus(prev => ({ ...prev, isLoading: true, error: null }));
       }
 
-      const configResponse = await apiRequest<ConfigApiResponse>(
-        `/config?userId=${user.id}`,
-        { method: 'GET' }
-      );
+      const configResponse = await fetchConfigOnce(user.id);
 
       // Update cache
       configCache = {
@@ -196,12 +215,32 @@ export function useConfigStatus(): ConfigStatus {
     checkConfiguration();
   }, [checkConfiguration]);
 
+  // Re-read after invalidateConfigCache(): saving the configuration or
+  // adding a public organization (which creates its tokenless source row)
+  // has to reach the components already on screen, or source-dependent UI
+  // like the organization card's "Public only" badge stays stale until a
+  // reload.
+  useEffect(() => {
+    const refresh = () => {
+      void checkConfiguration();
+    };
+    cacheSubscribers.add(refresh);
+    return () => {
+      cacheSubscribers.delete(refresh);
+    };
+  }, [checkConfiguration]);
+
   return configStatus;
 }
 
-// Export function to invalidate cache when config is updated
+// Export function to invalidate cache when config is updated. Mounted hooks
+// re-fetch (through the shared in-flight request, so this costs one call).
 export function invalidateConfigCache() {
   configCache = { data: null, timestamp: 0, userId: null };
+  inFlightRequest = null;
+  for (const refresh of [...cacheSubscribers]) {
+    refresh();
+  }
 }
 
 // Export function to get cached config data for other hooks

@@ -40,7 +40,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     // is the primary source). A source without a token still lists public
     // repositories through its provider. Configs written outside the sources
     // API get their first source row seeded here.
-    const { listSources, ensureSourcesFromConfig, selectSameRunPinsToClear } = await import("@/lib/sources");
+    const { listSources, ensureSourcesFromConfig, selectSameRunPinsToClear, decryptSourceToken } = await import("@/lib/sources");
     const { createSourceProviderFromSource } = await import("@/lib/source-providers");
     await ensureSourcesFromConfig(userId);
     const sources = (await listSources(userId)).filter((source) => source.enabled);
@@ -70,6 +70,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     let totalSkippedDisabled = 0;
     const failedOrgNames: string[] = [];
     const failedSourceNames: string[] = [];
+    const skippedPublicSourceNames: string[] = [];
 
     // Organization pins this run set itself (inserted, or re-pinned on
     // recovery), by normalized name. A later source listing the same name
@@ -79,6 +80,17 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     for (const source of sources) {
       try {
+        // A public-only (tokenless) source has no account to list from: the
+        // personal and starred listings 401 on every call, which would count
+        // the source as failed and, when it is the only one, answer 502. Its
+        // organizations are added through the add-organization route and
+        // re-listed by the scheduler, which skips these sources the same way.
+        if (decryptSourceToken(source.token) === "") {
+          console.log(`Skipping personal discovery for public-only source ${source.name} (${source.id})`);
+          skippedPublicSourceNames.push(source.name);
+          continue;
+        }
+
         const sourceProvider = createSourceProviderFromSource(source, { userId });
         const sourceLabel = SOURCE_PROVIDER_LABELS[sourceProvider.kind];
 
@@ -316,7 +328,8 @@ export const POST: APIRoute = async ({ request, locals }) => {
       }
     }
 
-    if (sources.length > 0 && failedSourceNames.length === sources.length) {
+    const attemptedSourceCount = sources.length - skippedPublicSourceNames.length;
+    if (attemptedSourceCount > 0 && failedSourceNames.length === attemptedSourceCount) {
       return createSecureErrorResponse(
         new Error("every enabled source failed to sync"),
         "source data sync",
@@ -327,12 +340,16 @@ export const POST: APIRoute = async ({ request, locals }) => {
     return jsonResponse({
       data: {
         success: true,
-        message: "Repositories and organizations synced successfully",
+        message:
+          attemptedSourceCount === 0 && skippedPublicSourceNames.length > 0
+            ? "Nothing to import: every connected source is public only, so it has no account to list repositories from. Public organizations are imported from the Organizations page."
+            : "Repositories and organizations synced successfully",
         newRepositories: totalInsertedRepos,
         newOrganizations: totalInsertedOrgs,
         skippedDisabledRepositories: totalSkippedDisabled,
         failedOrgs: failedOrgNames,
         failedSources: failedSourceNames,
+        skippedPublicSources: skippedPublicSourceNames,
         recoveredOrgs: totalRecoveredOrgs,
       },
     });

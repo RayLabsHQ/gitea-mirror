@@ -32,11 +32,12 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     const config = configResult[0];
 
-    if (!config || !config.githubConfig.token) {
+    // Scheduling a sync only needs the destination; see sync-repo.ts.
+    if (!config || !config.giteaConfig?.token) {
       return new Response(
         JSON.stringify({
           success: false,
-          error: "Config missing for the user or GitHub token not found.",
+          error: "Config missing for the user or destination token not found.",
           repositories: [],
         } satisfies ScheduleSyncRepoResponse),
         { status: 400, headers: { "Content-Type": "application/json" } }

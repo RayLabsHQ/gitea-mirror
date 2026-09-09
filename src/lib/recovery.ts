@@ -8,7 +8,7 @@ import { resetStuckMirrorStatuses } from './stuck-status-recovery';
 import { db, repositories, organizations, mirrorJobs, configs } from './db';
 import { eq, and, lt, inArray, sql } from 'drizzle-orm';
 import { mirrorRepositoryToDestination, syncRepositoryOnDestination } from './mirror-dispatch';
-import { createGitHubClient } from './github';
+import { createGitHubClient, createPublicGitHubClient } from './github';
 import type { Octokit } from '@octokit/rest';
 import {
   decryptSourceToken,
@@ -272,11 +272,8 @@ async function recoverMirrorJob(job: any, remainingItemIds: string[]) {
 
     console.log(`Found ${repos.length} repositories to process for recovery`);
 
-    // Validate GitHub configuration before creating client
-    if (!config.githubConfig?.token) {
-      throw new Error('GitHub token not found in configuration');
-    }
-
+    // No source-token check here: the client is resolved from each
+    // repository's own source below, and a public-only source has none.
     // Only GitHub sources use an API client while mirroring (metadata).
     // Other hosts get code-only mirrors through Gitea, so no client is built.
     // Repositories picked by bare id can span sources, so the sources are
@@ -304,6 +301,10 @@ async function recoverMirrorJob(job: any, remainingItemIds: string[]) {
         if (repoSource?.provider === 'github') {
           try {
             const decryptedToken = decryptSourceToken(repoSource.token);
+            // A tokenless GitHub source gets the anonymous public client
+            // (60 req/hr), the same resolution the job routes use; an empty
+            // token must never reach createGitHubClient, which would send
+            // `auth: ""` and 401 on every call.
             octokit = decryptedToken
               ? createGitHubClient(
                   decryptedToken,
@@ -311,7 +312,7 @@ async function recoverMirrorJob(job: any, remainingItemIds: string[]) {
                   repoSource.username || undefined,
                   resolveGitHubApiBaseUrl(repoSource.url)
                 )
-              : null;
+              : createPublicGitHubClient(resolveGitHubApiBaseUrl(repoSource.url));
           } catch (error) {
             throw new Error(`Failed to create GitHub client: ${error instanceof Error ? error.message : String(error)}`);
           }

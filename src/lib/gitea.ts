@@ -2531,13 +2531,14 @@ export const mirrorGitRepoIssuesToGitea = async ({
   giteaRepoName?: string;
 }) => {
   //things covered here are- issue, title, body, labels, comments and assignees
+  // The source client arrives as `octokit` (anonymous for a public-only
+  // source), so only the destination has to be configured here.
   if (
-    !config.githubConfig?.token ||
     !config.giteaConfig?.token ||
     !config.giteaConfig?.url ||
     !config.giteaConfig?.defaultOwner
   ) {
-    throw new Error("Missing GitHub or Gitea configuration.");
+    throw new Error("Missing destination configuration.");
   }
 
   // Decrypt config tokens for API usage
@@ -3601,13 +3602,13 @@ export async function mirrorGitRepoPullRequestsToGitea({
   giteaOwner: string;
   giteaRepoName?: string;
 }) {
+  // The source client arrives as `octokit`; see mirrorGitRepoIssuesToGitea.
   if (
-    !config.githubConfig?.token ||
     !config.giteaConfig?.token ||
     !config.giteaConfig?.url ||
     !config.giteaConfig?.defaultOwner
   ) {
-    throw new Error("Missing GitHub or Gitea configuration.");
+    throw new Error("Missing destination configuration.");
   }
 
   // Decrypt config tokens for API usage
@@ -4053,12 +4054,9 @@ export async function mirrorGitRepoLabelsToGitea({
   giteaOwner: string;
   giteaRepoName?: string;
 }) {
-  if (
-    !config.githubConfig?.token ||
-    !config.giteaConfig?.token ||
-    !config.giteaConfig?.url
-  ) {
-    throw new Error("Missing GitHub or Gitea configuration.");
+  // The source client arrives as `octokit`; see mirrorGitRepoIssuesToGitea.
+  if (!config.giteaConfig?.token || !config.giteaConfig?.url) {
+    throw new Error("Missing destination configuration.");
   }
 
   // Decrypt config tokens for API usage
@@ -4187,12 +4185,9 @@ export async function mirrorGitRepoMilestonesToGitea({
   giteaOwner: string;
   giteaRepoName?: string;
 }) {
-  if (
-    !config.githubConfig?.token ||
-    !config.giteaConfig?.token ||
-    !config.giteaConfig?.url
-  ) {
-    throw new Error("Missing GitHub or Gitea configuration.");
+  // The source client arrives as `octokit`; see mirrorGitRepoIssuesToGitea.
+  if (!config.giteaConfig?.token || !config.giteaConfig?.url) {
+    throw new Error("Missing destination configuration.");
   }
 
   // Decrypt config tokens for API usage

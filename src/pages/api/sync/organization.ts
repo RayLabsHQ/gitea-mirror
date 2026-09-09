@@ -161,7 +161,10 @@ export const POST: APIRoute = async ({ request, locals }) => {
         .set({
           membershipRole: role,
           normalizedName: normalizedOrg,
-          ...(source ? { sourceId: source.id } : {}),
+          // Only a request that named a source (an explicit pin, or public
+          // mode's provider) re-pins; a bare force re-add must leave the
+          // organization's own pin, including "every source", alone.
+          ...(source && (sourceId || body.provider) ? { sourceId: source.id } : {}),
           updatedAt: new Date(),
         })
         .where(eq(organizations.id, existingOrg.id))

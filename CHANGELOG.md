@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Public organizations without a source connection (#409)
+  - The Add Organization dialog offers a Public only mode, the default when no source is connected: pick GitHub, GitLab or Gitea/Forgejo, optionally an instance URL, and the organization is imported anonymously
+  - A tokenless source row is found or created for that provider and host and the organization is pinned to it, so attribution, locks, the scheduler and cleanup keep working per source
+  - Anonymous GitHub clients keep the throttling and rate-limit backoff of authenticated ones, and the scheduler, per-repo mirror, retry, sync and recovery paths gate on the destination token instead of a source token
+  - Sources with no username and no token are saved and shown as Public only, and the organizations and repositories pages work with no configured source
 - Per-organization source selection for multi-source accounts
   - Organizations remember which source they import and mirror from; migration 0020 backfills the pin from each organization's repositories when they agree on one
   - Source picker in the add-organization dialog and on organization cards when more than one source is connected

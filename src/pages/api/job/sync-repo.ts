@@ -49,9 +49,12 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
     const config = configResult[0];
 
-    if (!config || !config.githubConfig.token) {
+    // Syncing only touches the destination: the source client is resolved
+    // per repository further down the dispatch, and a public-only source has
+    // no token at all. Requiring one here locked those accounts out of Sync.
+    if (!config || !config.giteaConfig?.token) {
       return new Response(
-        JSON.stringify({ error: "Config missing for the user or token." }),
+        JSON.stringify({ error: "Config missing for the user or destination token." }),
         { status: 400, headers: { "Content-Type": "application/json" } }
       );
     }
