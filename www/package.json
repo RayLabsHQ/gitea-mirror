@@ -19,7 +19,7 @@
     "@types/canvas-confetti": "^1.9.0",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
-    "astro": "^7.1.0",
+    "astro": "^7.2.8",
     "canvas-confetti": "^1.9.4",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -35,7 +35,10 @@
   "packageManager": "pnpm@10.32.1",
   "pnpm": {
     "overrides": {
-      "esbuild@>=0.27.3 <0.28.1": ">=0.28.1"
+      "esbuild@>=0.27.3 <0.28.1": ">=0.28.1",
+      "sharp": "^0.35.4",
+      "svgo": "^4.1.0",
+      "js-yaml": "^4.3.2"
     }
   }
 }

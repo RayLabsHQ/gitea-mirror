@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- Raised the dependency floors for the advisories published on 2026-09-08: Astro 7.2.8 (remote code execution through AVIF image optimization, and an authorization bypass when stripping the configured base), @xmldom/xmldom 0.8.15 (eight parser and serializer issues), sharp 0.35.4 (libheif), svgo 4.1.0 (removeScripts sanitization) and js-yaml 4.3.2 (merge-key CPU use). Applied to both the application and the documentation site.
+
 ### Added
 - Public organizations without a source connection (#409)
   - The Add Organization dialog offers a Public only mode, the default when no source is connected: pick GitHub, GitLab or Gitea/Forgejo, optionally an instance URL, and the organization is imported anonymously

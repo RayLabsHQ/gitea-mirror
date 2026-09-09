@@ -45,16 +45,17 @@
   },
   "overrides": {
     "@esbuild-kit/esm-loader": "npm:tsx@^4.21.0",
-    "@xmldom/xmldom": "^0.8.13",
+    "@xmldom/xmldom": "^0.8.15",
     "browserslist": "^4.28.7",
     "devalue": "^5.8.1",
     "fast-uri": "^3.1.5",
     "fast-xml-builder": "^1.1.7",
-    "js-yaml": "^4.3.1",
+    "js-yaml": "^4.3.2",
     "kysely": "^0.28.17",
     "lodash": "^4.18.1",
     "picomatch": "^4.0.4",
-    "sharp": "^0.35.0"
+    "sharp": "^0.35.4",
+    "svgo": "^4.1.0"
   },
   "dependencies": {
     "@astrojs/mdx": "^7.0.3",
@@ -89,7 +90,7 @@
     "@types/canvas-confetti": "^1.9.0",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
-    "astro": "^7.1.0",
+    "astro": "^7.2.8",
     "bcryptjs": "^3.0.3",
     "better-auth": "1.7.2",
     "buffer": "^6.0.3",
