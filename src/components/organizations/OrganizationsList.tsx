@@ -306,7 +306,7 @@ export function OrganizationList({
   }, [organizations, filter]);
 
   return isLoading ? (
-    <div className="grid grid-cols-1 sm:grid-cols-[repeat(auto-fit,minmax(27rem,1fr))] gap-4">
+    <div className="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,minmax(27rem,1fr))] gap-4">
       {Array.from({ length: 5 }).map((_, i) => (
         <Skeleton key={i} className="h-[11.25rem] w-full" />
       ))}
@@ -340,7 +340,7 @@ export function OrganizationList({
       )}
     </div>
   ) : (
-    <div className="grid grid-cols-1 sm:grid-cols-[repeat(auto-fit,minmax(27rem,1fr))] gap-4 pb-20 sm:pb-0">
+    <div className="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,minmax(27rem,1fr))] gap-4 pb-20 sm:pb-0">
       {filteredOrganizations.map((org, index) => {
         const isLoading = loadingOrgIds.has(org.id ?? "");
         const statusBadge = getStatusBadge(org.status);
