@@ -113,9 +113,9 @@
     url = "https://registry.npmjs.org/@astrojs/mdx/-/mdx-7.0.3.tgz";
     hash = "sha512-RxyIwU0uFam5ftwqKOjpIdhnFxZ/kEikeimLyQy3eGXbHT8WgRGzzesOIHVU8+m9TY8ag5WVOyvV24/GyqPdPQ==";
   };
-  "@astrojs/node@11.0.2" = fetchurl {
-    url = "https://registry.npmjs.org/@astrojs/node/-/node-11.0.2.tgz";
-    hash = "sha512-/ijULxT+A5Cm8wSwWZ2vgqfim1b05D6B8n/a9l6MMA4FCotIH73g7fL7y76XojKXpTe75FVvQH92OxsMqea9kQ==";
+  "@astrojs/node@11.1.5" = fetchurl {
+    url = "https://registry.npmjs.org/@astrojs/node/-/node-11.1.5.tgz";
+    hash = "sha512-CgA+LmG4UWqHxg/Vdc5MdxjjJNZSjKYQQx4uEUwnbj+1ZD2CYumJI3OWg2twsVdj2FlYsB5yvmCC54Re+OK+UQ==";
   };
   "@astrojs/prism@4.0.2" = fetchurl {
     url = "https://registry.npmjs.org/@astrojs/prism/-/prism-4.0.2.tgz";

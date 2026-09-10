@@ -59,7 +59,7 @@
   },
   "dependencies": {
     "@astrojs/mdx": "^7.0.3",
-    "@astrojs/node": "^11.0.2",
+    "@astrojs/node": "^11.1.5",
     "@astrojs/react": "^6.0.1",
     "@better-auth/api-key": "1.7.2",
     "@better-auth/oauth-provider": "1.7.2",
