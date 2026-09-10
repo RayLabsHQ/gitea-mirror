@@ -272,6 +272,23 @@ export function OrganizationList({
   // GitHub and GitLab destinations are pushed to; only Gitea and Forgejo can transfer a repository.
   const destination = destinationInfo(giteaConfig);
 
+  // Where an organization's repositories land with no override, which is what
+  // the mirror strategy produces for organization repositories (see
+  // getGiteaRepoOwner in src/lib/gitea.ts). Only "preserve" and "mixed" make
+  // that the organization's own name, so the editor cannot assume it (#416).
+  // preserveOrgStructure is not consulted: the config API maps it from
+  // preserveVisibility, so mirrorStrategy is the only reliable signal here.
+  const defaultDestinationFor = (orgName: string): string => {
+    const strategy = giteaConfig?.mirrorStrategy || "preserve";
+    if (strategy === "single-org") {
+      return giteaConfig?.organization || giteaConfig?.username || orgName;
+    }
+    if (strategy === "flat-user") {
+      return giteaConfig?.username || orgName;
+    }
+    return orgName;
+  };
+
   const hasAnyFilter = Object.values(filter).some(
     (val) => val?.toString().trim() !== ""
   );
@@ -453,6 +470,7 @@ export function OrganizationList({
                   organizationId={org.id!}
                   organizationName={org.name!}
                   currentDestination={org.destinationOrg ?? undefined}
+                  defaultDestination={defaultDestinationFor(org.name!)}
                   onUpdate={(newDestination) => handleUpdateDestination(org.id!, newDestination)}
                   onMoveMirrors={
                     destination.isPushTarget
@@ -546,6 +564,7 @@ export function OrganizationList({
                   organizationId={org.id!}
                   organizationName={org.name!}
                   currentDestination={org.destinationOrg ?? undefined}
+                  defaultDestination={defaultDestinationFor(org.name!)}
                   onUpdate={(newDestination) => handleUpdateDestination(org.id!, newDestination)}
                   onMoveMirrors={
                     destination.isPushTarget

@@ -55,6 +55,12 @@ import { getRepositorySource, normalizeSourceUrl } from "@/lib/source-providers/
 
 export default function Repository() {
   const [repositories, setRepositories] = useState<Repository[]>([]);
+  // Organization name -> its destination override, from the list response.
+  // Kept beside the rows rather than on them: the action endpoints return the
+  // repositories row alone, and replacing a row would drop the field (#416).
+  const [organizationDestinations, setOrganizationDestinations] = useState<
+    Record<string, string>
+  >({});
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const { user } = useAuth();
   const { registerRefreshCallback, isLiveEnabled } = useLiveRefresh();
@@ -137,6 +143,7 @@ export default function Repository() {
 
       if (response.success) {
         setRepositories(response.repositories);
+        setOrganizationDestinations(response.organizationDestinations ?? {});
         return true;
       } else {
         // Only show error toast for manual refreshes to avoid spam during live updates
@@ -1580,6 +1587,7 @@ export default function Repository() {
       ) : (
         <RepositoryTable
           repositories={repositories}
+          organizationDestinations={organizationDestinations}
           isLoading={isInitialLoading || !connected}
           filter={filter}
           setFilter={setFilter}

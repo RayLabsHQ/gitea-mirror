@@ -1,5 +1,5 @@
 import type { APIRoute } from "astro";
-import { db, repositories, configs } from "@/lib/db";
+import { db, repositories, configs, organizations } from "@/lib/db";
 import { and, eq, sql } from "drizzle-orm";
 import {
   repositoryVisibilityEnum,
@@ -51,9 +51,28 @@ export const GET: APIRoute = async ({ request, locals }) => {
       .where(and(...conditions))
       .orderBy(sql`${repositories.importedAt} DESC`, sql`name COLLATE NOCASE`);
 
+    // Organization-level destination overrides. A repository without its own
+    // destinationOrg follows its organization's, so the list ships the map and
+    // the destination column names that instead of the strategy default (#416).
+    const orgDestinationRows = await db
+      .select({
+        name: organizations.name,
+        destinationOrg: organizations.destinationOrg,
+      })
+      .from(organizations)
+      .where(eq(organizations.userId, userId));
+
+    const organizationDestinations: Record<string, string> = {};
+    for (const row of orgDestinationRows) {
+      if (row.destinationOrg) {
+        organizationDestinations[row.name] = row.destinationOrg;
+      }
+    }
+
     const response: RepositoryApiResponse = {
       success: true,
       message: "Repositories fetched successfully",
+      organizationDestinations,
       repositories: rawRepositories.map((repo) => ({
         ...repo,
         organization: repo.organization ?? undefined,

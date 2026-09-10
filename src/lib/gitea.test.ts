@@ -594,6 +594,121 @@ describe("getGiteaRepoOwner - Organization Override Tests", () => {
     expect(result).toBe("custom-org");
   });
 
+  test("getGiteaRepoOwnerAsync: single-org strategy honors an organization override (#416)", async () => {
+    mockDbSelectResult = [
+      {
+        id: "org-id",
+        userId: "user-id",
+        configId: "config-id",
+        name: "GrapheneOS",
+        membershipRole: "member",
+        status: "imported",
+        destinationOrg: "GrapheneOS",
+        avatarUrl: "https://example.com/avatar.png",
+        isIncluded: true,
+        repositoryCount: 0,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      }
+    ];
+
+    const configWithSingleOrg: Partial<Config> = {
+      ...baseConfig,
+      userId: "user-id",
+      githubConfig: {
+        ...baseConfig.githubConfig!,
+        mirrorStrategy: "single-org"
+      },
+      giteaConfig: {
+        ...baseConfig.giteaConfig!,
+        organization: "mirrors"
+      }
+    };
+
+    const repo = { ...baseRepo, organization: "GrapheneOS", fullName: "GrapheneOS/platform_build" };
+
+    const result = await getGiteaRepoOwnerAsync({
+      config: configWithSingleOrg,
+      repository: repo
+    });
+
+    // The override names the organization's own name, which single-org would
+    // never produce: it must not be mistaken for "no override".
+    expect(result).toBe("GrapheneOS");
+  });
+
+  test("getGiteaRepoOwnerAsync: a repository override beats the organization override and single-org (#416)", async () => {
+    mockDbSelectResult = [
+      {
+        id: "org-id",
+        userId: "user-id",
+        configId: "config-id",
+        name: "GrapheneOS",
+        membershipRole: "member",
+        status: "imported",
+        destinationOrg: "GrapheneOS",
+        avatarUrl: "https://example.com/avatar.png",
+        isIncluded: true,
+        repositoryCount: 0,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      }
+    ];
+
+    const configWithSingleOrg: Partial<Config> = {
+      ...baseConfig,
+      userId: "user-id",
+      githubConfig: {
+        ...baseConfig.githubConfig!,
+        mirrorStrategy: "single-org"
+      },
+      giteaConfig: {
+        ...baseConfig.giteaConfig!,
+        organization: "mirrors"
+      }
+    };
+
+    const repo = {
+      ...baseRepo,
+      organization: "GrapheneOS",
+      fullName: "GrapheneOS/platform_build",
+      destinationOrg: "mirrors"
+    };
+
+    const result = await getGiteaRepoOwnerAsync({
+      config: configWithSingleOrg,
+      repository: repo
+    });
+
+    expect(result).toBe("mirrors");
+  });
+
+  test("getGiteaRepoOwnerAsync: single-org without an organization override uses the configured org (#416)", async () => {
+    mockDbSelectResult = [];
+
+    const configWithSingleOrg: Partial<Config> = {
+      ...baseConfig,
+      userId: "user-id",
+      githubConfig: {
+        ...baseConfig.githubConfig!,
+        mirrorStrategy: "single-org"
+      },
+      giteaConfig: {
+        ...baseConfig.giteaConfig!,
+        organization: "mirrors"
+      }
+    };
+
+    const repo = { ...baseRepo, organization: "GrapheneOS", fullName: "GrapheneOS/platform_build" };
+
+    const result = await getGiteaRepoOwnerAsync({
+      config: configWithSingleOrg,
+      repository: repo
+    });
+
+    expect(result).toBe("mirrors");
+  });
+
   test("getGiteaRepoOwnerAsync preserves starred owner when preserve-owner mode is enabled", async () => {
     const configWithUser: Partial<Config> = {
       ...baseConfig,

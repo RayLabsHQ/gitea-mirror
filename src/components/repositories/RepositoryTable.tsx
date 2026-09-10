@@ -68,6 +68,8 @@ export const REPOSITORY_SORT_OPTIONS = [
 
 interface RepositoryTableProps {
   repositories: Repository[];
+  /** Organization name -> its destination override (#416). */
+  organizationDestinations?: Record<string, string>;
   isLoading: boolean;
   filter: FilterParams;
   setFilter: (filter: FilterParams) => void;
@@ -110,6 +112,7 @@ function getTableSorting(sortOrder: string | undefined): SortingState {
 
 export default function RepositoryTable({
   repositories,
+  organizationDestinations,
   isLoading,
   filter,
   setFilter,
@@ -1066,6 +1069,11 @@ export default function RepositoryTable({
                         <InlineDestinationEditor
                           repository={repo}
                           giteaConfig={giteaConfig}
+                          organizationDestination={
+                            repo.organization
+                              ? organizationDestinations?.[repo.organization]
+                              : undefined
+                          }
                           onUpdate={handleUpdateDestination}
                           isUpdating={loadingRepoIds.has(repo.id ?? "")}
                         />

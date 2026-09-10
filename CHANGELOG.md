@@ -42,6 +42,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive fix report documentation
 
 ### Fixed
+- A per-organization Mirror Destination equal to the organization's own name is kept instead of being dropped (#416)
+  - The editor treated a typed value matching the organization name as "reset to default" and saved no override, which only holds under the preserve strategy; under single-org the default is the destination organization, so the repositories went there
+  - The organization card now shows the default for the configured strategy in the preview, the placeholder, the helper text and the reset button, and marks any stored destination as custom
+  - The repository destination column shows the organization's override as a repository's default, and pinning a repository to the value the strategy already produces is stored rather than discarded
+  - Reset to Default on an organization card clears the override instead of saving the current value again
 - Fixed metadata mirroring authentication errors (#68)
   - Changed field checking from `username` to `defaultOwner` in metadata functions
   - Added proper field validation for all metadata operations

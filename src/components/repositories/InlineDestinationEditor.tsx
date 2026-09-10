@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { destinationInfo } from "@/components/destination/DestinationIcon";
 import { cn } from "@/lib/utils";
+import { resolveDestinationSaveValue } from "@/lib/utils/destination-editor";
 import type { Repository } from "@/lib/db/schema";
 
 export interface DestinationUpdateOptions {
@@ -24,6 +25,12 @@ export interface DestinationUpdateOptions {
 interface InlineDestinationEditorProps {
   repository: Repository;
   giteaConfig: any;
+  /**
+   * Destination the repository's organization overrides to, when it sets one.
+   * It outranks the mirror strategy for the organization's repositories, so the
+   * row would otherwise name the strategy's owner instead (#416).
+   */
+  organizationDestination?: string | null;
   onUpdate: (
     repoId: string,
     newDestination: string | null,
@@ -40,6 +47,7 @@ const CANNOT_MOVE_STATUSES = new Set(["imported", "deleted", "deleting", "mirror
 export function InlineDestinationEditor({
   repository,
   giteaConfig,
+  organizationDestination,
   onUpdate,
   isUpdating = false,
   className,
@@ -67,6 +75,12 @@ export function InlineDestinationEditor({
       return "starred";
     }
     
+    // An organization's own override applies to its repositories whatever the
+    // strategy says, matching getGiteaRepoOwnerAsync's precedence (#416).
+    if (repository.organization && organizationDestination) {
+      return organizationDestination;
+    }
+
     // Check mirror strategy
     const strategy = giteaConfig?.mirrorStrategy || 'preserve';
     
@@ -93,7 +107,9 @@ export function InlineDestinationEditor({
 
   const defaultDestination = getDefaultDestination();
   const currentDestination = repository.destinationOrg || defaultDestination;
-  const hasOverride = repository.destinationOrg && repository.destinationOrg !== defaultDestination;
+  // A stored destination is a pin even when it spells out the default, so the
+  // badge follows the stored value rather than comparing against it (#416).
+  const hasOverride = Boolean(repository.destinationOrg);
   const isStarredRepo = repository.isStarred;
 
   const destination = destinationInfo(giteaConfig);
@@ -122,7 +138,7 @@ export function InlineDestinationEditor({
 
   const handleSave = async () => {
     const trimmedValue = editValue.trim();
-    const newDestination = trimmedValue === defaultDestination ? null : trimmedValue;
+    const newDestination = resolveDestinationSaveValue(editValue);
 
     if (trimmedValue === currentDestination) {
       setIsEditing(false);

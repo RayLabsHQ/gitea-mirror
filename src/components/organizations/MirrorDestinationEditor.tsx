@@ -20,12 +20,19 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { resolveDestinationSaveValue } from "@/lib/utils/destination-editor";
 import type { OrganizationMoveResult } from "@/lib/destination-transfer";
 
 interface MirrorDestinationEditorProps {
   organizationId: string;
   organizationName: string;
   currentDestination?: string;
+  /**
+   * Where this organization's repositories land when it has no override: what
+   * the configured mirror strategy produces. Only the same-named organization
+   * under `preserve`; the destination organization under `single-org` (#416).
+   */
+  defaultDestination: string;
   onUpdate: (newDestination: string | null) => Promise<void>;
   /**
    * Plan (dryRun) or perform the move of the organization's mirrors on the
@@ -75,6 +82,7 @@ export function MirrorDestinationEditor({
   organizationId,
   organizationName,
   currentDestination,
+  defaultDestination,
   onUpdate,
   onMoveMirrors,
   destinationLabel = "Gitea",
@@ -91,15 +99,16 @@ export function MirrorDestinationEditor({
   const [applying, setApplying] = useState(false);
   const [confirmError, setConfirmError] = useState<string | null>(null);
 
-  const hasOverride = currentDestination && currentDestination !== organizationName;
-  const effectiveDestination = currentDestination || organizationName;
+  // Any stored destination is an override, including one that spells out what
+  // the strategy would have picked anyway. Clearing it is the only way back.
+  const hasOverride = Boolean(currentDestination);
+  const effectiveDestination = currentDestination || defaultDestination;
   const canMove = typeof onMoveMirrors === "function";
 
-  const handleSave = async () => {
-    const trimmedValue = editValue.trim();
-    const newDestination = trimmedValue === "" || trimmedValue === organizationName 
-      ? null 
-      : trimmedValue;
+  // The value is passed in rather than read from state so Reset can save the
+  // cleared field right away: setEditValue does not update this closure.
+  const handleSave = async (rawValue: string = editValue) => {
+    const newDestination = resolveDestinationSaveValue(rawValue);
 
     setIsLoading(true);
     try {
@@ -160,7 +169,7 @@ export function MirrorDestinationEditor({
 
   const handleReset = async () => {
     setEditValue("");
-    await handleSave();
+    await handleSave("");
   };
 
   const handleCancel = () => {
@@ -227,7 +236,7 @@ export function MirrorDestinationEditor({
                   <div className="flex items-center gap-1.5">
                     <Building2 className="h-4 w-4 text-primary" />
                     <span className="font-medium text-primary">
-                      {editValue.trim() || organizationName}
+                      {editValue.trim() || defaultDestination}
                     </span>
                   </div>
                 </div>
@@ -242,12 +251,12 @@ export function MirrorDestinationEditor({
                   id="destination"
                   value={editValue}
                   onChange={(e) => setEditValue(e.target.value)}
-                  placeholder={organizationName}
+                  placeholder={defaultDestination}
                   className="h-8"
                   disabled={isLoading}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Leave empty to use the source organization name.
+                  Leave empty to use the default for your mirror strategy ({defaultDestination}).
                 </p>
               </div>
 
@@ -280,7 +289,7 @@ export function MirrorDestinationEditor({
                   className="w-full h-8 text-xs"
                 >
                   <RotateCcw className="h-3 w-3 mr-2" />
-                  Reset to Default ({organizationName})
+                  Reset to Default ({defaultDestination})
                 </Button>
               )}
             </div>
@@ -297,7 +306,7 @@ export function MirrorDestinationEditor({
               </Button>
               <Button
                 size="sm"
-                onClick={handleSave}
+                onClick={() => void handleSave()}
                 disabled={isLoading || (editValue.trim() === (currentDestination || ""))}
               >
                 {isLoading ? (

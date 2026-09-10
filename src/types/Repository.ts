@@ -31,6 +31,13 @@ export interface RepositoryApiSuccessResponse {
   success: true;
   message: string;
   repositories: Repository[];
+  /**
+   * Organization name -> the destination that organization overrides to, for
+   * the organizations that set one. A repository inherits it unless it has its
+   * own destinationOrg, the precedence getGiteaRepoOwnerAsync applies, so the
+   * list needs it to name a repository's real default (#416).
+   */
+  organizationDestinations?: Record<string, string>;
 }
 
 export interface RepositoryApiErrorResponse {

@@ -424,6 +424,41 @@ describe.skipIf(!isChild)("mirrorGitHubOrgToGitea destination routing (#343)", (
     expect(orgCreateCalls.filter((n) => n === "hub").length).toBe(1);
   });
 
+  test("single-org strategy keeps an organization override that equals the organization name (#416)", async () => {
+    const config = makeConfig({
+      githubConfig: { mirrorStrategy: "single-org" },
+      giteaConfig: { organization: "mirrors" },
+    });
+    // The reporter's case: the override spells out the organization's own name,
+    // which single-org would never produce on its own.
+    const organization = makeOrg({ destinationOrg: "A" });
+    orgRepoRows = [makeRepo()];
+    orgConfigRows = [organization];
+
+    await mirrorGitHubOrgToGitea({ organization, octokit: fakeOctokit, config });
+
+    const migrates = migrateCalls();
+    expect(migrates.length).toBe(1);
+    expect(migrates[0].payload.uid).toBe(orgIdFor("A"));
+    expect(orgCreateCalls).not.toContain("mirrors");
+  });
+
+  test("a repository override beats an organization override under single-org (#416)", async () => {
+    const config = makeConfig({
+      githubConfig: { mirrorStrategy: "single-org" },
+      giteaConfig: { organization: "mirrors" },
+    });
+    const organization = makeOrg({ destinationOrg: "A" });
+    orgRepoRows = [makeRepo({ destinationOrg: "mirrors" })];
+    orgConfigRows = [organization];
+
+    await mirrorGitHubOrgToGitea({ organization, octokit: fakeOctokit, config });
+
+    const migrates = migrateCalls();
+    expect(migrates.length).toBe(1);
+    expect(migrates[0].payload.uid).toBe(orgIdFor("mirrors"));
+  });
+
   test("regression: flat-user strategy without overrides mirrors to the user account (repo_owner, no org)", async () => {
     const config = makeConfig({ githubConfig: { mirrorStrategy: "flat-user" } });
     const organization = makeOrg();
