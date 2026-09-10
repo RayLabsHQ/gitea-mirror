@@ -42,6 +42,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Comprehensive fix report documentation
 
 ### Fixed
+- Crash recovery no longer resumes a job that is still running
+  - A job older than two hours was treated as interrupted even while it checkpointed every two minutes, so recovery started a second pass over the same repositories alongside the original; the age rule is gone and only a missing or stale checkpoint marks a job interrupted
+  - Every completed item is now recorded in the job's checkpoint instead of one in every N, so a real resume skips exactly what was done; progress events are still throttled
+  - Concurrent items completing at the same time could overwrite each other's checkpoint; job progress writes are serialized per job
+  - A resumed job records a fresh start time
 - A per-organization Mirror Destination equal to the organization's own name is kept instead of being dropped (#416)
   - The editor treated a typed value matching the organization name as "reset to default" and saved no override, which only holds under the preserve strategy; under single-org the default is the destination organization, so the repositories went there
   - The organization card now shows the default for the configured strategy in the preview, the placeholder, the helper text and the reset button, and marks any stored destination as custom

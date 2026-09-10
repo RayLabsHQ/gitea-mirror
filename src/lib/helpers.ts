@@ -4,6 +4,7 @@ import { eq, and } from "drizzle-orm";
 import { buildInterruptedJobsCondition } from "./interrupted-job-detection";
 import { v4 as uuidv4 } from "uuid";
 import { publishEvent } from "./events";
+import { withKeyedLock } from "./utils/keyed-mutex";
 import { triggerJobNotification } from "./notification-service";
 
 export async function createMirrorJob({
@@ -113,17 +114,18 @@ export async function createMirrorJob({
 }
 
 /**
- * Updates the progress of a mirror job
+ * Updates the progress of a mirror job.
+ *
+ * Progress is a read-modify-write of the completedItemIds list, and items
+ * finish concurrently, so the update runs under a per-job lock: two items
+ * completing in the same tick used to read the same list and one of them
+ * silently overwrote the other. A resume then re-processed the lost item.
+ *
+ * `silent` records the progress without publishing an event. Every completed
+ * item is checkpointed so a resume knows exactly what is done; the events the
+ * dashboard listens to are throttled by the caller instead.
  */
-export async function updateMirrorJobProgress({
-  jobId,
-  completedItemId,
-  status,
-  message,
-  details,
-  inProgress,
-  isCompleted,
-}: {
+export async function updateMirrorJobProgress(params: {
   jobId: string;
   completedItemId?: string;
   status?: RepoStatus;
@@ -131,7 +133,25 @@ export async function updateMirrorJobProgress({
   details?: string;
   inProgress?: boolean;
   isCompleted?: boolean;
+  /** Record a new start time, as when recovery resumes the job. */
+  startedAt?: Date;
+  /** Write the progress without publishing a mirror-status event. */
+  silent?: boolean;
 }) {
+  return withKeyedLock(`mirror-job:${params.jobId}`, () => updateMirrorJobProgressLocked(params));
+}
+
+async function updateMirrorJobProgressLocked({
+  jobId,
+  completedItemId,
+  status,
+  message,
+  details,
+  inProgress,
+  isCompleted,
+  startedAt,
+  silent = false,
+}: Parameters<typeof updateMirrorJobProgress>[0]) {
   try {
     // Get the current job
     const [job] = await db
@@ -155,6 +175,10 @@ export async function updateMirrorJobProgress({
         updates.completedItemIds = [...completedItemIds, completedItemId];
         updates.completedItems = (job.completedItems || 0) + 1;
       }
+    }
+
+    if (startedAt) {
+      updates.startedAt = startedAt;
     }
 
     // Update status if provided
@@ -194,6 +218,10 @@ export async function updateMirrorJobProgress({
       ...job,
       ...updates,
     };
+
+    if (silent) {
+      return updatedJob;
+    }
 
     // Create deduplication key for progress updates
     let deduplicationKey: string | undefined;
@@ -324,12 +352,15 @@ export async function resumeInterruptedJob(job: any) {
       return null;
     }
 
-    // Update the job to show it's being resumed
+    // Update the job to show it's being resumed. The start time moves to
+    // now so the row records this pass; the fresh checkpoint written here is
+    // what keeps a second recovery sweep from resuming the same job again.
     await updateMirrorJobProgress({
       jobId: job.id,
       message: `Resuming job with ${remainingItemIds.length} remaining items`,
       details: `Job was interrupted and is being resumed. ${job.completedItemIds.length} of ${job.itemIds.length} items were already processed.`,
       inProgress: true,
+      startedAt: new Date(),
     });
 
     return {

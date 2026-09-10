@@ -165,3 +165,46 @@ describe("processWithRetry", () => {
     }
   });
 });
+
+describe("processWithRetry checkpointing", () => {
+  test("records every completed item and publishes on the interval", async () => {
+    const items = ["a", "b", "c", "d", "e"];
+    const calls: Array<[string, string, boolean]> = [];
+
+    await processWithRetry(items, async (item) => item.toUpperCase(), {
+      concurrencyLimit: 1,
+      jobId: "job-1",
+      getItemId: (item) => item,
+      checkpointInterval: 2,
+      onCheckpoint: async (jobId, itemId, publish) => {
+        calls.push([jobId, itemId, publish]);
+      },
+    });
+
+    // One checkpoint per item, in completion order, and no "final" placeholder.
+    expect(calls.map(([, itemId]) => itemId)).toEqual(items);
+    expect(calls.every(([jobId]) => jobId === "job-1")).toBe(true);
+    // Progress events only every second item.
+    expect(calls.map(([, , publish]) => publish)).toEqual([false, true, false, true, false]);
+  });
+
+  test("does not checkpoint an item that failed for good", async () => {
+    const calls: string[] = [];
+
+    // processInParallel logs a failed item and carries on, so the call resolves.
+    await processWithRetry(["ok", "bad"], async (item) => {
+      if (item === "bad") throw new Error("nope");
+      return item;
+    }, {
+      concurrencyLimit: 1,
+      maxRetries: 0,
+      jobId: "job-2",
+      getItemId: (item) => item,
+      onCheckpoint: async (_jobId, itemId) => {
+        calls.push(itemId);
+      },
+    });
+
+    expect(calls).toEqual(["ok"]);
+  });
+});

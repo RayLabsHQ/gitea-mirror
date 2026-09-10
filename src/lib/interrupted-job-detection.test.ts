@@ -18,7 +18,6 @@ import { drizzle } from "drizzle-orm/bun-sqlite";
 import { mirrorJobs } from "@/lib/db/schema";
 import {
   INTERRUPTED_CHECKPOINT_AGE_MS,
-  STALE_JOB_AGE_MS,
   JOB_HEARTBEAT_INTERVAL_MS,
   computeInterruptedJobCutoffs,
   isJobInterrupted,
@@ -32,14 +31,15 @@ const NOW = new Date("2026-09-02T12:00:00Z");
 const ago = (ms: number) => new Date(NOW.getTime() - ms);
 
 describe("computeInterruptedJobCutoffs", () => {
-  test("keeps the 10 minute checkpoint window and 2 hour stale window", () => {
+  test("keeps the 10 minute checkpoint window and has no stale age cutoff", () => {
     expect(INTERRUPTED_CHECKPOINT_AGE_MS).toBe(10 * MINUTE);
-    expect(STALE_JOB_AGE_MS).toBe(2 * HOUR);
 
     const cutoffs = computeInterruptedJobCutoffs(NOW);
 
     expect(cutoffs.checkpointCutoff.getTime()).toBe(NOW.getTime() - 10 * MINUTE);
-    expect(cutoffs.staleCutoff.getTime()).toBe(NOW.getTime() - 2 * HOUR);
+    // The two hour "stale regardless of checkpoint" rule resumed live jobs
+    // and is gone; a checkpointing job is alive however old it is.
+    expect(Object.keys(cutoffs)).toEqual(["checkpointCutoff"]);
   });
 
   test("heartbeat interval leaves room for a missed beat inside the checkpoint window", () => {
@@ -78,9 +78,18 @@ describe("isJobInterrupted", () => {
     ).toBe(true);
   });
 
-  test("a job running past the stale window is interrupted even with a fresh checkpoint", () => {
+  test("a job that keeps checkpointing stays live however long ago it started", () => {
     expect(
       isJobInterrupted({ inProgress: true, startedAt: ago(3 * HOUR), lastCheckpoint: ago(MINUTE) }, NOW)
+    ).toBe(false);
+    expect(
+      isJobInterrupted({ inProgress: true, startedAt: ago(30 * HOUR), lastCheckpoint: ago(2 * MINUTE) }, NOW)
+    ).toBe(false);
+  });
+
+  test("an old job whose checkpoint went stale is still interrupted", () => {
+    expect(
+      isJobInterrupted({ inProgress: true, startedAt: ago(3 * HOUR), lastCheckpoint: ago(11 * MINUTE) }, NOW)
     ).toBe(true);
   });
 
@@ -233,6 +242,22 @@ describe("wiring", () => {
       /finally\s*\{\s*clearInterval\(heartbeat\);\s*\}/.test(CONCURRENCY_SRC),
       "the heartbeat must be cleared on every exit path"
     ).toBe(true);
+  });
+
+  test("resumeInterruptedJob records a fresh start time for the resumed pass", () => {
+    const resumeBody = HELPERS_SRC.slice(HELPERS_SRC.indexOf("export async function resumeInterruptedJob("));
+    expect(/inProgress:\s*true,\s*startedAt:\s*new Date\(\)/.test(resumeBody)).toBe(true);
+  });
+
+  test("updateMirrorJobProgress serializes writes per job so concurrent items cannot drop each other", () => {
+    expect(
+      /withKeyedLock\(`mirror-job:\$\{params\.jobId\}`,\s*\(\)\s*=>\s*updateMirrorJobProgressLocked\(params\)\)/.test(HELPERS_SRC)
+    ).toBe(true);
+  });
+
+  test("processWithRetry checkpoints every completed item instead of the one that trips the interval", () => {
+    expect(/await onCheckpoint\(jobId,\s*itemId,\s*publish\)/.test(CONCURRENCY_SRC)).toBe(true);
+    expect(CONCURRENCY_SRC.includes("onCheckpoint(jobId, 'final')")).toBe(false);
   });
 
   test("middleware keeps the recovery latch until the recovery promise settles", () => {

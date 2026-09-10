@@ -93,8 +93,15 @@ export async function processWithRetry<T, R>(
     onRetry?: (item: T, error: Error, attempt: number) => void;
     jobId?: string; // Optional job ID for checkpointing
     getItemId?: (item: T) => string; // Function to get a unique ID for each item
-    onCheckpoint?: (jobId: string, completedItemId: string) => Promise<void>; // Callback for checkpointing
-    checkpointInterval?: number; // How many items to process before checkpointing
+    /**
+     * Called once for EVERY completed item, so a resume knows exactly what is
+     * done. `publish` is true every `checkpointInterval` items: the callback
+     * uses it to throttle progress events, not the checkpoint itself. It used
+     * to be called only for the item that tripped the interval, and a resume
+     * re-processed everything finished since the previous checkpoint.
+     */
+    onCheckpoint?: (jobId: string, completedItemId: string, publish: boolean) => Promise<void>;
+    checkpointInterval?: number; // How many completed items between published progress events
   } = {}
 ): Promise<R[]> {
   const {
@@ -130,16 +137,16 @@ export async function processWithRetry<T, R>(
 
         const result = await processItem(item);
 
-        // Handle checkpointing if enabled
+        // Record every completed item; publish progress on the interval.
         if (jobId && getItemId && onCheckpoint) {
           const itemId = getItemId(item);
           itemsProcessedSinceLastCheckpoint++;
 
-          // Checkpoint based on the interval
-          if (itemsProcessedSinceLastCheckpoint >= checkpointInterval) {
-            await onCheckpoint(jobId, itemId);
+          const publish = itemsProcessedSinceLastCheckpoint >= checkpointInterval;
+          if (publish) {
             itemsProcessedSinceLastCheckpoint = 0;
           }
+          await onCheckpoint(jobId, itemId, publish);
         }
 
         return result;
@@ -185,12 +192,6 @@ export async function processWithRetry<T, R>(
     concurrencyLimit,
     onProgress
   );
-
-  // Final checkpoint if there are remaining items since the last checkpoint
-  if (jobId && getItemId && onCheckpoint && itemsProcessedSinceLastCheckpoint > 0) {
-    // We don't have a specific item ID for the final checkpoint, so we'll use a placeholder
-    await onCheckpoint(jobId, 'final');
-  }
 
   return results;
 }
@@ -309,8 +310,10 @@ export async function processWithResilience<T, R>(
     });
   }, JOB_HEARTBEAT_INTERVAL_MS);
 
-  // Define the checkpoint function
-  const onCheckpoint = async (jobId: string, completedItemId: string) => {
+  // Define the checkpoint function. Every completed item is written to the
+  // job row so a resume skips exactly what is done; only every
+  // checkpointInterval-th write also publishes a progress event.
+  const onCheckpoint = async (jobId: string, completedItemId: string, publish: boolean = true) => {
     const itemName = items.find(item => getItemId(item) === completedItemId)
       ? getItemName(items.find(item => getItemId(item) === completedItemId)!)
       : 'unknown';
@@ -319,6 +322,7 @@ export async function processWithResilience<T, R>(
       jobId,
       completedItemId,
       message: `Processed item: ${itemName}`,
+      silent: !publish,
     });
   };
 
