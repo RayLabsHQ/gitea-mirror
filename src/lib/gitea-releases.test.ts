@@ -164,6 +164,11 @@ describe("classifyReleasesForReconciliation", () => {
  * existing release" and left it at 0.
  *
  * Fix: reconcile assets idempotently on both paths via classifyAssetsForReconciliation.
+ *
+ * Extended for #417: the destination allows several attachments with the same
+ * name (no name-collision check in CreateReleaseAttachment), so the classifier
+ * groups existing attachments by name, keeps one copy and reports the surplus
+ * ones in toDelete.
  */
 describe("classifyAssetsForReconciliation", () => {
   it("uploads all assets when the Gitea release has none (the #331 broken state)", () => {
@@ -173,13 +178,11 @@ describe("classifyAssetsForReconciliation", () => {
     ];
     const gitea: Array<{ id: number; name: string; size: number }> = [];
 
-    const { toUpload, toSkip } = classifyAssetsForReconciliation(github, gitea);
+    const { toUpload, toSkip, toDelete } = classifyAssetsForReconciliation(github, gitea);
 
     expect(toSkip).toEqual([]);
-    expect(toUpload).toEqual([
-      { name: "base.zip", replaceAssetId: null },
-      { name: "extras.zip", replaceAssetId: null },
-    ]);
+    expect(toDelete).toEqual([]);
+    expect(toUpload).toEqual(["base.zip", "extras.zip"]);
   });
 
   it("backfills only the missing asset when one already exists", () => {
@@ -189,10 +192,11 @@ describe("classifyAssetsForReconciliation", () => {
     ];
     const gitea = [{ id: 9, name: "base.zip", size: 40_264_954 }];
 
-    const { toUpload, toSkip } = classifyAssetsForReconciliation(github, gitea);
+    const { toUpload, toSkip, toDelete } = classifyAssetsForReconciliation(github, gitea);
 
     expect(toSkip).toEqual(["base.zip"]);
-    expect(toUpload).toEqual([{ name: "extras.zip", replaceAssetId: null }]);
+    expect(toUpload).toEqual(["extras.zip"]);
+    expect(toDelete).toEqual([]);
   });
 
   it("is idempotent — skips everything when all assets already match by name+size", () => {
@@ -205,28 +209,111 @@ describe("classifyAssetsForReconciliation", () => {
       { id: 10, name: "extras.zip", size: 37_098_528 },
     ];
 
-    const { toUpload, toSkip } = classifyAssetsForReconciliation(github, gitea);
+    const { toUpload, toSkip, toDelete } = classifyAssetsForReconciliation(github, gitea);
 
     expect(toUpload).toEqual([]);
     expect(toSkip).toEqual(["base.zip", "extras.zip"]);
+    expect(toDelete).toEqual([]);
   });
 
-  it("replaces an asset whose size changed upstream (re-upload over the stale copy)", () => {
+  it("replaces an asset whose size changed upstream (delete the stale copy, upload once)", () => {
     const github = [{ name: "firmware.bin", size: 2048 }];
     const gitea = [{ id: 42, name: "firmware.bin", size: 1024 }]; // truncated/stale
 
-    const { toUpload, toSkip } = classifyAssetsForReconciliation(github, gitea);
+    const { toUpload, toSkip, toDelete } = classifyAssetsForReconciliation(github, gitea);
 
     expect(toSkip).toEqual([]);
-    expect(toUpload).toEqual([{ name: "firmware.bin", replaceAssetId: 42 }]);
+    expect(toUpload).toEqual(["firmware.bin"]);
+    expect(toDelete).toEqual([42]);
   });
 
   it("handles a release with no GitHub assets", () => {
-    const { toUpload, toSkip } = classifyAssetsForReconciliation(
+    const { toUpload, toSkip, toDelete } = classifyAssetsForReconciliation(
       [],
       [{ id: 1, name: "leftover.zip", size: 10 }]
     );
     expect(toUpload).toEqual([]);
     expect(toSkip).toEqual([]);
+    expect(toDelete).toEqual([]);
+  });
+
+  // --- #417: duplicate attachments on the destination ---
+
+  it("keeps one copy and deletes the extra when two copies both match (#417)", () => {
+    const github = [{ name: "base.zip", size: 40_264_954 }];
+    const gitea = [
+      { id: 9, name: "base.zip", size: 40_264_954 },
+      { id: 14, name: "base.zip", size: 40_264_954 },
+    ];
+
+    const { toUpload, toSkip, toDelete } = classifyAssetsForReconciliation(github, gitea);
+
+    expect(toUpload).toEqual([]);
+    expect(toSkip).toEqual(["base.zip"]);
+    expect(toDelete).toEqual([14]);
+  });
+
+  it("deletes all three copies and uploads once when none matches the size", () => {
+    const github = [{ name: "firmware.bin", size: 2048 }];
+    const gitea = [
+      { id: 7, name: "firmware.bin", size: 1024 },
+      { id: 8, name: "firmware.bin", size: 1024 },
+      { id: 9, name: "firmware.bin", size: 99 },
+    ];
+
+    const { toUpload, toSkip, toDelete } = classifyAssetsForReconciliation(github, gitea);
+
+    expect(toUpload).toEqual(["firmware.bin"]);
+    expect(toSkip).toEqual([]);
+    expect(toDelete).toEqual([7, 8, 9]);
+  });
+
+  it("keeps the matching copy and deletes the two that do not match", () => {
+    const github = [{ name: "installer.dmg", size: 5_000 }];
+    const gitea = [
+      { id: 3, name: "installer.dmg", size: 1_000 },
+      { id: 4, name: "installer.dmg", size: 5_000 },
+      { id: 5, name: "installer.dmg", size: 2_000 },
+    ];
+
+    const { toUpload, toSkip, toDelete } = classifyAssetsForReconciliation(github, gitea);
+
+    expect(toUpload).toEqual([]);
+    expect(toSkip).toEqual(["installer.dmg"]);
+    expect(toDelete).toEqual([3, 5]);
+  });
+
+  it("never deletes a destination attachment whose name is not in the GitHub list", () => {
+    const github = [{ name: "base.zip", size: 10 }];
+    const gitea = [
+      { id: 1, name: "base.zip", size: 10 },
+      { id: 2, name: "from-an-older-release.zip", size: 10 },
+      { id: 3, name: "from-an-older-release.zip", size: 99 },
+    ];
+
+    const { toUpload, toSkip, toDelete } = classifyAssetsForReconciliation(github, gitea);
+
+    expect(toUpload).toEqual([]);
+    expect(toSkip).toEqual(["base.zip"]);
+    expect(toDelete).toEqual([]);
+  });
+
+  it("keeps the lowest id whatever order the destination listed the copies in", () => {
+    const github = [{ name: "base.zip", size: 10 }];
+    const listedOneWay = [
+      { id: 31, name: "base.zip", size: 10 },
+      { id: 12, name: "base.zip", size: 10 },
+      { id: 25, name: "base.zip", size: 10 },
+    ];
+    const listedTheOtherWay = [...listedOneWay].reverse();
+
+    const first = classifyAssetsForReconciliation(github, listedOneWay);
+    const second = classifyAssetsForReconciliation(github, listedTheOtherWay);
+
+    // id 12 survives in both, and the deletes come back in the same order.
+    expect(first.toDelete).toEqual([25, 31]);
+    expect(second.toDelete).toEqual([25, 31]);
+    expect(first.toSkip).toEqual(["base.zip"]);
+    expect(second.toSkip).toEqual(["base.zip"]);
   });
 });

@@ -113,7 +113,16 @@ mock.module("@/lib/db", () => {
       }),
     }),
     update: (_table: any) => ({
-      set: (_data: any) => ({ where: (_cond: any) => Promise.resolve() }),
+      set: (_data: any) => ({
+        where: (_cond: any) => {
+          // The mirror path claims the row with a conditional UPDATE and reads
+          // the returned rows to find out whether it won (#417); one row means
+          // claimed.
+          const result: any = Promise.resolve();
+          result.returning = () => Promise.resolve([{ id: "repo-1" }]);
+          return result;
+        },
+      }),
     }),
     insert: (_table: any) => ({ values: (_data: any) => Promise.resolve() }),
     delete: (_table: any) => ({ where: (_cond: any) => Promise.resolve() }),

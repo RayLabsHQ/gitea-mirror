@@ -113,9 +113,49 @@ export const POST: APIRoute = async ({ request, locals }) => {
     // action === "approve": create backup first (safety), then trigger sync
     const decryptedConfig = decryptConfigTokens(config as unknown as Config);
 
+    // Claim the rows before the background work starts: one conditional UPDATE
+    // per repository, so the status flips to "syncing" immediately (the UI asks
+    // for that) without stealing a row that a mirror or sync already owns
+    // (#417). The sync itself is then told the row is claimed.
+    const claimedRepos: typeof repos = [];
+    for (const repo of repos) {
+      const claimed = await db
+        .update(repositories)
+        .set({
+          status: "syncing",
+          errorMessage: null,
+          updatedAt: new Date(),
+        })
+        .where(
+          and(
+            eq(repositories.id, repo.id),
+            eq(repositories.status, "pending-approval"),
+          ),
+        )
+        .returning({ id: repositories.id });
+
+      if (claimed.length > 0) {
+        claimedRepos.push(repo);
+      } else {
+        console.log(
+          `[ApproveSync] Skipping ${repo.name}: it is no longer waiting for approval (another run may have picked it up).`,
+        );
+      }
+    }
+
+    if (claimedRepos.length === 0) {
+      return new Response(
+        JSON.stringify({
+          success: false,
+          message: "No pending-approval repositories were available to sync.",
+        }),
+        { status: 409, headers: { "Content-Type": "application/json" } },
+      );
+    }
+
     // Process in background
     setTimeout(async () => {
-      for (const repo of repos) {
+      for (const repo of claimedRepos) {
         try {
           const { getGiteaRepoOwnerAsync } = await import("@/lib/gitea");
           const repoOwner = await getGiteaRepoOwnerAsync({ config, repository: repo });
@@ -163,6 +203,8 @@ export const POST: APIRoute = async ({ request, locals }) => {
             config,
             repository: repoData,
             skipForcePushDetection: true,
+            // The row was claimed above, before this background task started.
+            alreadyClaimed: true,
           });
           console.log(`[ApproveSync] Sync completed for approved repository: ${repo.name}`);
         } catch (error) {
@@ -174,23 +216,11 @@ export const POST: APIRoute = async ({ request, locals }) => {
       }
     }, 0);
 
-    // Immediately update status to syncing for responsiveness
-    for (const repo of repos) {
-      await db
-        .update(repositories)
-        .set({
-          status: "syncing",
-          errorMessage: null,
-          updatedAt: new Date(),
-        })
-        .where(eq(repositories.id, repo.id));
-    }
-
     return new Response(
       JSON.stringify({
         success: true,
-        message: `Approved sync for ${repos.length} repository(ies). Backup + sync started.`,
-        repositories: repos.map((repo) => ({
+        message: `Approved sync for ${claimedRepos.length} repository(ies). Backup + sync started.`,
+        repositories: claimedRepos.map((repo) => ({
           ...repo,
           status: "syncing",
           errorMessage: null,

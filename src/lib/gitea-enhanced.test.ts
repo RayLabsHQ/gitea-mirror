@@ -25,6 +25,9 @@ let mockShouldBlockSyncOnBackupFailure = true;
 // dbUpdateSetCalls so tests can assert on what got written (e.g. archived
 // repos keeping status "archived" after a Manual Sync).
 const dbUpdateSetCalls: any[] = [];
+// Rows the sync's atomic status claim gets back (#417): one row means this run
+// claimed the repository, an empty array means another mirror or sync owns it.
+let mockClaimRows: Array<{ id: string }> = [{ id: "repo-1" }];
 const mockDb = {
   insert: mock((table: any) => ({
     values: mock((data: any) => Promise.resolve({ insertedId: "mock-id" }))
@@ -32,7 +35,13 @@ const mockDb = {
   update: mock(() => ({
     set: mock((data: any) => {
       dbUpdateSetCalls.push(data);
-      return { where: mock(() => Promise.resolve()) };
+      return {
+        where: mock(() => {
+          const result: any = Promise.resolve();
+          result.returning = mock(() => Promise.resolve(mockClaimRows));
+          return result;
+        })
+      };
     })
   }))
 };
@@ -453,6 +462,7 @@ describe("Enhanced Gitea Operations", () => {
     mockHttpDelete.mockClear();
     mockHttpPatch.mockClear();
     dbUpdateSetCalls.length = 0;
+    mockClaimRows = [{ id: "repo-1" }];
     mockCreatePreSyncBundleBackup.mockClear();
     mockCreatePreSyncBundleBackup.mockImplementation(() =>
       Promise.resolve({ bundlePath: "/tmp/mock.bundle" })
@@ -669,6 +679,118 @@ describe("Enhanced Gitea Operations", () => {
       ).rejects.toThrow("Repository non-mirror-repo is not a mirror. Cannot sync.");
 
       expect(mockMirrorGitHubReleasesToGitea).not.toHaveBeenCalled();
+    });
+
+    test("refuses to start when another run already owns the repository (#417)", async () => {
+      // Cast: the fixture only sets the fields this path reads.
+      const config = {
+        userId: "user123",
+        githubConfig: {
+          username: "testuser",
+          token: "github-token",
+          privateRepositories: false,
+          mirrorStarred: true,
+        },
+        giteaConfig: {
+          url: "https://gitea.example.com",
+          token: "encrypted-token",
+          defaultOwner: "testuser",
+          mirrorReleases: true,
+        },
+      } as unknown as Partial<Config>;
+
+      const repository = {
+        id: "repo456",
+        name: "mirror-repo",
+        fullName: "user/mirror-repo",
+        owner: "user",
+        cloneUrl: "https://github.com/user/mirror-repo.git",
+        isPrivate: false,
+        isStarred: true,
+        // The row is already "syncing" from another run; the claim loses.
+        status: repoStatusEnum.parse("syncing"),
+        visibility: "public",
+        userId: "user123",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } as unknown as Repository;
+
+      // The conditional UPDATE matches no row: another mirror or sync owns it.
+      mockClaimRows = [];
+
+      const result = await syncGiteaRepoEnhanced(
+        { config, repository },
+        {
+          getGiteaRepoOwnerAsync: mockGetGiteaRepoOwnerAsync,
+          mirrorGitHubReleasesToGitea: mockMirrorGitHubReleasesToGitea,
+          mirrorGitRepoIssuesToGitea: mockMirrorGitRepoIssuesToGitea,
+          mirrorGitRepoPullRequestsToGitea: mockMirrorGitRepoPullRequestsToGitea,
+          mirrorGitRepoLabelsToGitea: mockMirrorGitRepoLabelsToGitea,
+          mirrorGitRepoMilestonesToGitea: mockMirrorGitRepoMilestonesToGitea,
+          syncRepositoryMetadataToGitea: mockSyncRepositoryMetadataToGitea,
+        }
+      );
+
+      expect(result).toEqual({ skipped: true, reason: "already-in-progress" });
+      // Nothing ran: no release or metadata mirroring, and the row was not
+      // marked failed (it belongs to the run that owns it).
+      expect(mockMirrorGitHubReleasesToGitea).not.toHaveBeenCalled();
+      expect(mockSyncRepositoryMetadataToGitea).not.toHaveBeenCalled();
+      expect(dbUpdateSetCalls.some((call) => call.status === "failed")).toBe(false);
+    });
+
+    test("syncs when the caller already claimed the row (approve-sync)", async () => {
+      // Cast: the fixture only sets the fields this path reads.
+      const config = {
+        userId: "user123",
+        githubConfig: {
+          username: "testuser",
+          token: "github-token",
+          privateRepositories: false,
+          mirrorStarred: true,
+        },
+        giteaConfig: {
+          url: "https://gitea.example.com",
+          token: "encrypted-token",
+          defaultOwner: "testuser",
+          mirrorReleases: true,
+        },
+      } as unknown as Partial<Config>;
+
+      const repository = {
+        id: "repo456",
+        name: "mirror-repo",
+        fullName: "user/mirror-repo",
+        owner: "user",
+        cloneUrl: "https://github.com/user/mirror-repo.git",
+        isPrivate: false,
+        isStarred: true,
+        // approve-sync has already moved the row to "syncing" itself.
+        status: repoStatusEnum.parse("syncing"),
+        visibility: "public",
+        userId: "user123",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      } as unknown as Repository;
+
+      // Would refuse the claim, but alreadyClaimed skips it entirely.
+      mockClaimRows = [];
+
+      const result = await syncGiteaRepoEnhanced(
+        { config, repository, alreadyClaimed: true },
+        {
+          getGiteaRepoOwnerAsync: mockGetGiteaRepoOwnerAsync,
+          mirrorGitHubReleasesToGitea: mockMirrorGitHubReleasesToGitea,
+          mirrorGitRepoIssuesToGitea: mockMirrorGitRepoIssuesToGitea,
+          mirrorGitRepoPullRequestsToGitea: mockMirrorGitRepoPullRequestsToGitea,
+          mirrorGitRepoLabelsToGitea: mockMirrorGitRepoLabelsToGitea,
+          mirrorGitRepoMilestonesToGitea: mockMirrorGitRepoMilestonesToGitea,
+          syncRepositoryMetadataToGitea: mockSyncRepositoryMetadataToGitea,
+        }
+      );
+
+      expect(result).toEqual({ success: true });
+      expect(mockMirrorGitHubReleasesToGitea).toHaveBeenCalledTimes(1);
     });
 
     test("should successfully sync a mirror repository", async () => {

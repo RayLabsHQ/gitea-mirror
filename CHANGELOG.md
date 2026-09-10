@@ -47,6 +47,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - The organization card now shows the default for the configured strategy in the preview, the placeholder, the helper text and the reset button, and marks any stored destination as custom
   - The repository destination column shows the organization's override as a repository's default, and pinning a repository to the value the strategy already produces is stored rather than discarded
   - Reset to Default on an organization card clears the override instead of saving the current value again
+- Release assets are never duplicated on the destination (#417)
+  - Gitea and Forgejo accept any number of attachments with the same name, so two mirror passes that overlapped on one repository both saw an asset as missing and both uploaded it, leaving two, three or five copies
+  - Release reconciliation now runs one pass at a time per destination repository, keeps a single copy of each asset, and deletes surplus and stale copies before uploading anything
+  - A sync no longer starts on a repository that is already being mirrored or synced, and the mirror path claims the repository in one statement instead of checking and then writing
+  - Nothing is uploaded when the destination cannot say which assets a release already has, or when a stale copy could not be removed first
+  - The next sync of an affected repository removes the surplus copies for every release that still gets its assets; releases that have dropped out of the newest-N window keep their duplicates until they are removed by hand
 - Fixed metadata mirroring authentication errors (#68)
   - Changed field checking from `username` to `defaultOwner` in metadata functions
   - Added proper field validation for all metadata operations

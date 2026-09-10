@@ -24,6 +24,7 @@ import { httpPost, httpGet, httpPatch, HttpError } from "./http-client";
 import { db, repositories } from "./db";
 import { eq } from "drizzle-orm";
 import { repoStatusEnum } from "@/types/Repository";
+import { claimRepositoryForInFlightWork } from "./utils/repo-status-claim";
 import { resolveMirrorOptionsForRepository } from "./utils/mirror-overrides";
 import {
   createPreSyncBundleBackup,
@@ -444,11 +445,19 @@ export async function syncGiteaRepoEnhanced({
   config,
   repository,
   skipForcePushDetection,
+  alreadyClaimed,
 }: {
   config: Partial<Config>;
   repository: Repository;
   /** When true, skip force-push detection and blocking (used by approve-sync). */
   skipForcePushDetection?: boolean;
+  /**
+   * Set by a caller that already claimed this row for the sync with its own
+   * conditional UPDATE (approve-sync does, so the UI sees "syncing" right
+   * away). Skips the claim below instead of refusing to run on the caller's
+   * own "syncing" status.
+   */
+  alreadyClaimed?: boolean;
 }, deps?: SyncDependencies): Promise<any> {
   try {
     if (!config.userId || !config.giteaConfig?.url || !config.giteaConfig?.token) {
@@ -472,14 +481,30 @@ export async function syncGiteaRepoEnhanced({
 
     console.log(`[Sync] Starting sync for repository ${repository.name}`);
 
-    // Mark repo as "syncing" in DB
-    await db
-      .update(repositories)
-      .set({
-        status: repoStatusEnum.parse("syncing"),
-        updatedAt: new Date(),
-      })
-      .where(eq(repositories.id, repository.id!));
+    // Mark repo as "syncing" in DB, but only while no other run owns the row.
+    // This used to be an unconditional write: a sync would start on a
+    // repository that was already mirroring or syncing, and the two passes
+    // reconciled the same releases against the same destination at the same
+    // time, which duplicated release assets (#417). A row left in an in-flight
+    // status by a crash is taken over once it goes stale (two hours), and
+    // resetStuckMirrorStatuses resets those rows to "failed" as well, so
+    // nothing is locked out permanently.
+    if (!alreadyClaimed) {
+      const claimed = await claimRepositoryForInFlightWork({
+        repositoryId: repository.id!,
+        set: {
+          status: repoStatusEnum.parse("syncing"),
+          updatedAt: new Date(),
+        },
+      });
+
+      if (!claimed) {
+        console.log(
+          `[Sync] Skipping ${repository.name}: it is already being mirrored or synced by another run.`
+        );
+        return { skipped: true, reason: "already-in-progress" };
+      }
+    }
 
     // Resolve sync target in a backward-compatible order:
     // 1) recorded mirroredLocation (actual historical mirror location)

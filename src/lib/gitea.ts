@@ -40,6 +40,8 @@ import {
 } from "./utils/mirror-overrides";
 import { repositoryDestinationColumns } from "./repo-utils";
 import { resolveDestinationIdentity } from "./destination-connection";
+import { withKeyedLock } from "./utils/keyed-mutex";
+import { claimRepositoryForInFlightWork } from "./utils/repo-status-claim";
 
 /**
  * Helper function to get organization configuration including destination override
@@ -875,34 +877,30 @@ export const mirrorGithubRepoToGitea = async ({
 
     console.log(`Mirroring repository ${repository.name}`);
 
-    // DOUBLE-CHECK: Final idempotency check right before updating status
-    // This catches race conditions in the small window between first check and status update
-    const finalCheck = await isRepoCurrentlyMirroring({
-      config,
-      repoName: targetRepoName,
-      expectedLocation: targetLocation,
-    });
-
-    if (finalCheck) {
-      console.log(
-        `[Idempotency] Race condition detected - ${repository.fullName} is now being mirrored by another process. Skipping.`
-      );
-      return;
-    }
-
-    // Mark repos as "mirroring" in DB
+    // CLAIM THE ROW: mark it "mirroring" only while no other run owns it. This
+    // used to be a second isRepoCurrentlyMirroring read followed by an
+    // unconditional write, so two workers starting in the same tick both read
+    // "free" and both mirrored the repository (#417). One conditional UPDATE
+    // closes that window.
     // CRITICAL: Set mirroredLocation NOW (not after success) so idempotency checks work
     // This becomes the "target location" - where we intend to mirror to
     // Without this, the idempotency check can't detect concurrent operations on first mirror
-    await db
-      .update(repositories)
-      .set({
+    const claimed = await claimRepositoryForInFlightWork({
+      repositoryId: repository.id!,
+      set: {
         status: repoStatusEnum.parse("mirroring"),
         mirroredLocation: targetLocation,
         ...repositoryDestinationColumns(resolveDestinationIdentity(config)),
         updatedAt: new Date(),
-      })
-      .where(eq(repositories.id, repository.id!));
+      },
+    });
+
+    if (!claimed) {
+      console.log(
+        `[Idempotency] Race condition detected - ${repository.fullName} is now being mirrored or synced by another process. Skipping.`
+      );
+      return;
+    }
 
     // Append log for "mirroring" status
     await createMirrorJob({
@@ -1727,34 +1725,28 @@ export async function mirrorGitHubRepoToGiteaOrg({
     // Use clean clone URL without embedded credentials (Forgejo 12+ security requirement)
     const cloneAddress = repository.cloneUrl;
 
-    // DOUBLE-CHECK: Final idempotency check right before updating status
-    // This catches race conditions in the small window between first check and status update
-    const finalCheck = await isRepoCurrentlyMirroring({
-      config,
-      repoName: targetRepoName,
-      expectedLocation: targetLocation,
-    });
-
-    if (finalCheck) {
-      console.log(
-        `[Idempotency] Race condition detected - ${repository.fullName} is now being mirrored by another process. Skipping.`
-      );
-      return;
-    }
-
-    // Mark repos as "mirroring" in DB
+    // CLAIM THE ROW: see the same claim on the user-owner path above. One
+    // conditional UPDATE replaces the old read-then-write, so two workers
+    // starting in the same tick cannot both mirror this repository (#417).
     // CRITICAL: Set mirroredLocation NOW (not after success) so idempotency checks work
     // This becomes the "target location" - where we intend to mirror to
     // Without this, the idempotency check can't detect concurrent operations on first mirror
-    await db
-      .update(repositories)
-      .set({
+    const claimed = await claimRepositoryForInFlightWork({
+      repositoryId: repository.id!,
+      set: {
         status: repoStatusEnum.parse("mirroring"),
         mirroredLocation: targetLocation,
         ...repositoryDestinationColumns(resolveDestinationIdentity(config)),
         updatedAt: new Date(),
-      })
-      .where(eq(repositories.id, repository.id!));
+      },
+    });
+
+    if (!claimed) {
+      console.log(
+        `[Idempotency] Race condition detected - ${repository.fullName} is now being mirrored or synced by another process. Skipping.`
+      );
+      return;
+    }
 
     // Note: "mirroring" status events are handled by the concurrency system
     // to avoid duplicate events during batch operations
@@ -3037,37 +3029,90 @@ export function classifyReleasesForReconciliation(
 }
 
 /**
- * Decide which of a GitHub release's assets need (re)uploading to Gitea.
+ * Decide what to upload, keep and delete for one release's assets.
  *
- * Compared by name:
- *   - present in Gitea with a matching size  -> skip (already mirrored)
- *   - present with a different size          -> upload, replacing the stale copy
- *   - absent                                 -> upload (fresh)
+ * Destination attachments are grouped by name because the destination happily
+ * holds several attachments with the same name: Gitea's and Forgejo's
+ * CreateReleaseAttachment has no name-collision check, so every POST appends a
+ * new attachment. Two overlapping mirror passes each saw an asset as missing
+ * and each uploaded it, which is how releases ended up with two, three or five
+ * copies of every asset (#417). Grouping means a pass that finds duplicates
+ * cleans them up instead of adding to them.
  *
- * Pure function so the create/update reconciliation decision is unit-testable
- * without hitting the network (regression guard for #331).
+ * For each GitHub asset, matched by name:
+ *   - one or more copies match the size -> keep the lowest id, skip the
+ *     upload, delete every other copy of that name
+ *   - copies exist but none matches the size -> delete all of them, upload once
+ *   - no copy exists                        -> upload
+ *
+ * A destination attachment whose name is not in the GitHub list is never
+ * deleted: the asset limit (#311), an older upstream release and manual
+ * uploads all leave attachments this reconciliation has no claim over.
+ *
+ * Pure function so the reconciliation decision is unit-testable without
+ * hitting the network (regression guard for #331 and #417).
  */
 export function classifyAssetsForReconciliation(
   githubAssets: Array<{ name: string; size: number }>,
   giteaAssets: Array<{ id: number; name: string; size: number }>
 ): {
-  toUpload: Array<{ name: string; replaceAssetId: number | null }>;
+  toUpload: string[];
   toSkip: string[];
+  toDelete: number[];
 } {
-  const existingByName = new Map(giteaAssets.map((a) => [a.name, a]));
-  const toUpload: Array<{ name: string; replaceAssetId: number | null }> = [];
+  const existingByName = new Map<string, Array<{ id: number; name: string; size: number }>>();
+  for (const existing of giteaAssets) {
+    const copies = existingByName.get(existing.name);
+    if (copies) {
+      copies.push(existing);
+    } else {
+      existingByName.set(existing.name, [existing]);
+    }
+  }
+  // Lowest id first, so "keep one copy" and the delete order are deterministic
+  // whatever order the destination listed the attachments in.
+  for (const copies of existingByName.values()) {
+    copies.sort((a, b) => a.id - b.id);
+  }
+
+  const toUpload: string[] = [];
   const toSkip: string[] = [];
+  const toDelete: number[] = [];
+  const seen = new Set<string>();
 
   for (const asset of githubAssets) {
-    const existing = existingByName.get(asset.name);
-    if (existing && existing.size === asset.size) {
+    if (seen.has(asset.name)) {
+      continue;
+    }
+    seen.add(asset.name);
+
+    const copies = existingByName.get(asset.name) ?? [];
+    if (copies.length === 0) {
+      toUpload.push(asset.name);
+      continue;
+    }
+
+    const keep = copies.find((copy) => copy.size === asset.size);
+    if (keep) {
+      // Already mirrored: keep the first (lowest id) matching copy and drop
+      // every other attachment carrying that name.
       toSkip.push(asset.name);
+      for (const copy of copies) {
+        if (copy.id !== keep.id) {
+          toDelete.push(copy.id);
+        }
+      }
     } else {
-      toUpload.push({ name: asset.name, replaceAssetId: existing ? existing.id : null });
+      // Every copy is stale (truncated, or changed upstream): remove them all
+      // and upload a single fresh one.
+      for (const copy of copies) {
+        toDelete.push(copy.id);
+      }
+      toUpload.push(asset.name);
     }
   }
 
-  return { toUpload, toSkip };
+  return { toUpload, toSkip, toDelete };
 }
 
 /**
@@ -3080,11 +3125,20 @@ export function classifyAssetsForReconciliation(
  * failed or were interrupted on first creation therefore stayed permanently
  * asset-less, and re-syncing could never heal it (#331).
  *
- * Strategy: compare by asset name. Skip assets already present with a matching size;
- * (re)upload anything missing, and replace an existing asset whose size differs
- * (truncated/changed upstream). Returns per-release counts so the caller can report.
+ * Never adds a copy of an asset that is already there (#417):
+ *   - the existing attachments are listed first, and if that listing fails the
+ *     whole release is skipped ("fail closed") instead of being uploaded blind;
+ *   - surplus and stale attachments are deleted BEFORE anything is uploaded;
+ *   - an asset whose stale copy could not be deleted is not uploaded either, so
+ *     a failed delete never turns into one more copy.
+ *
+ * The caller is expected to hold the per-destination lock (see
+ * mirrorGitHubReleasesToGitea), which keeps two passes over the same
+ * destination repository from interleaving their list and upload steps.
+ *
+ * Returns per-release counts so the caller can report.
  */
-async function reconcileReleaseAssets({
+export async function reconcileReleaseAssets({
   config,
   decryptedConfig,
   repoOwner,
@@ -3092,6 +3146,7 @@ async function reconcileReleaseAssets({
   giteaReleaseId,
   githubAssets,
   tagName,
+  fetchImpl,
 }: {
   config: Partial<Config>;
   decryptedConfig: Config;
@@ -3100,6 +3155,8 @@ async function reconcileReleaseAssets({
   giteaReleaseId: number;
   githubAssets: Array<{ name: string; size: number; browser_download_url: string }>;
   tagName: string;
+  /** Injected in tests; production uses the global fetch. */
+  fetchImpl?: typeof fetch;
 }): Promise<{ uploaded: number; failed: number; skipped: number }> {
   let uploaded = 0;
   let failed = 0;
@@ -3109,27 +3166,87 @@ async function reconcileReleaseAssets({
     return { uploaded, failed, skipped };
   }
 
+  const doFetch: typeof fetch = fetchImpl ?? fetch;
   const giteaBaseUrl = config.giteaConfig!.url;
   const giteaAuth = { Authorization: `token ${decryptedConfig.giteaConfig!.token}` };
+  const assetsUrl = `${giteaBaseUrl}/api/v1/repos/${repoOwner}/${repoName}/releases/${giteaReleaseId}/assets`;
 
-  // Fetch existing attachments so we only transfer what's missing or changed.
-  const existingAssets: Array<{ id: number; name: string; size: number }> = await httpGet(
-    `${giteaBaseUrl}/api/v1/repos/${repoOwner}/${repoName}/releases/${giteaReleaseId}/assets`,
-    giteaAuth
-  )
-    .then((r) => (Array.isArray(r?.data) ? r.data : []))
-    .catch(() => []);
+  // FAIL CLOSED: the list of what the release already has is the only thing
+  // standing between a sync and a second copy of every asset. If it cannot be
+  // read, upload nothing and let the next sync try again. Treating a failed
+  // GET as "the release has no assets" is exactly how duplicates appeared.
+  let existingAssets: Array<{ id: number; name: string; size: number }>;
+  try {
+    const listResponse = await doFetch(assetsUrl, { headers: giteaAuth });
+    if (!listResponse.ok) {
+      throw new Error(`HTTP ${listResponse.status} ${listResponse.statusText}`);
+    }
+    const body = await listResponse.json();
+    if (!Array.isArray(body)) {
+      throw new Error("the assets endpoint did not return a list");
+    }
+    existingAssets = body;
+  } catch (listError) {
+    console.error(
+      `[Releases] Could not list the existing assets of ${tagName}: ${
+        listError instanceof Error ? listError.message : String(listError)
+      }. Skipping all ${githubAssets.length} asset(s) for this release so no duplicate is created; the next sync retries.`
+    );
+    return { uploaded, failed: githubAssets.length, skipped };
+  }
 
-  const { toUpload, toSkip } = classifyAssetsForReconciliation(
+  const { toUpload, toSkip, toDelete } = classifyAssetsForReconciliation(
     githubAssets,
     existingAssets
   );
   skipped = toSkip.length;
 
+  const nameById = new Map(existingAssets.map((a) => [a.id, a.name]));
+  // Names that still have a surplus or stale attachment on the destination:
+  // uploading now would leave one copy too many, so the upload waits.
+  const undeletedNames = new Set<string>();
+
+  // Deletes run before any upload, so a release that already has duplicates is
+  // cleaned up by the very sync that notices them.
+  for (const assetId of toDelete) {
+    const name = nameById.get(assetId);
+    try {
+      const deleteResponse = await doFetch(`${assetsUrl}/${assetId}`, {
+        method: "DELETE",
+        headers: giteaAuth,
+      });
+      // 404 means it is already gone, which is the state we wanted.
+      if (!deleteResponse.ok && deleteResponse.status !== 404) {
+        throw new Error(`HTTP ${deleteResponse.status} ${deleteResponse.statusText}`);
+      }
+      console.log(
+        `[Releases] Removed surplus/stale attachment ${name ?? assetId} (id ${assetId}) from ${tagName}`
+      );
+    } catch (deleteError) {
+      if (name) {
+        undeletedNames.add(name);
+      }
+      console.error(
+        `[Releases] Failed to delete attachment ${name ?? assetId} (id ${assetId}) from ${tagName}: ${
+          deleteError instanceof Error ? deleteError.message : String(deleteError)
+        }`
+      );
+    }
+  }
+
   const githubByName = new Map(githubAssets.map((a) => [a.name, a]));
 
-  for (const { name, replaceAssetId } of toUpload) {
+  for (const name of toUpload) {
     const asset = githubByName.get(name)!;
+
+    if (undeletedNames.has(name)) {
+      console.warn(
+        `[Releases] Not uploading ${name} for ${tagName}: its stale copy is still on the destination and uploading would leave two copies. Retrying on the next sync.`
+      );
+      failed++;
+      continue;
+    }
+
     try {
       // Download from GitHub. fetch strips the Authorization header on the
       // cross-host redirect to GitHub's object storage, so this works for both
@@ -3137,7 +3254,7 @@ async function reconcileReleaseAssets({
       console.log(
         `[Releases] Downloading asset: ${asset.name} (${asset.size} bytes) for ${tagName}`
       );
-      const assetResponse = await fetch(asset.browser_download_url, {
+      const assetResponse = await doFetch(asset.browser_download_url, {
         headers: {
           Accept: "application/octet-stream",
           Authorization: `token ${decryptedConfig.githubConfig!.token}`,
@@ -3154,23 +3271,14 @@ async function reconcileReleaseAssets({
 
       const assetData = await assetResponse.arrayBuffer();
 
-      // Gitea rejects a duplicate attachment name, so drop a stale/mismatched
-      // copy before re-uploading.
-      if (replaceAssetId !== null) {
-        await httpDelete(
-          `${giteaBaseUrl}/api/v1/repos/${repoOwner}/${repoName}/releases/${giteaReleaseId}/assets/${replaceAssetId}`,
-          giteaAuth
-        ).catch(() => null);
-      }
-
       const formData = new FormData();
       formData.append("attachment", new Blob([assetData]), asset.name);
 
-      const uploadResponse = await fetch(
-        `${giteaBaseUrl}/api/v1/repos/${repoOwner}/${repoName}/releases/${giteaReleaseId}/assets?name=${encodeURIComponent(asset.name)}`,
+      const uploadResponse = await doFetch(
+        `${assetsUrl}?name=${encodeURIComponent(asset.name)}`,
         {
           method: "POST",
-          headers: { Authorization: `token ${decryptedConfig.giteaConfig!.token}` },
+          headers: giteaAuth,
           body: formData,
         }
       );
@@ -3198,15 +3306,7 @@ async function reconcileReleaseAssets({
   return { uploaded, failed, skipped };
 }
 
-export async function mirrorGitHubReleasesToGitea({
-  octokit,
-  repository,
-  config,
-  giteaOwner,
-  giteaRepoName,
-  releaseLimit: releaseLimitOverride,
-  releaseAssetLimit: releaseAssetLimitOverride,
-}: {
+type MirrorReleasesParams = {
   octokit: Octokit;
   repository: Repository;
   config: Partial<Config>;
@@ -3224,7 +3324,73 @@ export async function mirrorGitHubReleasesToGitea({
    * none, `undefined` means resolve it here like the release limit.
    */
   releaseAssetLimit?: number | null;
-}) {
+};
+
+/**
+ * Lock key for one destination repository's releases: the destination base URL
+ * plus the owner and repository name it is mirrored as, lowercased.
+ *
+ * Keyed on the destination and not on the repository row on purpose. Two rows
+ * (the same upstream repository imported under two sources) resolve to the same
+ * destination repository, and a per-row status guard cannot see that (#417).
+ */
+export function buildReleaseTargetLockKey(
+  giteaBaseUrl: string,
+  owner: string,
+  repoName: string
+): string {
+  return `${giteaBaseUrl.replace(/\/+$/, "")}|${owner}|${repoName}`.toLowerCase();
+}
+
+/**
+ * Mirror a repository's releases, and the assets of the newest ones, onto the
+ * destination.
+ *
+ * One pass per destination repository at a time (#417): release reconciliation
+ * reads what the destination already has and then writes what is missing, and
+ * the destination appends a new attachment for every upload POST without any
+ * name-collision check. Two passes that overlap on one repository (the
+ * scheduler racing a manual sync, recovery resuming a live job, or two
+ * repository rows pointing at the same destination) both read "missing" and
+ * both upload, leaving duplicates. The lock makes the read and the write one
+ * unit per destination repository.
+ */
+export async function mirrorGitHubReleasesToGitea(params: MirrorReleasesParams) {
+  const { config, repository, giteaOwner, giteaRepoName } = params;
+
+  if (
+    !config.giteaConfig?.defaultOwner ||
+    !config.giteaConfig?.token ||
+    !config.giteaConfig?.url
+  ) {
+    throw new Error("Gitea config is incomplete for mirroring releases.");
+  }
+
+  // Resolved here so the lock key names the destination repository, then passed
+  // down so the locked body does not resolve it a second time.
+  const repoOwner = giteaOwner || (await getGiteaRepoOwnerAsync({ config, repository }));
+  const repoName = giteaRepoName || repository.name;
+
+  return withKeyedLock(
+    buildReleaseTargetLockKey(config.giteaConfig.url, repoOwner, repoName),
+    () =>
+      mirrorGitHubReleasesToGiteaLocked({
+        ...params,
+        giteaOwner: repoOwner,
+        giteaRepoName: repoName,
+      })
+  );
+}
+
+async function mirrorGitHubReleasesToGiteaLocked({
+  octokit,
+  repository,
+  config,
+  giteaOwner,
+  giteaRepoName,
+  releaseLimit: releaseLimitOverride,
+  releaseAssetLimit: releaseAssetLimitOverride,
+}: MirrorReleasesParams) {
   if (
     !config.giteaConfig?.defaultOwner ||
     !config.giteaConfig?.token ||
