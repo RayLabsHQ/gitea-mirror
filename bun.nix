@@ -3205,9 +3205,9 @@
     url = "https://registry.npmjs.org/sisteransi/-/sisteransi-1.0.5.tgz";
     hash = "sha512-bLGGlR1QxBcynn2d5YmDX4MGjlZvy2MRBDRNHLJ8VI6l6+9FUiyTFNJ0IveOSP0bcXgVDPRcfGqA0pjaqUpfVg==";
   };
-  "smol-toml@1.6.0" = fetchurl {
-    url = "https://registry.npmjs.org/smol-toml/-/smol-toml-1.6.0.tgz";
-    hash = "sha512-4zemZi0HvTnYwLfrpk/CF9LOd9Lt87kAt50GnqhMpyF9U3poDAP2+iukq2bZsO/ufegbYehBkqINbsWxj4l4cw==";
+  "smol-toml@1.8.0" = fetchurl {
+    url = "https://registry.npmjs.org/smol-toml/-/smol-toml-1.8.0.tgz";
+    hash = "sha512-kCZr2V3ch9i00x8zXRhjUNVcjG9ijES5dDudkXvUVCT5QlJNQWElSJdZqyPemffHoLNUYwOcou0Fy+ojN0uHSQ==";
   };
   "sonner@2.0.7" = fetchurl {
     url = "https://registry.npmjs.org/sonner/-/sonner-2.0.7.tgz";
