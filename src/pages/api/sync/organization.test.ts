@@ -148,6 +148,17 @@ if (isChild) {
       select: () => ({
         from: (table: unknown) => ({
           where: (cond: unknown) => ({
+            // Awaited directly by the existing-repository lookup that keeps
+            // one row per upstream repository; the inserted rows stand in
+            // for the table.
+            then: (
+              onfulfilled: (rows: OrgRow[]) => unknown,
+              onrejected?: (reason: unknown) => unknown
+            ) =>
+              Promise.resolve(table === repositoriesTable ? [...insertedRepoRows] : []).then(
+                onfulfilled,
+                onrejected
+              ),
             limit: async (): Promise<OrgRow[]> => {
               const leaves = conditionLeafValues(cond);
               if (table === organizationsTable) {

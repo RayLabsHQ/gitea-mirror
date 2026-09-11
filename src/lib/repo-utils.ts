@@ -93,3 +93,82 @@ export function repositoryDestinationColumns(
 ): Pick<RepoInsert, 'destinationProvider' | 'destinationUrl'> {
   return { destinationProvider: destination.provider, destinationUrl: destination.url };
 }
+
+/**
+ * Upstream identity of a repository row: which host it lives on and its full
+ * name there. The repositories table is unique on (userId, sourceId,
+ * normalizedFullName) so that the same owner/name can be tracked on two
+ * hosts, but two source rows can point at the same host (a personal token
+ * source and a public-only source, both github.com), and a legacy row with a
+ * NULL sourceId is distinct from a re-imported one. Discovery used the unique
+ * index alone to decide what was new, so one upstream repository could end up
+ * as two rows that both mirror to the same destination repository and get
+ * processed together in one batch (one of the overlaps behind #417).
+ */
+export interface RepositoryIdentityFields {
+  sourceProvider?: string | null;
+  sourceUrl?: string | null;
+  normalizedFullName: string;
+}
+
+export function repositoryIdentityKey(row: RepositoryIdentityFields): string {
+  const provider = (row.sourceProvider || 'github').trim().toLowerCase();
+  const url = (row.sourceUrl || 'https://github.com').trim().toLowerCase().replace(/\/+$/, '');
+  return `${provider}|${url}|${row.normalizedFullName.toLowerCase()}`;
+}
+
+/**
+ * Split discovered rows into the ones not yet tracked for this user on the
+ * same host under any source, and the ones that are. Also drops repeats
+ * within `candidates` themselves. `existing` is extended with every fresh
+ * row, so a caller looping over several sources can pass the same set.
+ */
+export function selectNewRepositoriesByIdentity<T extends RepositoryIdentityFields>(
+  candidates: T[],
+  existing: Set<string>
+): { fresh: T[]; alreadyTracked: T[] } {
+  const fresh: T[] = [];
+  const alreadyTracked: T[] = [];
+  for (const candidate of candidates) {
+    const key = repositoryIdentityKey(candidate);
+    if (existing.has(key)) {
+      alreadyTracked.push(candidate);
+    } else {
+      existing.add(key);
+      fresh.push(candidate);
+    }
+  }
+  return { fresh, alreadyTracked };
+}
+
+export function repositoryIdentityKeys(rows: Iterable<RepositoryIdentityFields>): Set<string> {
+  const keys = new Set<string>();
+  for (const row of rows) keys.add(repositoryIdentityKey(row));
+  return keys;
+}
+
+/**
+ * Keep one row per upstream identity in a processing batch, so two rows that
+ * resolve to the same destination repository are never mirrored or synced in
+ * the same pass. A row linked to a source wins over a legacy row without one;
+ * otherwise the first row in the batch is kept.
+ */
+export function dedupeRepositoriesByIdentity<
+  T extends RepositoryIdentityFields & { sourceId?: string | null },
+>(rows: T[]): { kept: T[]; dropped: T[] } {
+  const byKey = new Map<string, T>();
+  const dropped: T[] = [];
+  for (const row of rows) {
+    const key = repositoryIdentityKey(row);
+    const current = byKey.get(key);
+    if (!current) {
+      byKey.set(key, row);
+    } else if (!current.sourceId && row.sourceId) {
+      dropped.push(current);
+      byKey.set(key, row);
+    } else {
+      dropped.push(row);
+    }
+  }
+  return { kept: Array.from(byKey.values()), dropped };
+}

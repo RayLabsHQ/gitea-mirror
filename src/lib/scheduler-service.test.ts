@@ -465,6 +465,34 @@ describe.skipIf(!isChild)("Scheduler public-only sources (WP4)", () => {
       .filter((row) => row.normalizedFullName?.startsWith("pinned-org/"))
       .map((row) => row.name);
     expect(orgRepoNamesAfterSecondRun).toEqual(["existing", "newly-published"]);
-    expect(repoInsertAttempts).toBeGreaterThan(attemptsAfterFirstRun);
+    // Nothing new on the second run, so discovery does not even attempt an
+    // insert: already-tracked repositories are filtered out by identity
+    // before the write, not dropped by the unique index afterwards.
+    expect(repoInsertAttempts).toBe(attemptsAfterFirstRun);
+  });
+
+  test("re-discovery does not add a second row for a repository the user already tracks under another source on the same host", async () => {
+    // Imported earlier through a personal token source on github.com, so it
+    // has a different sourceId than the pinned public-only source.
+    repoRows.push({
+      userId: "user-1",
+      sourceId: "source-personal",
+      name: "shared",
+      fullName: "pinned-org/shared",
+      normalizedFullName: "pinned-org/shared",
+      organization: "pinned-org",
+      sourceProvider: "github",
+      sourceUrl: "https://github.com",
+      status: "mirrored",
+    });
+    orgRepoListings.set("pinned-org", [makeGitRepo("shared"), makeGitRepo("fresh")]);
+
+    await schedulerLoop();
+
+    const sharedRows = repoRows.filter((row) => row.normalizedFullName === "pinned-org/shared");
+    expect(sharedRows).toHaveLength(1);
+    expect(sharedRows[0].sourceId).toBe("source-personal");
+    expect(repoRows.some((row) => row.normalizedFullName === "pinned-org/fresh")).toBe(true);
+    expect(consoleLines.some((line) => line.includes("already tracked") && line.includes("pinned-org"))).toBe(true);
   });
 });

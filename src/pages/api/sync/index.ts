@@ -9,6 +9,8 @@ import {
   mergeGitReposPreferStarred,
   normalizeGitRepoToInsert,
   calcBatchSizeForInsert,
+  repositoryIdentityKeys,
+  selectNewRepositoriesByIdentity,
 } from "@/lib/repo-utils";
 import { loadOrganizationForkPolicies } from "@/lib/utils/mirror-overrides";
 import { requireAuthenticatedUserId } from "@/lib/auth-guards";
@@ -165,7 +167,8 @@ export const POST: APIRoute = async ({ request, locals }) => {
             tx
               .select({
                 normalizedFullName: repositories.normalizedFullName,
-                sourceId: repositories.sourceId,
+                sourceProvider: repositories.sourceProvider,
+                sourceUrl: repositories.sourceUrl,
               })
               .from(repositories)
               .where(eq(repositories.userId, userId)),
@@ -175,17 +178,20 @@ export const POST: APIRoute = async ({ request, locals }) => {
               .where(eq(organizations.userId, userId)),
           ]);
 
-          // The same full name under two sources is two different repositories.
-          const existingRepoKeys = new Set(
-            existingRepos.map((r) => `${r.sourceId ?? ""}|${r.normalizedFullName}`)
-          );
+          // A repository is identified by its host and full name, whichever
+          // source row lists it. The same name on two hosts is two
+          // repositories; the same repository seen by two sources on one host
+          // (a personal token and a public-only source) is one, and must not
+          // become two rows that mirror to the same destination.
+          const existingRepoKeys = repositoryIdentityKeys(existingRepos);
           const existingOrgMap = new Map(existingOrgs.map((o) => [o.normalizedName, o.status]));
 
-          insertedRepos = newRepos.filter(
-            (r) =>
-              !existingRepoKeys.has(`${source.id}|${r.normalizedFullName}`) &&
-              (!r.organization || !ignoredOrgNames.has(r.organization.toLowerCase()))
-          );
+          insertedRepos = selectNewRepositoriesByIdentity(
+            newRepos.filter(
+              (r) => !r.organization || !ignoredOrgNames.has(r.organization.toLowerCase())
+            ),
+            existingRepoKeys
+          ).fresh;
           insertedOrgs = newOrgs.filter((o) => !existingOrgMap.has(o.normalizedName));
 
           // Update previously failed orgs that now succeeded. The pin must

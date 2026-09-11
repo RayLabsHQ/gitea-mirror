@@ -15,7 +15,12 @@ import {
   normalizeSourceUrl,
 } from "@/lib/source-providers/kinds";
 import type { SourceRecord } from "@/lib/sources";
-import { normalizeGitRepoToInsert, calcBatchSizeForInsert } from "@/lib/repo-utils";
+import {
+  normalizeGitRepoToInsert,
+  calcBatchSizeForInsert,
+  repositoryIdentityKeys,
+  selectNewRepositoriesByIdentity,
+} from "@/lib/repo-utils";
 import { resolveOrganizationSkipForks } from "@/lib/utils/mirror-overrides";
 import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 
@@ -259,12 +264,31 @@ export const POST: APIRoute = async ({ request, locals }) => {
     );
 
     // Insert repositories. The normalizer stamps the source provider and URL.
-    const repoRecords = mirrorableRepos.map((repo) =>
-      normalizeGitRepoToInsert(
-        { ...repo, organization: repo.organization ?? orgData.name },
-        { userId, configId, sourceId: source.id }
-      )
+    // Repositories the user already tracks on this host under another source
+    // (the personal source, say) are not inserted a second time: two rows for
+    // one upstream repository would both mirror to the same destination.
+    const existingRepos = await db
+      .select({
+        normalizedFullName: repositories.normalizedFullName,
+        sourceProvider: repositories.sourceProvider,
+        sourceUrl: repositories.sourceUrl,
+      })
+      .from(repositories)
+      .where(eq(repositories.userId, userId));
+    const { fresh: repoRecords, alreadyTracked } = selectNewRepositoriesByIdentity(
+      mirrorableRepos.map((repo) =>
+        normalizeGitRepoToInsert(
+          { ...repo, organization: repo.organization ?? orgData.name },
+          { userId, configId, sourceId: source.id }
+        )
+      ),
+      repositoryIdentityKeys(existingRepos)
     );
+    if (alreadyTracked.length > 0) {
+      console.log(
+        `[Organization import] ${alreadyTracked.length} repositories of ${orgData.name} are already tracked for user ${userId} on this host; not adding them again under source ${source.name}`
+      );
+    }
 
     // Batch insert repositories to avoid SQLite parameter limit
     // Compute batch size based on column count

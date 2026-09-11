@@ -13,7 +13,14 @@ import { formatDuration } from '@/lib/utils/duration-parser';
 import type { Repository } from '@/lib/db/schema';
 import type { Octokit } from '@octokit/rest';
 import { repoStatusEnum, repositoryVisibilityEnum } from '@/types/Repository';
-import { mergeGitReposPreferStarred, normalizeGitRepoToInsert, calcBatchSizeForInsert } from '@/lib/repo-utils';
+import {
+  mergeGitReposPreferStarred,
+  normalizeGitRepoToInsert,
+  calcBatchSizeForInsert,
+  repositoryIdentityKeys,
+  selectNewRepositoriesByIdentity,
+  dedupeRepositoriesByIdentity,
+} from '@/lib/repo-utils';
 import { isMirrorableGitHubRepo } from '@/lib/repo-eligibility';
 import { loadOrganizationForkPolicies, orgForkSkipDecision, resolveOrganizationSkipForks } from '@/lib/utils/mirror-overrides';
 import { createMirrorJob } from '@/lib/helpers';
@@ -102,14 +109,19 @@ async function importRepositoriesFromSources(
   const orgForkOverrides = await loadOrganizationForkPolicies({ userId });
 
   const existingRepos = await db
-    .select({ normalizedFullName: repositories.normalizedFullName, sourceId: repositories.sourceId })
+    .select({
+      normalizedFullName: repositories.normalizedFullName,
+      sourceProvider: repositories.sourceProvider,
+      sourceUrl: repositories.sourceUrl,
+    })
     .from(repositories)
     .where(eq(repositories.userId, userId));
-  // Repositories are unique per source: the same full name under two sources
-  // counts as two repositories.
-  const existingRepoKeys = new Set(
-    existingRepos.map(r => `${r.sourceId ?? ''}|${r.normalizedFullName}`)
-  );
+  // A repository is identified by its host and full name, not by the source
+  // row that found it. Two sources can point at the same host (a personal
+  // token and a public-only source, both github.com), and a repository the
+  // user already tracks must not be inserted a second time under the other
+  // source: both rows would mirror to the same destination repository.
+  const existingRepoKeys = repositoryIdentityKeys(existingRepos);
 
   for (const source of sources) {
     try {
@@ -132,16 +144,20 @@ async function importRepositoriesFromSources(
       const allGithubRepos = mergeGitReposPreferStarred(basicAndForkedRepos, starredRepos);
       const mirrorableGithubRepos = allGithubRepos.filter(isMirrorableGitHubRepo);
 
-      const newRepos = mirrorableGithubRepos.filter(
-        r => !existingRepoKeys.has(`${source.id}|${r.fullName.toLowerCase()}`)
+      const candidates = mirrorableGithubRepos.map(repo =>
+        normalizeGitRepoToInsert(repo, { userId, configId: config.id, sourceId: source.id })
       );
+      const { fresh: reposToInsert, alreadyTracked } = selectNewRepositoriesByIdentity(
+        candidates,
+        existingRepoKeys
+      );
+      const newRepos = reposToInsert;
+      if (alreadyTracked.length > 0) {
+        console.log(`[Scheduler] ${alreadyTracked.length} repositories listed by source ${source.name} are already tracked for user ${userId} on the same host; not adding them again`);
+      }
 
       if (newRepos.length > 0) {
         console.log(`[Scheduler] Found ${newRepos.length} new repositories for user ${userId} on source ${source.name}`);
-
-        const reposToInsert = newRepos.map(repo =>
-          normalizeGitRepoToInsert(repo, { userId, configId: config.id, sourceId: source.id })
-        );
 
         // Batch insert to avoid SQLite parameter limit
         const sample = reposToInsert[0];
@@ -213,6 +229,19 @@ async function rediscoverOrganizationRepositories(
       )
     );
 
+  // Same identity rule as personal discovery: an organization pinned to a
+  // public-only source must not re-insert repositories the personal source
+  // already tracks on the same host (or the other way round).
+  const existingRepos = await db
+    .select({
+      normalizedFullName: repositories.normalizedFullName,
+      sourceProvider: repositories.sourceProvider,
+      sourceUrl: repositories.sourceUrl,
+    })
+    .from(repositories)
+    .where(eq(repositories.userId, userId));
+  const existingRepoKeys = repositoryIdentityKeys(existingRepos);
+
   for (const org of includedOrgs) {
     try {
       const source = findSourceForOrganization(org, sources);
@@ -228,14 +257,17 @@ async function rediscoverOrganizationRepositories(
         repo => repo.isDisabled !== true && !(skipOrgForks && repo.isForked)
       );
 
-      if (mirrorableRepos.length > 0) {
-        const repoRecords = mirrorableRepos.map(repo =>
+      const { fresh: repoRecords, alreadyTracked } = selectNewRepositoriesByIdentity(
+        mirrorableRepos.map(repo =>
           normalizeGitRepoToInsert(
             { ...repo, organization: repo.organization ?? org.name },
             { userId, configId: config.id, sourceId: source.id }
           )
-        );
+        ),
+        existingRepoKeys
+      );
 
+      if (repoRecords.length > 0) {
         // Batch insert to avoid SQLite parameter limit
         const sample = repoRecords[0];
         const columnCount = Object.keys(sample ?? {}).length || 1;
@@ -247,7 +279,10 @@ async function rediscoverOrganizationRepositories(
             .values(batch)
             .onConflictDoNothing({ target: [repositories.userId, repositories.sourceId, repositories.normalizedFullName] });
         }
-        console.log(`[Scheduler] Re-discovered ${mirrorableRepos.length} repositories for organization ${org.name} on source ${source.name} for user ${userId} during ${phase}`);
+        console.log(`[Scheduler] Re-discovered ${repoRecords.length} new repositories for organization ${org.name} on source ${source.name} for user ${userId} during ${phase}`);
+      }
+      if (alreadyTracked.length > 0) {
+        console.log(`[Scheduler] Organization ${org.name}: ${alreadyTracked.length} repositories are already tracked for user ${userId} on the same host, not adding them again under source ${source.name}`);
       }
 
       await db
@@ -331,6 +366,24 @@ function sourceUsernamesBySourceId(sources: SourceRecord[]): Map<string, string>
 /**
  * Run scheduled mirror sync for a single user configuration
  */
+/**
+ * Keep one row per upstream repository in a scheduler batch. Duplicate rows
+ * (the same repository imported under two sources on the same host) resolve
+ * to one destination repository, and processing both in one Promise.all ran
+ * every step twice against it. The dropped rows are logged so the duplicate
+ * can be cleaned up; discovery no longer creates new ones.
+ */
+function dropDuplicateRowsForPass<T extends { fullName: string; sourceId?: string | null; sourceProvider?: string | null; sourceUrl?: string | null; normalizedFullName: string }>(
+  rows: T[],
+  pass: string
+): T[] {
+  const { kept, dropped } = dedupeRepositoriesByIdentity(rows);
+  for (const row of dropped) {
+    console.warn(`[Scheduler] ${row.fullName} is tracked more than once (another row on the same host covers it); skipping the duplicate row in this ${pass} pass`);
+  }
+  return kept;
+}
+
 async function runScheduledSync(config: any): Promise<void> {
   const userId = config.userId;
   console.log(`[Scheduler] Running scheduled sync for user ${userId}`);
@@ -456,6 +509,11 @@ async function runScheduledSync(config: any): Promise<void> {
         if (reposNeedingMirror.length !== forkSkippedCount) {
           console.log(`[Scheduler] Skipped ${forkSkippedCount - reposNeedingMirror.length} forked repositories from auto-mirror (organization skip forks)`);
         }
+
+        // Two rows for one upstream repository (imported under two sources
+        // that point at the same host) resolve to one destination
+        // repository; mirror it once per pass, not twice at the same time.
+        reposNeedingMirror = dropDuplicateRowsForPass(reposNeedingMirror, 'auto-mirror');
 
         if (reposNeedingMirror.length > 0) {
           console.log(`[Scheduler] Found ${reposNeedingMirror.length} repositories that need initial mirroring`);
@@ -583,6 +641,8 @@ async function runScheduledSync(config: any): Promise<void> {
     } catch {
       // Non-critical logging, ignore errors
     }
+
+    reposToSync = dropDuplicateRowsForPass(reposToSync, 'sync');
 
     if (reposToSync.length === 0) {
       console.log(`[Scheduler] No repositories to sync for user ${userId}`);
@@ -808,6 +868,7 @@ async function performInitialAutoStart(): Promise<void> {
         if (skippedCount > 0) {
           console.log(`[Scheduler] Skipped ${skippedCount} repositories from initial auto-mirror (autoMirror=${autoMirrorOwned}, autoMirrorStarred=${autoMirrorStarred})`);
         }
+        reposNeedingMirror = dropDuplicateRowsForPass(reposNeedingMirror, 'initial auto-mirror');
 
         if (reposNeedingMirror.length > 0) {
           console.log(`[Scheduler] Found ${reposNeedingMirror.length} repositories that need mirroring`);
