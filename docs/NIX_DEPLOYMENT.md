@@ -115,10 +115,15 @@ Access at http://localhost:4321, sign up (first user is admin), and configure ev
 
 ### Production Configuration
 
-For production with custom domain and firewall:
+For production with custom domain and firewall. Like every snippet on this
+page, it needs the module imported first; `services.gitea-mirror` does not
+exist until `gitea-mirror.nixosModules.default` is in your modules list.
 
 ```nix
+{ inputs, ... }:
 {
+  imports = [ inputs.gitea-mirror.nixosModules.default ];
+
   services.gitea-mirror = {
     enable = true;
     host = "0.0.0.0";

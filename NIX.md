@@ -46,9 +46,13 @@ nix run --extra-experimental-features 'nix-command flakes' .#gitea-mirror
 
 ### 4. NixOS System Service
 ```nix
-# configuration.nix
+# flake.nix
+inputs.gitea-mirror.url = "github:RayLabsHQ/gitea-mirror";
+
+# configuration.nix (needs `inputs` passed through specialArgs)
+{ inputs, ... }:
 {
-  inputs.gitea-mirror.url = "github:RayLabsHQ/gitea-mirror";
+  imports = [ inputs.gitea-mirror.nixosModules.default ];
 
   services.gitea-mirror = {
     enable = true;
