@@ -3,7 +3,6 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Plus, RefreshCw, Building2, Check, AlertCircle, Clock, MoreVertical, Ban, SlidersHorizontal, Trash2, Layers } from "lucide-react";
-import { SiGitea } from "react-icons/si";
 import { toast } from "sonner";
 import type { MirrorOverrides, Organization } from "@/lib/db/schema";
 import type { FilterParams } from "@/types/filter";
@@ -13,7 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { buildGiteaWebUrl } from "@/lib/gitea-url";
 import { MirrorDestinationEditor } from "./MirrorDestinationEditor";
-import { destinationInfo } from "@/components/destination/DestinationIcon";
+import { DestinationIcon, destinationInfo } from "@/components/destination/DestinationIcon";
 import type { OrganizationMoveResult } from "@/lib/destination-transfer";
 import { MirrorOverridesDialog } from "@/components/config/MirrorOverridesDialog";
 import { hasMirrorOverrides, mirrorOptionsToFlags } from "@/lib/utils/mirror-overrides";
@@ -271,6 +270,17 @@ export function OrganizationList({
 
   // GitHub and GitLab destinations are pushed to; only Gitea and Forgejo can transfer a repository.
   const destination = destinationInfo(giteaConfig);
+
+  // Tooltip for the destination link on a card. Named after the configured
+  // destination, so a Forgejo user is not told to view the org on Gitea (#430).
+  const destinationLinkTooltip = (org: Organization, orgUrl: string | null): string => {
+    if (!giteaConfig?.url) return `${destination.label} not configured`;
+    if (org.status === "imported") return `Organization not yet mirrored to ${destination.label}`;
+    if (org.status === "failed") return "Organization mirroring failed";
+    if (org.status === "mirroring") return `Organization is being mirrored to ${destination.label}`;
+    if (orgUrl) return `View on ${destination.label}`;
+    return `${destination.label} organization not available`;
+  };
 
   // Where an organization's repositories land with no override, which is what
   // the mirror strategy produces for organization repositories (see
@@ -749,21 +759,7 @@ export function OrganizationList({
                 {(() => {
                   const giteaUrl = getGiteaOrgUrl(org);
 
-                  // Determine tooltip based on status and configuration
-                  let tooltip: string;
-                  if (!giteaConfig?.url) {
-                    tooltip = "Gitea not configured";
-                  } else if (org.status === 'imported') {
-                    tooltip = "Organization not yet mirrored to Gitea";
-                  } else if (org.status === 'failed') {
-                    tooltip = "Organization mirroring failed";
-                  } else if (org.status === 'mirroring') {
-                    tooltip = "Organization is being mirrored to Gitea";
-                  } else if (giteaUrl) {
-                    tooltip = "View on Gitea";
-                  } else {
-                    tooltip = "Gitea organization not available";
-                  }
+                  const tooltip = destinationLinkTooltip(org, giteaUrl);
 
                   return giteaUrl ? (
                     <Button variant="outline" size="default" asChild className="flex-1 h-10 min-w-0">
@@ -774,14 +770,14 @@ export function OrganizationList({
                         title={tooltip}
                         className="flex items-center justify-center gap-2"
                       >
-                        <SiGitea className="h-4 w-4 flex-shrink-0" />
-                        <span className="text-xs">Gitea</span>
+                        <DestinationIcon provider={destination.provider} className="h-4 w-4 flex-shrink-0" />
+                        <span className="text-xs">{destination.label}</span>
                       </a>
                     </Button>
                   ) : (
                     <Button variant="outline" size="default" disabled title={tooltip} className="flex-1 h-10">
-                      <SiGitea className="h-4 w-4" />
-                      <span className="text-xs ml-2">Gitea</span>
+                      <DestinationIcon provider={destination.provider} className="h-4 w-4" />
+                      <span className="text-xs ml-2">{destination.label}</span>
                     </Button>
                   );
                 })()}
@@ -914,21 +910,7 @@ export function OrganizationList({
                 {(() => {
                   const giteaUrl = getGiteaOrgUrl(org);
 
-                  // Determine tooltip based on status and configuration
-                  let tooltip: string;
-                  if (!giteaConfig?.url) {
-                    tooltip = "Gitea not configured";
-                  } else if (org.status === 'imported') {
-                    tooltip = "Organization not yet mirrored to Gitea";
-                  } else if (org.status === 'failed') {
-                    tooltip = "Organization mirroring failed";
-                  } else if (org.status === 'mirroring') {
-                    tooltip = "Organization is being mirrored to Gitea";
-                  } else if (giteaUrl) {
-                    tooltip = "View on Gitea";
-                  } else {
-                    tooltip = "Gitea organization not available";
-                  }
+                  const tooltip = destinationLinkTooltip(org, giteaUrl);
 
                   return (
                     <div className="flex items-center border rounded-md">
@@ -946,13 +928,13 @@ export function OrganizationList({
                             target="_blank"
                             rel="noopener noreferrer"
                           >
-                            <SiGitea className="h-4 w-4 mr-2" />
-                            Gitea
+                            <DestinationIcon provider={destination.provider} className="h-4 w-4 mr-2" />
+                            {destination.label}
                           </a>
                         ) : (
                           <>
-                            <SiGitea className="h-4 w-4 mr-2" />
-                            Gitea
+                            <DestinationIcon provider={destination.provider} className="h-4 w-4 mr-2" />
+                            {destination.label}
                           </>
                         )}
                       </Button>
