@@ -68,6 +68,24 @@ const retentionPeriods = [
   { label: "3 months", value: 7776000 },
 ];
 
+/** "every 8 hours", "every 30 minutes", "every 2 days" for a plain interval. */
+function formatIntervalSeconds(interval: number | string | undefined): string {
+  const seconds = typeof interval === "number" ? interval : Number(interval);
+  if (!Number.isFinite(seconds) || seconds <= 0) return "on a fixed interval";
+  const units: [number, string][] = [
+    [86400, "day"],
+    [3600, "hour"],
+    [60, "minute"],
+  ];
+  for (const [size, name] of units) {
+    if (seconds % size === 0 || seconds >= size * 2) {
+      const count = Math.round(seconds / size);
+      return `every ${count === 1 ? name : `${count} ${name}s`}`;
+    }
+  }
+  return `every ${seconds} seconds`;
+}
+
 function getCleanupInterval(retentionSeconds: number): number {
   const days = retentionSeconds / 86400;
   if (days <= 1) return 21600; // 6 hours
@@ -126,16 +144,22 @@ export function AutomationSettings({
       ? Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
       : "UTC";
 
-  // Use saved timezone, but treat "UTC" as unset for users who never chose
-  // it: older versions stored UTC as a default without asking. Anyone truly
-  // in UTC gets the same result via their browser timezone.
-  const effectiveTimezone =
-    scheduleConfig.timezone && scheduleConfig.timezone !== "UTC"
-      ? scheduleConfig.timezone
-      : browserTimezone;
+  // The timezone the scheduler really uses. It used to be shown as the
+  // browser timezone whenever UTC was stored, which made the card promise a
+  // local 22:00 while the sync ran at 22:00 UTC (#427). The chip below offers
+  // a one-click switch to the browser timezone when the two differ.
+  const effectiveTimezone = scheduleConfig.timezone || browserTimezone;
+  const timezoneDiffers = effectiveTimezone !== browserTimezone;
+
+  // The stored schedule is a plain interval (seconds or a duration such as
+  // 8h) rather than a clock schedule. That is what SCHEDULE_INTERVAL and
+  // GITEA_MIRROR_INTERVAL produce, and what older versions stored. The card
+  // only edits clock schedules, so say what actually runs instead of showing
+  // the 22:00 placeholder as if it were saved (#427).
+  const isIntervalSchedule = scheduleConfig.scheduleMode === "interval";
 
   const nextScheduledRun = useMemo(() => {
-    if (!scheduleConfig.enabled) return null;
+    if (!scheduleConfig.enabled || isIntervalSchedule) return null;
     const startTime = scheduleConfig.startTime || "22:00";
     const frequencyHours = scheduleConfig.clockFrequencyHours || 24;
     const cronExpression = buildClockCronExpression(startTime, frequencyHours);
@@ -145,7 +169,16 @@ export function AutomationSettings({
     } catch {
       return null;
     }
-  }, [scheduleConfig.enabled, scheduleConfig.startTime, scheduleConfig.clockFrequencyHours, effectiveTimezone]);
+  }, [scheduleConfig.enabled, isIntervalSchedule, scheduleConfig.startTime, scheduleConfig.clockFrequencyHours, effectiveTimezone]);
+
+  const switchToBrowserTimezone = () =>
+    onScheduleChange({
+      ...scheduleConfig,
+      scheduleMode: "clock",
+      startTime: scheduleConfig.startTime || "22:00",
+      clockFrequencyHours: scheduleConfig.clockFrequencyHours || 24,
+      timezone: browserTimezone,
+    });
 
   // Update nextRun for cleanup when settings change
   useEffect(() => {
@@ -217,14 +250,38 @@ export function AutomationSettings({
               <CardSection>
                 <SectionTitle
                   action={
-                    <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-[11px] text-muted-foreground">
-                      <Globe className="h-3 w-3" />
-                      {effectiveTimezone}
-                    </span>
+                    timezoneDiffers ? (
+                      <button
+                        type="button"
+                        onClick={switchToBrowserTimezone}
+                        title={`Switch the schedule to ${browserTimezone}`}
+                        className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-[11px] text-muted-foreground hover:bg-muted/70 hover:text-foreground"
+                      >
+                        <Globe className="h-3 w-3" />
+                        {effectiveTimezone}
+                        <span className="text-muted-foreground/60">· use {browserTimezone}</span>
+                      </button>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-[11px] text-muted-foreground">
+                        <Globe className="h-3 w-3" />
+                        {effectiveTimezone}
+                      </span>
+                    )
                   }
                 >
                   Schedule
                 </SectionTitle>
+
+                {isIntervalSchedule && (
+                  <p className="flex items-start gap-2 rounded-md border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
+                    <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                    <span>
+                      Syncing {formatIntervalSeconds(scheduleConfig.interval)}, counted from the last run.
+                      {" "}This interval comes from SCHEDULE_INTERVAL or GITEA_MIRROR_INTERVAL, which is applied again on every restart while it is set, or from an older version.
+                      {" "}Pick a frequency or start time to switch to a clock schedule.
+                    </span>
+                  </p>
+                )}
 
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="space-y-1.5">
@@ -235,7 +292,7 @@ export function AutomationSettings({
                       Frequency
                     </Label>
                     <Select
-                      value={String(scheduleConfig.clockFrequencyHours || 24)}
+                      value={isIntervalSchedule ? "" : String(scheduleConfig.clockFrequencyHours || 24)}
                       onValueChange={(value) =>
                         onScheduleChange({
                           ...scheduleConfig,
@@ -247,7 +304,7 @@ export function AutomationSettings({
                       }
                     >
                       <SelectTrigger id="clock-frequency" className="w-full">
-                        <SelectValue />
+                        <SelectValue placeholder="Choose a frequency" />
                       </SelectTrigger>
                       <SelectContent>
                         {clockFrequencies.map((option) => (
@@ -276,7 +333,7 @@ export function AutomationSettings({
                       <Input
                         id="clock-start-time"
                         type="time"
-                        value={scheduleConfig.startTime || "22:00"}
+                        value={isIntervalSchedule ? "" : scheduleConfig.startTime || "22:00"}
                         onChange={(event) =>
                           onScheduleChange({
                             ...scheduleConfig,

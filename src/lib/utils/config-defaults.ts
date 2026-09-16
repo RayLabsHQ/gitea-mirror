@@ -47,11 +47,17 @@ export async function createDefaultConfig({ userId, envOverrides = {} }: Default
   const giteaToken = envOverrides.giteaToken || process.env.GITEA_TOKEN || "";
   const giteaUsername = envOverrides.giteaUsername || process.env.GITEA_USERNAME || "";
   
-  // Schedule config from env - default to ENABLED
-  const scheduleEnabled = envOverrides.scheduleEnabled ?? 
-    (process.env.SCHEDULE_ENABLED === "false" ? false : true); // Default: ENABLED
+  // Schedule config from env. Off unless the environment turns it on, with
+  // the same rule as env-config-loader: SCHEDULE_ENABLED=true or any interval
+  // variable. A fresh install used to start enabled on a plain 24h interval
+  // counted from first login, which the settings card (clock mode only)
+  // showed as "22:00 daily" (#427). Enabling from the card stores the clock
+  // schedule and the browser timezone, so the card and the scheduler agree.
+  const envInterval = process.env.SCHEDULE_INTERVAL || process.env.GITEA_MIRROR_INTERVAL;
+  const scheduleEnabled = envOverrides.scheduleEnabled ??
+    (process.env.SCHEDULE_ENABLED === "true" || !!envInterval);
   const scheduleInterval = envOverrides.scheduleInterval ??
-    (process.env.SCHEDULE_INTERVAL || 86400); // Default: daily
+    (envInterval || "0 22 * * *"); // Default: daily at 22:00 in scheduleTimezone
   const scheduleTimezone = normalizeTimezone(process.env.SCHEDULE_TIMEZONE || "UTC");
   let scheduleNextRun: Date | null = null;
   if (scheduleEnabled) {

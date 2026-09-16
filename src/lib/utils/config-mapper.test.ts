@@ -82,6 +82,23 @@ test("mapDbScheduleToUi - infers clock mode for generated cron", () => {
   expect(mapped.timezone).toBe("Asia/Kolkata");
 });
 
+test("mapDbScheduleToUi - reports interval mode for a plain interval instead of a clock schedule", () => {
+  // What SCHEDULE_INTERVAL / GITEA_MIRROR_INTERVAL and older versions store.
+  // The settings card must not present the 22:00 placeholder as saved (#427).
+  const mapped = mapDbScheduleToUi(
+    scheduleConfigSchema.parse({
+      enabled: true,
+      interval: "8h",
+      timezone: "UTC",
+    })
+  );
+
+  expect(mapped.scheduleMode).toBe("interval");
+  expect(mapped.interval).toBe(8 * 3600);
+  expect(mapped.intervalExpression).toBe("8h");
+  expect(mapped.timezone).toBe("UTC");
+});
+
 test("includeCollaboratorRepos round-trips through UI -> DB -> UI when true", () => {
   const ui = buildMinimalUiConfigs({ includeCollaboratorRepos: true });
   const db = mapUiToDbConfig(
