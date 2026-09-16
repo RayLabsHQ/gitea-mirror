@@ -222,21 +222,33 @@ export function Organization() {
 
       const newStatus = ignore ? "ignored" : "imported";
       
-      const response = await apiRequest<{ success: boolean; organization?: Organization; error?: string }>(
+      // cascade: the organization's repositories follow it, so ignoring an
+      // organization actually stops its mirrors from syncing (#429).
+      const response = await apiRequest<{
+        success: boolean;
+        organization?: Organization;
+        repositoriesChanged?: number;
+        error?: string;
+      }>(
         `/organizations/${orgId}/status`, 
         {
           method: "PATCH",
           data: { 
             status: newStatus, 
-            userId: user.id 
+            userId: user.id,
+            cascade: true,
           },
         }
       );
 
       if (response.success) {
+        const changed = response.repositoriesChanged ?? 0;
+        const repoNote = changed > 0
+          ? ` (${changed} ${changed === 1 ? "repository" : "repositories"} ${ignore ? "ignored too" : "restored"})`
+          : "";
         toast.success(ignore 
-          ? `Organization will be ignored in future operations`
-          : `Organization included for mirroring`
+          ? `Organization will be ignored in future operations${repoNote}`
+          : `Organization included for mirroring${repoNote}`
         );
         
         // Update local state

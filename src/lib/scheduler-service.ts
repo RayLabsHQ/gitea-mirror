@@ -5,7 +5,7 @@
  */
 
 import { db, configs, repositories, organizations } from '@/lib/db';
-import { eq, and, or } from 'drizzle-orm';
+import { eq, and, or, ne } from 'drizzle-orm';
 import { mirrorRepositoryToDestination, syncRepositoryOnDestination } from '@/lib/mirror-dispatch';
 import { usesPushEngine } from '@/lib/destination-connection';
 import { getDecryptedGitHubToken } from '@/lib/utils/config-encryption';
@@ -219,13 +219,17 @@ async function rediscoverOrganizationRepositories(
   const { createSourceProviderFromSource } = await import('@/lib/source-providers');
   const sources = (await listSources(userId)).filter(source => source.enabled);
 
+  // An ignored organization is left alone entirely: rediscovering it would
+  // insert its new repositories as imported and auto-mirror could pick them
+  // up, which is what the user just asked to stop (#429).
   const includedOrgs = await db
     .select()
     .from(organizations)
     .where(
       and(
         eq(organizations.userId, userId),
-        eq(organizations.isIncluded, true)
+        eq(organizations.isIncluded, true),
+        ne(organizations.status, 'ignored')
       )
     );
 
