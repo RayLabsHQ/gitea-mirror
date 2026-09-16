@@ -233,8 +233,10 @@ jobs:
         if: github.event_name != 'pull_request'
         with:
           command: cves,recommendations
-          # Scan the image this run pushed, whatever tags it carries.
-          image: ${{ env.REGISTRY }}/${{ env.IMAGE }}@${{ steps.build-and-push.outputs.digest }}
+          # Scan the image this run pushed: the release tag on a tag build,
+          # edge on a main or scheduled build. The action rejects digest
+          # references ("missing or wrong image input").
+          image: ${{ env.REGISTRY }}/${{ env.IMAGE }}:${{ steps.tag_version.outputs.VERSION }}
           sarif-file: scout-results.sarif
           summary: true
           exit-code: false
