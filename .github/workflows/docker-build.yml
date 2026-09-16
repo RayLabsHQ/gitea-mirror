@@ -28,6 +28,13 @@ on:
   schedule:
     - cron: '0 0 * * 0'  # Weekly security scan on Sunday at midnight
 
+# One build per ref at a time. A merge and the release bump that follows it
+# land on main seconds apart and used to race each other for the latest tag
+# (#425). Branch and PR builds cancel the older run; tag builds always finish.
+concurrency:
+  group: docker-build-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
 env:
   REGISTRY: ghcr.io
   IMAGE: ${{ github.repository }}
@@ -90,9 +97,9 @@ jobs:
             echo "APP_VERSION=${APP_VERSION}" >> $GITHUB_OUTPUT
             echo "Using version tag: ${TAG_VERSION}"
           else
-            echo "VERSION=latest" >> $GITHUB_OUTPUT
+            echo "VERSION=edge" >> $GITHUB_OUTPUT
             echo "APP_VERSION=dev" >> $GITHUB_OUTPUT
-            echo "No version tag, using 'latest'"
+            echo "No version tag, using 'edge'"
           fi
 
       # Keep version files aligned automatically for tag-based releases
@@ -116,12 +123,15 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE }}
           labels: |
             org.opencontainers.image.revision=${{ env.SHA }}
+          # latest follows the release tag, not main: a main build can carry
+          # an unreleased package.json and must never overwrite a release.
+          # Pre-release tags (v1.2.3-rc.1) keep latest on the last stable one.
           tags: |
-            type=edge,branch=$repo.default_branch
+            type=edge,branch=main
             type=semver,pattern=v{{version}}
             type=sha,prefix=,suffix=,format=short
-            type=raw,value=latest,enable={{is_default_branch}}
-            type=raw,value=${{ steps.tag_version.outputs.VERSION }}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') && !contains(github.ref, '-') }}
+            type=raw,value=${{ steps.tag_version.outputs.VERSION }},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
             type=ref,event=pr,prefix=pr-
 
       # Build and push Docker image
@@ -223,7 +233,8 @@ jobs:
         if: github.event_name != 'pull_request'
         with:
           command: cves,recommendations
-          image: ${{ env.REGISTRY }}/${{ env.IMAGE }}:latest
+          # Scan the image this run pushed, whatever tags it carries.
+          image: ${{ env.REGISTRY }}/${{ env.IMAGE }}@${{ steps.build-and-push.outputs.digest }}
           sarif-file: scout-results.sarif
           summary: true
           exit-code: false
