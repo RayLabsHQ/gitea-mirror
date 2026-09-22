@@ -2001,9 +2001,9 @@
     url = "https://registry.npmjs.org/detect-node-es/-/detect-node-es-1.1.0.tgz";
     hash = "sha512-ypdmJU/TbBby2Dxibuv7ZLW3Bs1QEmM7nHjEANfohJLvE0XVujisn1qPJcZxg+qDucsr+bP6fLD1rPS3AhJ7EQ==";
   };
-  "devalue@5.8.1" = fetchurl {
-    url = "https://registry.npmjs.org/devalue/-/devalue-5.8.1.tgz";
-    hash = "sha512-4CXDYRBGqN+57wVJkuXBYmpAVUSg3L6JAQa/DFqm238G73E1wuyc/JhGQJzN7vUf/CMphYau2zXbfWzDR5aTEw==";
+  "devalue@5.9.4" = fetchurl {
+    url = "https://registry.npmjs.org/devalue/-/devalue-5.9.4.tgz";
+    hash = "sha512-sPAT4pztbu6586/hrhOnMKS17IJrvg12mXiSPSS3W5qDeN2RGgvZ0diZCm31dBbnevfVmujNO3IM2wrS4Y2Rhg==";
   };
   "devlop@1.1.0" = fetchurl {
     url = "https://registry.npmjs.org/devlop/-/devlop-1.1.0.tgz";
