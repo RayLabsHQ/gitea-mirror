@@ -16,9 +16,14 @@
  * - anything that is not plain http or https
  *
  * Host names are resolved and every address they resolve to is checked, so
- * a DNS name pointing at the metadata range is refused too. Callers that
- * follow redirects must run the check on every hop; `safeFetch` below does
- * not follow redirects at all.
+ * a DNS name pointing at the metadata range is refused too. A plain http
+ * request is then sent to the address that was checked, with the original
+ * name in the Host header, so a name that changes its answer between the
+ * check and the request (DNS rebinding) gains nothing. An https request
+ * keeps the name: the certificate is validated against it, and the
+ * metadata services this guard exists for speak no TLS at all. Callers
+ * that follow redirects must run the check on every hop; `safeFetch` below
+ * does not follow redirects at all.
  */
 
 import { isIP } from "node:net";
@@ -122,15 +127,60 @@ export async function assertSafeOutboundUrl(
   return url;
 }
 
+export interface OutboundTarget {
+  /** The URL as given, parsed and checked. */
+  url: URL;
+  /** The URL to actually request: pinned to the checked address for plain http. */
+  requestUrl: string;
+  /** Headers the request must carry (the original Host when pinned). */
+  headers: Record<string, string>;
+}
+
 /**
- * fetch for user supplied URLs: runs the guard first and never follows a
- * redirect, so a permitted host cannot bounce the request to a blocked one.
+ * Check a user supplied URL and decide where the request goes. Plain http
+ * to a host name is pinned to the first address the check saw; everything
+ * else is requested as given.
+ */
+export async function resolveOutboundTarget(
+  rawUrl: string,
+  resolver: AddressResolver = defaultResolver
+): Promise<OutboundTarget> {
+  const url = await assertSafeOutboundUrl(rawUrl, resolver);
+  const hostname = stripBrackets(url.hostname);
+
+  if (url.protocol !== "http:" || isIP(hostname)) {
+    return { url, requestUrl: url.toString(), headers: {} };
+  }
+
+  const [address] = await resolver(hostname.toLowerCase());
+  if (!address || isLinkLocalAddress(address)) {
+    // Unresolvable names are left to fetch, which fails on them anyway.
+    return { url, requestUrl: url.toString(), headers: {} };
+  }
+
+  const pinned = new URL(url.toString());
+  pinned.hostname = isIP(address) === 6 ? `[${address}]` : address;
+  return { url, requestUrl: pinned.toString(), headers: { Host: url.host } };
+}
+
+/**
+ * fetch for user supplied URLs: runs the guard first, pins plain http to
+ * the checked address and never follows a redirect, so a permitted host
+ * cannot bounce the request to a blocked one.
  */
 export async function safeFetch(
   rawUrl: string,
   init: RequestInit = {},
   resolver?: AddressResolver
 ): Promise<Response> {
-  const url = await assertSafeOutboundUrl(rawUrl, resolver);
-  return fetch(url.toString(), { ...init, redirect: "manual" });
+  const target = await resolveOutboundTarget(rawUrl, resolver);
+  let headers: HeadersInit;
+  if (init.headers instanceof Headers || Array.isArray(init.headers)) {
+    const merged = new Headers(init.headers);
+    for (const [name, value] of Object.entries(target.headers)) merged.set(name, value);
+    headers = merged;
+  } else {
+    headers = { ...(init.headers ?? {}), ...target.headers };
+  }
+  return fetch(target.requestUrl, { ...init, headers, redirect: "manual" });
 }

@@ -3,6 +3,7 @@ import {
   assertSafeOutboundUrl,
   isLinkLocalAddress,
   OutboundUrlError,
+  resolveOutboundTarget,
   safeFetch,
 } from "./outbound-url";
 
@@ -80,22 +81,60 @@ describe("assertSafeOutboundUrl", () => {
   });
 });
 
+describe("resolveOutboundTarget", () => {
+  it("pins plain http to the checked address and keeps the name in Host", async () => {
+    const resolver = async () => ["10.0.0.5", "10.0.0.6"];
+    const target = await resolveOutboundTarget("http://ntfy.local:8080/topic?x=1", resolver);
+    expect(target.requestUrl).toBe("http://10.0.0.5:8080/topic?x=1");
+    expect(target.headers).toEqual({ Host: "ntfy.local:8080" });
+  });
+
+  it("brackets a pinned IPv6 address", async () => {
+    const resolver = async () => ["fd00::10"];
+    const target = await resolveOutboundTarget("http://gotify.local/message", resolver);
+    expect(target.requestUrl).toBe("http://[fd00::10]/message");
+    expect(target.headers).toEqual({ Host: "gotify.local" });
+  });
+
+  it("does not pin https, IP literals or unresolvable names", async () => {
+    const resolver = async () => ["10.0.0.5"];
+    expect((await resolveOutboundTarget("https://idp.example.com/x", resolver)).headers).toEqual({});
+    expect((await resolveOutboundTarget("http://192.168.1.10:3000/", resolver)).requestUrl).toBe(
+      "http://192.168.1.10:3000/"
+    );
+    const unresolved = await resolveOutboundTarget("http://nope.invalid/", noResolve);
+    expect(unresolved.requestUrl).toBe("http://nope.invalid/");
+    expect(unresolved.headers).toEqual({});
+  });
+});
+
 describe("safeFetch", () => {
   const realFetch = globalThis.fetch;
   afterEach(() => {
     globalThis.fetch = realFetch;
   });
 
-  it("never follows redirects and refuses blocked hosts before fetching", async () => {
+  it("never follows redirects, pins the address and refuses blocked hosts before fetching", async () => {
     let seen: any = null;
     globalThis.fetch = (async (input: any, init?: RequestInit) => {
-      seen = { url: String(input), redirect: init?.redirect };
+      const headers = new Headers(init?.headers);
+      seen = { url: String(input), redirect: init?.redirect, host: headers.get("host"), auth: headers.get("authorization") };
       return new Response("", { status: 302, headers: { location: "http://169.254.169.254/" } });
     }) as typeof fetch;
 
-    const response = await safeFetch("http://ntfy.local/topic", { method: "POST" }, noResolve);
+    const resolver = async () => ["10.0.0.5"];
+    const response = await safeFetch(
+      "http://ntfy.local/topic",
+      { method: "POST", headers: { Authorization: "Bearer t" } },
+      resolver
+    );
     expect(response.status).toBe(302);
-    expect(seen).toEqual({ url: "http://ntfy.local/topic", redirect: "manual" });
+    expect(seen).toEqual({
+      url: "http://10.0.0.5/topic",
+      redirect: "manual",
+      host: "ntfy.local",
+      auth: "Bearer t",
+    });
 
     seen = null;
     await expect(safeFetch("http://169.254.169.254/", {}, noResolve)).rejects.toBeInstanceOf(

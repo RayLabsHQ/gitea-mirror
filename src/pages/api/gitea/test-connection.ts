@@ -2,7 +2,7 @@ import type { APIRoute } from 'astro';
 import { httpGet, HttpError } from '@/lib/http-client';
 import { createSecureErrorResponse } from '@/lib/utils';
 import { requireAuthenticatedUserId } from '@/lib/auth-guards';
-import { assertSafeOutboundUrl, OutboundUrlError } from '@/lib/utils/outbound-url';
+import { assertSafeOutboundUrl, resolveOutboundTarget, OutboundUrlError } from '@/lib/utils/outbound-url';
 import {
   DESTINATION_PROVIDER_LABELS,
   isPushDestinationKind,
@@ -112,19 +112,24 @@ export const POST: APIRoute = async ({ request, locals }) => {
     }
 
     // Normalize the URL (remove trailing slash if present)
-    const baseUrl = String(url).endsWith('/') ? String(url).slice(0, -1) : String(url);
+    const givenUrl = String(url).endsWith('/') ? String(url).slice(0, -1) : String(url);
 
+    // Checked and, for plain http, pinned to the checked address so the
+    // two requests below go where the check looked.
+    let target: Awaited<ReturnType<typeof resolveOutboundTarget>>;
     try {
-      await assertSafeOutboundUrl(baseUrl);
+      target = await resolveOutboundTarget(givenUrl);
     } catch (error) {
       if (error instanceof OutboundUrlError) {
         return json({ success: false, message: error.message }, 400);
       }
       throw error;
     }
+    const baseUrl = target.requestUrl.replace(/\/$/, '');
 
     // Test the connection by fetching the authenticated user
     const response = await httpGet(`${baseUrl}/api/v1/user`, {
+      ...target.headers,
       'Authorization': `token ${token}`,
       'Accept': 'application/json',
     });
@@ -139,6 +144,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     let serverInfo: ReturnType<typeof parseServerInfo> | undefined;
     try {
       const versionResp = await httpGet(`${baseUrl}/api/v1/version`, {
+        ...target.headers,
         'Accept': 'application/json',
       });
       if (typeof versionResp.data?.version === 'string') {
