@@ -79,6 +79,8 @@ services:
       - CLEANUP_DRY_RUN=${CLEANUP_DRY_RUN:-true}
       # Optional: Skip TLS verification (insecure, use only for testing)
       # - GITEA_SKIP_TLS_VERIFY=${GITEA_SKIP_TLS_VERIFY:-false}
+      # Login page: which tab opens first when both methods are available
+      - AUTH_DEFAULT_METHOD=${AUTH_DEFAULT_METHOD:-email}
       # Header Authentication (for Reverse Proxy SSO)
       - HEADER_AUTH_ENABLED=${HEADER_AUTH_ENABLED:-false}
       - HEADER_AUTH_USER_HEADER=${HEADER_AUTH_USER_HEADER:-X-Authentik-Username}

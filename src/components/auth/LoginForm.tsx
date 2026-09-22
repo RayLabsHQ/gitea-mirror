@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { useAuth } from '@/hooks/useAuth';
@@ -13,6 +13,13 @@ import { toast, Toaster } from 'sonner';
 import { showErrorToast } from '@/lib/utils';
 import { Loader2, Mail, Globe, Eye, EyeOff } from 'lucide-react';
 import { withBase } from '@/lib/base-path';
+import {
+  DEFAULT_AUTH_METHOD,
+  getLastAuthMethod,
+  resolveInitialAuthMethod,
+  setLastAuthMethod,
+  type AuthMethod,
+} from '@/lib/utils/auth-method';
 
 
 export function LoginForm() {
@@ -21,13 +28,27 @@ export function LoginForm() {
   const [ssoEmail, setSsoEmail] = useState('');
   const { login } = useAuth();
   const { authMethods, isLoading: isLoadingMethods } = useAuthMethods();
+  const [activeTab, setActiveTab] = useState<AuthMethod>(DEFAULT_AUTH_METHOD);
+  // The tab is only resolved once, so a manual switch is not overridden.
+  const hasResolvedTab = useRef(false);
 
-  // Determine which tab to show by default
-  const getDefaultTab = () => {
-    if (authMethods.emailPassword) return 'email';
-    if (authMethods.sso.enabled) return 'sso';
-    return 'email'; // fallback
-  };
+  // Which tab to open on: the method this browser last used, else the server
+  // default (AUTH_DEFAULT_METHOD), else whichever method is available. This
+  // runs once the available methods are known, before the tabs are rendered.
+  useEffect(() => {
+    if (isLoadingMethods || hasResolvedTab.current) return;
+    hasResolvedTab.current = true;
+    setActiveTab(
+      resolveInitialAuthMethod({
+        remembered: getLastAuthMethod(),
+        serverDefault: authMethods.defaultMethod,
+        available: {
+          email: authMethods.emailPassword,
+          sso: authMethods.sso.enabled,
+        },
+      })
+    );
+  }, [isLoadingMethods, authMethods]);
 
   async function handleLogin(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -45,6 +66,7 @@ export function LoginForm() {
 
     try {
       await login(email, password);
+      setLastAuthMethod('email');
       toast.success('Login successful!');
       // Small delay before redirecting to see the success message
       setTimeout(() => {
@@ -64,6 +86,8 @@ export function LoginForm() {
         toast.error('Please enter your email or select a provider');
         return;
       }
+
+      setLastAuthMethod('sso');
 
       const callbackURL =
         typeof window !== 'undefined'
@@ -119,7 +143,11 @@ export function LoginForm() {
           <>
             {/* Show tabs only if multiple auth methods are available */}
             {authMethods.sso.enabled && authMethods.emailPassword ? (
-              <Tabs defaultValue={getDefaultTab()} className="w-full">
+              <Tabs
+                value={activeTab}
+                onValueChange={(value) => setActiveTab(value as AuthMethod)}
+                className="w-full"
+              >
                 <TabsList className="grid w-full grid-cols-2 mx-6" style={{ width: 'calc(100% - 3rem)' }}>
                   <TabsTrigger value="email">
                     <Mail className="h-4 w-4 mr-2" />

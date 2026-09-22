@@ -1,5 +1,10 @@
 import { useState, useEffect } from 'react';
 import { apiRequest } from '@/lib/utils';
+import {
+  DEFAULT_AUTH_METHOD,
+  parseDefaultAuthMethod,
+  type AuthMethod,
+} from '@/lib/utils/auth-method';
 
 interface AuthMethods {
   emailPassword: boolean;
@@ -14,6 +19,8 @@ interface AuthMethods {
   oidc: {
     enabled: boolean;
   };
+  /** Instance default from AUTH_DEFAULT_METHOD, used when nothing is remembered. */
+  defaultMethod: AuthMethod;
 }
 
 export function useAuthMethods() {
@@ -26,6 +33,7 @@ export function useAuthMethods() {
     oidc: {
       enabled: false,
     },
+    defaultMethod: DEFAULT_AUTH_METHOD,
   });
   const [isLoading, setIsLoading] = useState(true);
 
@@ -35,9 +43,9 @@ export function useAuthMethods() {
 
   const loadAuthMethods = async () => {
     try {
-      // Check SSO providers - use public endpoint since this is used on login page
-      const providers = await apiRequest<any[]>('/sso/providers/public').catch(() => []);
-      const applications = await apiRequest<any[]>('/sso/applications').catch(() => []);
+      // Public endpoint: the login page calls it before anyone is signed in.
+      const methods = await apiRequest<Partial<AuthMethods>>('/auth/methods');
+      const providers = methods.sso?.providers ?? [];
 
       setAuthMethods({
         emailPassword: true, // Always enabled
@@ -50,8 +58,9 @@ export function useAuthMethods() {
           })),
         },
         oidc: {
-          enabled: applications.length > 0,
+          enabled: methods.oidc?.enabled === true,
         },
+        defaultMethod: parseDefaultAuthMethod(methods.defaultMethod),
       });
     } catch (error) {
       // If we can't load auth methods, default to email/password only

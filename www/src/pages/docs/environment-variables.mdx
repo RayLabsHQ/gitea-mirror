@@ -42,6 +42,7 @@ Variables fall into two groups.
 | `BETTER_AUTH_TRUSTED_ORIGINS` | none | Comma-separated additional origins allowed to make auth requests. The origin of `BETTER_AUTH_URL` is always trusted. |
 | `BETTER_AUTH_LOG_LEVEL` | `warn` | Better Auth logger verbosity: `debug`, `info`, `warn`, or `error`. Use `debug` to trace SSO and OIDC sign-in problems. Better Auth does not read the `DEBUG` variable. |
 | `ENCRYPTION_SECRET` | none | Key for AES-256-GCM encryption of stored tokens. Generate with `openssl rand -base64 48`. |
+| `AUTH_DEFAULT_METHOD` | `email` | Tab the login page opens on when both email and SSO are available: `email` or `sso`. The method last used in that browser wins over this default. |
 
 In Docker, `BETTER_AUTH_SECRET` and `ENCRYPTION_SECRET` are generated on first boot if unset and saved to `/app/data/.better_auth_secret` and `/app/data/.encryption_secret` so they persist across restarts. Outside Docker there is no fallback: a missing `BETTER_AUTH_SECRET` logs a security warning in production and uses a known insecure development value.
 

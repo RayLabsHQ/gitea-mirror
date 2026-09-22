@@ -342,6 +342,15 @@ Configure automatic cleanup of old events and data.
 
 Configure authentication methods and SSO.
 
+### Login Page
+
+| Variable | Description | Default | Options |
+|----------|-------------|---------|---------|
+| `AUTH_DEFAULT_METHOD` | Tab the login page opens on when both email and SSO are available. Any other value falls back to `email`. | `email` | `email`, `sso` |
+
+The login page also remembers the method last used in that browser, which wins
+over this default. Anything unrecognised falls back to `email`.
+
 ### Header Authentication (Reverse Proxy SSO)
 
 | Variable | Description | Default | Options |
