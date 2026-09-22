@@ -11,6 +11,7 @@ import { eq } from "drizzle-orm";
 import { withBase } from "./base-path";
 import { headerAuthPlugin } from "./auth-header-plugin";
 import { apiKeyGuardPlugin } from "./auth-api-key-guard";
+import { signupGuardPlugin } from "./auth-signup-guard";
 
 /**
  * Extracts the origins implied by registered SSO identity providers.
@@ -401,6 +402,18 @@ export const auth = betterAuth({
     // Refuses /api-key/* calls that arrive with the key header, so a key
     // can never create, list or revoke keys. See auth-api-key-guard.ts.
     apiKeyGuardPlugin(),
+
+    // Refuses email sign-up once an account exists unless
+    // AUTH_ALLOW_SIGNUP=true. The signup page only redirected; the endpoint
+    // itself was open. See auth-signup-guard.ts.
+    signupGuardPlugin({
+      countUsers: async () => {
+        const { db, users } = await import("./db");
+        const { sql } = await import("drizzle-orm");
+        const [row] = await db.select({ count: sql<number>`count(*)` }).from(users);
+        return Number(row?.count ?? 0);
+      },
+    }),
 
     // Header / forward authentication bridge. Exposes
     // POST /api/auth/sign-in/header so the middleware can mint a real

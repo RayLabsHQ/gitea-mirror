@@ -1,4 +1,5 @@
 import type { GotifyConfig } from "@/types/config";
+import { safeFetch } from "@/lib/utils/outbound-url";
 import type { NotificationEvent } from "./ntfy";
 
 export async function sendGotifyNotification(config: GotifyConfig, event: NotificationEvent): Promise<void> {
@@ -12,6 +13,6 @@ export async function sendGotifyNotification(config: GotifyConfig, event: Notifi
     message: event.message,
     priority: event.type === "sync_error" ? 8 : (config.priority ?? 5),
   });
-  const resp = await fetch(url, { method: "POST", body, headers });
-  if (!resp.ok) throw new Error(`Gotify error: ${resp.status} ${await resp.text()}`);
+  const resp = await safeFetch(url, { method: "POST", body, headers });
+  if (!resp.ok) throw new Error(`Gotify error: ${resp.status}`);
 }

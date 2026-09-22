@@ -1,5 +1,7 @@
 import type { APIRoute } from "astro";
 import { createSecureErrorResponse } from "@/lib/utils";
+import { requireAuthenticatedUserId } from "@/lib/auth-guards";
+import { assertSafeOutboundUrl, OutboundUrlError } from "@/lib/utils/outbound-url";
 import {
   SOURCE_PROVIDER_LABELS,
   createSourceProvider,
@@ -20,7 +22,12 @@ function json(body: unknown, status: number): Response {
  * compatibility, but serves every source provider: the body carries the
  * provider and, for GitLab and Gitea, the instance URL.
  */
-export const POST: APIRoute = async ({ request }) => {
+export const POST: APIRoute = async ({ request, locals }) => {
+  // The route makes a server side request to a URL from the body, so it is
+  // for signed in users only, like every other API route that reaches out.
+  const authResult = await requireAuthenticatedUserId({ request, locals });
+  if ("response" in authResult) return authResult.response;
+
   const body = await request.json().catch(() => ({}));
   const { token, username, provider: rawProvider, url } = body ?? {};
   const provider = normalizeSourceProviderKind(rawProvider);
@@ -31,10 +38,20 @@ export const POST: APIRoute = async ({ request }) => {
       return json({ success: false, message: `${label} token is required` }, 400);
     }
 
+    const instanceUrl = normalizeSourceUrl(url, provider);
+    try {
+      await assertSafeOutboundUrl(instanceUrl);
+    } catch (error) {
+      if (error instanceof OutboundUrlError) {
+        return json({ success: false, message: error.message }, 400);
+      }
+      throw error;
+    }
+
     // GitHub honors GH_API_URL / GITHUB_API_URL for GHES / GHEC inside the adapter.
     const sourceProvider = createSourceProvider({
       provider,
-      url: normalizeSourceUrl(url, provider),
+      url: instanceUrl,
       username: typeof username === "string" ? username : "",
       token,
     });

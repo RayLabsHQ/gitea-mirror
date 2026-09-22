@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Security
+- Fixed four privately reported vulnerabilities (GHSA-9m33-xfrc-5jxw, GHSA-6m23-28hh-gjh2, GHSA-2hpx-83vg-gm45, GHSA-5pp8-r7f5-6q8p)
+  - `POST /api/gitea/test-connection` and `POST /api/github/test-connection` now require a signed-in user; they were the only non-public API routes without a guard and made a server side request to any URL in the body
+  - The email sign-up endpoint is closed server side once an account exists (`AUTH_ALLOW_SIGNUP=true` reopens it); only the signup page redirected before, so anyone reaching the instance could create an account through the API
+  - SSO providers are scoped to the user who created them for listing, updating and deleting, and the OIDC client secret is no longer returned by the API (the form keeps the stored secret when the field is left blank)
+  - HTTP errors from Gitea and other hosts no longer carry the upstream response body in the message, so an error can no longer echo the content of a host the caller chose
+  - Requests to user supplied URLs (connection tests, OIDC discovery, ntfy, Gotify, Apprise and webhook notifications) refuse link local and cloud metadata addresses and no longer follow redirects; private networks stay allowed because mirroring to a LAN Gitea is the normal deployment
 - Raised the devalue floor to 5.9.2 in the application and the documentation site (GHSA-9rgm-9g3h-6x36, denial of service through malformed input); both lockfiles resolve 5.9.4
 - Raised the dependency floors for the advisories published on 2026-09-08: Astro 7.2.8 (remote code execution through AVIF image optimization, and an authorization bypass when stripping the configured base), @xmldom/xmldom 0.8.15 (eight parser and serializer issues), sharp 0.35.4 (libheif), svgo 4.1.0 (removeScripts sanitization) and js-yaml 4.3.2 (merge-key CPU use). Applied to both the application and the documentation site.
 

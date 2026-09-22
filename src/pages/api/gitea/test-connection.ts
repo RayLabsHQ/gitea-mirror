@@ -1,6 +1,8 @@
 import type { APIRoute } from 'astro';
 import { httpGet, HttpError } from '@/lib/http-client';
 import { createSecureErrorResponse } from '@/lib/utils';
+import { requireAuthenticatedUserId } from '@/lib/auth-guards';
+import { assertSafeOutboundUrl, OutboundUrlError } from '@/lib/utils/outbound-url';
 import {
   DESTINATION_PROVIDER_LABELS,
   isPushDestinationKind,
@@ -81,13 +83,27 @@ async function testPushTarget(
   }
 }
 
-export const POST: APIRoute = async ({ request }) => {
+export const POST: APIRoute = async ({ request, locals }) => {
+  // The route makes a server side request to a URL from the body, so it is
+  // for signed in users only, like every other API route that reaches out.
+  const authResult = await requireAuthenticatedUserId({ request, locals });
+  if ('response' in authResult) return authResult.response;
+
   try {
     const body = await request.json();
     const { url, token, username } = body;
     const provider = normalizeDestinationProviderKind(body.provider);
 
     if (isPushDestinationKind(provider)) {
+      const pushUrl = normalizeDestinationBaseUrl(url, provider);
+      try {
+        await assertSafeOutboundUrl(pushUrl);
+      } catch (error) {
+        if (error instanceof OutboundUrlError) {
+          return json({ success: false, message: error.message }, 400);
+        }
+        throw error;
+      }
       return testPushTarget(provider, { url, token, username });
     }
 
@@ -96,7 +112,16 @@ export const POST: APIRoute = async ({ request }) => {
     }
 
     // Normalize the URL (remove trailing slash if present)
-    const baseUrl = url.endsWith('/') ? url.slice(0, -1) : url;
+    const baseUrl = String(url).endsWith('/') ? String(url).slice(0, -1) : String(url);
+
+    try {
+      await assertSafeOutboundUrl(baseUrl);
+    } catch (error) {
+      if (error instanceof OutboundUrlError) {
+        return json({ success: false, message: error.message }, 400);
+      }
+      throw error;
+    }
 
     // Test the connection by fetching the authenticated user
     const response = await httpGet(`${baseUrl}/api/v1/user`, {

@@ -3,8 +3,34 @@ import { createSecureErrorResponse } from "@/lib/utils";
 import { requireAuth } from "@/lib/utils/auth-helpers";
 import { db, ssoProviders } from "@/lib/db";
 import { nanoid } from "nanoid";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { normalizeOidcProviderConfig, OidcConfigError, type RawOidcConfig } from "@/lib/sso/oidc-config";
+
+/**
+ * Providers are owned by the user who created them. Every read and write
+ * here is scoped to the caller, and the client secret never leaves the
+ * server: the API reports whether one is stored and the form keeps it by
+ * sending an empty value.
+ */
+export function formatProviderForClient(provider: {
+  oidcConfig: string | null;
+  [key: string]: unknown;
+}) {
+  const oidcConfig = provider.oidcConfig ? JSON.parse(provider.oidcConfig) : undefined;
+  if (oidcConfig && typeof oidcConfig === "object") {
+    const { clientSecret, ...rest } = oidcConfig as { clientSecret?: unknown };
+    return {
+      ...provider,
+      oidcConfig: { ...rest, hasClientSecret: typeof clientSecret === "string" && clientSecret.length > 0 },
+      samlConfig: (provider as any).samlConfig ? JSON.parse((provider as any).samlConfig) : undefined,
+    };
+  }
+  return {
+    ...provider,
+    oidcConfig,
+    samlConfig: (provider as any).samlConfig ? JSON.parse((provider as any).samlConfig) : undefined,
+  };
+}
 
 // GET /api/sso/providers - List all SSO providers
 export async function GET(context: APIContext) {
@@ -12,14 +38,12 @@ export async function GET(context: APIContext) {
     const { user, response } = await requireAuth(context);
     if (response) return response;
 
-    const providers = await db.select().from(ssoProviders);
+    const providers = await db
+      .select()
+      .from(ssoProviders)
+      .where(eq(ssoProviders.userId, user.id));
 
-    // Parse JSON fields before sending
-    const formattedProviders = providers.map(provider => ({
-      ...provider,
-      oidcConfig: provider.oidcConfig ? JSON.parse(provider.oidcConfig) : undefined,
-      samlConfig: (provider as any).samlConfig ? JSON.parse((provider as any).samlConfig) : undefined,
-    }));
+    const formattedProviders = providers.map(formatProviderForClient);
 
     return new Response(JSON.stringify(formattedProviders), {
       status: 200,
@@ -142,12 +166,7 @@ export async function POST(context: APIContext) {
       })
       .returning();
 
-    // Parse JSON fields before sending
-    const formattedProvider = {
-      ...newProvider,
-      oidcConfig: newProvider.oidcConfig ? JSON.parse(newProvider.oidcConfig) : undefined,
-      samlConfig: (newProvider as any).samlConfig ? JSON.parse((newProvider as any).samlConfig) : undefined,
-    };
+    const formattedProvider = formatProviderForClient(newProvider);
 
     return new Response(JSON.stringify(formattedProvider), {
       status: 201,
@@ -193,11 +212,11 @@ export async function PUT(context: APIContext) {
       organizationId,
     } = body;
 
-    // Get existing provider
+    // Get existing provider; another user's provider reads as not found
     const [existingProvider] = await db
       .select()
       .from(ssoProviders)
-      .where(eq(ssoProviders.id, providerId))
+      .where(and(eq(ssoProviders.id, providerId), eq(ssoProviders.userId, user.id)))
       .limit(1);
 
     if (!existingProvider) {
@@ -228,7 +247,9 @@ export async function PUT(context: APIContext) {
 
     const mergedConfig: RawOidcConfig = {
       clientId: clientId ?? existingConfig.clientId,
-      clientSecret: clientSecret ?? existingConfig.clientSecret,
+      // The list endpoint never returns the secret, so the form sends an
+      // empty value to keep the stored one.
+      clientSecret: clientSecret ? clientSecret : existingConfig.clientSecret,
       authorizationEndpoint: authorizationEndpoint ?? existingConfig.authorizationEndpoint,
       tokenEndpoint: tokenEndpoint ?? existingConfig.tokenEndpoint,
       jwksEndpoint: jwksEndpoint ?? existingConfig.jwksEndpoint,
@@ -269,15 +290,10 @@ export async function PUT(context: APIContext) {
         organizationId: organizationId !== undefined ? organizationId : existingProvider.organizationId,
         updatedAt: new Date(),
       })
-      .where(eq(ssoProviders.id, providerId))
+      .where(and(eq(ssoProviders.id, providerId), eq(ssoProviders.userId, user.id)))
       .returning();
 
-    // Parse JSON fields before sending
-    const formattedProvider = {
-      ...updatedProvider,
-      oidcConfig: JSON.parse(updatedProvider.oidcConfig),
-      samlConfig: (updatedProvider as any).samlConfig ? JSON.parse((updatedProvider as any).samlConfig) : undefined,
-    };
+    const formattedProvider = formatProviderForClient(updatedProvider);
 
     return new Response(JSON.stringify(formattedProvider), {
       status: 200,
@@ -309,7 +325,7 @@ export async function DELETE(context: APIContext) {
 
     const deleted = await db
       .delete(ssoProviders)
-      .where(eq(ssoProviders.id, providerId))
+      .where(and(eq(ssoProviders.id, providerId), eq(ssoProviders.userId, user.id)))
       .returning();
 
     if (deleted.length === 0) {

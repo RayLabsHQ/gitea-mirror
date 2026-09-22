@@ -55,7 +55,7 @@ describe("GitHub Test Connection API", () => {
       body: JSON.stringify({})
     });
 
-    const response = await POST({ request } as any);
+    const response = await POST({ request, locals: { user: { id: "user-1" } } } as any);
 
     expect(response.status).toBe(400);
 
@@ -75,7 +75,7 @@ describe("GitHub Test Connection API", () => {
       })
     });
 
-    const response = await POST({ request } as any);
+    const response = await POST({ request, locals: { user: { id: "user-1" } } } as any);
 
     expect(response.status).toBe(200);
 
@@ -101,7 +101,7 @@ describe("GitHub Test Connection API", () => {
       })
     });
 
-    const response = await POST({ request } as any);
+    const response = await POST({ request, locals: { user: { id: "user-1" } } } as any);
 
     expect(response.status).toBe(400);
 
@@ -124,7 +124,7 @@ describe("GitHub Test Connection API", () => {
       })
     });
 
-    const response = await POST({ request } as any);
+    const response = await POST({ request, locals: { user: { id: "user-1" } } } as any);
 
     expect(response.status).toBe(500);
 

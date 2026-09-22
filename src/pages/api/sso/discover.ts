@@ -1,6 +1,7 @@
 import type { APIContext } from "astro";
 import { createSecureErrorResponse } from "@/lib/utils";
 import { requireAuth } from "@/lib/utils/auth-helpers";
+import { safeFetch, OutboundUrlError } from "@/lib/utils/outbound-url";
 
 // POST /api/sso/discover - Discover OIDC configuration from issuer URL
 export async function POST(context: APIContext) {
@@ -45,13 +46,16 @@ export async function POST(context: APIContext) {
       
       let response: Response;
       try {
-        response = await fetch(discoveryUrl, {
+        response = await safeFetch(discoveryUrl, {
           signal: controller.signal,
           headers: {
             'Accept': 'application/json',
           }
         });
       } catch (fetchError) {
+        if (fetchError instanceof OutboundUrlError) {
+          throw fetchError;
+        }
         if (fetchError instanceof Error && fetchError.name === 'AbortError') {
           throw new Error(`Request timeout: The OIDC provider at ${trimmedIssuer} did not respond within 10 seconds`);
         }

@@ -41,25 +41,17 @@ export async function httpRequest<T = any>(
     const responseClone = response.clone();
 
     if (!response.ok) {
-      let errorMessage = `HTTP ${response.status}: ${response.statusText}`;
+      // The message carries the status only. The upstream body is kept on
+      // `HttpError.response` for logs and for callers that inspect it, but
+      // it never goes into the message: messages can reach API clients
+      // through createSecureErrorResponse, and a URL under the user's
+      // control would otherwise turn any error into a readable proxy of
+      // whatever host it pointed at.
+      const errorMessage = `HTTP ${response.status}: ${response.statusText}`;
       let responseText = '';
 
       try {
         responseText = await responseClone.text();
-        if (responseText) {
-          // Try to parse as JSON for better error messages
-          try {
-            const errorData = JSON.parse(responseText);
-            if (errorData.message) {
-              errorMessage = `HTTP ${response.status}: ${errorData.message}`;
-            } else {
-              errorMessage += ` - ${responseText}`;
-            }
-          } catch {
-            // Not JSON, use as-is
-            errorMessage += ` - ${responseText}`;
-          }
-        }
       } catch {
         // Ignore text parsing errors
       }
@@ -104,7 +96,7 @@ export async function httpRequest<T = any>(
         }
 
         throw new HttpError(
-          `Failed to parse JSON response from ${url}: ${jsonError instanceof Error ? jsonError.message : String(jsonError)}. Response: ${responseText.substring(0, 200)}${responseText.length > 200 ? '...' : ''}`,
+          `Failed to parse JSON response from ${url}: ${jsonError instanceof Error ? jsonError.message : String(jsonError)}`,
           response.status,
           response.statusText,
           responseText

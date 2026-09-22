@@ -1,4 +1,5 @@
 import type { NtfyConfig } from "@/types/config";
+import { safeFetch } from "@/lib/utils/outbound-url";
 
 export interface NotificationEvent {
   title: string;
@@ -16,6 +17,6 @@ export async function sendNtfyNotification(config: NtfyConfig, event: Notificati
   if (config.token) {
     headers["Authorization"] = `Bearer ${config.token}`;
   }
-  const resp = await fetch(url, { method: "POST", body: event.message, headers });
-  if (!resp.ok) throw new Error(`Ntfy error: ${resp.status} ${await resp.text()}`);
+  const resp = await safeFetch(url, { method: "POST", body: event.message, headers });
+  if (!resp.ok) throw new Error(`Ntfy error: ${resp.status}`);
 }

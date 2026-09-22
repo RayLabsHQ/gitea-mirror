@@ -347,6 +347,7 @@ Configure authentication methods and SSO.
 | Variable | Description | Default | Options |
 |----------|-------------|---------|---------|
 | `AUTH_DEFAULT_METHOD` | Tab the login page opens on when both email and SSO are available. Any other value falls back to `email`. | `email` | `email`, `sso` |
+| `AUTH_ALLOW_SIGNUP` | Allow email and password sign-up after the first account exists. Off, the sign-up endpoint answers 403 once a user exists; the first account can always be created. | `false` | `true`, `false` |
 
 The login page also remembers the method last used in that browser, which wins
 over this default. Anything unrecognised falls back to `email`.

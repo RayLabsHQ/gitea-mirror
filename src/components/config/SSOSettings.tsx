@@ -454,6 +454,7 @@ export function SSOSettings() {
                       <Input
                         id="clientSecret"
                         type="password"
+                        placeholder={editingProvider ? "Leave blank to keep the current secret" : ""}
                         value={providerForm.clientSecret}
                         onChange={e => setProviderForm(prev => ({ ...prev, clientSecret: e.target.value }))}
                       />
