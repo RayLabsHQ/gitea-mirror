@@ -18,7 +18,7 @@ import {
   SelectValue,
 } from "../ui/select";
 import { Button } from "@/components/ui/button";
-import { Search, RefreshCw, FlipHorizontal, RotateCcw, X, Filter, Ban, Check, LoaderCircle, Trash2 } from "lucide-react";
+import { Search, RefreshCw, FlipHorizontal, RotateCcw, X, Filter, Ban, Check, LoaderCircle, Trash2, Download } from "lucide-react";
 import type { MirrorRepoRequest, MirrorRepoResponse } from "@/types/mirror";
 import {
   Drawer,
@@ -1075,7 +1075,7 @@ export default function Repository() {
       <div className="flex flex-col sm:flex-row items-start sm:items-center gap-2 sm:gap-4 w-full">
         {/* Mobile: Search bar with filter button */}
         <div className="flex items-center gap-2 w-full lg:hidden">
-          <div className="relative flex-grow">
+          <div className="relative flex-grow min-w-0">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <input
               type="text"
@@ -1292,7 +1292,19 @@ export default function Repository() {
           >
             <RefreshCw className="h-4 w-4" />
           </Button>
-          
+
+          <Button
+            asChild
+            variant="outline"
+            size="icon"
+            title="Export repositories as CSV"
+            className="h-10 w-10 shrink-0"
+          >
+            <a href={withBase("/api/repositories/export")} download>
+              <Download className="h-4 w-4" />
+            </a>
+          </Button>
+
           <Button
             variant="default"
             size="icon"
@@ -1346,6 +1358,19 @@ export default function Repository() {
             className="h-10 w-10 shrink-0"
           >
             <RefreshCw className="h-4 w-4" />
+          </Button>
+
+          {/* CSV export of every tracked repository */}
+          <Button
+            asChild
+            variant="outline"
+            title="Export repositories as CSV"
+            className="h-10 shrink-0 whitespace-nowrap"
+          >
+            <a href={withBase("/api/repositories/export")} download>
+              <Download className="h-4 w-4 xl:mr-2" />
+              <span className="hidden xl:inline">Export CSV</span>
+            </a>
           </Button>
 
           {/* Mirror All action */}

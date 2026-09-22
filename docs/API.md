@@ -125,6 +125,24 @@ When several sources are connected, an optional `sourceId` picks which one the o
 
 `PATCH /api/organizations/:id` with `{ "sourceId": "…" }` re-pins an existing organization to another source, and `{ "sourceId": null }` clears the pin so the organization follows every source's repositories of the same name again. A pin whose source was removed falls back the same way.
 
+### Export as CSV
+
+`GET /api/repositories/export` and `GET /api/organizations/export` return everything the account tracks as a CSV file, so the list can be shared with people who do not have a login here (issue #428).
+
+Both answer `text/csv; charset=utf-8` with a download name such as `gitea-mirror-repositories-2026-09-22.csv`, start with a header row, use CRLF line endings and RFC 4180 quoting, and write dates as ISO strings and booleans as `true` or `false`. Repositories are ordered by full name, organizations by name. The export has no filters: it is every row of the account. Internal fields are left out, that is the ids, the metadata sync state and the mirror option overrides.
+
+Repository columns: `name`, `fullName`, `url`, `cloneUrl`, `owner`, `organization`, `sourceProvider`, `sourceUrl`, `destinationProvider`, `destinationUrl`, `destinationOrg`, `mirroredLocation`, `visibility`, `isPrivate`, `isForked`, `forkedFrom`, `isStarred`, `isArchived`, `hasLFS`, `hasSubmodules`, `hasIssues`, `language`, `description`, `defaultBranch`, `size`, `status`, `lastMirrored`, `errorMessage`, `importedAt`, `createdAt`, `updatedAt`.
+
+Organization columns: `name`, `membershipRole`, `isIncluded`, `destinationOrg`, `status`, `repositoryCount`, `publicRepositoryCount`, `privateRepositoryCount`, `forkRepositoryCount`, `lastMirrored`, `errorMessage`, `createdAt`, `updatedAt`.
+
+```bash
+curl -sS "https://mirror.example.com/api/repositories/export" \
+  -H "x-api-key: gm_..." \
+  -o repositories.csv
+```
+
+The **Export CSV** button on the Repositories and Organizations pages downloads the same files.
+
 ### Reconcile the destination
 
 `POST /api/cleanup/reconcile`

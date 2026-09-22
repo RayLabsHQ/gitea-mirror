@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Search, RefreshCw, FlipHorizontal, Filter, LoaderCircle, Trash2 } from "lucide-react";
+import { Search, RefreshCw, FlipHorizontal, Filter, LoaderCircle, Trash2, Download } from "lucide-react";
 import type { MirrorJob, Organization } from "@/lib/db/schema";
 import { OrganizationList } from "./OrganizationsList";
 import AddOrganizationDialog from "./AddOrganizationDialog";
@@ -28,6 +28,7 @@ import { toast } from "sonner";
 import { invalidateConfigCache, useConfigStatus } from "@/hooks/useConfigStatus";
 import { useNavigation } from "@/components/layout/MainLayout";
 import { useLiveRefresh } from "@/hooks/useLiveRefresh";
+import { withBase } from "@/lib/base-path";
 import {
   Drawer,
   DrawerClose,
@@ -511,7 +512,7 @@ export function Organization() {
       <div className="flex flex-col lg:flex-row items-start lg:items-center gap-2 lg:gap-4 w-full">
         {/* Mobile: Search bar with filter button */}
         <div className="flex items-center gap-2 w-full lg:hidden">
-          <div className="relative flex-grow">
+          <div className="relative flex-grow min-w-0">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <input
               type="text"
@@ -729,7 +730,19 @@ export function Organization() {
           >
             <RefreshCw className="h-4 w-4" />
           </Button>
-          
+
+          <Button
+            asChild
+            variant="outline"
+            size="icon"
+            title="Export organizations as CSV"
+            className="h-10 w-10 shrink-0"
+          >
+            <a href={withBase("/api/organizations/export")} download>
+              <Download className="h-4 w-4" />
+            </a>
+          </Button>
+
           <Button
             variant="default"
             size="icon"
@@ -876,6 +889,19 @@ export function Organization() {
               className="h-10 w-10"
             >
               <RefreshCw className="h-4 w-4" />
+            </Button>
+
+            {/* CSV export of every tracked organization */}
+            <Button
+              asChild
+              variant="outline"
+              title="Export organizations as CSV"
+              className="h-10 whitespace-nowrap"
+            >
+              <a href={withBase("/api/organizations/export")} download>
+                <Download className="h-4 w-4 xl:mr-2" />
+                <span className="hidden xl:inline">Export CSV</span>
+              </a>
             </Button>
 
             <Button
