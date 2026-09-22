@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Raised the dependency floors for the advisories published on 2026-09-08: Astro 7.2.8 (remote code execution through AVIF image optimization, and an authorization bypass when stripping the configured base), @xmldom/xmldom 0.8.15 (eight parser and serializer issues), sharp 0.35.4 (libheif), svgo 4.1.0 (removeScripts sanitization) and js-yaml 4.3.2 (merge-key CPU use). Applied to both the application and the documentation site.
 
 ### Added
+- Releases mirror from Gitea and Forgejo sources, Codeberg included (#440)
+  - The release mirror lists releases through the repository's own source instead of always through the GitHub API, and keeps the same release limit, asset limit, per-destination lock, tag check and retention pruning
+  - Release assets are downloaded with the credentials of the host they live on, so a Gitea source uses its own token and a public one needs none
+  - The release switch and its two limits are enabled for Gitea and Forgejo sources; GitLab stays code only
 - Sync an organization that is already mirrored (#429)
   - The organization card menu gains Sync Organization for mirrored and failed organizations; the Mirror button only ever covered the first run
   - `POST /api/job/sync-org` re-discovers the organization's repositories from its source, mirrors the imported ones and syncs the mirrored, synced and failed ones, leaving rows another run owns alone; the organization is claimed before the response so two clicks cannot both start a run

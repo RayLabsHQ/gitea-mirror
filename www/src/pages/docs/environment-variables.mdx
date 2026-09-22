@@ -167,7 +167,7 @@ Only used when `DESTINATION_PROVIDER` is `github` or `gitlab`.
 
 > **Note:** Concurrency above `1` speeds up metadata mirroring but issues and pull requests may be created out of chronological order, since Gitea assigns numbers on creation. Set both to `1` if exact ordering matters more than throughput.
 
-Issues, pull requests, labels, milestones and releases are read from the GitHub API and need a GitHub source. With a GitHub or GitLab destination none of the metadata options apply, and neither do wiki and LFS: push targets receive branches and tags only.
+Issues, pull requests, labels and milestones are read from the GitHub API and need a GitHub source. Releases are read from the source's own API, so they mirror from GitHub and from Gitea/Forgejo sources, but not from GitLab. With a GitHub or GitLab destination none of the metadata options apply, and neither do wiki and LFS: push targets receive branches and tags only.
 
 ## Scheduling
 

@@ -822,6 +822,7 @@ import {
   GITHUB_ONLY_METADATA_KEYS,
   resolveMirrorOptions as resolveOptionsForSource,
 } from "./mirror-overrides";
+import { sourceKindSupportsReleases } from "@/lib/source-providers/kinds";
 
 describe("resolveMirrorOptions for non-GitHub sources", () => {
   const config = {
@@ -869,6 +870,87 @@ describe("resolveMirrorOptions for non-GitHub sources", () => {
     });
     expect(resolved.mirrorIssues).toBe(true);
     expect(resolved.mirrorReleases).toBe(true);
+  });
+
+  // #440: Gitea and Forgejo expose releases through their own API, so the
+  // release switch is no longer part of the GitHub only clamp.
+  test("a Gitea repository keeps releases while the GitHub only metadata is clamped", () => {
+    const resolved = resolveOptionsForSource({
+      config,
+      repository: { isStarred: false, mirrorOverrides: null, sourceProvider: "gitea" } as any,
+    });
+    expect(resolved.mirrorReleases).toBe(true);
+    expect(resolved.releaseLimit).toBe(5);
+    expect(resolved.mirrorIssues).toBe(false);
+    expect(resolved.mirrorPullRequests).toBe(false);
+    expect(resolved.mirrorLabels).toBe(false);
+    expect(resolved.mirrorMilestones).toBe(false);
+    expect(resolved.mirrorMetadata).toBe(false);
+  });
+
+  test("forgejo and codeberg spellings resolve to the Gitea kind and keep releases", () => {
+    for (const sourceProvider of ["forgejo", "codeberg"]) {
+      const resolved = resolveOptionsForSource({
+        config,
+        repository: { isStarred: false, mirrorOverrides: null, sourceProvider } as any,
+      });
+      expect(resolved.mirrorReleases).toBe(true);
+      expect(resolved.mirrorIssues).toBe(false);
+    }
+  });
+
+  test("a GitLab repository still has releases and every other metadata flag clamped", () => {
+    const resolved = resolveOptionsForSource({
+      config,
+      repository: {
+        isStarred: false,
+        mirrorOverrides: { mirrorReleases: true },
+        sourceProvider: "gitlab",
+      } as any,
+    });
+    expect(resolved.mirrorReleases).toBe(false);
+    for (const key of GITHUB_ONLY_METADATA_KEYS) {
+      expect(resolved[key]).toBe(false);
+    }
+  });
+
+  test("releases left the GitHub only set, so the constant no longer lists them", () => {
+    expect(GITHUB_ONLY_METADATA_KEYS as readonly string[]).not.toContain("mirrorReleases");
+  });
+
+  test("a Gitea repository still loses releases on a push destination", () => {
+    const resolved = resolveOptionsForSource({
+      config: {
+        ...config,
+        giteaConfig: { ...config.giteaConfig, provider: "github" },
+      } as any,
+      repository: { isStarred: false, mirrorOverrides: null, sourceProvider: "gitea" } as any,
+    });
+    expect(resolved.mirrorReleases).toBe(false);
+  });
+
+  test("starredCodeOnly still outranks the Gitea release capability", () => {
+    const resolved = resolveOptionsForSource({
+      config: { ...config, githubConfig: { starredCodeOnly: true } } as any,
+      repository: { isStarred: true, mirrorOverrides: null, sourceProvider: "gitea" } as any,
+    });
+    expect(resolved.mirrorReleases).toBe(false);
+  });
+});
+
+describe("sourceKindSupportsReleases", () => {
+  test("GitHub and Gitea can list releases, GitLab cannot", () => {
+    expect(sourceKindSupportsReleases("github")).toBe(true);
+    expect(sourceKindSupportsReleases("gitea")).toBe(true);
+    expect(sourceKindSupportsReleases("forgejo")).toBe(true);
+    expect(sourceKindSupportsReleases("codeberg")).toBe(true);
+    expect(sourceKindSupportsReleases("gitlab")).toBe(false);
+  });
+
+  test("an unknown value is a GitHub row, as everywhere else", () => {
+    expect(sourceKindSupportsReleases(undefined)).toBe(true);
+    expect(sourceKindSupportsReleases(null)).toBe(true);
+    expect(sourceKindSupportsReleases("bitbucket")).toBe(true);
   });
 });
 

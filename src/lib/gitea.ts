@@ -20,6 +20,9 @@ import {
   resolveSourceConnection,
   sourceConnectionFromSource,
 } from "./source-providers";
+import { GiteaSourceProvider } from "./source-providers/gitea-source";
+import { SOURCE_PROVIDER_LABELS } from "./source-providers/kinds";
+import type { SourceConnection, SourceRelease } from "./source-providers/types";
 import {
   decryptSourceToken,
   findSourceForOrganization,
@@ -42,6 +45,82 @@ import { repositoryDestinationColumns } from "./repo-utils";
 import { resolveDestinationIdentity } from "./destination-connection";
 import { withKeyedLock } from "./utils/keyed-mutex";
 import { claimRepositoryForInFlightWork } from "./utils/repo-status-claim";
+
+/**
+ * Run the release mirror for one repository through whichever source it came
+ * from (#440).
+ *
+ * GitHub goes through the Octokit path, Gitea and Forgejo through the source
+ * instance's REST API with that instance's own credentials. Any other source
+ * (GitLab today) has no release listing, so the caller logs and moves on;
+ * `resolveMirrorOptions` already keeps the switch off for it, this is the
+ * belt to that braces.
+ *
+ * Returns true when a release pass actually ran.
+ */
+export async function mirrorRepositoryReleases({
+  config,
+  repository,
+  sourceConnection,
+  sourceToken,
+  octokit,
+  giteaOwner,
+  giteaRepoName,
+  releaseLimit,
+  releaseAssetLimit,
+}: {
+  config: Partial<Config>;
+  repository: Repository;
+  sourceConnection: SourceConnection;
+  /** Decrypted token of the repository's own source row. */
+  sourceToken: string;
+  /** Only used for a GitHub source; null means no client could be built. */
+  octokit: Octokit | null;
+  giteaOwner: string;
+  giteaRepoName: string;
+  releaseLimit?: number;
+  releaseAssetLimit?: number | null;
+}): Promise<boolean> {
+  if (sourceConnection.provider === "github") {
+    if (!octokit) {
+      console.warn(
+        `[Releases] Skipping release mirroring for ${repository.name}: no GitHub client for its source`
+      );
+      return false;
+    }
+    await mirrorGitHubReleasesToGitea({
+      config,
+      octokit,
+      repository,
+      sourceToken,
+      giteaOwner,
+      giteaRepoName,
+      releaseLimit,
+      releaseAssetLimit,
+    });
+    return true;
+  }
+
+  if (sourceConnection.provider === "gitea") {
+    await mirrorGiteaSourceReleasesToGitea({
+      config,
+      repository,
+      connection: { ...sourceConnection, token: sourceToken },
+      giteaOwner,
+      giteaRepoName,
+      releaseLimit,
+      releaseAssetLimit,
+    });
+    return true;
+  }
+
+  console.warn(
+    `[Releases] Skipping release mirroring for ${repository.name}: ${
+      SOURCE_PROVIDER_LABELS[sourceConnection.provider]
+    } sources cannot list releases`
+  );
+  return false;
+}
 
 /**
  * Helper function to get organization configuration including destination override
@@ -1050,7 +1129,8 @@ export const mirrorGithubRepoToGitea = async ({
 
     // Mirror releases if enabled (always allowed to rerun for updates).
     // mirrorOptions already accounts for org/repo overrides and starredCodeOnly.
-    const shouldMirrorReleases = mirrorOptions.mirrorReleases && octokit !== null;
+    // Which source path runs is decided inside mirrorRepositoryReleases (#440).
+    const shouldMirrorReleases = mirrorOptions.mirrorReleases;
 
     console.log(
       `[Metadata] Release mirroring check: mirrorReleases=${mirrorOptions.mirrorReleases}, isStarred=${repository.isStarred}, starredCodeOnly=${config.githubConfig?.starredCodeOnly}, shouldMirrorReleases=${shouldMirrorReleases}`
@@ -1058,20 +1138,24 @@ export const mirrorGithubRepoToGitea = async ({
 
     if (shouldMirrorReleases) {
       try {
-        await mirrorGitHubReleasesToGitea({
+        const mirrored = await mirrorRepositoryReleases({
           config,
-          octokit,
           repository,
+          sourceConnection,
+          sourceToken: repoSourceToken,
+          octokit,
           giteaOwner: repoOwner,
           giteaRepoName: targetRepoName,
           releaseLimit: mirrorOptions.releaseLimit,
           releaseAssetLimit: mirrorOptions.releaseAssetLimit,
         });
-        metadataState.components.releases = true;
-        metadataUpdated = true;
-        console.log(
-          `[Metadata] Successfully mirrored releases for ${repository.name}`
-        );
+        if (mirrored) {
+          metadataState.components.releases = true;
+          metadataUpdated = true;
+          console.log(
+            `[Metadata] Successfully mirrored releases for ${repository.name}`
+          );
+        }
       } catch (error) {
         console.error(
           `[Metadata] Failed to mirror releases for ${repository.name}: ${
@@ -1819,7 +1903,8 @@ export async function mirrorGitHubRepoToGiteaOrg({
     let metadataUpdated = false;
 
     // mirrorOptions already accounts for org/repo overrides and starredCodeOnly.
-    const shouldMirrorReleases = mirrorOptions.mirrorReleases && octokit !== null;
+    // Which source path runs is decided inside mirrorRepositoryReleases (#440).
+    const shouldMirrorReleases = mirrorOptions.mirrorReleases;
 
     console.log(
       `[Metadata] Release mirroring check: mirrorReleases=${mirrorOptions.mirrorReleases}, isStarred=${repository.isStarred}, starredCodeOnly=${config.githubConfig?.starredCodeOnly}, shouldMirrorReleases=${shouldMirrorReleases}`
@@ -1827,20 +1912,24 @@ export async function mirrorGitHubRepoToGiteaOrg({
 
     if (shouldMirrorReleases) {
       try {
-        await mirrorGitHubReleasesToGitea({
+        const mirrored = await mirrorRepositoryReleases({
           config,
-          octokit,
           repository,
+          sourceConnection,
+          sourceToken: repoSourceToken,
+          octokit,
           giteaOwner: orgName,
           giteaRepoName: targetRepoName,
           releaseLimit: mirrorOptions.releaseLimit,
           releaseAssetLimit: mirrorOptions.releaseAssetLimit,
         });
-        metadataState.components.releases = true;
-        metadataUpdated = true;
-        console.log(
-          `[Metadata] Successfully mirrored releases for ${repository.name}`
-        );
+        if (mirrored) {
+          metadataState.components.releases = true;
+          metadataUpdated = true;
+          console.log(
+            `[Metadata] Successfully mirrored releases for ${repository.name}`
+          );
+        }
       } catch (error) {
         console.error(
           `[Metadata] Failed to mirror releases for ${repository.name}: ${
@@ -3053,7 +3142,7 @@ export function classifyReleasesForReconciliation(
  * hitting the network (regression guard for #331 and #417).
  */
 export function classifyAssetsForReconciliation(
-  githubAssets: Array<{ name: string; size: number }>,
+  sourceAssets: Array<{ name: string; size: number }>,
   giteaAssets: Array<{ id: number; name: string; size: number }>
 ): {
   toUpload: string[];
@@ -3080,7 +3169,7 @@ export function classifyAssetsForReconciliation(
   const toDelete: number[] = [];
   const seen = new Set<string>();
 
-  for (const asset of githubAssets) {
+  for (const asset of sourceAssets) {
     if (seen.has(asset.name)) {
       continue;
     }
@@ -3144,7 +3233,8 @@ export async function reconcileReleaseAssets({
   repoOwner,
   repoName,
   giteaReleaseId,
-  githubAssets,
+  sourceAssets,
+  downloadAuthorization,
   tagName,
   fetchImpl,
 }: {
@@ -3153,7 +3243,16 @@ export async function reconcileReleaseAssets({
   repoOwner: string;
   repoName: string;
   giteaReleaseId: number;
-  githubAssets: Array<{ name: string; size: number; browser_download_url: string }>;
+  sourceAssets: Array<{ name: string; size: number; browser_download_url: string }>;
+  /**
+   * Authorization header value for the download requests, or null for none.
+   * The caller supplies it because the assets live on the repository's own
+   * source: a GitHub token for a GitHub release, that instance's token for a
+   * Gitea or Forgejo release, and nothing for a tokenless public source. This
+   * function must never pick a credential itself, or one host's token would
+   * end up on another host (#440).
+   */
+  downloadAuthorization: string | null;
   tagName: string;
   /** Injected in tests; production uses the global fetch. */
   fetchImpl?: typeof fetch;
@@ -3162,7 +3261,7 @@ export async function reconcileReleaseAssets({
   let failed = 0;
   let skipped = 0;
 
-  if (!githubAssets || githubAssets.length === 0) {
+  if (!sourceAssets || sourceAssets.length === 0) {
     return { uploaded, failed, skipped };
   }
 
@@ -3190,13 +3289,13 @@ export async function reconcileReleaseAssets({
     console.error(
       `[Releases] Could not list the existing assets of ${tagName}: ${
         listError instanceof Error ? listError.message : String(listError)
-      }. Skipping all ${githubAssets.length} asset(s) for this release so no duplicate is created; the next sync retries.`
+      }. Skipping all ${sourceAssets.length} asset(s) for this release so no duplicate is created; the next sync retries.`
     );
-    return { uploaded, failed: githubAssets.length, skipped };
+    return { uploaded, failed: sourceAssets.length, skipped };
   }
 
   const { toUpload, toSkip, toDelete } = classifyAssetsForReconciliation(
-    githubAssets,
+    sourceAssets,
     existingAssets
   );
   skipped = toSkip.length;
@@ -3234,10 +3333,10 @@ export async function reconcileReleaseAssets({
     }
   }
 
-  const githubByName = new Map(githubAssets.map((a) => [a.name, a]));
+  const sourceByName = new Map(sourceAssets.map((a) => [a.name, a]));
 
   for (const name of toUpload) {
-    const asset = githubByName.get(name)!;
+    const asset = sourceByName.get(name)!;
 
     if (undeletedNames.has(name)) {
       console.warn(
@@ -3248,16 +3347,16 @@ export async function reconcileReleaseAssets({
     }
 
     try {
-      // Download from GitHub. fetch strips the Authorization header on the
-      // cross-host redirect to GitHub's object storage, so this works for both
-      // public and private release assets.
+      // Download from the source host. fetch strips the Authorization header
+      // on a cross-host redirect (GitHub redirects to its object storage), so
+      // this works for both public and private release assets.
       console.log(
         `[Releases] Downloading asset: ${asset.name} (${asset.size} bytes) for ${tagName}`
       );
       const assetResponse = await doFetch(asset.browser_download_url, {
         headers: {
           Accept: "application/octet-stream",
-          Authorization: `token ${decryptedConfig.githubConfig!.token}`,
+          ...(downloadAuthorization ? { Authorization: downloadAuthorization } : {}),
         },
       });
 
@@ -3306,6 +3405,26 @@ export async function reconcileReleaseAssets({
   return { uploaded, failed, skipped };
 }
 
+/**
+ * Where one release mirror pass gets its releases and its download credentials.
+ *
+ * The list-and-reconcile logic below is identical for every source; only the
+ * listing call, the header label and the Authorization header used to download
+ * assets differ (#440). Keeping those three in one object is what stops a
+ * GitHub token from ever being sent to a Gitea host, or the other way round.
+ */
+type ReleaseSourceAdapter = {
+  /** Host label for the release body header, e.g. "GitHub". */
+  label: string;
+  /**
+   * Authorization header value for asset downloads, or null for no header.
+   * Always a credential for the host the assets live on, never for another.
+   */
+  downloadAuthorization: string | null;
+  /** The newest `limit` releases of the source repository, newest first. */
+  listReleases: (owner: string, repo: string, limit: number) => Promise<SourceRelease[]>;
+};
+
 type MirrorReleasesParams = {
   octokit: Octokit;
   repository: Repository;
@@ -3319,11 +3438,22 @@ type MirrorReleasesParams = {
    */
   releaseLimit?: number;
   /**
+   * Decrypted token of the repository's own GitHub source, used to download
+   * assets. Absent or empty, the primary config's GitHub token is used, which
+   * is the historical behaviour for single-source setups.
+   */
+  sourceToken?: string;
+  /**
    * Already-resolved asset limit (#311): assets are uploaded only for the
    * newest N of the mirrored releases. `null` means every release, 0 means
    * none, `undefined` means resolve it here like the release limit.
    */
   releaseAssetLimit?: number | null;
+};
+
+/** The same parameters with the source adapter in place of the GitHub client. */
+type MirrorSourceReleasesParams = Omit<MirrorReleasesParams, "octokit"> & {
+  source: ReleaseSourceAdapter;
 };
 
 /**
@@ -3355,7 +3485,7 @@ export function buildReleaseTargetLockKey(
  * both upload, leaving duplicates. The lock makes the read and the write one
  * unit per destination repository.
  */
-export async function mirrorGitHubReleasesToGitea(params: MirrorReleasesParams) {
+async function mirrorSourceReleasesToGitea(params: MirrorSourceReleasesParams) {
   const { config, repository, giteaOwner, giteaRepoName } = params;
 
   if (
@@ -3374,7 +3504,7 @@ export async function mirrorGitHubReleasesToGitea(params: MirrorReleasesParams) 
   return withKeyedLock(
     buildReleaseTargetLockKey(config.giteaConfig.url, repoOwner, repoName),
     () =>
-      mirrorGitHubReleasesToGiteaLocked({
+      mirrorSourceReleasesToGiteaLocked({
         ...params,
         giteaOwner: repoOwner,
         giteaRepoName: repoName,
@@ -3382,15 +3512,110 @@ export async function mirrorGitHubReleasesToGitea(params: MirrorReleasesParams) 
   );
 }
 
-async function mirrorGitHubReleasesToGiteaLocked({
-  octokit,
+/**
+ * Mirror releases from a GitHub source.
+ *
+ * The historical entry point: same signature and same behaviour as before the
+ * mirror was made source agnostic, including the "Originally published on
+ * GitHub:" header line, which must stay byte for byte or every already
+ * mirrored release body would differ and be PATCHed on the next sync.
+ */
+export async function mirrorGitHubReleasesToGitea(params: MirrorReleasesParams) {
+  const { octokit, ...rest } = params;
+
+  // The source token downloads the assets; the destination token is read
+  // inside the locked body. An empty token means an anonymous public client,
+  // and an empty `token ` header is worse than sending none at all.
+  const decryptedConfig = decryptConfigTokens(params.config as Config);
+  const githubToken =
+    params.sourceToken?.trim() || decryptedConfig.githubConfig?.token?.trim() || "";
+
+  return mirrorSourceReleasesToGitea({
+    ...rest,
+    source: {
+      label: SOURCE_PROVIDER_LABELS.github,
+      downloadAuthorization: githubToken ? `token ${githubToken}` : null,
+      listReleases: async (owner, repo, limit) => {
+        // GitHub API max per page is 100; paginate until we reach the limit.
+        const releases: Awaited<
+          ReturnType<typeof octokit.rest.repos.listReleases>
+        >["data"] = [];
+        let page = 1;
+        const perPage = Math.min(100, limit);
+
+        while (releases.length < limit) {
+          const response = await octokit.rest.repos.listReleases({
+            owner,
+            repo,
+            per_page: perPage,
+            page,
+          });
+
+          if (response.data.length === 0) {
+            break;
+          }
+
+          releases.push(...response.data);
+
+          if (response.data.length < perPage) {
+            break;
+          }
+
+          page++;
+        }
+
+        return releases.slice(0, limit).map((release) => ({
+          tag_name: release.tag_name,
+          name: release.name,
+          body: release.body,
+          draft: release.draft,
+          prerelease: release.prerelease,
+          created_at: release.created_at,
+          published_at: release.published_at,
+          assets: (release.assets ?? []).map((asset) => ({
+            name: asset.name,
+            size: asset.size,
+            browser_download_url: asset.browser_download_url,
+          })),
+        }));
+      },
+    },
+  });
+}
+
+/**
+ * Mirror releases from a Gitea or Forgejo source, Codeberg included (#440).
+ *
+ * The connection is the repository's own source row, so assets are downloaded
+ * with that instance's token when it has one and anonymously when it does not.
+ * Public repositories need no token at all.
+ */
+export async function mirrorGiteaSourceReleasesToGitea(
+  params: Omit<MirrorReleasesParams, "octokit"> & { connection: SourceConnection }
+) {
+  const { connection, ...rest } = params;
+  const provider = new GiteaSourceProvider(connection);
+  const token = connection.token.trim();
+
+  return mirrorSourceReleasesToGitea({
+    ...rest,
+    source: {
+      label: SOURCE_PROVIDER_LABELS.gitea,
+      downloadAuthorization: token ? `token ${token}` : null,
+      listReleases: (owner, repo, limit) => provider.listReleases(owner, repo, limit),
+    },
+  });
+}
+
+async function mirrorSourceReleasesToGiteaLocked({
+  source,
   repository,
   config,
   giteaOwner,
   giteaRepoName,
   releaseLimit: releaseLimitOverride,
   releaseAssetLimit: releaseAssetLimitOverride,
-}: MirrorReleasesParams) {
+}: MirrorSourceReleasesParams) {
   if (
     !config.giteaConfig?.defaultOwner ||
     !config.giteaConfig?.token ||
@@ -3406,13 +3631,13 @@ async function mirrorGitHubReleasesToGiteaLocked({
   const repoOwner = giteaOwner || (await getGiteaRepoOwnerAsync({ config, repository }));
   const repoName = giteaRepoName || repository.name;
 
-  // Derive GITHUB coordinates from fullName, matching the issues/PRs/labels/
+  // Derive the SOURCE coordinates from fullName, matching the issues/PRs/labels/
   // milestones mirror functions (`const [owner, repo] = repository.fullName.split("/")`).
-  // repository.name/owner can drift from the GitHub source (e.g. Gitea-side
-  // renames), so fullName is authoritative; fall back only if it's malformed.
+  // repository.name/owner can drift from the source (e.g. Gitea-side renames),
+  // so fullName is authoritative; fall back only if it's malformed.
   const [fullNameOwner, fullNameRepo] = (repository.fullName || "").split("/");
-  const githubOwner = fullNameOwner && fullNameRepo ? fullNameOwner : repository.owner;
-  const githubRepo = fullNameOwner && fullNameRepo ? fullNameRepo : repository.name;
+  const sourceOwner = fullNameOwner && fullNameRepo ? fullNameOwner : repository.owner;
+  const sourceRepo = fullNameOwner && fullNameRepo ? fullNameRepo : repository.name;
 
   // Verify the repository exists in Gitea before attempting to mirror releases
   console.log(`[Releases] Verifying repository ${repoName} exists at ${repoOwner}`);
@@ -3421,7 +3646,7 @@ async function mirrorGitHubReleasesToGiteaLocked({
     owner: repoOwner,
     repoName: repoName,
   });
-  
+
   if (!repoExists) {
     console.error(`[Releases] Repository ${repository.name} not found at ${repoOwner}. Cannot mirror releases.`);
     throw new Error(`Repository ${repository.name} does not exist in Gitea at ${repoOwner}. Please ensure the repository is mirrored first.`);
@@ -3448,35 +3673,11 @@ async function mirrorGitHubReleasesToGiteaLocked({
       ? (normalizeReleaseAssetLimit(releaseAssetLimitOverride) ?? null)
       : (await resolveOptions()).releaseAssetLimit;
 
-  // GitHub API max per page is 100; paginate until we reach the configured limit.
-  const releases: Awaited<
-    ReturnType<typeof octokit.rest.repos.listReleases>
-  >["data"] = [];
-  let page = 1;
-  const perPage = Math.min(100, releaseLimit);
-
-  while (releases.length < releaseLimit) {
-    const response = await octokit.rest.repos.listReleases({
-      owner: githubOwner,
-      repo: githubRepo,
-      per_page: perPage,
-      page,
-    });
-
-    if (response.data.length === 0) {
-      break;
-    }
-
-    releases.push(...response.data);
-
-    if (response.data.length < perPage) {
-      break;
-    }
-
-    page++;
-  }
-
-  const limitedReleases = releases.slice(0, releaseLimit);
+  // The source lists its own newest releases; everything below this point is
+  // the same reconciliation whichever host they came from.
+  const limitedReleases = (
+    await source.listReleases(sourceOwner, sourceRepo, releaseLimit)
+  ).slice(0, releaseLimit);
 
   console.log(
     `[Releases] Found ${limitedReleases.length} releases (limited to latest ${releaseLimit}; ${
@@ -3498,7 +3699,7 @@ async function mirrorGitHubReleasesToGiteaLocked({
   let totalAssetsFailed = 0;
   let releasesPastAssetLimit = 0;
 
-  // Process releases in their GitHub API order (newest first by default)
+  // Process releases in the source API's order (newest first by default)
   const releasesToProcess = limitedReleases.slice();
 
   console.log(`[Releases] Processing ${releasesToProcess.length} releases for ${repository.fullName}`);
@@ -3523,34 +3724,34 @@ async function mirrorGitHubReleasesToGiteaLocked({
         }
       ).catch(() => null);
 
-      // Prepare release body with GitHub original date header
-      const githubPublishedDate = release.published_at || release.created_at;
-      const githubTagCreatedDate = release.created_at;
+      // Prepare release body with the source's original date header
+      const sourcePublishedDate = release.published_at || release.created_at;
+      const sourceTagCreatedDate = release.created_at;
 
-      let githubDateHeader = '';
-      if (githubPublishedDate) {
-        githubDateHeader = `> 📅 **Originally published on GitHub:** ${new Date(githubPublishedDate).toUTCString()}`;
+      let sourceDateHeader = '';
+      if (sourcePublishedDate) {
+        sourceDateHeader = `> 📅 **Originally published on ${source.label}:** ${new Date(sourcePublishedDate).toUTCString()}`;
 
         // If the tag was created on a different date than the release was published,
         // show both dates (helps with repos that create multiple tags from the same commit)
         if (release.published_at && release.created_at && release.published_at !== release.created_at) {
-          githubDateHeader += `\n> 🏷️  **Git tag created:** ${new Date(githubTagCreatedDate).toUTCString()}`;
+          sourceDateHeader += `\n> 🏷️  **Git tag created:** ${new Date(sourceTagCreatedDate).toUTCString()}`;
         }
 
-        githubDateHeader += '\n\n';
+        sourceDateHeader += '\n\n';
       }
 
       const originalReleaseNote = release.body || "";
-      const releaseNote = githubDateHeader + originalReleaseNote;
+      const releaseNote = sourceDateHeader + originalReleaseNote;
 
       if (existingReleasesResponse) {
         // Update existing release if the changelog/body differs
         const existingRelease = existingReleasesResponse.data;
         const existingNote = existingRelease.body || "";
-        
+
         if (existingNote !== releaseNote || existingRelease.name !== (release.name || release.tag_name)) {
           console.log(`[Releases] Updating existing release ${release.tag_name} with new changelog/title`);
-          
+
           await httpPatch(
             `${config.giteaConfig.url}/api/v1/repos/${repoOwner}/${repoName}/releases/${existingRelease.id}`,
             buildGiteaReleasePayload(release, releaseNote),
@@ -3560,9 +3761,9 @@ async function mirrorGitHubReleasesToGiteaLocked({
           );
 
           if (originalReleaseNote) {
-            console.log(`[Releases] Updated changelog for ${release.tag_name} (${originalReleaseNote.length} characters + GitHub date header)`);
+            console.log(`[Releases] Updated changelog for ${release.tag_name} (${originalReleaseNote.length} characters + ${source.label} date header)`);
           } else {
-            console.log(`[Releases] Updated release ${release.tag_name} with GitHub date header`);
+            console.log(`[Releases] Updated release ${release.tag_name} with ${source.label} date header`);
           }
           mirroredCount++;
         } else {
@@ -3584,7 +3785,8 @@ async function mirrorGitHubReleasesToGiteaLocked({
             repoOwner,
             repoName,
             giteaReleaseId: existingRelease.id,
-            githubAssets: release.assets || [],
+            sourceAssets: release.assets || [],
+            downloadAuthorization: source.downloadAuthorization,
             tagName: release.tag_name,
           });
           if (assetResult.uploaded > 0) {
@@ -3626,11 +3828,11 @@ async function mirrorGitHubReleasesToGiteaLocked({
         continue;
       }
 
-      // Create new release with changelog/body content (includes GitHub date header)
+      // Create new release with changelog/body content (includes the date header)
       if (originalReleaseNote) {
-        console.log(`[Releases] Including changelog for ${release.tag_name} (${originalReleaseNote.length} characters + GitHub date header)`);
+        console.log(`[Releases] Including changelog for ${release.tag_name} (${originalReleaseNote.length} characters + ${source.label} date header)`);
       } else {
-        console.log(`[Releases] Creating release ${release.tag_name} with GitHub date header (no changelog)`);
+        console.log(`[Releases] Creating release ${release.tag_name} with ${source.label} date header (no changelog)`);
       }
 
       const createReleaseResponse = await httpPost(
@@ -3640,7 +3842,7 @@ async function mirrorGitHubReleasesToGiteaLocked({
           Authorization: `token ${decryptedConfig.giteaConfig.token}`,
         }
       );
-      
+
       // Mirror release assets if they exist (idempotent — see reconcileReleaseAssets)
       // and the release sits inside the asset limit (#311).
       if (release.assets && release.assets.length > 0) {
@@ -3652,7 +3854,8 @@ async function mirrorGitHubReleasesToGiteaLocked({
             repoOwner,
             repoName,
             giteaReleaseId: createReleaseResponse.data.id,
-            githubAssets: release.assets,
+            sourceAssets: release.assets,
+            downloadAuthorization: source.downloadAuthorization,
             tagName: release.tag_name,
           });
           totalAssetsUploaded += assetResult.uploaded;

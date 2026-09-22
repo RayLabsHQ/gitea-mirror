@@ -16,6 +16,26 @@ export function isBetaSourceProvider(kind: SourceProviderKind): boolean {
   return kind !== DEFAULT_SOURCE_PROVIDER;
 }
 
+/**
+ * Sources whose API can list releases with their assets.
+ *
+ * GitHub has always been able to. Gitea and Forgejo expose the same shape at
+ * `GET /repos/{owner}/{repo}/releases`, so Codeberg and self hosted instances
+ * can mirror releases too (#440). GitLab is code only: its release API is not
+ * wired up, so the resolver still forces releases off for it.
+ */
+export const RELEASE_CAPABLE_SOURCE_KINDS = [
+  "github",
+  "gitea",
+] as const satisfies readonly SourceProviderKind[];
+
+/** True when a source kind's API can list releases. Unknown values are GitHub rows. */
+export function sourceKindSupportsReleases(kind: unknown): boolean {
+  return (RELEASE_CAPABLE_SOURCE_KINDS as readonly string[]).includes(
+    normalizeSourceProviderKind(kind)
+  );
+}
+
 /** Base URL used when the config has no instance URL for the provider. */
 export const SOURCE_PROVIDER_DEFAULT_URLS: Record<SourceProviderKind, string> = {
   github: "https://github.com",

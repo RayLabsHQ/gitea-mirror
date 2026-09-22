@@ -58,11 +58,11 @@ The code itself is copied by the destination: Gitea and Forgejo pull from the so
 | Private repositories | yes | yes | yes |
 | Add a single repository by URL | yes | yes | yes |
 | Issues, pull requests, labels, milestones | yes | no | no |
-| Releases with assets | yes | no | no |
+| Releases with assets | yes | no | yes |
 | Star lists | yes | no | no |
 | Force push detection | yes | no | no |
 
-The GitHub only rows read the GitHub API. With another source the corresponding switches in the mirror settings are disabled and say why. Wiki and LFS also depend on the destination: they travel to Gitea and Forgejo, not to GitHub or GitLab. See [Destinations](./destinations.md).
+The GitHub only rows read the GitHub API. With another source the corresponding switches in the mirror settings are disabled and say why. Releases are the exception: Gitea and Forgejo expose them through their own API, so a Gitea, Forgejo or Codeberg source mirrors releases and their assets with that instance's token, or anonymously for a public repository. Wiki and LFS also depend on the destination: they travel to Gitea and Forgejo, not to GitHub or GitLab. See [Destinations](./destinations.md).
 
 ## Adding repositories
 

@@ -97,7 +97,7 @@ GITHUB_USERNAME=my-codeberg-user
 GITHUB_TOKEN=...
 ```
 
-Code, tags, wiki and LFS are mirrored from every source. Issues, pull requests, releases, labels, milestones and star lists need a GitHub source and are skipped for the others.
+Code, tags, wiki and LFS are mirrored from every source, and releases with their assets from GitHub and Gitea/Forgejo sources. Issues, pull requests, labels, milestones and star lists need a GitHub source and are skipped for the others.
 
 Once repositories have been imported the source is locked, and once anything has been mirrored the Gitea server URL is locked. A `SOURCE_PROVIDER`, `SOURCE_URL` or `GITEA_URL` value that disagrees with a locked host is ignored on boot with a warning; change the host on the Configuration page, where the change asks for confirmation.
 

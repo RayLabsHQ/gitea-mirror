@@ -7,7 +7,11 @@
  */
 
 import type { Config } from "@/types/config";
-import { getRepositorySource } from "@/lib/source-providers/kinds";
+import {
+  getRepositorySource,
+  SOURCE_PROVIDER_LABELS,
+} from "@/lib/source-providers/kinds";
+import { sourceConnectionFromSource } from "@/lib/source-providers";
 import {
   decryptSourceToken,
   findSourceForRepository,
@@ -46,6 +50,12 @@ type SyncDependencies = {
   getGiteaRepoOwnerAsync: typeof import("./gitea")["getGiteaRepoOwnerAsync"];
   syncRepositoryMetadataToGitea: typeof import("./gitea")["syncRepositoryMetadataToGitea"];
   mirrorGitHubReleasesToGitea: typeof import("./gitea")["mirrorGitHubReleasesToGitea"];
+  /**
+   * Optional so the many existing test doubles of this dependency bag keep
+   * type checking; the real module always carries it and the sync path falls
+   * back to importing it when a double leaves it out.
+   */
+  mirrorGiteaSourceReleasesToGitea?: typeof import("./gitea")["mirrorGiteaSourceReleasesToGitea"];
   mirrorGitRepoIssuesToGitea: typeof import("./gitea")["mirrorGitRepoIssuesToGitea"];
   mirrorGitRepoPullRequestsToGitea: typeof import("./gitea")["mirrorGitRepoPullRequestsToGitea"];
   mirrorGitRepoLabelsToGitea: typeof import("./gitea")["mirrorGitRepoLabelsToGitea"];
@@ -472,7 +482,8 @@ export async function syncGiteaRepoEnhanced({
     const sources = config.userId ? await listSources(config.userId) : [];
     const repoSource = findSourceForRepository(repository, sources);
     const repoSourceToken = repoSource ? decryptSourceToken(repoSource.token) : "";
-    const repoIsGitHub = getRepositorySource(repository).provider === "github";
+    const repoSourceKind = getRepositorySource(repository).provider;
+    const repoIsGitHub = repoSourceKind === "github";
 
     if (usesPushEngine(config)) {
       throw new Error("The configured destination is a push target; syncing goes through the push engine.");
@@ -1002,36 +1013,72 @@ export async function syncGiteaRepoEnhanced({
       const shouldMirrorMilestones = mirrorOptions.mirrorMilestones;
 
       if (shouldMirrorReleases) {
-        const octokit = ensureOctokit();
-        if (!octokit) {
-          console.warn(
-            `[Sync] Skipping release mirroring for ${repository.name}: Missing GitHub token`
-          );
-        } else {
-          try {
-            await dependencies.mirrorGitHubReleasesToGitea({
+        // GitHub reads releases through Octokit; Gitea and Forgejo sources
+        // read them from their own instance with their own token (#440).
+        // Any other source has no release listing and is skipped.
+        try {
+          let mirrored = false;
+
+          if (repoIsGitHub) {
+            const octokit = ensureOctokit();
+            if (!octokit) {
+              console.warn(
+                `[Sync] Skipping release mirroring for ${repository.name}: Missing GitHub token`
+              );
+            } else {
+              await dependencies.mirrorGitHubReleasesToGitea({
+                config,
+                octokit,
+                repository,
+                sourceToken: repoSourceToken,
+                giteaOwner: repoOwner,
+                giteaRepoName: repoName,
+                releaseLimit: mirrorOptions.releaseLimit,
+                releaseAssetLimit: mirrorOptions.releaseAssetLimit,
+              });
+              mirrored = true;
+            }
+          } else if (repoSourceKind === "gitea" && repoSource) {
+            const mirrorGiteaSourceReleases =
+              dependencies.mirrorGiteaSourceReleasesToGitea ??
+              (await import("./gitea")).mirrorGiteaSourceReleasesToGitea;
+            await mirrorGiteaSourceReleases({
               config,
-              octokit,
               repository,
+              // Carries that instance's own decrypted token, so the release
+              // listing and the asset downloads authenticate against it.
+              connection: sourceConnectionFromSource(repoSource, {
+                userId: config.userId,
+              }),
               giteaOwner: repoOwner,
               giteaRepoName: repoName,
               releaseLimit: mirrorOptions.releaseLimit,
               releaseAssetLimit: mirrorOptions.releaseAssetLimit,
             });
+            mirrored = true;
+          } else {
+            console.warn(
+              `[Sync] Skipping release mirroring for ${repository.name}: ${
+                SOURCE_PROVIDER_LABELS[repoSourceKind]
+              } sources cannot list releases`
+            );
+          }
+
+          if (mirrored) {
             metadataState.components.releases = true;
             metadataUpdated = true;
             console.log(
               `[Sync] Mirrored releases for ${repository.name} after sync`
             );
-          } catch (releaseError) {
-            console.error(
-              `[Sync] Failed to mirror releases for ${repository.name}: ${
-                releaseError instanceof Error
-                  ? releaseError.message
-                  : String(releaseError)
-              }`
-            );
           }
+        } catch (releaseError) {
+          console.error(
+            `[Sync] Failed to mirror releases for ${repository.name}: ${
+              releaseError instanceof Error
+                ? releaseError.message
+                : String(releaseError)
+            }`
+          );
         }
       }
 

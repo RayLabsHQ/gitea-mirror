@@ -24,6 +24,7 @@ import type {
   SourceFailedOrganization,
   SourceOrganizationResult,
   SourceProvider,
+  SourceRelease,
   SourceRepositoryPath,
 } from "./types";
 
@@ -58,6 +59,50 @@ export interface GiteaRepository {
   default_branch?: string;
   created_at?: string;
   updated_at?: string;
+}
+
+export interface GiteaReleaseAsset {
+  id?: number;
+  name?: string;
+  size?: number;
+  browser_download_url?: string;
+}
+
+export interface GiteaRelease {
+  id?: number;
+  tag_name?: string;
+  name?: string | null;
+  body?: string | null;
+  draft?: boolean;
+  prerelease?: boolean;
+  created_at?: string;
+  published_at?: string | null;
+  assets?: GiteaReleaseAsset[] | null;
+}
+
+/**
+ * Normalize one Gitea/Forgejo release into the shape the release mirror works
+ * on. Assets without a name or a download URL are dropped: there is nothing to
+ * fetch or to name the attachment after.
+ */
+export function mapGiteaRelease(release: GiteaRelease): SourceRelease {
+  const createdAt = release.created_at || release.published_at || "";
+  return {
+    tag_name: release.tag_name || "",
+    name: release.name ?? null,
+    body: release.body ?? "",
+    draft: Boolean(release.draft),
+    prerelease: Boolean(release.prerelease),
+    created_at: createdAt,
+    published_at: release.published_at ?? null,
+    assets: (release.assets ?? [])
+      .filter((asset) => !!asset?.name && !!asset?.browser_download_url)
+      .map((asset) => ({
+        name: asset.name!,
+        size: Number(asset.size) || 0,
+        browser_download_url: asset.browser_download_url!,
+      })),
+  };
 }
 
 export interface GiteaOrganization {
@@ -167,24 +212,31 @@ export class GiteaSourceProvider implements SourceProvider {
 
   private async paginate<T>(
     path: string,
-    params: Record<string, string | number | boolean | undefined> = {}
+    params: Record<string, string | number | boolean | undefined> = {},
+    /** Stop once this many items are collected. Absent means every page. */
+    maxItems?: number
   ): Promise<T[]> {
     const items: T[] = [];
     for (let page = 1; page <= MAX_PAGES; page += 1) {
+      const pageSize =
+        maxItems === undefined ? PAGE_SIZE : Math.min(PAGE_SIZE, maxItems - items.length);
+      if (pageSize <= 0) break;
+
       const url = withQuery(`${this.apiRoot}${path}`, {
         ...params,
-        limit: PAGE_SIZE,
+        limit: pageSize,
         page,
       });
       const { data, response } = await sourceFetch<T[]>(url, { headers: this.headers() });
       if (!Array.isArray(data) || data.length === 0) break;
       items.push(...data);
+      if (maxItems !== undefined && items.length >= maxItems) break;
 
       const header = response.headers.get("x-total-count");
       const total = header === null ? Number.NaN : Number(header);
       if (Number.isFinite(total)) {
         if (items.length >= total) break;
-      } else if (data.length < PAGE_SIZE) {
+      } else if (data.length < pageSize) {
         break;
       }
     }
@@ -362,6 +414,26 @@ export class GiteaSourceProvider implements SourceProvider {
       if (isSourceNotFound(error)) return false;
       throw error;
     }
+  }
+
+  /**
+   * The newest `limit` releases of a repository (#440).
+   *
+   * Gitea and Forgejo return releases newest first and accept the same
+   * limit/page pagination as every other list endpoint. Public repositories
+   * answer without a token, so a tokenless source can mirror releases too.
+   */
+  async listReleases(owner: string, repo: string, limit: number): Promise<SourceRelease[]> {
+    const max = Math.max(1, Math.floor(limit) || 1);
+    const releases = await this.paginate<GiteaRelease>(
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/releases`,
+      {},
+      max
+    );
+    return releases
+      .slice(0, max)
+      .map(mapGiteaRelease)
+      .filter((release) => release.tag_name.length > 0);
   }
 
   async testConnection(): Promise<SourceAccount> {

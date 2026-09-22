@@ -1,7 +1,10 @@
 import type { Config } from "@/types/config";
 import type { MirrorOverrides, Repository } from "@/lib/db/schema";
 import { mirrorOverridesSchema } from "@/lib/db/schema";
-import { normalizeSourceProviderKind } from "@/lib/source-providers/kinds";
+import {
+  normalizeSourceProviderKind,
+  sourceKindSupportsReleases,
+} from "@/lib/source-providers/kinds";
 import { isPushDestinationKind, normalizeDestinationProviderKind } from "@/lib/destination-kinds";
 
 /**
@@ -139,13 +142,16 @@ export const STARRED_CLAMPED_KEYS = [
 /**
  * Flags that only work for GitHub sources.
  *
- * Issue, pull request, release, label and milestone mirroring read the
- * GitHub API. A repository from GitLab or Gitea gets code, wiki and LFS
- * through the Gitea pull mirror and nothing else, so the resolver forces
- * these off for it regardless of what any tier asked for.
+ * Issue, pull request, label and milestone mirroring read the GitHub API. A
+ * repository from GitLab or Gitea gets code, wiki and LFS through the Gitea
+ * pull mirror, so the resolver forces these off for it regardless of what any
+ * tier asked for.
+ *
+ * `mirrorReleases` is deliberately not in this list since #440: releases are
+ * gated on `sourceKindSupportsReleases` instead, which also allows Gitea and
+ * Forgejo sources. GitLab still ends up with releases off, through that gate.
  */
 export const GITHUB_ONLY_METADATA_KEYS = [
-  "mirrorReleases",
   "mirrorMetadata",
   "mirrorIssues",
   "mirrorPullRequests",
@@ -531,10 +537,17 @@ export function resolveMirrorOptions({
 
   // Metadata mirroring needs the GitHub API. Rows without a source
   // provider predate the column and came from GitHub.
-  if (normalizeSourceProviderKind(repository.sourceProvider) !== "github") {
+  const sourceKind = normalizeSourceProviderKind(repository.sourceProvider);
+  if (sourceKind !== "github") {
     for (const key of GITHUB_ONLY_METADATA_KEYS) {
       resolved[key] = false;
     }
+  }
+
+  // Releases are listed through the source API, which GitHub and
+  // Gitea/Forgejo both expose (#440). GitLab is code only, so it lands here.
+  if (!sourceKindSupportsReleases(sourceKind)) {
+    resolved.mirrorReleases = false;
   }
 
   // A push target receives branches and tags only.

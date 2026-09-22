@@ -39,11 +39,11 @@ The mirror itself is done by Gitea's pull mirror, which treats every source as a
 | Entire organizations (GitLab: top level groups) | yes | yes | yes |
 | Add a single repository by URL | yes | yes | yes |
 | Issues, pull requests, labels, milestones | yes | no | no |
-| Releases with assets | yes | no | no |
+| Releases with assets | yes | no | yes |
 | Star lists | yes | no | no |
 | Force push detection | yes | no | no |
 
-The GitHub only rows read the GitHub API. For other sources the corresponding switches are disabled on the Configuration page, and the mirror step skips them.
+The GitHub only rows read the GitHub API. For other sources the corresponding switches are disabled on the Configuration page, and the mirror step skips them. Releases are the exception: Gitea and Forgejo expose them at `GET /repos/{owner}/{repo}/releases`, so a Gitea, Forgejo or Codeberg source mirrors releases and their assets like GitHub does, with that instance's own token (public repositories need none).
 
 Entire organizations also mirror without a token on every source; the next section covers public mode.
 
@@ -56,7 +56,7 @@ On the Organizations page, **Add organization** has a public mode, which is the 
 Public mode degrades in known ways:
 
 - **GitHub metadata is best effort.** Anonymous requests run under GitHub's 60 requests per hour limit, so a large organization can end up with partial metadata. Releases, description and topics mirror anonymously with no account at all. Issues, pull requests, labels and milestones are also fetched anonymously once any source in the account carries a token; with no token anywhere they are skipped, and the mirror itself is unaffected either way.
-- **GitLab and Gitea/Forgejo sources mirror code only.** Metadata remains GitHub only, as in the table above, and issues and merge requests from those sources stay a Not yet item with or without a token.
+- **GitLab sources mirror code only; Gitea and Forgejo sources add releases.** The rest of the metadata remains GitHub only, as in the table above, and issues and merge requests from those sources stay a Not yet item with or without a token.
 - **Personal auto discovery and starred repositories need a token.** Neither runs for a public only source.
 - **Cleanup does not run.** Repositories deleted upstream are not detected for public only sources.
 

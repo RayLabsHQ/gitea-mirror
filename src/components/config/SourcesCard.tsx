@@ -119,7 +119,7 @@ function providerHelp(provider: SourceProvider): string {
   if (provider === "github") return "Where your repositories are pulled from";
   if (provider === "gitlab")
     return "Beta. Code, tags, wiki and LFS are mirrored. Issues, merge requests and releases need a GitHub source.";
-  return "Beta. Code, tags, wiki and LFS are mirrored. Issues, pull requests and releases need a GitHub source.";
+  return "Beta. Code, tags, releases, wiki and LFS are mirrored. Issues and pull requests need a GitHub source.";
 }
 
 function sourceHost(source: SourceApiRecord): string {

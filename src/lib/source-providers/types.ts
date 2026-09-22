@@ -51,6 +51,32 @@ export interface SourceRepositoryPath {
   repo: string;
 }
 
+/** One file attached to a release on a source host. */
+export interface SourceReleaseAsset {
+  name: string;
+  size: number;
+  /** Direct download URL on the source host. */
+  browser_download_url: string;
+}
+
+/**
+ * One release, in the shape the release mirror works on.
+ *
+ * Field names follow the GitHub and Gitea payloads (both use snake_case and
+ * agree on every field here), so the GitHub path needed no mapping when the
+ * mirror was made source agnostic (#440).
+ */
+export interface SourceRelease {
+  tag_name: string;
+  name?: string | null;
+  body?: string | null;
+  draft?: boolean;
+  prerelease?: boolean;
+  created_at: string;
+  published_at?: string | null;
+  assets: SourceReleaseAsset[];
+}
+
 /**
  * The operations the mirror pipeline needs from a source host.
  *
@@ -91,6 +117,15 @@ export interface SourceProvider {
 
   /** Whether the account currently stars the repository. Throws on errors other than 404. */
   isRepositoryStarred(owner: string, name: string): Promise<boolean>;
+
+  /**
+   * The newest `limit` releases of a repository, newest first.
+   *
+   * Optional: only hosts whose API exposes releases implement it (GitHub and
+   * Gitea/Forgejo). GitLab is code only, so it leaves this out and
+   * `sourceKindSupportsReleases` keeps the release switch off for it.
+   */
+  listReleases?(owner: string, repo: string, limit: number): Promise<SourceRelease[]>;
 
   /** Verify the token and return the account it belongs to. */
   testConnection(): Promise<SourceAccount>;

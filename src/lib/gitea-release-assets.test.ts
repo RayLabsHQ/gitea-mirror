@@ -138,7 +138,7 @@ function createFakeDestination(options: FakeDestinationOptions = {}) {
 
 function reconcile(
   fetchImpl: typeof fetch,
-  githubAssets: Array<{ name: string; size: number; browser_download_url: string }>
+  sourceAssets: Array<{ name: string; size: number; browser_download_url: string }>
 ) {
   return reconcileReleaseAssets({
     config,
@@ -146,7 +146,9 @@ function reconcile(
     repoOwner: OWNER,
     repoName: REPO,
     giteaReleaseId: RELEASE_ID,
-    githubAssets,
+    sourceAssets,
+    // The GitHub path's credential, which is what these cases model.
+    downloadAuthorization: `token ${decryptedConfig.githubConfig!.token}`,
     tagName: "v1.0.0",
     fetchImpl,
   });

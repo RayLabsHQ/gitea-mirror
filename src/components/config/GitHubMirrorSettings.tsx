@@ -59,6 +59,7 @@ import {
 import { cn } from "@/lib/utils";
 import { githubApi } from "@/lib/api";
 import {
+  sourceKindSupportsReleases,
   SOURCE_PROVIDER_LABELS,
   SOURCE_PROVIDER_ORG_NOUNS,
 } from "@/lib/source-providers/kinds";
@@ -106,14 +107,21 @@ export function GitHubMirrorSettings({
   const isPushTarget = isPushDestinationKind(destinationProvider ?? "gitea");
   const destinationLabel = DESTINATION_PROVIDER_LABELS[destinationProvider ?? "gitea"];
   const pushTargetReason = `Not available for ${destinationLabel} destinations: only branches and tags are pushed`;
-  // Star lists, issues, pull requests, releases, labels and milestones all
-  // read the GitHub API, so they are only offered for GitHub sources.
+  // Star lists, issues, pull requests, labels and milestones all read the
+  // GitHub API, so they are only offered for GitHub sources.
   const sourceProvider = githubConfig.provider ?? "github";
   const hasGithubSource =
     sources && sources.length > 0
       ? sources.some((source) => source.provider === "github")
       : sourceProvider === "github";
   const isGithubSource = hasGithubSource && !isPushTarget;
+  // Releases are listed through the source API, which Gitea and Forgejo
+  // expose as well (#440), so they follow their own capability check.
+  const hasReleaseCapableSource =
+    sources && sources.length > 0
+      ? sources.some((source) => sourceKindSupportsReleases(source.provider))
+      : sourceKindSupportsReleases(sourceProvider);
+  const isReleaseCapableSource = hasReleaseCapableSource && !isPushTarget;
   const sourceLabel = SOURCE_PROVIDER_LABELS[sourceProvider];
   const orgNoun = SOURCE_PROVIDER_ORG_NOUNS[sourceProvider];
   const [starListsOpen, setStarListsOpen] = React.useState(false);
@@ -881,7 +889,9 @@ export function GitHubMirrorSettings({
                 ? `${destinationLabel} destinations receive branches and tags only`
                 : isGithubSource
                   ? "Pull requests are mirrored as issues due to Gitea API limits"
-                  : "Issues, pull requests and releases are mirrored for GitHub sources only"
+                  : isReleaseCapableSource
+                    ? "Releases are mirrored. Issues, pull requests, labels and milestones need a GitHub source"
+                    : "Issues, pull requests and releases are mirrored for GitHub sources only"
             }
           />
         }
@@ -906,13 +916,13 @@ export function GitHubMirrorSettings({
             description={
               isPushTarget
                 ? pushTargetReason
-                : !isGithubSource
-                ? "Release assets need a GitHub source. Tags always come with the code"
+                : !isReleaseCapableSource
+                ? "Release assets need a GitHub or Gitea/Forgejo source. Tags always come with the code"
                 : mirrorOptions.mirrorReleases
                   ? "Includes tags. Leave the assets box empty to upload assets for every mirrored release, or set it to 0 for release notes only"
                   : "Includes release assets and tags"
             }
-            disabled={!isGithubSource}
+            disabled={!isReleaseCapableSource}
             checked={mirrorOptions.mirrorReleases}
             onCheckedChange={(checked) => handleMirrorChange('mirrorReleases', checked)}
             extra={

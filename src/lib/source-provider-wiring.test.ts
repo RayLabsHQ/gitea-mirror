@@ -44,7 +44,17 @@ describe("gitea.ts migrate sites", () => {
 
   test("the mirror entry points accept a null GitHub client and skip metadata without one", () => {
     expect(count(source, "octokit: Octokit | null;")).toBeGreaterThanOrEqual(4);
-    expect(count(source, "&& octokit !== null;")).toBe(10);
+    // Releases no longer gate on a GitHub client here: both mirror paths hand
+    // the decision to mirrorRepositoryReleases, which picks the source's own
+    // release path (#440). Everything else still needs Octokit.
+    expect(count(source, "&& octokit !== null;")).toBe(8);
+  });
+
+  test("both mirror paths route releases through the repository's own source", () => {
+    expect(count(source, "await mirrorRepositoryReleases({")).toBe(2);
+    expect(count(source, "sourceToken: repoSourceToken,")).toBe(2);
+    expect(source).toContain('if (sourceConnection.provider === "gitea") {');
+    expect(source).toContain("await mirrorGiteaSourceReleasesToGitea({");
   });
 });
 
@@ -77,14 +87,25 @@ describe("discovery and housekeeping go through the source provider", () => {
     expect(recovery).toContain("findSourceForRepository(repo, sources)");
     expect(recovery).toContain("repoSource?.provider === 'github'");
     const enhanced = read("gitea-enhanced.ts");
-    expect(enhanced).toContain("getRepositorySource(repository).provider === \"github\"");
+    expect(enhanced).toContain("const repoSourceKind = getRepositorySource(repository).provider;");
+    expect(enhanced).toContain('const repoIsGitHub = repoSourceKind === "github";');
     expect(enhanced).toContain("findSourceForRepository(repository, sources)");
+    // The sync path mirrors releases from a Gitea/Forgejo source too (#440).
+    expect(enhanced).toContain('repoSourceKind === "gitea" && repoSource');
+    expect(enhanced).toContain("mirrorGiteaSourceReleasesToGitea");
   });
 
   test("the metadata resolver clamps GitHub only options for other sources", () => {
     const source = read("utils", "mirror-overrides.ts");
     expect(source).toContain("GITHUB_ONLY_METADATA_KEYS");
-    expect(source).toContain('normalizeSourceProviderKind(repository.sourceProvider) !== "github"');
+    expect(source).toContain("const sourceKind = normalizeSourceProviderKind(repository.sourceProvider);");
+    expect(source).toContain('if (sourceKind !== "github") {');
+    // Releases have their own gate: GitHub and Gitea/Forgejo can list them,
+    // GitLab cannot, so they left the GitHub only set (#440).
+    expect(source).toContain(
+      'export const GITHUB_ONLY_METADATA_KEYS = [\n  "mirrorMetadata",'
+    );
+    expect(source).toContain("if (!sourceKindSupportsReleases(sourceKind)) {");
   });
 
   test("the discovery routes use the provider, match the pasted host against connected sources and stamp the source on inserted rows", () => {
