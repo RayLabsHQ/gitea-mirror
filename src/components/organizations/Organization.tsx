@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from "../ui/select";
 import type { MirrorOrgRequest, MirrorOrgResponse } from "@/types/mirror";
+import type { SyncOrgRequest, SyncOrgResponse } from "@/types/sync";
 import type { SourceProviderKind } from "@/lib/source-providers/kinds";
 import { useSSE } from "@/hooks/useSEE";
 import { useFilterParams } from "@/hooks/useFilterParams";
@@ -194,6 +195,62 @@ export function Organization() {
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Error starting mirror job"
+      );
+    } finally {
+      setLoadingOrgIds((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(orgId);
+        return newSet;
+      });
+    }
+  };
+
+  // Re-sync an organization that is already mirrored: the Mirror button only
+  // covers the first run, so this is the by-hand refresh (#429).
+  const handleSyncOrg = async ({ orgId }: { orgId: string }) => {
+    try {
+      if (!user || !user.id) {
+        return;
+      }
+
+      setLoadingOrgIds((prev) => new Set(prev).add(orgId));
+
+      const reqPayload: SyncOrgRequest = { orgId };
+
+      const response = await apiRequest<SyncOrgResponse>("/job/sync-org", {
+        method: "POST",
+        data: reqPayload,
+      });
+
+      if (response.success) {
+        const queued = response.queued;
+        const parts: string[] = [];
+        if (queued?.mirror) parts.push(`${queued.mirror} to mirror`);
+        if (queued?.sync) parts.push(`${queued.sync} to sync`);
+        toast.success(
+          parts.length > 0
+            ? `Sync started: ${parts.join(", ")}`
+            : "Sync started: checking for new repositories"
+        );
+
+        // Show the spinner right away; the card settles once the run reports back.
+        setOrganizations((prevOrgs) =>
+          prevOrgs.map((org) =>
+            org.id === orgId ? { ...org, status: "mirroring" } : org
+          )
+        );
+
+        // Refresh organization data to get updated repository breakdown
+        // Use a small delay to allow the backend to process the sync request
+        setTimeout(() => {
+          fetchOrganizations(true);
+        }, 1000);
+      } else {
+        toast.error(response.error || "Error starting sync job");
+      }
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : "Error starting sync job"
       );
     } finally {
       setLoadingOrgIds((prev) => {
@@ -898,6 +955,7 @@ export function Organization() {
         setFilter={setFilter}
         loadingOrgIds={loadingOrgIds}
         onMirror={handleMirrorOrg}
+        onSync={handleSyncOrg}
         onIgnore={handleIgnoreOrg}
         onAddOrganization={() => setIsDialogOpen(true)}
         onDelete={handleRequestDeleteOrganization}

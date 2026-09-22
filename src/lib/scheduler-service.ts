@@ -22,8 +22,9 @@ import {
   dedupeRepositoriesByIdentity,
 } from '@/lib/repo-utils';
 import { isMirrorableGitHubRepo } from '@/lib/repo-eligibility';
-import { loadOrganizationForkPolicies, orgForkSkipDecision, resolveOrganizationSkipForks } from '@/lib/utils/mirror-overrides';
+import { loadOrganizationForkPolicies, orgForkSkipDecision } from '@/lib/utils/mirror-overrides';
 import { createMirrorJob } from '@/lib/helpers';
+import { rediscoverRepositoriesForOrganization } from '@/lib/organization-discovery';
 import { getNextScheduledRun, isCronExpression, normalizeTimezone } from '@/lib/utils/schedule-utils';
 import { resetStuckMirrorStatuses } from '@/lib/stuck-status-recovery';
 import type { SourceRecord } from '@/lib/sources';
@@ -197,26 +198,18 @@ async function importRepositoriesFromSources(
 }
 
 /**
- * Re-discover organization repositories: an organization pinned to a source
- * can gain newly published upstream repositories at any time, and a
- * public-only (tokenless) source never runs the personal listings that
- * would otherwise surface them. Each tick re-lists every included
+ * Re-discover organization repositories: each tick re-lists every included
  * organization whose pin resolves to an existing enabled source and inserts
- * the repositories it does not have yet (onConflictDoNothing keeps repeats
- * idempotent). Unpinned organizations and pins whose source is gone keep
- * the legacy DB-only behavior — no behavior change for existing users.
- *
- * Repositories missing from the listing are deliberately NOT removed:
- * a tokenless listing only shows public repositories, so cleanup stays
- * membership-based (repository-cleanup-service).
+ * the repositories it does not have yet. The per-organization work lives in
+ * rediscoverRepositoriesForOrganization, which the manual organization sync
+ * route shares.
  */
 async function rediscoverOrganizationRepositories(
   config: any,
   userId: string,
   phase: 'scheduled sync' | 'auto-start'
 ): Promise<void> {
-  const { listSources, findSourceForOrganization } = await import('@/lib/sources');
-  const { createSourceProviderFromSource } = await import('@/lib/source-providers');
+  const { listSources } = await import('@/lib/sources');
   const sources = (await listSources(userId)).filter(source => source.enabled);
 
   // An ignored organization is left alone entirely: rediscovering it would
@@ -235,7 +228,9 @@ async function rediscoverOrganizationRepositories(
 
   // Same identity rule as personal discovery: an organization pinned to a
   // public-only source must not re-insert repositories the personal source
-  // already tracks on the same host (or the other way round).
+  // already tracks on the same host (or the other way round). One set is
+  // shared by every organization in the pass, so it also keeps two
+  // organizations from inserting the same repository twice.
   const existingRepos = await db
     .select({
       normalizedFullName: repositories.normalizedFullName,
@@ -248,51 +243,14 @@ async function rediscoverOrganizationRepositories(
 
   for (const org of includedOrgs) {
     try {
-      const source = findSourceForOrganization(org, sources);
-      if (!source) continue;
-
-      const sourceProvider = createSourceProviderFromSource(source, { userId });
-      const orgRepos = await sourceProvider.listOrganizationRepositories(org.name);
-
-      // The organization's fork policy (override -> global skipForks), the
-      // same resolution the organization mirror path applies.
-      const skipOrgForks = resolveOrganizationSkipForks({ orgOverrides: org.mirrorOverrides, config });
-      const mirrorableRepos = orgRepos.filter(
-        repo => repo.isDisabled !== true && !(skipOrgForks && repo.isForked)
-      );
-
-      const { fresh: repoRecords, alreadyTracked } = selectNewRepositoriesByIdentity(
-        mirrorableRepos.map(repo =>
-          normalizeGitRepoToInsert(
-            { ...repo, organization: repo.organization ?? org.name },
-            { userId, configId: config.id, sourceId: source.id }
-          )
-        ),
-        existingRepoKeys
-      );
-
-      if (repoRecords.length > 0) {
-        // Batch insert to avoid SQLite parameter limit
-        const sample = repoRecords[0];
-        const columnCount = Object.keys(sample ?? {}).length || 1;
-        const BATCH_SIZE = calcBatchSizeForInsert(columnCount);
-        for (let i = 0; i < repoRecords.length; i += BATCH_SIZE) {
-          const batch = repoRecords.slice(i, i + BATCH_SIZE);
-          await db
-            .insert(repositories)
-            .values(batch)
-            .onConflictDoNothing({ target: [repositories.userId, repositories.sourceId, repositories.normalizedFullName] });
-        }
-        console.log(`[Scheduler] Re-discovered ${repoRecords.length} new repositories for organization ${org.name} on source ${source.name} for user ${userId} during ${phase}`);
-      }
-      if (alreadyTracked.length > 0) {
-        console.log(`[Scheduler] Organization ${org.name}: ${alreadyTracked.length} repositories are already tracked for user ${userId} on the same host, not adding them again under source ${source.name}`);
-      }
-
-      await db
-        .update(organizations)
-        .set({ repositoryCount: orgRepos.length, updatedAt: new Date() })
-        .where(eq(organizations.id, org.id));
+      await rediscoverRepositoriesForOrganization({
+        config,
+        userId,
+        organization: org,
+        sources,
+        existingRepoKeys,
+        phase,
+      });
     } catch (orgError) {
       console.error(`[Scheduler] Failed to re-discover repositories for organization ${org.name} for user ${userId} during ${phase}:`, orgError);
     }

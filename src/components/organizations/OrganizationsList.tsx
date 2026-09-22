@@ -48,6 +48,12 @@ interface OrganizationListProps {
   filter: FilterParams;
   setFilter: (filter: FilterParams) => void;
   onMirror: ({ orgId }: { orgId: string }) => Promise<void>;
+  /**
+   * Re-sync an organization that has already been mirrored. The Mirror
+   * button only covers the first run, so without this an organization could
+   * never be refreshed by hand (#429).
+   */
+  onSync?: ({ orgId }: { orgId: string }) => Promise<void>;
   onIgnore?: ({ orgId, ignore }: { orgId: string; ignore: boolean }) => Promise<void>;
   loadingOrgIds: Set<string>;
   onAddOrganization?: () => void;
@@ -145,6 +151,7 @@ export function OrganizationList({
   filter,
   setFilter,
   onMirror,
+  onSync,
   onIgnore,
   loadingOrgIds,
   onAddOrganization,
@@ -726,6 +733,15 @@ export function OrganizationList({
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
+                      {onSync && (org.status === "mirrored" || org.status === "failed") && (
+                        <>
+                          <DropdownMenuItem onClick={() => org.id && onSync({ orgId: org.id })}>
+                            <RefreshCw className="h-4 w-4 mr-2" />
+                            Sync Organization
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                        </>
+                      )}
                       <DropdownMenuItem onClick={() => setOverridesTarget(org)}>
                         <SlidersHorizontal className="h-4 w-4 mr-2" />
                         Mirror Options
@@ -877,6 +893,15 @@ export function OrganizationList({
                       </Button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
+                      {onSync && (org.status === "mirrored" || org.status === "failed") && (
+                        <>
+                          <DropdownMenuItem onClick={() => org.id && onSync({ orgId: org.id })}>
+                            <RefreshCw className="h-4 w-4 mr-2" />
+                            Sync Organization
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                        </>
+                      )}
                       <DropdownMenuItem onClick={() => setOverridesTarget(org)}>
                         <SlidersHorizontal className="h-4 w-4 mr-2" />
                         Mirror Options
