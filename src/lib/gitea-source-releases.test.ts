@@ -11,19 +11,39 @@
  *
  * Both entry points are driven through a fake global fetch, which is what the
  * destination client, the source adapter and the asset reconciliation all use.
- * No module mocks on purpose: bun's mock.module is process-wide and leaks into
- * other test files.
+ * Other test files replace @/lib/http-client and friends with mock.module,
+ * which is process-wide in bun and depends on file order, so the suites here
+ * run in an isolated child process (same harness as
+ * gitea-org-mirror-destination.test.ts) where the real modules are loaded.
  */
 
-import { afterEach, describe, expect, it } from "bun:test";
-import {
-  mirrorGiteaSourceReleasesToGitea,
-  mirrorGitHubReleasesToGitea,
-} from "@/lib/gitea";
+import { afterEach, describe, expect, it, test } from "bun:test";
 import type { Config } from "@/types/config";
 import type { Repository } from "@/lib/db/schema";
 import type { SourceConnection } from "@/lib/source-providers/types";
 
+const CHILD_FLAG = "GM_SOURCE_RELEASES_ISOLATED";
+const isChild = !!process.env[CHILD_FLAG];
+
+if (!isChild) {
+  test("source aware release mirroring - isolated child suite", () => {
+    const res = Bun.spawnSync({
+      cmd: [process.execPath, "test", import.meta.path],
+      env: { ...process.env, [CHILD_FLAG]: "1" },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    if (res.exitCode !== 0) {
+      console.error(res.stdout.toString());
+      console.error(res.stderr.toString());
+    }
+    expect(res.exitCode).toBe(0);
+  }, 60_000);
+}
+
+const { mirrorGiteaSourceReleasesToGitea, mirrorGitHubReleasesToGitea } = isChild
+  ? await import("@/lib/gitea")
+  : ({} as typeof import("@/lib/gitea"));
 const GITEA_URL = "https://gitea.example.com";
 const SOURCE_URL = "https://codeberg.org";
 const DEST_OWNER = "mirror-owner";
@@ -188,7 +208,7 @@ function mirrorFromGitea(connection: SourceConnection) {
   });
 }
 
-describe("mirrorGiteaSourceReleasesToGitea", () => {
+describe.skipIf(!isChild)("mirrorGiteaSourceReleasesToGitea", () => {
   it("creates a missing release with the Gitea/Forgejo header", async () => {
     const world = fakeWorld({ sourceReleases: [giteaRelease("v1.0.0")] });
 
@@ -310,7 +330,7 @@ describe("mirrorGiteaSourceReleasesToGitea", () => {
   });
 });
 
-describe("mirrorGitHubReleasesToGitea keeps its own header and credentials", () => {
+describe.skipIf(!isChild)("mirrorGitHubReleasesToGitea keeps its own header and credentials", () => {
   function githubOctokit(releases: Array<Record<string, unknown>>) {
     return {
       rest: {
