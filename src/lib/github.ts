@@ -8,6 +8,11 @@ import {
   applyConditionalRequests,
   conditionalRequestTokenScope,
 } from "@/lib/github-conditional-requests";
+import {
+  clearRateLimit,
+  markRateLimited,
+  rateLimitGateKey,
+} from "@/lib/rate-limit-gate";
 // Conditionally import rate limit manager (not available in test environment)
 let RateLimitManager: any = null;
 let publishEvent: any = null;
@@ -30,6 +35,46 @@ const MyOctokit: any = (Octokit as any)?.plugin?.call
   : (Octokit as any);
 
 /**
+ * Longest wait a request may sleep through inside the throttling plugin.
+ * A primary rate limit resets at a fixed time that is often tens of minutes
+ * away; sleeping that long inside the request holds the scheduler lock for the
+ * whole run (issue #437), so anything longer is handed to the rate limit gate
+ * and the request fails fast instead.
+ */
+export const RATE_LIMIT_FAST_FAIL_THRESHOLD_SECONDS = 120;
+
+export type RateLimitRetryAction = "retry" | "fail-fast" | "give-up";
+
+/**
+ * What the throttle handler should do with a primary rate limit. Pure, so the
+ * policy can be tested without standing up Octokit.
+ *
+ * - "retry": short wait, sleep it off inside the request as before.
+ * - "fail-fast": the reset is too far out to wait for; pause the source and
+ *   let the caller fail so the scheduler can end its run and come back.
+ * - "give-up": short waits were retried to the limit and got nowhere.
+ */
+export function decideRateLimitRetry({
+  retryAfter,
+  retryCount,
+  maxRetries,
+  thresholdSeconds = RATE_LIMIT_FAST_FAIL_THRESHOLD_SECONDS,
+}: {
+  retryAfter: number;
+  retryCount: number;
+  maxRetries: number;
+  thresholdSeconds?: number;
+}): RateLimitRetryAction {
+  if (retryAfter > thresholdSeconds) {
+    return "fail-fast";
+  }
+  if (retryCount < maxRetries) {
+    return "retry";
+  }
+  return "give-up";
+}
+
+/**
  * Throttling and rate-limit handling shared by every Octokit this module
  * builds, authenticated or anonymous. `userId` is optional: without it the
  * handlers only log and schedule the retry — there is no per-user
@@ -45,10 +90,23 @@ function githubThrottleOptions(userId?: string) {
     ) => {
       const isSearch = options.url.includes("/search/");
       const maxRetries = isSearch ? 5 : 3; // Search endpoints get more retries
+      const action = decideRateLimitRetry({ retryAfter, retryCount, maxRetries });
+      const resetAt = new Date(Date.now() + retryAfter * 1000);
 
-      console.warn(
-        `[GitHub] Rate limit hit for ${options.method} ${options.url}. Retry ${retryCount + 1}/${maxRetries}`,
-      );
+      if (action === "fail-fast") {
+        // Record the reset for the whole source, not just this request: every
+        // other call on the same token would run into the same wall.
+        markRateLimited(rateLimitGateKey(userId), resetAt);
+        console.warn(
+          `[GitHub] Rate limit hit for ${options.method} ${options.url}. ` +
+            `The limit resets in ${retryAfter}s, over the ${RATE_LIMIT_FAST_FAIL_THRESHOLD_SECONDS}s a request may wait, ` +
+            `so this request fails now and GitHub work pauses until ${resetAt.toISOString()}.`,
+        );
+      } else {
+        console.warn(
+          `[GitHub] Rate limit hit for ${options.method} ${options.url}. Retry ${retryCount + 1}/${maxRetries}`,
+        );
+      }
 
       // Update rate limit status and notify UI (if available)
       if (userId && RateLimitManager) {
@@ -69,21 +127,28 @@ function githubThrottleOptions(userId?: string) {
             retryAfter,
             retryCount,
             endpoint: options.url,
-            message: `Rate limit hit. Waiting ${retryAfter}s before retry ${retryCount + 1}/${maxRetries}...`,
+            resetAt: resetAt.toISOString(),
+            willRetry: action === "retry",
+            message:
+              action === "fail-fast"
+                ? `Rate limit exceeded. GitHub work is paused until ${resetAt.toISOString()} and resumes automatically.`
+                : `Rate limit hit. Waiting ${retryAfter}s before retry ${retryCount + 1}/${maxRetries}...`,
           },
         });
       }
 
-      // Retry with exponential backoff
-      if (retryCount < maxRetries) {
+      // Short waits are still slept off inside the request.
+      if (action === "retry") {
         console.log(`[GitHub] Waiting ${retryAfter}s before retry...`);
         return true;
       }
 
-      // Max retries reached
-      console.error(
-        `[GitHub] Max retries (${maxRetries}) reached for ${options.url}`,
-      );
+      if (action === "give-up") {
+        console.error(
+          `[GitHub] Max retries (${maxRetries}) reached for ${options.url}`,
+        );
+      }
+
       return false;
     },
     onSecondaryRateLimit: async (
@@ -169,6 +234,19 @@ export function createGitHubClient(
     },
     throttle: githubThrottleOptions(userId),
   });
+
+  // A response that still has budget means the limit is over, whatever reset
+  // time was recorded earlier. Open the gate so the scheduler resumes at once
+  // instead of sitting out the rest of a stale window. Some tests stub Octokit
+  // without the hook system; skip wiring in that case.
+  if (typeof (octokit as any)?.hook?.after === "function") {
+    octokit.hook.after("request", async (response: any) => {
+      const remaining = Number(response?.headers?.["x-ratelimit-remaining"]);
+      if (Number.isFinite(remaining) && remaining > 0) {
+        clearRateLimit(rateLimitGateKey(userId));
+      }
+    });
+  }
 
   // Add rate limit tracking hooks if userId is provided and RateLimitManager is available
   if (userId && RateLimitManager) {

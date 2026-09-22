@@ -1,5 +1,10 @@
 import { describe, test, expect, mock, beforeEach } from "bun:test";
 import { repoStatusEnum } from "@/types/Repository";
+import {
+  clearAllRateLimits,
+  markRateLimited,
+  rateLimitGateKey,
+} from "@/lib/rate-limit-gate";
 import type { Repository } from "./db/schema";
 
 // ---------------------------------------------------------------------------
@@ -188,7 +193,11 @@ const configsTable = { __table: "configs" } as any;
 let configRows: any[] = [];
 let orgRows: any[] = [];
 let repoRows: any[] = [];
+// Rows the unprojected repository selects return: the auto-mirror and sync
+// pools. Empty for the discovery scenarios, filled by the rate limit ones.
+let poolRows: any[] = [];
 let orgUpdates: Array<Record<string, any>> = [];
+let configUpdates: Array<Record<string, any>> = [];
 let repoInsertAttempts = 0;
 
 const publicOnlySource = {
@@ -212,6 +221,8 @@ const orgRepoListings = new Map<string, any[]>();
 const mockListOrganizationRepositories = mock(async (name: string) =>
   orgRepoListings.get(name) ?? []
 );
+const mockMirrorRepositoryToDestination = mock(async () => {});
+const mockSyncRepositoryOnDestination = mock(async () => {});
 const mockCreateSourceProviderFromSource = mock(() => ({
   listRepositories: mockListRepositories,
   listStarredRepositories: mockListStarredRepositories,
@@ -230,7 +241,7 @@ if (isChild) {
             if (table === configsTable) return Promise.resolve(configRows);
             if (table === organizationsTable) return Promise.resolve(orgRows);
             if (table === repositoriesTable) {
-              return Promise.resolve(fields ? repoRows : []);
+              return Promise.resolve(fields ? repoRows : poolRows);
             }
             return Promise.resolve([]);
           },
@@ -262,6 +273,7 @@ if (isChild) {
         set: (data: any) => ({
           where: (_cond: any) => {
             if (table === organizationsTable) orgUpdates.push(data);
+            if (table === configsTable) configUpdates.push(data);
             return Promise.resolve();
           },
         }),
@@ -305,8 +317,8 @@ if (isChild) {
   }));
 
   mock.module("@/lib/mirror-dispatch", () => ({
-    mirrorRepositoryToDestination: mock(async () => {}),
-    syncRepositoryOnDestination: mock(async () => {}),
+    mirrorRepositoryToDestination: mockMirrorRepositoryToDestination,
+    syncRepositoryOnDestination: mockSyncRepositoryOnDestination,
   }));
 }
 
@@ -400,8 +412,11 @@ describe.skipIf(!isChild)("Scheduler public-only sources (WP4)", () => {
       }),
     ];
     repoRows = [];
+    poolRows = [];
     orgUpdates = [];
+    configUpdates = [];
     repoInsertAttempts = 0;
+    clearAllRateLimits();
     orgRepoListings.clear();
     mockListRepositories.mockClear();
     mockListStarredRepositories.mockClear();
@@ -494,5 +509,140 @@ describe.skipIf(!isChild)("Scheduler public-only sources (WP4)", () => {
     expect(sharedRows[0].sourceId).toBe("source-personal");
     expect(repoRows.some((row) => row.normalizedFullName === "pinned-org/fresh")).toBe(true);
     expect(consoleLines.some((line) => line.includes("already tracked") && line.includes("pinned-org"))).toBe(true);
+  });
+});
+// ---------------------------------------------------------------------------
+// Rate limit gate (issue #437).
+//
+// A scheduled run used to sit inside Octokit until the GitHub limit reset,
+// which held the scheduler lock for the whole run: every later tick logged
+// "Scheduler is already running, skipping this cycle" and nothing synced until
+// the container was restarted. The throttle handler now records the reset on
+// the gate and fails the request, and the run below has to notice that and
+// stop by itself.
+// ---------------------------------------------------------------------------
+function makeSyncRow(name: string, overrides: Record<string, any> = {}): any {
+  return {
+    id: `repo-${name}`,
+    userId: "user-1",
+    sourceId: "source-public",
+    name,
+    fullName: `pinned-org/${name}`,
+    normalizedFullName: `pinned-org/${name}`,
+    owner: "pinned-org",
+    organization: "pinned-org",
+    sourceProvider: "github",
+    sourceUrl: "https://github.com",
+    status: "mirrored",
+    isStarred: false,
+    isForked: false,
+    isPrivate: false,
+    visibility: "public",
+    mirroredLocation: `gitea-org/${name}`,
+    lastMirrored: null,
+    errorMessage: null,
+    forkedFrom: null,
+    createdAt: new Date(0),
+    updatedAt: new Date(0),
+    ...overrides,
+  };
+}
+
+describe.skipIf(!isChild)("Scheduler rate limit gate (#437)", () => {
+  let consoleLines: string[];
+
+  beforeEach(() => {
+    consoleLines = [];
+    const capture = mock((...args: unknown[]) => {
+      consoleLines.push(args.map((arg) => (typeof arg === "string" ? arg : String(arg))).join(" "));
+    }) as any;
+    console.log = capture;
+    console.warn = capture;
+    console.error = capture;
+
+    configRows = [makeSchedulerConfig()];
+    orgRows = [];
+    repoRows = [];
+    poolRows = [];
+    orgUpdates = [];
+    configUpdates = [];
+    repoInsertAttempts = 0;
+    orgRepoListings.clear();
+    mockListOrganizationRepositories.mockClear();
+    mockMirrorRepositoryToDestination.mockClear();
+    mockSyncRepositoryOnDestination.mockClear();
+    clearAllRateLimits();
+  });
+
+  test("a run that starts rate limited is skipped and comes back just after the reset", async () => {
+    const resetAt = new Date(Date.now() + 45 * 60 * 1000);
+    markRateLimited(rateLimitGateKey("user-1"), resetAt);
+    poolRows = [makeSyncRow("alpha"), makeSyncRow("beta")];
+
+    await schedulerLoop();
+
+    expect(mockSyncRepositoryOnDestination).not.toHaveBeenCalled();
+    expect(
+      consoleLines.some(
+        (line) => line.includes("rate limited until") && line.includes("skipping this run")
+      )
+    ).toBe(true);
+
+    const nextRun = configUpdates.at(-1)?.scheduleConfig?.nextRun as Date;
+    expect(nextRun).toBeInstanceOf(Date);
+    expect(nextRun.getTime()).toBe(resetAt.getTime() + 60_000);
+  });
+
+  test("a rate limit hit mid-run stops the sync loop and leaves the rest for the next run", async () => {
+    const resetAt = new Date(Date.now() + 45 * 60 * 1000);
+    orgRows = [makeOrgRow()];
+    orgRepoListings.set("pinned-org", [makeGitRepo("existing")]);
+    poolRows = [makeSyncRow("alpha"), makeSyncRow("beta"), makeSyncRow("gamma")];
+
+    // Stands in for the throttle handler: discovery runs into the limit and
+    // records the reset instead of sleeping through it.
+    mockListOrganizationRepositories.mockImplementationOnce(async () => {
+      markRateLimited(rateLimitGateKey("user-1"), resetAt);
+      throw Object.assign(new Error("API rate limit exceeded for user ID 1."), { status: 403 });
+    });
+
+    await schedulerLoop();
+
+    // The run reached the sync phase and then stopped without syncing anything.
+    expect(consoleLines.some((line) => line.includes("Syncing 3 repositories for user user-1"))).toBe(true);
+    expect(mockSyncRepositoryOnDestination).not.toHaveBeenCalled();
+    expect(
+      consoleLines.some(
+        (line) =>
+          line.includes("rate limited until") &&
+          line.includes("leaving 3 repositories to sync on the next run")
+      )
+    ).toBe(true);
+
+    // The lock is released, so the next tick is free to run.
+    expect(consoleLines.some((line) => line.includes("already running"))).toBe(false);
+
+    const nextRun = configUpdates.at(-1)?.scheduleConfig?.nextRun as Date;
+    expect(nextRun.getTime()).toBe(resetAt.getTime() + 60_000);
+  });
+
+  test("the gate only logs once per run", async () => {
+    markRateLimited(rateLimitGateKey("user-1"), new Date(Date.now() + 45 * 60 * 1000));
+    poolRows = [makeSyncRow("alpha")];
+
+    await schedulerLoop();
+
+    const gateLines = consoleLines.filter((line) => line.includes("rate limited until"));
+    expect(gateLines).toHaveLength(1);
+  });
+
+  test("a run that is not rate limited syncs every repository as before", async () => {
+    poolRows = [makeSyncRow("alpha"), makeSyncRow("beta")];
+
+    await schedulerLoop();
+
+    expect(mockSyncRepositoryOnDestination).toHaveBeenCalledTimes(2);
+    expect(consoleLines.some((line) => line.includes("rate limited until"))).toBe(false);
+    expect(consoleLines.some((line) => line.includes("Completed scheduled sync for user user-1"))).toBe(true);
   });
 });

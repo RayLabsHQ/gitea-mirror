@@ -26,6 +26,7 @@ import { loadOrganizationForkPolicies, orgForkSkipDecision, resolveOrganizationS
 import { createMirrorJob } from '@/lib/helpers';
 import { getNextScheduledRun, isCronExpression, normalizeTimezone } from '@/lib/utils/schedule-utils';
 import { resetStuckMirrorStatuses } from '@/lib/stuck-status-recovery';
+import { isRateLimitError, rateLimitGateKey, rateLimitedUntil } from '@/lib/rate-limit-gate';
 import type { SourceRecord } from '@/lib/sources';
 
 let schedulerInterval: NodeJS.Timeout | null = null;
@@ -84,6 +85,103 @@ async function persistScheduleRunState(config: any, currentTime: Date, forceEnab
 
   logNextRun(config.userId, source, timezone, currentTime, nextRun);
   return nextRun;
+}
+
+/** Head start the next run gets after a rate limit reset, so the window is really over. */
+const RATE_LIMIT_RESUME_MARGIN_MS = 60 * 1000;
+
+/**
+ * Watches the rate limit gate for one run.
+ *
+ * A run used to sit inside Octokit until the limit reset, which held the
+ * scheduler lock for up to an hour per repository and left every later tick
+ * logging "Scheduler is already running" (issue #437). The throttle handler
+ * now records the reset instead of sleeping, and the loops below ask this
+ * watcher between batches and between repositories whether to stop. Only the
+ * first stop is logged, so a long batch loop does not repeat itself.
+ */
+function createRateLimitWatcher(userId: string) {
+  const key = rateLimitGateKey(userId);
+  let logged = false;
+
+  return {
+    /** The reset time when the source is paused, otherwise null. */
+    check(describeEffect: () => string): Date | null {
+      const until = rateLimitedUntil(key);
+      if (!until) {
+        return null;
+      }
+
+      if (!logged) {
+        logged = true;
+        console.warn(
+          `[Scheduler] Source is rate limited until ${until.toISOString()} for user ${userId}, ${describeEffect()}`
+        );
+      }
+
+      return until;
+    },
+    /** The reset time without logging, for the next run calculation. */
+    current(): Date | null {
+      return rateLimitedUntil(key);
+    },
+  };
+}
+
+/**
+ * Bring the next run forward to just after the rate limit reset.
+ *
+ * Without this the run that stopped early would keep the schedule's own
+ * nextRun, so a daily cron would leave the remaining repositories untouched
+ * for a day even though the limit is back minutes later.
+ */
+async function persistRateLimitedNextRun(config: any, currentTime: Date, resetAt: Date): Promise<Date> {
+  const scheduleConfig = config.scheduleConfig || {};
+  const nextRun = new Date(resetAt.getTime() + RATE_LIMIT_RESUME_MARGIN_MS);
+
+  await db.update(configs).set({
+    scheduleConfig: {
+      ...scheduleConfig,
+      lastRun: currentTime,
+      nextRun,
+    },
+    updatedAt: new Date(),
+  }).where(eq(configs.id, config.id));
+
+  console.log(
+    `[Scheduler] Next sync for user ${config.userId} moved to ${nextRun.toISOString()} to resume after the rate limit reset`
+  );
+
+  return nextRun;
+}
+
+/**
+ * Put a repository back to the status it had before an attempt that only
+ * failed because of a rate limit.
+ *
+ * The mirror and sync paths write "failed" on any error, which leaves the row
+ * waiting for a manual retry. A rate limit is not a repository failure, and
+ * the scheduler already re-syncs "failed", "mirrored", "synced" and "pending"
+ * rows, so restoring the previous status is enough for the run after the reset
+ * to pick the repository up on its own.
+ */
+async function restoreRepositoryAfterRateLimit(
+  repo: { id: string; fullName: string; status: string },
+  phase: string
+): Promise<void> {
+  try {
+    await db.update(repositories).set({
+      status: repo.status,
+      updatedAt: new Date(),
+    }).where(eq(repositories.id, repo.id));
+
+    console.warn(
+      `[Scheduler] ${repo.fullName} hit the source rate limit during ${phase}; ` +
+      `left it as "${repo.status}" so it is retried after the reset instead of needing a manual retry`
+    );
+  } catch (error) {
+    console.error(`[Scheduler] Failed to restore the status of ${repo.fullName} after a rate limit:`, error);
+  }
 }
 
 /**
@@ -390,6 +488,7 @@ function dropDuplicateRowsForPass<T extends { fullName: string; sourceId?: strin
 
 async function runScheduledSync(config: any): Promise<void> {
   const userId = config.userId;
+  const rateLimit = createRateLimitWatcher(userId);
   console.log(`[Scheduler] Running scheduled sync for user ${userId}`);
   
   try {
@@ -407,6 +506,15 @@ async function runScheduledSync(config: any): Promise<void> {
     const { source, timezone } = resolveScheduleSettings(config);
     console.log(`[Scheduler] Using schedule source for user ${userId}: ${String(source)} (timezone=${timezone})`);
     await persistScheduleRunState(config, currentTime);
+
+    // A rate limit left open by an earlier run (or by the boot auto-start)
+    // would fail every source call here. Skip the whole run and come back
+    // just after the reset instead of burning a tick on failures.
+    const pausedAtStart = rateLimit.check(() => 'skipping this run');
+    if (pausedAtStart) {
+      await persistRateLimitedNextRun(config, currentTime, pausedAtStart);
+      return;
+    }
 
     // Auto-discovery: Check for new repositories on every enabled source
     if (scheduleConfig.autoImport !== false) {
@@ -529,11 +637,20 @@ async function runScheduledSync(config: any): Promise<void> {
           const batchSize = scheduleConfig.batchSize || 10;
           const pauseBetweenBatches = scheduleConfig.pauseBetweenBatches || 2000;
           for (let i = 0; i < reposNeedingMirror.length; i += batchSize) {
+            const remaining = reposNeedingMirror.length - i;
+            if (rateLimit.check(() => `leaving ${remaining} repositories to auto-mirror on the next run`)) {
+              break;
+            }
+
             const batch = reposNeedingMirror.slice(i, Math.min(i + batchSize, reposNeedingMirror.length));
             console.log(`[Scheduler] Auto-mirror batch ${Math.floor(i / batchSize) + 1} of ${Math.ceil(reposNeedingMirror.length / batchSize)} (${batch.length} repos)`);
 
             await Promise.all(
               batch.map(async (repo) => {
+                if (rateLimit.check(() => `leaving ${remaining} repositories to auto-mirror on the next run`)) {
+                  return;
+                }
+
                 try {
                   const repository: Repository = {
                     ...repo,
@@ -570,6 +687,10 @@ async function runScheduledSync(config: any): Promise<void> {
                   await mirrorRepositoryToDestination({ octokit: await resolveOctokit(repo), repository, config });
                   console.log(`[Scheduler] Auto-mirrored repository: ${repo.fullName}`);
                 } catch (error) {
+                  if (isRateLimitError(error)) {
+                    await restoreRepositoryAfterRateLimit(repo, 'auto-mirror');
+                    return;
+                  }
                   console.error(`[Scheduler] Failed to auto-mirror repository ${repo.fullName}:`, error);
                 }
               })
@@ -650,6 +771,10 @@ async function runScheduledSync(config: any): Promise<void> {
 
     if (reposToSync.length === 0) {
       console.log(`[Scheduler] No repositories to sync for user ${userId}`);
+      const pausedAfterMirror = rateLimit.current();
+      if (pausedAfterMirror) {
+        await persistRateLimitedNextRun(config, currentTime, pausedAfterMirror);
+      }
       return;
     }
 
@@ -660,7 +785,11 @@ async function runScheduledSync(config: any): Promise<void> {
     const pauseBetweenBatches = scheduleConfig.pauseBetweenBatches || 5000;
     const concurrent = scheduleConfig.concurrent ?? false;
     
-    for (let i = 0; i < reposToSync.length; i += batchSize) {
+    syncBatches: for (let i = 0; i < reposToSync.length; i += batchSize) {
+      if (rateLimit.check(() => `leaving ${reposToSync.length - i} repositories to sync on the next run`)) {
+        break;
+      }
+
       const batch = reposToSync.slice(i, i + batchSize);
       
       if (concurrent) {
@@ -670,8 +799,11 @@ async function runScheduledSync(config: any): Promise<void> {
         );
       } else {
         // Process batch sequentially
-        for (const repo of batch) {
-          await syncSingleRepository(config, repo);
+        for (let j = 0; j < batch.length; j++) {
+          if (rateLimit.check(() => `leaving ${reposToSync.length - i - j} repositories to sync on the next run`)) {
+            break syncBatches;
+          }
+          await syncSingleRepository(config, batch[j]);
         }
       }
       
@@ -680,7 +812,16 @@ async function runScheduledSync(config: any): Promise<void> {
         await new Promise(resolve => setTimeout(resolve, pauseBetweenBatches));
       }
     }
-    
+
+    // A run that stopped on the rate limit comes back just after the reset,
+    // not at the schedule's own next slot, so the repositories it left behind
+    // are not held for a whole cron period.
+    const pausedUntil = rateLimit.current();
+    if (pausedUntil) {
+      await persistRateLimitedNextRun(config, currentTime, pausedUntil);
+      return;
+    }
+
     console.log(`[Scheduler] Completed scheduled sync for user ${userId}`);
   } catch (error) {
     console.error(`[Scheduler] Error during scheduled sync for user ${userId}:`, error);
@@ -706,6 +847,14 @@ async function syncSingleRepository(config: any, repo: any): Promise<void> {
     await syncRepositoryOnDestination({ config, repository });
     console.log(`[Scheduler] Successfully synced repository ${repo.fullName}`);
   } catch (error) {
+    // The sync path claimed the row as "syncing" and the failure handler below
+    // it wrote "failed". A rate limit is not the repository's fault, so put the
+    // row back where it was and let the run after the reset retry it.
+    if (isRateLimitError(error)) {
+      await restoreRepositoryAfterRateLimit(repo, 'sync');
+      return;
+    }
+
     console.error(`[Scheduler] Failed to sync repository ${repo.fullName}:`, error);
     
     // Update repository status to failed
@@ -790,6 +939,12 @@ async function performInitialAutoStart(): Promise<void> {
       
       console.log(`[Scheduler] Auto-starting for user ${config.userId}...`);
       
+      // Auto-start runs outside the scheduler lock, but it mirrors the same
+      // repositories and must stop on a rate limit too: otherwise it keeps
+      // failing every repository in turn and hands the scheduler a pile of
+      // rows marked "failed" (issue #437).
+      const rateLimit = createRateLimitWatcher(config.userId);
+
       try {
         // Step 1: Import repositories from every enabled source
         console.log(`[Scheduler] Step 1: Importing repositories from the configured sources for user ${config.userId}...`);
@@ -883,11 +1038,20 @@ async function performInitialAutoStart(): Promise<void> {
           // Process repositories in batches
           const batchSize = config.scheduleConfig?.batchSize || 5;
           for (let i = 0; i < reposNeedingMirror.length; i += batchSize) {
+            const remaining = reposNeedingMirror.length - i;
+            if (rateLimit.check(() => `leaving ${remaining} repositories for the first scheduled run`)) {
+              break;
+            }
+
             const batch = reposNeedingMirror.slice(i, Math.min(i + batchSize, reposNeedingMirror.length));
             console.log(`[Scheduler] Processing batch ${Math.floor(i / batchSize) + 1} of ${Math.ceil(reposNeedingMirror.length / batchSize)} (${batch.length} repos)`);
 
             await Promise.all(
               batch.map(async (repo) => {
+                if (rateLimit.check(() => `leaving ${remaining} repositories for the first scheduled run`)) {
+                  return;
+                }
+
                 try {
                   const repository: Repository = {
                     ...repo,
@@ -907,6 +1071,10 @@ async function performInitialAutoStart(): Promise<void> {
                   });
                   console.log(`[Scheduler] Successfully mirrored repository: ${repo.fullName}`);
                 } catch (error) {
+                  if (isRateLimitError(error)) {
+                    await restoreRepositoryAfterRateLimit(repo, 'auto-start mirror');
+                    return;
+                  }
                   console.error(`[Scheduler] Failed to mirror repository ${repo.fullName}:`, error);
                 }
               })
@@ -927,8 +1095,16 @@ async function performInitialAutoStart(): Promise<void> {
         
         // Update the schedule config to indicate we've run
         const currentTime = new Date();
-        const nextRun = await persistScheduleRunState(config, currentTime, true);
-        
+        let nextRun = await persistScheduleRunState(config, currentTime, true);
+
+        // A rate limit that stopped the initial mirror also moves the first
+        // scheduled run to just after the reset, so the repositories left
+        // behind are not held for a whole schedule period.
+        const pausedUntil = rateLimit.current();
+        if (pausedUntil) {
+          nextRun = await persistRateLimitedNextRun(config, currentTime, pausedUntil);
+        }
+
         console.log(`[Scheduler] Auto-start completed for user ${config.userId}, next sync at ${nextRun.toISOString()}`);
         
       } catch (error) {
