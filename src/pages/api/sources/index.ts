@@ -5,6 +5,7 @@ import {
   isValidSourceUrl,
 } from "@/lib/source-providers/kinds";
 import { requireAuthenticatedUserId } from "@/lib/auth-guards";
+import { blockedOutboundUrlReason } from "@/lib/utils/outbound-url";
 import { createSecureErrorResponse } from "@/lib/utils";
 import { createSource } from "@/lib/sources";
 import {
@@ -69,6 +70,13 @@ export const POST: APIRoute = async ({ request, locals }) => {
             status: 400,
             headers: { "Content-Type": "application/json" },
           }
+        );
+      }
+      const blocked = rawSourceUrl ? await blockedOutboundUrlReason(rawSourceUrl) : null;
+      if (blocked) {
+        return new Response(
+          JSON.stringify({ success: false, message: blocked }),
+          { status: 400, headers: { "Content-Type": "application/json" } }
         );
       }
     }

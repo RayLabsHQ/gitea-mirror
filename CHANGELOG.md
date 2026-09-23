@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Security
+- Source URLs go through the outbound guard too (GHSA-p7w3-46pg-mv6h): `POST /api/sources`, `PUT /api/sources/:id` and the configuration save refuse link local and metadata addresses for source and destination URLs, the source fetch helper pins and never follows redirects like the other user supplied URLs, source errors no longer carry the upstream body in their message, and errors raised by a request to another host are never forwarded to API clients whatever words they contain
 - Fixed four privately reported vulnerabilities (GHSA-9m33-xfrc-5jxw, GHSA-6m23-28hh-gjh2, GHSA-2hpx-83vg-gm45, GHSA-5pp8-r7f5-6q8p)
   - `POST /api/gitea/test-connection` and `POST /api/github/test-connection` now require a signed-in user; they were the only non-public API routes without a guard and made a server side request to any URL in the body
   - The email sign-up endpoint is closed server side once an account exists (`AUTH_ALLOW_SIGNUP=true` reopens it); only the signup page redirected before, so anyone reaching the instance could create an account through the API

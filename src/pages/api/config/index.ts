@@ -27,6 +27,7 @@ import {
 import { encrypt, decrypt } from "@/lib/utils/encryption";
 import { createDefaultConfig } from "@/lib/utils/config-defaults";
 import { requireAuthenticatedUserId } from "@/lib/auth-guards";
+import { blockedOutboundUrlReason } from "@/lib/utils/outbound-url";
 import { notificationConfigSchema } from "@/lib/db/schema";
 import {
   loadSourceApiItems,
@@ -100,6 +101,13 @@ export const POST: APIRoute = async ({ request, locals }) => {
           { status: 400, headers: { "Content-Type": "application/json" } }
         );
       }
+      const blockedDestination = await blockedOutboundUrlReason(giteaConfig.url);
+      if (blockedDestination) {
+        return new Response(
+          JSON.stringify({ success: false, message: blockedDestination }),
+          { status: 400, headers: { "Content-Type": "application/json" } }
+        );
+      }
     }
 
     // Validate the destination provider. GitHub and GitLab targets default to
@@ -134,6 +142,13 @@ export const POST: APIRoute = async ({ request, locals }) => {
             success: false,
             message: `${SOURCE_PROVIDER_LABELS[sourceProvider]} URL must be a valid http or https URL.`,
           }),
+          { status: 400, headers: { "Content-Type": "application/json" } }
+        );
+      }
+      const blockedSource = rawSourceUrl ? await blockedOutboundUrlReason(rawSourceUrl) : null;
+      if (blockedSource) {
+        return new Response(
+          JSON.stringify({ success: false, message: blockedSource }),
           { status: 400, headers: { "Content-Type": "application/json" } }
         );
       }

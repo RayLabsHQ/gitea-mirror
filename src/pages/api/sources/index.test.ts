@@ -211,6 +211,22 @@ describe("POST /api/sources", () => {
     expect(data.message).toContain("GitLab URL");
   });
 
+  test("refuses a source URL that points at the instance metadata service", async () => {
+    for (const url of ["http://169.254.169.254", "metadata.google.internal"]) {
+      const response = await post({
+        provider: "gitea",
+        url,
+        username: "me",
+        token: "tok",
+      });
+      expect(response.status).toBe(400);
+      const data = await response.json();
+      expect(data.success).toBe(false);
+      expect(data.message).toMatch(/link local|metadata service/);
+    }
+    expect(sourceRows).toHaveLength(0);
+  });
+
   test("answers 409 when the same source is already connected", async () => {
     sourceRows = [
       {

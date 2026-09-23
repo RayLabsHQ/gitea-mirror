@@ -14,6 +14,7 @@ import {
   sourceIdentity,
 } from "@/lib/config-locks";
 import { requireAuthenticatedUserId } from "@/lib/auth-guards";
+import { blockedOutboundUrlReason } from "@/lib/utils/outbound-url";
 import { createSecureErrorResponse } from "@/lib/utils";
 import {
   deleteSource,
@@ -86,6 +87,10 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
         `${SOURCE_PROVIDER_LABELS[provider]} URL must be a valid http or https URL.`,
         400
       );
+    }
+    if (provider !== "github" && typeof body.url === "string" && body.url.trim()) {
+      const blocked = await blockedOutboundUrlReason(body.url);
+      if (blocked) return jsonError(blocked, 400);
     }
 
     const repositoryCount = await countRepositoriesForSource(userId, sourceId);

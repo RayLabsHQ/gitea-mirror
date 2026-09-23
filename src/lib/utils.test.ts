@@ -198,3 +198,29 @@ describe("showErrorToast", () => {
     expect(calls[0][1].description).toContain("http://10.10.20.45:4321");
   });
 });
+
+describe("createSecureErrorResponse and errors from other hosts", () => {
+  test("never forwards the message of an error raised by a request to another host", async () => {
+    const { createSecureErrorResponse } = await import("./utils");
+    const { HttpError } = await import("./http-client");
+    const { SourceApiError } = await import("./source-providers/http");
+
+    const remote = new SourceApiError(
+      "Request to http://10.0.0.9/api/v1/orgs/x failed with status 403: Forbidden",
+      403,
+      "http://10.0.0.9/api/v1/orgs/x"
+    );
+    const destination = new HttpError("HTTP 404: Not Found", 404, "Not Found");
+    const local = new Error("Organization not found");
+
+    for (const [error, forwarded] of [
+      [remote, false],
+      [destination, false],
+      [local, true],
+    ] as const) {
+      const response = createSecureErrorResponse(error, "test");
+      const body = (await response.json()) as { error: string };
+      expect(body.error === error.message).toBe(forwarded);
+    }
+  });
+});

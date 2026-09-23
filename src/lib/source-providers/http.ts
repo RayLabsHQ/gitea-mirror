@@ -5,6 +5,8 @@
  * of database imports so the adapters stay pure.
  */
 
+import { safeFetch } from "@/lib/utils/outbound-url";
+
 export const DEFAULT_SOURCE_TIMEOUT_MS = 30_000;
 
 export class SourceApiError extends Error {
@@ -41,7 +43,11 @@ export async function sourceFetch<T>(
 ): Promise<SourceFetchResult<T>> {
   const { method = "GET", headers = {}, timeoutMs = DEFAULT_SOURCE_TIMEOUT_MS } = init;
 
-  const response = await fetch(url, {
+  // Source URLs are stored by signed in users, so they go through the same
+  // outbound guard as every other user supplied URL: link local and
+  // metadata addresses are refused, plain http is pinned to the checked
+  // address and redirects are not followed (GHSA-p7w3-46pg-mv6h).
+  const response = await safeFetch(url, {
     method,
     headers: { Accept: "application/json", ...headers },
     signal: AbortSignal.timeout(timeoutMs),
@@ -54,9 +60,14 @@ export async function sourceFetch<T>(
     } catch {
       // The status is what matters; the body is only for diagnostics.
     }
+    // The body stays on the error for logs and callers that inspect it and
+    // never goes into the message, which can reach API clients.
     const detail = summarizeErrorBody(body);
+    if (detail) {
+      console.warn(`[Source] ${method} ${url} failed with status ${response.status}: ${detail}`);
+    }
     throw new SourceApiError(
-      `Request to ${url} failed with status ${response.status}${detail ? `: ${detail}` : ""}`,
+      `Request to ${url} failed with status ${response.status}`,
       response.status,
       url,
       body

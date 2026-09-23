@@ -351,9 +351,15 @@ export function createSecureErrorResponse(
       /use post method/i,
     ];
 
-    const isSafeError = safeErrorPatterns.some(pattern =>
-      pattern.test(error.message)
-    );
+    // An error raised by a request to another host carries that host's URL
+    // and status, and the words above are exactly what such hosts put in
+    // their bodies. Those errors are matched by type, never by text.
+    const describesRemoteHost =
+      error.name === "SourceApiError" || error.name === "HttpError";
+
+    const isSafeError =
+      !describesRemoteHost &&
+      safeErrorPatterns.some(pattern => pattern.test(error.message));
 
     if (isSafeError) {
       clientMessage = error.message;
