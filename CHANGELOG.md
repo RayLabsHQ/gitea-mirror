@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Raised the dependency floors for the advisories published on 2026-09-08: Astro 7.2.8 (remote code execution through AVIF image optimization, and an authorization bypass when stripping the configured base), @xmldom/xmldom 0.8.15 (eight parser and serializer issues), sharp 0.35.4 (libheif), svgo 4.1.0 (removeScripts sanitization) and js-yaml 4.3.2 (merge-key CPU use). Applied to both the application and the documentation site.
 
 ### Added
+- Incremental issue and pull request sync (#449)
+  - After a complete pass, the issues and pull request passes ask GitHub only for items updated since the last one (with a 10 minute margin), so comments, pull request details, commits and files are fetched only for what changed instead of for every item on every sync
+  - The watermark is stored per repository in the metadata state and only moves when a pass finishes with no failed item
+  - A full pass still runs when the last one is older than 7 days, when the destination has no mirrored issues or pull requests, and after Reset metadata
 - Releases mirror from Gitea and Forgejo sources, Codeberg included (#440)
   - The release mirror lists releases through the repository's own source instead of always through the GitHub API, and keeps the same release limit, asset limit, per-destination lock, tag check and retention pruning
   - Release assets are downloaded with the credentials of the host they live on, so a Gitea source uses its own token and a public one needs none

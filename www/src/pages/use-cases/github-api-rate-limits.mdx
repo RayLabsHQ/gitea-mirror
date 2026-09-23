@@ -33,6 +33,8 @@ Gitea Mirror uses this on every GET. Each response's ETag is cached; every subse
 
 The practical effect is that sync frequency mostly stops mattering. A `30m` interval on a stable account costs barely more than a `24h` one, because 47 of the 48 daily sweeps are nearly all cache hits. The requests you spend scale with how much changed, not how often you look.
 
+Issues and pull requests go one step further. After the first complete pass, a scheduled sync asks GitHub only for the issues and pull requests updated since the previous one, and fetches comments, commits and changed files for those alone. A tracker with thousands of issues and a handful of changes costs a handful of requests. A full pass still runs once a week to catch anything the incremental listing cannot see.
+
 ## Configuration that stays inside the budget
 
 A few settings still matter for large or busy accounts:

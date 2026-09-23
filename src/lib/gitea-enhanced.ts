@@ -1090,13 +1090,15 @@ export async function syncGiteaRepoEnhanced({
           );
         } else {
           try {
-            await dependencies.mirrorGitRepoIssuesToGitea({
+            const issuesCursor = await dependencies.mirrorGitRepoIssuesToGitea({
               config,
               octokit,
               repository,
               giteaOwner: repoOwner,
               giteaRepoName: repoName,
+              syncCursor: metadataState.syncCursors.issues,
             });
+            if (issuesCursor) metadataState.syncCursors.issues = issuesCursor;
             metadataState.components.issues = true;
             metadataState.components.labels = true;
             metadataUpdated = true;
@@ -1123,13 +1125,15 @@ export async function syncGiteaRepoEnhanced({
           );
         } else {
           try {
-            await dependencies.mirrorGitRepoPullRequestsToGitea({
+            const pullRequestsCursor = await dependencies.mirrorGitRepoPullRequestsToGitea({
               config,
               octokit,
               repository,
               giteaOwner: repoOwner,
               giteaRepoName: repoName,
+              syncCursor: metadataState.syncCursors.pullRequests,
             });
+            if (pullRequestsCursor) metadataState.syncCursors.pullRequests = pullRequestsCursor;
             metadataState.components.pullRequests = true;
             metadataUpdated = true;
             console.log(

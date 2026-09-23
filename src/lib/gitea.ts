@@ -30,8 +30,11 @@ import {
   listSources,
 } from "./sources";
 import {
+  advanceMetadataSyncCursor,
   parseRepositoryMetadataState,
+  planMetadataPass,
   serializeRepositoryMetadataState,
+  type MetadataSyncCursor,
 } from "./metadata-state";
 import {
   normalizeReleaseAssetLimit,
@@ -1178,13 +1181,15 @@ export const mirrorGithubRepoToGitea = async ({
 
     if (shouldMirrorIssuesThisRun) {
       try {
-        await mirrorGitRepoIssuesToGitea({
+        const issuesCursor = await mirrorGitRepoIssuesToGitea({
           config,
           octokit,
           repository,
           giteaOwner: repoOwner,
           giteaRepoName: targetRepoName,
+          syncCursor: metadataState.syncCursors.issues,
         });
+        if (issuesCursor) metadataState.syncCursors.issues = issuesCursor;
         metadataState.components.issues = true;
         metadataState.components.labels = true;
         metadataUpdated = true;
@@ -1209,13 +1214,15 @@ export const mirrorGithubRepoToGitea = async ({
 
     if (shouldMirrorPullRequests) {
       try {
-        await mirrorGitRepoPullRequestsToGitea({
+        const pullRequestsCursor = await mirrorGitRepoPullRequestsToGitea({
           config,
           octokit,
           repository,
           giteaOwner: repoOwner,
           giteaRepoName: targetRepoName,
+          syncCursor: metadataState.syncCursors.pullRequests,
         });
+        if (pullRequestsCursor) metadataState.syncCursors.pullRequests = pullRequestsCursor;
         metadataState.components.pullRequests = true;
         metadataUpdated = true;
         console.log(
@@ -1950,13 +1957,15 @@ export async function mirrorGitHubRepoToGiteaOrg({
 
     if (shouldMirrorIssuesThisRun) {
       try {
-        await mirrorGitRepoIssuesToGitea({
+        const issuesCursor = await mirrorGitRepoIssuesToGitea({
           config,
           octokit,
           repository,
           giteaOwner: orgName,
           giteaRepoName: targetRepoName,
+          syncCursor: metadataState.syncCursors.issues,
         });
+        if (issuesCursor) metadataState.syncCursors.issues = issuesCursor;
         metadataState.components.issues = true;
         metadataState.components.labels = true;
         metadataUpdated = true;
@@ -1981,13 +1990,15 @@ export async function mirrorGitHubRepoToGiteaOrg({
 
     if (shouldMirrorPullRequests) {
       try {
-        await mirrorGitRepoPullRequestsToGitea({
+        const pullRequestsCursor = await mirrorGitRepoPullRequestsToGitea({
           config,
           octokit,
           repository,
           giteaOwner: orgName,
           giteaRepoName: targetRepoName,
+          syncCursor: metadataState.syncCursors.pullRequests,
         });
+        if (pullRequestsCursor) metadataState.syncCursors.pullRequests = pullRequestsCursor;
         metadataState.components.pullRequests = true;
         metadataUpdated = true;
         console.log(
@@ -2604,13 +2615,19 @@ export const mirrorGitRepoIssuesToGitea = async ({
   repository,
   giteaOwner,
   giteaRepoName,
+  syncCursor,
 }: {
   config: Partial<Config>;
   octokit: Octokit;
   repository: Repository;
   giteaOwner: string;
   giteaRepoName?: string;
-}) => {
+  /**
+   * Watermark from the previous completed issues pass (#449). When set,
+   * only issues updated since then are listed and reconciled.
+   */
+  syncCursor?: MetadataSyncCursor;
+}): Promise<MetadataSyncCursor | undefined> => {
   //things covered here are- issue, title, body, labels, comments and assignees
   // The source client arrives as `octokit` (anonymous for a public-only
   // source), so only the destination has to be configured here.
@@ -2649,30 +2666,74 @@ export const mirrorGitRepoIssuesToGitea = async ({
 
   const [owner, repo] = repository.fullName.split("/");
 
-  // Fetch GitHub issues
-  const issues = await octokit.paginate(
-    octokit.rest.issues.listForRepo,
-    {
-      owner,
-      repo,
-      state: "all",
-      per_page: 100,
-      sort: "created",
-      direction: "asc",
-    },
-    (res) => res.data
-  );
+  // Incremental sync (#449): once a pass has completed, ask GitHub only
+  // for issues updated since then. A new comment, a label, state,
+  // milestone, title or body change all bump updated_at, so this is the
+  // set that needs reconciling, and the per-issue comment listing below
+  // only runs for it. The watermark is the time this listing started.
+  let plan = planMetadataPass(syncCursor);
+  const listingStartedAt = new Date();
 
-  // Filter out pull requests
-  const filteredIssues = issues.filter((issue) => !(issue as any).pull_request);
+  const listGitHubIssues = async (since?: string) => {
+    const listed = await octokit.paginate(
+      octokit.rest.issues.listForRepo,
+      since
+        ? {
+            owner,
+            repo,
+            state: "all",
+            per_page: 100,
+            sort: "updated",
+            direction: "asc",
+            since,
+          }
+        : {
+            owner,
+            repo,
+            state: "all",
+            per_page: 100,
+            sort: "created",
+            direction: "asc",
+          },
+      (res) => res.data
+    );
+    // Filter out pull requests
+    const onlyIssues = listed.filter((issue) => !(issue as any).pull_request);
+    if (since) {
+      // Process in creation order, like the full pass, so issues opened
+      // since the last pass are created in Gitea in their GitHub order.
+      onlyIssues.sort(
+        (a, b) =>
+          new Date(a.created_at).getTime() - new Date(b.created_at).getTime() ||
+          a.number - b.number
+      );
+    }
+    return onlyIssues;
+  };
+
+  let filteredIssues: Awaited<ReturnType<typeof listGitHubIssues>>;
+  if (plan.mode === "incremental") {
+    console.log(
+      `[Issues] Incremental pass for ${repository.fullName}: listing issues updated since ${plan.since}`
+    );
+    filteredIssues = await listGitHubIssues(plan.since);
+    console.log(
+      `[Issues] Incremental listing returned ${filteredIssues.length} changed issue(s) for ${repository.fullName}`
+    );
+  } else {
+    console.log(
+      `[Issues] Full pass for ${repository.fullName} (${plan.reason})`
+    );
+    filteredIssues = await listGitHubIssues();
+  }
 
   console.log(
     `Mirroring ${filteredIssues.length} issues from ${repository.fullName}`
   );
 
-  if (filteredIssues.length === 0) {
+  if (filteredIssues.length === 0 && plan.mode === "full") {
     console.log(`No issues to mirror for ${repository.fullName}`);
-    return;
+    return advanceMetadataSyncCursor(syncCursor, plan.mode, listingStartedAt);
   }
 
   const ghIssueMarkerRegex = /\[GH-ISSUE #(\d+)\]/i;
@@ -2736,6 +2797,25 @@ export const mirrorGitRepoIssuesToGitea = async ({
     titleFallbackMap.set(title, existing);
   }
 
+  // A watermark with no mirrored issue on the Gitea side means the
+  // destination was recreated or emptied since the last pass. Only a
+  // full listing can repopulate it.
+  if (plan.mode === "incremental" && giteaIssueByGitHubNumber.size === 0) {
+    console.log(
+      `[Issues] No mirrored issues found in Gitea for ${repoName}; ignoring the watermark and running a full pass`
+    );
+    plan = { mode: "full", reason: "destination has no mirrored issues" };
+    filteredIssues = await listGitHubIssues();
+    console.log(
+      `Mirroring ${filteredIssues.length} issues from ${repository.fullName}`
+    );
+  }
+
+  if (filteredIssues.length === 0) {
+    console.log(`No issues to mirror for ${repository.fullName}`);
+    return advanceMetadataSyncCursor(syncCursor, plan.mode, listingStartedAt);
+  }
+
   // Get existing labels from Gitea
   const giteaLabelsRes = await httpGet(
     `${config.giteaConfig.url}/api/v1/repos/${giteaOwner}/${repoName}/labels`,
@@ -2765,7 +2845,7 @@ export const mirrorGitRepoIssuesToGitea = async ({
   }
 
   // Process issues in parallel with concurrency control
-  await processWithRetry(
+  const mirroredIssues = await processWithRetry(
     filteredIssues,
     async (issue) => {
       const githubLabelNames =
@@ -3084,6 +3164,18 @@ export const mirrorGitRepoIssuesToGitea = async ({
   console.log(
     `Completed mirroring ${filteredIssues.length} issues for ${repository.fullName}`
   );
+
+  // processWithRetry logs and drops items that still fail after their
+  // retries. Keep the old watermark so the next pass lists them again.
+  const failedIssueCount = filteredIssues.length - mirroredIssues.length;
+  if (failedIssueCount > 0) {
+    console.warn(
+      `[Issues] ${failedIssueCount} issue(s) failed for ${repository.fullName}; keeping the previous watermark so they are retried next run`
+    );
+    return undefined;
+  }
+
+  return advanceMetadataSyncCursor(syncCursor, plan.mode, listingStartedAt);
 };
 
 /**
@@ -3964,13 +4056,19 @@ export async function mirrorGitRepoPullRequestsToGitea({
   repository,
   giteaOwner,
   giteaRepoName,
+  syncCursor,
 }: {
   config: Partial<Config>;
   octokit: Octokit;
   repository: Repository;
   giteaOwner: string;
   giteaRepoName?: string;
-}) {
+  /**
+   * Watermark from the previous completed pull request pass (#449).
+   * When set, only pull requests updated since then are processed.
+   */
+  syncCursor?: MetadataSyncCursor;
+}): Promise<MetadataSyncCursor | undefined> {
   // The source client arrives as `octokit`; see mirrorGitRepoIssuesToGitea.
   if (
     !config.giteaConfig?.token ||
@@ -4007,27 +4105,97 @@ export async function mirrorGitRepoPullRequestsToGitea({
 
   const [owner, repo] = repository.fullName.split("/");
 
-  // Fetch GitHub pull requests
-  const pullRequests = await octokit.paginate(
-    octokit.rest.pulls.list,
-    {
-      owner,
-      repo,
-      state: "all",
-      per_page: 100,
-      sort: "created",
-      direction: "asc",
-    },
-    (res) => res.data
-  );
+  // Incremental sync (#449). pulls.list has no `since`, so an
+  // incremental pass lists issues updated since the watermark and keeps
+  // the pull request entries. The detail, commits and files calls below
+  // then only run for those. The watermark is the time this listing
+  // started.
+  let plan = planMetadataPass(syncCursor);
+  const listingStartedAt = new Date();
+  type ListedPullRequest = Awaited<
+    ReturnType<typeof octokit.rest.pulls.list>
+  >["data"][number];
+
+  const listAllPullRequests = () =>
+    octokit.paginate(
+      octokit.rest.pulls.list,
+      {
+        owner,
+        repo,
+        state: "all",
+        per_page: 100,
+        sort: "created",
+        direction: "asc",
+      },
+      (res) => res.data
+    );
+
+  const listChangedPullRequests = async (
+    since: string
+  ): Promise<ListedPullRequest[]> => {
+    const changed = await octokit.paginate(
+      octokit.rest.issues.listForRepo,
+      {
+        owner,
+        repo,
+        state: "all",
+        per_page: 100,
+        sort: "updated",
+        direction: "asc",
+        since,
+      },
+      (res) => res.data
+    );
+    return changed
+      .filter((entry) => Boolean((entry as any).pull_request))
+      .sort(
+        (a, b) =>
+          new Date(a.created_at).getTime() - new Date(b.created_at).getTime() ||
+          a.number - b.number
+      )
+      .map(
+        (entry) =>
+          // The issues endpoint has no head/base refs. The per-PR detail
+          // call below replaces this with the full pull request; these
+          // fields are what the basic fallback needs if that call fails.
+          ({
+            number: entry.number,
+            title: entry.title,
+            body: entry.body ?? null,
+            state: entry.state,
+            html_url: entry.html_url,
+            user: entry.user,
+            created_at: entry.created_at,
+            merged_at: (entry as any).pull_request?.merged_at ?? null,
+          }) as unknown as ListedPullRequest
+      );
+  };
+
+  let pullRequests: ListedPullRequest[];
+  let listedFromIssues = false;
+  if (plan.mode === "incremental") {
+    console.log(
+      `[Pull Requests] Incremental pass for ${repository.fullName}: listing pull requests updated since ${plan.since}`
+    );
+    pullRequests = await listChangedPullRequests(plan.since);
+    listedFromIssues = true;
+    console.log(
+      `[Pull Requests] Incremental listing returned ${pullRequests.length} changed pull request(s) for ${repository.fullName}`
+    );
+  } else {
+    console.log(
+      `[Pull Requests] Full pass for ${repository.fullName} (${plan.reason})`
+    );
+    pullRequests = await listAllPullRequests();
+  }
 
   console.log(
     `Mirroring ${pullRequests.length} pull requests from ${repository.fullName}`
   );
 
-  if (pullRequests.length === 0) {
+  if (pullRequests.length === 0 && plan.mode === "full") {
     console.log(`No pull requests to mirror for ${repository.fullName}`);
-    return;
+    return advanceMetadataSyncCursor(syncCursor, plan.mode, listingStartedAt);
   }
 
   // Note: Gitea doesn't have a direct API to create pull requests from external sources
@@ -4104,6 +4272,25 @@ export async function mirrorGitRepoPullRequestsToGitea({
     prIssuesPage += 1;
   }
 
+  // Same guard as the issues pass: a watermark with no mirrored pull
+  // request in Gitea means the destination was recreated or emptied.
+  if (plan.mode === "incremental" && existingPrIssuesByNumber.size === 0) {
+    console.log(
+      `[Pull Requests] No mirrored pull requests found in Gitea for ${repoName}; ignoring the watermark and running a full pass`
+    );
+    plan = { mode: "full", reason: "destination has no mirrored pull requests" };
+    pullRequests = await listAllPullRequests();
+    listedFromIssues = false;
+    console.log(
+      `Mirroring ${pullRequests.length} pull requests from ${repository.fullName}`
+    );
+  }
+
+  if (pullRequests.length === 0) {
+    console.log(`No pull requests to mirror for ${repository.fullName}`);
+    return advanceMetadataSyncCursor(syncCursor, plan.mode, listingStartedAt);
+  }
+
   const { processWithRetry } = await import("@/lib/utils/concurrency");
 
   const rawPullConcurrency = config.giteaConfig?.pullRequestConcurrency ?? 5;
@@ -4121,9 +4308,10 @@ export async function mirrorGitRepoPullRequestsToGitea({
   let successCount = 0;
   let failedCount = 0;
 
-  await processWithRetry(
+  const processedPullRequests = await processWithRetry(
     pullRequests,
-    async (pr) => {
+    async (listedPr) => {
+      let pr = listedPr;
       try {
         // Fetch additional PR data for rich metadata
         const [prDetail, commits, files] = await Promise.all([
@@ -4131,6 +4319,11 @@ export async function mirrorGitRepoPullRequestsToGitea({
           octokit.rest.pulls.listCommits({ owner, repo, pull_number: pr.number, per_page: 10 }),
           octokit.rest.pulls.listFiles({ owner, repo, pull_number: pr.number, per_page: 100 })
         ]);
+        // An incremental listing came from the issues endpoint; the
+        // detail response has every field the pulls.list entry has.
+        if (listedFromIssues) {
+          pr = prDetail.data as unknown as ListedPullRequest;
+        }
 
         // Build rich PR body with metadata
         let richBody = `## 📋 Pull Request Information\n\n`;
@@ -4408,6 +4601,21 @@ export async function mirrorGitRepoPullRequestsToGitea({
   );
 
   console.log(`✅ Mirrored ${successCount}/${pullRequests.length} pull requests to Gitea as enriched issues (${failedCount} failed)`);
+
+  // Keep the old watermark when any pull request failed so the next
+  // pass lists it again.
+  const unfinishedPullRequests = Math.max(
+    failedCount,
+    pullRequests.length - processedPullRequests.length
+  );
+  if (unfinishedPullRequests > 0) {
+    console.warn(
+      `[Pull Requests] ${unfinishedPullRequests} pull request(s) failed for ${repository.fullName}; keeping the previous watermark so they are retried next run`
+    );
+    return undefined;
+  }
+
+  return advanceMetadataSyncCursor(syncCursor, plan.mode, listingStartedAt);
 }
 
 export async function mirrorGitRepoLabelsToGitea({

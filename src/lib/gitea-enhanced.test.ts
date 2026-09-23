@@ -9,8 +9,8 @@ mock.module("@/lib/helpers", () => ({
 }));
 
 const mockMirrorGitHubReleasesToGitea = mock(() => Promise.resolve());
-const mockMirrorGitRepoIssuesToGitea = mock(() => Promise.resolve());
-const mockMirrorGitRepoPullRequestsToGitea = mock(() => Promise.resolve());
+const mockMirrorGitRepoIssuesToGitea = mock(() => Promise.resolve(undefined));
+const mockMirrorGitRepoPullRequestsToGitea = mock(() => Promise.resolve(undefined));
 const mockMirrorGitRepoLabelsToGitea = mock(() => Promise.resolve());
 const mockMirrorGitRepoMilestonesToGitea = mock(() => Promise.resolve());
 const mockSyncRepositoryMetadataToGitea = mock(() => Promise.resolve());

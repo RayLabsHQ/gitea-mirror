@@ -152,6 +152,12 @@ Throughout, job status updates are published as server-sent events so the dashbo
 
 Gitea's API cannot create a pull request through the migration path, so mirrored pull requests are created as issues instead. Each one is tagged with a `pull-request` label, its title is prefixed with the original number and status, and its body includes the commit history, changed files, and merge outcome. This is a deliberate workaround for an API limitation, not a temporary gap.
 
+### Incremental issue and pull request sync
+
+The first issues pass and the first pull request pass list everything on GitHub. After a pass completes, the repository's metadata state records when its listing started, and later passes ask GitHub only for items updated since then, minus a 10 minute safety margin. New comments, label, state, milestone, title and body changes all move an item's `updated_at`, so only those items are reconciled and only their comments, pull request details, commits and files are fetched. Pull requests are listed through the issues endpoint for this, because the pull request list has no `since` filter.
+
+A full pass still runs when the last one is more than 7 days old, when the destination has no mirrored issues or pull requests (for example after it was recreated), and after Reset metadata. If any item fails, the watermark is not moved, so the next pass lists it again. Items deleted on GitHub are left on the destination, as before.
+
 ### Ordering and concurrency
 
 Gitea assigns issue numbers on creation, so processing issues in parallel can produce numbering that does not match GitHub's. The concurrency settings default to 3 for issues and 5 for pull requests, trading some ordering fidelity for speed. Set both to 1 if you need the numbering to line up.

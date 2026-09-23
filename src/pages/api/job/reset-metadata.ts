@@ -76,6 +76,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
       );
     }
 
+    // Clearing the whole state also drops the incremental sync
+    // watermarks (#449), so the next issues and pull request passes are
+    // full ones.
     await db
       .update(repositories)
       .set({
