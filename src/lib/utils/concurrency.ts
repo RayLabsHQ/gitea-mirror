@@ -1,4 +1,26 @@
 import { JOB_HEARTBEAT_INTERVAL_MS } from "@/lib/interrupted-job-detection";
+import { isRateLimitError } from "@/lib/rate-limit-gate";
+
+/**
+ * Thrown by processWithRetry when a batch stopped because the source is rate
+ * limited. Carries the results gathered so far so a caller can still count
+ * what was done. Shaped like a GitHub refusal so isRateLimitError matches it.
+ */
+export class RateLimitedBatchError<R = unknown> extends Error {
+  readonly status = 403;
+  readonly results: R[];
+  readonly cause: unknown;
+
+  constructor(cause: unknown, results: R[], remaining: number) {
+    super(
+      `Rate limit hit while processing items; stopped with ${remaining} item(s) left ` +
+        `(${cause instanceof Error ? cause.message : String(cause)})`
+    );
+    this.name = "RateLimitedBatchError";
+    this.cause = cause;
+    this.results = results;
+  }
+}
 
 /**
  * Utility for processing items in parallel with concurrency control
@@ -13,7 +35,12 @@ export async function processInParallel<T, R>(
   items: T[],
   processItem: (item: T) => Promise<R>,
   concurrencyLimit: number = 5, // Safe default for GitHub API (max 100 concurrent, but 5-10 recommended)
-  onProgress?: (completed: number, total: number, result?: R) => void
+  onProgress?: (completed: number, total: number, result?: R) => void,
+  /**
+   * Asked before each batch. Returning true ends the loop with the results
+   * gathered so far; the remaining items are not started.
+   */
+  shouldStop?: () => boolean
 ): Promise<R[]> {
   const results: R[] = [];
   let completed = 0;
@@ -21,6 +48,11 @@ export async function processInParallel<T, R>(
 
   // Process items in batches to control concurrency
   for (let i = 0; i < total; i += concurrencyLimit) {
+    if (shouldStop?.()) {
+      console.warn(`[Batch] Stopping before item ${i} of ${total}: source is rate limited`);
+      break;
+    }
+
     const batch = items.slice(i, i + concurrencyLimit);
 
     const batchPromises = batch.map(async (item) => {
@@ -119,6 +151,11 @@ export async function processWithRetry<T, R>(
   // Track checkpoint counter
   let itemsProcessedSinceLastCheckpoint = 0;
 
+  // The first rate limit refusal ends the run: retrying it, or starting the
+  // items behind it, would only send more requests into the same wall
+  // (issue #437). The caller gets a RateLimitedBatchError with what finished.
+  let rateLimitError: unknown = null;
+
   // Wrap the process function with retry logic
   const processWithRetryLogic = async (item: T): Promise<R> => {
     let lastError: Error | null = null;
@@ -152,6 +189,16 @@ export async function processWithRetry<T, R>(
         return result;
       } catch (error) {
         lastError = error instanceof Error ? error : new Error(String(error));
+
+        if (isRateLimitError(error)) {
+          if (!rateLimitError) {
+            rateLimitError = error;
+            console.warn(
+              `[Batch] Rate limit hit on ${getItemId ? getItemId(item) : "an item"}; not retrying and not starting the remaining items`
+            );
+          }
+          throw lastError;
+        }
 
         if (attempt <= maxRetries) {
           if (onRetry) {
@@ -190,8 +237,13 @@ export async function processWithRetry<T, R>(
     items,
     processWithRetryLogic,
     concurrencyLimit,
-    onProgress
+    onProgress,
+    () => rateLimitError !== null
   );
+
+  if (rateLimitError) {
+    throw new RateLimitedBatchError(rateLimitError, results, items.length - results.length);
+  }
 
   return results;
 }

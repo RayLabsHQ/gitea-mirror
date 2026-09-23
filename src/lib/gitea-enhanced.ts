@@ -7,6 +7,7 @@
  */
 
 import type { Config } from "@/types/config";
+import { isRateLimitError } from "@/lib/rate-limit-gate";
 import {
   getRepositorySource,
   SOURCE_PROVIDER_LABELS,
@@ -1072,6 +1073,9 @@ export async function syncGiteaRepoEnhanced({
             );
           }
         } catch (releaseError) {
+          // Rate limited: fail the sync so the scheduler restores the row and
+          // retries after the reset instead of running the next component (#437).
+          if (isRateLimitError(releaseError)) throw releaseError;
           console.error(
             `[Sync] Failed to mirror releases for ${repository.name}: ${
               releaseError instanceof Error
@@ -1106,6 +1110,9 @@ export async function syncGiteaRepoEnhanced({
               `[Sync] Mirrored issues for ${repository.name} after sync`
             );
           } catch (issueError) {
+            // Rate limited: fail the sync so the scheduler restores the row and
+            // retries after the reset instead of running the next component (#437).
+            if (isRateLimitError(issueError)) throw issueError;
             console.error(
               `[Sync] Failed to mirror issues for ${repository.name}: ${
                 issueError instanceof Error
@@ -1140,6 +1147,9 @@ export async function syncGiteaRepoEnhanced({
               `[Sync] Mirrored pull requests for ${repository.name} after sync`
             );
           } catch (prError) {
+            // Rate limited: fail the sync so the scheduler restores the row and
+            // retries after the reset instead of running the next component (#437).
+            if (isRateLimitError(prError)) throw prError;
             console.error(
               `[Sync] Failed to mirror pull requests for ${repository.name}: ${
                 prError instanceof Error ? prError.message : String(prError)
@@ -1170,6 +1180,9 @@ export async function syncGiteaRepoEnhanced({
               `[Sync] Mirrored labels for ${repository.name} after sync`
             );
           } catch (labelError) {
+            // Rate limited: fail the sync so the scheduler restores the row and
+            // retries after the reset instead of running the next component (#437).
+            if (isRateLimitError(labelError)) throw labelError;
             console.error(
               `[Sync] Failed to mirror labels for ${repository.name}: ${
                 labelError instanceof Error
@@ -1202,6 +1215,9 @@ export async function syncGiteaRepoEnhanced({
               `[Sync] Mirrored milestones for ${repository.name} after sync`
             );
           } catch (milestoneError) {
+            // Rate limited: fail the sync so the scheduler restores the row and
+            // retries after the reset instead of running the next component (#437).
+            if (isRateLimitError(milestoneError)) throw milestoneError;
             console.error(
               `[Sync] Failed to mirror milestones for ${repository.name}: ${
                 milestoneError instanceof Error

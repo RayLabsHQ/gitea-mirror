@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- No request leaves the process while GitHub is rate limited (#437, second report)
+  - The v3.37.0 change stopped the scheduler run from holding its lock through a rate limit, but every other request already queued in the run still went to GitHub and came back 403, and the retry helper sent each of them three more times; GitHub counts requests made while limited toward abuse detection and one account was suspended that way
+  - Every GitHub client now holds its requests while the source is paused: a limit that resets within two minutes is waited out inside the request, a longer one fails the request at once without contacting GitHub, and the rate limit probe endpoint stays available so the pause can end early
+  - The retry helper no longer retries a rate limit refusal and stops starting the remaining items of the batch
+  - A rate limit refusal inside the issues, pull requests, releases, labels or milestones pass now fails the repository (which the scheduler already puts back to its previous status and retries after the reset) instead of moving on to the next component, and a pull request whose detail call was refused is no longer written as a stripped down issue
+  - A secondary rate limit pauses the whole client for its retry-after window, not only the request that was told to slow down
+
 ### Security
 - Source URLs go through the outbound guard too (GHSA-p7w3-46pg-mv6h): `POST /api/sources`, `PUT /api/sources/:id` and the configuration save refuse link local and metadata addresses for source and destination URLs, the source fetch helper pins and never follows redirects like the other user supplied URLs, source errors no longer carry the upstream body in their message, and errors raised by a request to another host are never forwarded to API clients whatever words they contain
 - Fixed four privately reported vulnerabilities (GHSA-9m33-xfrc-5jxw, GHSA-6m23-28hh-gjh2, GHSA-2hpx-83vg-gm45, GHSA-5pp8-r7f5-6q8p)

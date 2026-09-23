@@ -29,6 +29,7 @@ import {
   findSourceForRepository,
   listSources,
 } from "./sources";
+import { isRateLimitError } from "./rate-limit-gate";
 import {
   advanceMetadataSyncCursor,
   parseRepositoryMetadataState,
@@ -1160,6 +1161,10 @@ export const mirrorGithubRepoToGitea = async ({
           );
         }
       } catch (error) {
+        // A rate limit is not this repository's fault and the other
+        // components would run into the same wall: fail the mirror so the
+        // scheduler puts the row back and retries after the reset (#437).
+        if (isRateLimitError(error)) throw error;
         console.error(
           `[Metadata] Failed to mirror releases for ${repository.name}: ${
             error instanceof Error ? error.message : String(error)
@@ -1197,6 +1202,10 @@ export const mirrorGithubRepoToGitea = async ({
           `[Metadata] Successfully mirrored issues for ${repository.name}`
         );
       } catch (error) {
+        // A rate limit is not this repository's fault and the other
+        // components would run into the same wall: fail the mirror so the
+        // scheduler puts the row back and retries after the reset (#437).
+        if (isRateLimitError(error)) throw error;
         console.error(
           `[Metadata] Failed to mirror issues for ${repository.name}: ${
             error instanceof Error ? error.message : String(error)
@@ -1229,6 +1238,10 @@ export const mirrorGithubRepoToGitea = async ({
           `[Metadata] Successfully mirrored pull requests for ${repository.name}`
         );
       } catch (error) {
+        // A rate limit is not this repository's fault and the other
+        // components would run into the same wall: fail the mirror so the
+        // scheduler puts the row back and retries after the reset (#437).
+        if (isRateLimitError(error)) throw error;
         console.error(
           `[Metadata] Failed to mirror pull requests for ${repository.name}: ${
             error instanceof Error ? error.message : String(error)
@@ -1261,6 +1274,10 @@ export const mirrorGithubRepoToGitea = async ({
           `[Metadata] Successfully mirrored labels for ${repository.name}`
         );
       } catch (error) {
+        // A rate limit is not this repository's fault and the other
+        // components would run into the same wall: fail the mirror so the
+        // scheduler puts the row back and retries after the reset (#437).
+        if (isRateLimitError(error)) throw error;
         console.error(
           `[Metadata] Failed to mirror labels for ${repository.name}: ${
             error instanceof Error ? error.message : String(error)
@@ -1291,6 +1308,10 @@ export const mirrorGithubRepoToGitea = async ({
           `[Metadata] Successfully mirrored milestones for ${repository.name}`
         );
       } catch (error) {
+        // A rate limit is not this repository's fault and the other
+        // components would run into the same wall: fail the mirror so the
+        // scheduler puts the row back and retries after the reset (#437).
+        if (isRateLimitError(error)) throw error;
         console.error(
           `[Metadata] Failed to mirror milestones for ${repository.name}: ${
             error instanceof Error ? error.message : String(error)
@@ -1938,6 +1959,10 @@ export async function mirrorGitHubRepoToGiteaOrg({
           );
         }
       } catch (error) {
+        // A rate limit is not this repository's fault and the other
+        // components would run into the same wall: fail the mirror so the
+        // scheduler puts the row back and retries after the reset (#437).
+        if (isRateLimitError(error)) throw error;
         console.error(
           `[Metadata] Failed to mirror releases for ${repository.name}: ${
             error instanceof Error ? error.message : String(error)
@@ -1973,6 +1998,10 @@ export async function mirrorGitHubRepoToGiteaOrg({
           `[Metadata] Successfully mirrored issues for ${repository.name} to org ${orgName}/${targetRepoName}`
         );
       } catch (error) {
+        // A rate limit is not this repository's fault and the other
+        // components would run into the same wall: fail the mirror so the
+        // scheduler puts the row back and retries after the reset (#437).
+        if (isRateLimitError(error)) throw error;
         console.error(
           `[Metadata] Failed to mirror issues for ${repository.name} to org ${orgName}/${targetRepoName}: ${
             error instanceof Error ? error.message : String(error)
@@ -2005,6 +2034,10 @@ export async function mirrorGitHubRepoToGiteaOrg({
           `[Metadata] Successfully mirrored pull requests for ${repository.name} to org ${orgName}/${targetRepoName}`
         );
       } catch (error) {
+        // A rate limit is not this repository's fault and the other
+        // components would run into the same wall: fail the mirror so the
+        // scheduler puts the row back and retries after the reset (#437).
+        if (isRateLimitError(error)) throw error;
         console.error(
           `[Metadata] Failed to mirror pull requests for ${repository.name} to org ${orgName}/${targetRepoName}: ${
             error instanceof Error ? error.message : String(error)
@@ -2037,6 +2070,10 @@ export async function mirrorGitHubRepoToGiteaOrg({
           `[Metadata] Successfully mirrored labels for ${repository.name} to org ${orgName}/${targetRepoName}`
         );
       } catch (error) {
+        // A rate limit is not this repository's fault and the other
+        // components would run into the same wall: fail the mirror so the
+        // scheduler puts the row back and retries after the reset (#437).
+        if (isRateLimitError(error)) throw error;
         console.error(
           `[Metadata] Failed to mirror labels for ${repository.name} to org ${orgName}/${targetRepoName}: ${
             error instanceof Error ? error.message : String(error)
@@ -2067,6 +2104,10 @@ export async function mirrorGitHubRepoToGiteaOrg({
           `[Metadata] Successfully mirrored milestones for ${repository.name} to org ${orgName}/${targetRepoName}`
         );
       } catch (error) {
+        // A rate limit is not this repository's fault and the other
+        // components would run into the same wall: fail the mirror so the
+        // scheduler puts the row back and retries after the reset (#437).
+        if (isRateLimitError(error)) throw error;
         console.error(
           `[Metadata] Failed to mirror milestones for ${repository.name} to org ${orgName}/${targetRepoName}: ${
             error instanceof Error ? error.message : String(error)
@@ -4487,6 +4528,9 @@ export async function mirrorGitRepoPullRequestsToGitea({
         successCount++;
         console.log(`[Pull Requests] ✅ Successfully created issue for PR #${pr.number}`);
       } catch (apiError) {
+        // A rate limit refusal is not a reason to write a stripped down
+        // issue; let it end the pass so the next run redoes this PR (#437).
+        if (isRateLimitError(apiError)) throw apiError;
         // If the detailed fetch fails, fall back to basic PR info
         console.log(`[Pull Requests] Falling back to basic info for PR #${pr.number} due to error: ${apiError}`);
         const basicIssueData = {

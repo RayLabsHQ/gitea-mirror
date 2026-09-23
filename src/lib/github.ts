@@ -10,6 +10,7 @@ import {
 } from "@/lib/github-conditional-requests";
 import {
   clearRateLimit,
+  installRateLimitGate,
   markRateLimited,
   rateLimitGateKey,
 } from "@/lib/rate-limit-gate";
@@ -80,7 +81,7 @@ export function decideRateLimitRetry({
  * handlers only log and schedule the retry — there is no per-user
  * rate-limit state or UI event to update for a tokenless source.
  */
-function githubThrottleOptions(userId?: string) {
+export function githubThrottleOptions(userId?: string) {
   return {
     onRateLimit: async (
       retryAfter: number,
@@ -160,6 +161,11 @@ function githubThrottleOptions(userId?: string) {
       console.warn(
         `[GitHub] Secondary rate limit hit for ${options.method} ${options.url}`,
       );
+
+      // A secondary limit is GitHub asking the whole client to slow down,
+      // not only this request. Close the gate for the retry-after window so
+      // the other queued calls wait instead of piling on (issue #437).
+      markRateLimited(rateLimitGateKey(userId), Date.now() + retryAfter * 1000);
 
       // Update status and notify UI (if available)
       if (userId && publishEvent) {
@@ -306,6 +312,13 @@ export function createGitHubClient(
     scope: userId ?? username ?? conditionalRequestTokenScope(token),
   });
 
+  // Registered last so it runs first: a closed gate is answered before the
+  // conditional request cache and before anything reaches the network.
+  installRateLimitGate(octokit, {
+    key: rateLimitGateKey(userId),
+    maxWaitMs: RATE_LIMIT_FAST_FAIL_THRESHOLD_SECONDS * 1000,
+  });
+
   return octokit;
 }
 
@@ -328,7 +341,7 @@ export function createPublicGitHubClient(apiBaseUrl?: string): Octokit {
   // with GitHub Actions, which sets it to https://api.github.com by default).
   const baseUrl = apiBaseUrl || process.env.GH_API_URL || process.env.GITHUB_API_URL || "https://api.github.com";
 
-  return new MyOctokit({
+  const octokit = new MyOctokit({
     userAgent: "gitea-mirror/3.5.4",
     baseUrl, // Configurable for E2E testing
     log: {
@@ -345,6 +358,15 @@ export function createPublicGitHubClient(apiBaseUrl?: string): Octokit {
     },
     throttle: githubThrottleOptions(),
   });
+
+  // Anonymous clients share one gate key, so one exhausted 60 req/hr budget
+  // pauses every tokenless source together.
+  installRateLimitGate(octokit, {
+    key: rateLimitGateKey(undefined),
+    maxWaitMs: RATE_LIMIT_FAST_FAIL_THRESHOLD_SECONDS * 1000,
+  });
+
+  return octokit;
 }
 
 /**

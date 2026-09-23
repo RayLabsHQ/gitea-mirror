@@ -35,6 +35,8 @@ The practical effect is that sync frequency mostly stops mattering. A `30m` inte
 
 Issues and pull requests go one step further. After the first complete pass, a scheduled sync asks GitHub only for the issues and pull requests updated since the previous one, and fetches comments, commits and changed files for those alone. A tracker with thousands of issues and a handful of changes costs a handful of requests. A full pass still runs once a week to catch anything the incremental listing cannot see.
 
+When the limit is hit anyway, nothing else is sent. Every GitHub client pauses until the reset GitHub reported: a reset within two minutes is waited out inside the request, a longer one fails the request at once without contacting GitHub, and the run ends so the next scheduled one starts a minute after the reset. Repositories that failed only because of the limit go back to their previous status and are retried then. This matters because GitHub counts requests made while limited toward abuse detection, which can suspend the account.
+
 ## Configuration that stays inside the budget
 
 A few settings still matter for large or busy accounts:
