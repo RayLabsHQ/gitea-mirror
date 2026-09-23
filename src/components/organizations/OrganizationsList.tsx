@@ -2,8 +2,7 @@ import { useMemo, useState } from "react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Plus, RefreshCw, Building2, Check, AlertCircle, Clock, MoreVertical, Ban, SlidersHorizontal, Trash2, Layers } from "lucide-react";
-import { toast } from "sonner";
+import { Plus, RefreshCw, Building2, Check, AlertCircle, Clock, Ban, Layers } from "lucide-react";
 import type { MirrorOverrides, Organization } from "@/lib/db/schema";
 import type { FilterParams } from "@/types/filter";
 import type { SourceApiRecord } from "@/types/config";
@@ -26,21 +25,11 @@ import {
   type SourceProviderKind,
 } from "@/lib/source-providers/kinds";
 import { SOURCE_PROVIDER_ICONS } from "@/lib/source-providers/icons";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import type { OrganizationsViewMode } from "@/lib/utils/organizations-view";
+import { OrganizationSourceEditor } from "./OrganizationSourceEditor";
+import { OrganizationActionsMenu } from "./OrganizationActionsMenu";
+import { OrganizationsTable } from "./OrganizationsTable";
+import { getOrganizationStatusBadge, resolveOrganizationSource } from "./organization-presentation";
 
 interface OrganizationListProps {
   organizations: Organization[];
@@ -64,86 +53,17 @@ interface OrganizationListProps {
   sourceUrl?: string;
   /** Connected sources; with more than one, each card shows and edits its own source. */
   sources?: SourceApiRecord[];
+  /** Cards (default) or the compact list (#428). */
+  view?: OrganizationsViewMode;
 }
+
+const STATUS_ICONS = { check: Check, alert: AlertCircle, clock: Clock, ban: Ban } as const;
 
 // Helper function to get status badge variant and icon
 const getStatusBadge = (status: string | null) => {
-  switch (status) {
-    case "imported":
-      return { variant: "secondary" as const, label: "Not Mirrored", icon: null };
-    case "mirroring":
-      return { variant: "outline" as const, label: "Mirroring", icon: Clock };
-    case "mirrored":
-      return { variant: "default" as const, label: "Mirrored", icon: Check };
-    case "failed":
-      return { variant: "destructive" as const, label: "Failed", icon: AlertCircle };
-    case "ignored":
-      return { variant: "outline" as const, label: "Ignored", icon: Ban };
-    default:
-      return { variant: "secondary" as const, label: "Unknown", icon: null };
-  }
+  const badge = getOrganizationStatusBadge(status);
+  return { ...badge, icon: badge.icon ? STATUS_ICONS[badge.icon] : null };
 };
-
-// Radix reserves the empty string as a Select value, so unpinned
-// organizations use this sentinel instead.
-const EVERY_SOURCE_VALUE = "every-source";
-
-function OrganizationSourceEditor({
-  sources,
-  value,
-  disabled = false,
-  onUpdateSource,
-}: {
-  sources: SourceApiRecord[];
-  value?: string | null;
-  disabled?: boolean;
-  onUpdateSource: (sourceId: string | null) => Promise<void>;
-}) {
-  const [isUpdating, setIsUpdating] = useState(false);
-
-  const handleValueChange = async (next: string) => {
-    setIsUpdating(true);
-    try {
-      await onUpdateSource(next === EVERY_SOURCE_VALUE ? null : next);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to update source");
-    } finally {
-      setIsUpdating(false);
-    }
-  };
-
-  return (
-    <div className="flex items-center gap-2 w-full">
-      <span className="flex items-center gap-1.5 text-xs text-muted-foreground shrink-0">
-        <Layers className="h-3 w-3" />
-        Source
-      </span>
-      <Select
-        value={value ?? EVERY_SOURCE_VALUE}
-        onValueChange={(next) => void handleValueChange(next)}
-        disabled={disabled || isUpdating}
-      >
-        <SelectTrigger className="h-8 min-w-0 flex-1 text-xs">
-          <SelectValue placeholder="Source" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value={EVERY_SOURCE_VALUE}>Every source</SelectItem>
-          {sources.map((source) => {
-            const SourceIcon = SOURCE_PROVIDER_ICONS[source.provider];
-            return (
-              <SelectItem key={source.id} value={source.id}>
-                <span className="flex items-center gap-2">
-                  <SourceIcon className="h-3.5 w-3.5" />
-                  {source.name}
-                </span>
-              </SelectItem>
-            );
-          })}
-        </SelectContent>
-      </Select>
-    </div>
-  );
-}
 
 export function OrganizationList({
   organizations,
@@ -160,6 +80,7 @@ export function OrganizationList({
   sourceProvider = "github",
   sourceUrl: sourceUrlProp,
   sources,
+  view = "cards",
 }: OrganizationListProps) {
   const { giteaConfig, mirrorOptions, advancedOptions } = useGiteaConfig();
   const [overridesTarget, setOverridesTarget] = useState<Organization | null>(null);
@@ -339,12 +260,43 @@ export function OrganizationList({
     return result;
   }, [organizations, filter]);
 
+  const overridesDialog = (
+    <MirrorOverridesDialog
+      open={!!overridesTarget}
+      onOpenChange={(open) => {
+        if (!open) setOverridesTarget(null);
+      }}
+      targetKind="organization"
+      targetName={overridesTarget?.name ?? ""}
+      value={overridesTarget?.mirrorOverrides ?? null}
+      destinationProvider={giteaConfig?.provider}
+      inheritedFrom={{
+        ...mirrorOptionsToFlags(mirrorOptions),
+        skipForks: !!advancedOptions?.skipForks,
+      }}
+      inheritedLabel="global settings"
+      onSave={async (overrides) => {
+        if (overridesTarget?.id) {
+          await handleUpdateMirrorOverrides(overridesTarget.id, overrides);
+        }
+      }}
+    />
+  );
+
   return isLoading ? (
-    <div className="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,minmax(27rem,1fr))] gap-4">
-      {Array.from({ length: 5 }).map((_, i) => (
-        <Skeleton key={i} className="h-[11.25rem] w-full" />
-      ))}
-    </div>
+    view === "list" ? (
+      <div className="flex flex-col gap-2">
+        {Array.from({ length: 6 }).map((_, i) => (
+          <Skeleton key={i} className="h-14 w-full" />
+        ))}
+      </div>
+    ) : (
+      <div className="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,minmax(27rem,1fr))] gap-4">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <Skeleton key={i} className="h-[11.25rem] w-full" />
+        ))}
+      </div>
+    )
   ) : filteredOrganizations.length === 0 ? (
     <div className="flex flex-col items-center justify-center py-12 text-center">
       <Building2 className="h-12 w-12 text-muted-foreground mb-4" />
@@ -373,6 +325,29 @@ export function OrganizationList({
         </Button>
       )}
     </div>
+  ) : view === "list" ? (
+    <>
+      <OrganizationsTable
+        organizations={filteredOrganizations}
+        loadingOrgIds={loadingOrgIds}
+        sources={sources}
+        sourceProvider={sourceProvider}
+        sourceUrl={sourceUrl}
+        destination={destination}
+        getDestinationUrl={getGiteaOrgUrl}
+        destinationLinkTooltip={destinationLinkTooltip}
+        defaultDestinationFor={defaultDestinationFor}
+        onUpdateDestination={handleUpdateDestination}
+        onMoveMirrors={destination.isPushTarget ? undefined : handleMoveMirrors}
+        onUpdateSource={handleUpdateSource}
+        onMirror={onMirror}
+        onSync={onSync}
+        onIgnore={onIgnore}
+        onDelete={onDelete}
+        onEditMirrorOptions={setOverridesTarget}
+      />
+      {overridesDialog}
+    </>
   ) : (
     <div className="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,minmax(27rem,1fr))] gap-4 pb-20 sm:pb-0">
       {filteredOrganizations.map((org, index) => {
@@ -380,16 +355,12 @@ export function OrganizationList({
         const statusBadge = getStatusBadge(org.status);
         const StatusIcon = statusBadge.icon;
         const orgSources = sources ?? [];
-        const pinnedSource =
-          orgSources.find((source) => source.id === org.sourceId) ?? null;
-        const isPublicOnlySource = pinnedSource?.token === "";
-        const orgProvider: SourceProviderKind = pinnedSource?.provider ?? sourceProvider;
-        const orgSourceUrl = pinnedSource
-          ? normalizeSourceUrl(pinnedSource.url, pinnedSource.provider)
-          : sourceUrl;
-        const orgSourceLabel = SOURCE_PROVIDER_LABELS[orgProvider];
-        const orgSourceShortLabel = orgProvider === "gitea" ? "Gitea" : orgSourceLabel;
-        const OrgSourceIcon = SOURCE_PROVIDER_ICONS[orgProvider];
+        const orgSource = resolveOrganizationSource(org, sources, sourceProvider, sourceUrl);
+        const { pinnedSource, isPublicOnlySource } = orgSource;
+        const orgSourceUrl = orgSource.sourceUrl;
+        const orgSourceLabel = orgSource.label;
+        const orgSourceShortLabel = orgSource.shortLabel;
+        const OrgSourceIcon = SOURCE_PROVIDER_ICONS[orgSource.provider];
 
         return (
           <Card 
@@ -724,51 +695,15 @@ export function OrganizationList({
                   </>
                 )}
 
-                {/* Dropdown menu for additional actions */}
-                {org.status !== "mirroring" && (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon" disabled={isLoading} className="h-10 w-10">
-                        <MoreVertical className="h-4 w-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      {onSync && (org.status === "mirrored" || org.status === "failed") && (
-                        <>
-                          <DropdownMenuItem onClick={() => org.id && onSync({ orgId: org.id })}>
-                            <RefreshCw className="h-4 w-4 mr-2" />
-                            Sync Organization
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                        </>
-                      )}
-                      <DropdownMenuItem onClick={() => setOverridesTarget(org)}>
-                        <SlidersHorizontal className="h-4 w-4 mr-2" />
-                        Mirror Options
-                      </DropdownMenuItem>
-                      {org.status !== "ignored" && (
-                        <DropdownMenuItem
-                          onClick={() => org.id && onIgnore && onIgnore({ orgId: org.id, ignore: true })}
-                        >
-                          <Ban className="h-4 w-4 mr-2" />
-                          Ignore Organization
-                        </DropdownMenuItem>
-                      )}
-                      {onDelete && (
-                        <>
-                          {org.status !== "ignored" && <DropdownMenuSeparator />}
-                          <DropdownMenuItem
-                            className="text-destructive focus:text-destructive"
-                            onClick={() => org.id && onDelete(org.id)}
-                          >
-                            <Trash2 className="h-4 w-4 mr-2" />
-                            Delete from Mirror
-                          </DropdownMenuItem>
-                        </>
-                      )}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                )}
+                <OrganizationActionsMenu
+                  org={org}
+                  disabled={isLoading}
+                  onSync={onSync}
+                  onIgnore={onIgnore}
+                  onDelete={onDelete}
+                  onEditMirrorOptions={setOverridesTarget}
+                  triggerClassName="h-10 w-10"
+                />
               </div>
 
               <div className="flex items-center gap-2 justify-center">
@@ -884,51 +819,14 @@ export function OrganizationList({
                   </>
                 )}
                 
-                {/* Dropdown menu for additional actions */}
-                {org.status !== "mirroring" && (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon" disabled={isLoading}>
-                        <MoreVertical className="h-4 w-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      {onSync && (org.status === "mirrored" || org.status === "failed") && (
-                        <>
-                          <DropdownMenuItem onClick={() => org.id && onSync({ orgId: org.id })}>
-                            <RefreshCw className="h-4 w-4 mr-2" />
-                            Sync Organization
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                        </>
-                      )}
-                      <DropdownMenuItem onClick={() => setOverridesTarget(org)}>
-                        <SlidersHorizontal className="h-4 w-4 mr-2" />
-                        Mirror Options
-                      </DropdownMenuItem>
-                      {org.status !== "ignored" && (
-                        <DropdownMenuItem
-                          onClick={() => org.id && onIgnore && onIgnore({ orgId: org.id, ignore: true })}
-                        >
-                          <Ban className="h-4 w-4 mr-2" />
-                          Ignore Organization
-                        </DropdownMenuItem>
-                      )}
-                      {onDelete && (
-                        <>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            className="text-destructive focus:text-destructive"
-                            onClick={() => org.id && onDelete(org.id)}
-                          >
-                            <Trash2 className="h-4 w-4 mr-2" />
-                            Delete from Mirror
-                          </DropdownMenuItem>
-                        </>
-                      )}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                )}
+                <OrganizationActionsMenu
+                  org={org}
+                  disabled={isLoading}
+                  onSync={onSync}
+                  onIgnore={onIgnore}
+                  onDelete={onDelete}
+                  onEditMirrorOptions={setOverridesTarget}
+                />
               </div>
 
               <div className="flex items-center gap-2">
@@ -988,26 +886,7 @@ export function OrganizationList({
         );
       })}
 
-      <MirrorOverridesDialog
-        open={!!overridesTarget}
-        onOpenChange={(open) => {
-          if (!open) setOverridesTarget(null);
-        }}
-        targetKind="organization"
-        targetName={overridesTarget?.name ?? ""}
-        value={overridesTarget?.mirrorOverrides ?? null}
-        destinationProvider={giteaConfig?.provider}
-        inheritedFrom={{
-          ...mirrorOptionsToFlags(mirrorOptions),
-          skipForks: !!advancedOptions?.skipForks,
-        }}
-        inheritedLabel="global settings"
-        onSave={async (overrides) => {
-          if (overridesTarget?.id) {
-            await handleUpdateMirrorOverrides(overridesTarget.id, overrides);
-          }
-        }}
-      />
+      {overridesDialog}
     </div>
   );
 }

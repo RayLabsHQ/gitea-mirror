@@ -44,6 +44,11 @@ interface MirrorDestinationEditorProps {
   destinationLabel?: string;
   isUpdating?: boolean;
   className?: string;
+  /**
+   * Show only the destination and the edit button. The list view (#428)
+   * already names the organization in its first column.
+   */
+  compact?: boolean;
 }
 
 const MAX_LISTED = 8;
@@ -88,6 +93,7 @@ export function MirrorDestinationEditor({
   destinationLabel = "Gitea",
   isUpdating = false,
   className,
+  compact = false,
 }: MirrorDestinationEditorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [editValue, setEditValue] = useState(currentDestination || "");
@@ -185,14 +191,25 @@ export function MirrorDestinationEditor({
 
   return (
     <div className={cn("flex items-center gap-2 w-full", className)}>
-      <div className="flex items-center gap-1.5 text-xs text-muted-foreground min-w-0 flex-1">
-        <Building2 className="h-3 w-3 flex-shrink-0" />
-        <span className="font-medium truncate">{organizationName}</span>
-        <ArrowRight className="h-3 w-3 flex-shrink-0" />
-        <span className={cn(
-          "font-medium truncate",
-          hasOverride && "text-orange-600 dark:text-orange-400"
-        )}>
+      <div className={cn(
+        "flex items-center gap-1.5 text-muted-foreground min-w-0 flex-1",
+        compact ? "text-sm" : "text-xs"
+      )}>
+        {!compact && (
+          <>
+            <Building2 className="h-3 w-3 flex-shrink-0" />
+            <span className="font-medium truncate">{organizationName}</span>
+            <ArrowRight className="h-3 w-3 flex-shrink-0" />
+          </>
+        )}
+        <span
+          className={cn(
+            "font-medium truncate",
+            compact && "text-foreground",
+            hasOverride && "text-orange-600 dark:text-orange-400"
+          )}
+          title={effectiveDestination}
+        >
           {effectiveDestination}
         </span>
         {hasOverride && (

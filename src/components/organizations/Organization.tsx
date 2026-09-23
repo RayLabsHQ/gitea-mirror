@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Search, RefreshCw, FlipHorizontal, Filter, LoaderCircle, Trash2, Download } from "lucide-react";
+import { Search, RefreshCw, FlipHorizontal, Filter, LoaderCircle, Trash2, Download, LayoutGrid, List } from "lucide-react";
 import type { MirrorJob, Organization } from "@/lib/db/schema";
 import { OrganizationList } from "./OrganizationsList";
 import AddOrganizationDialog from "./AddOrganizationDialog";
@@ -30,6 +30,9 @@ import { invalidateConfigCache, useConfigStatus } from "@/hooks/useConfigStatus"
 import { useNavigation } from "@/components/layout/MainLayout";
 import { useLiveRefresh } from "@/hooks/useLiveRefresh";
 import { withBase } from "@/lib/base-path";
+import { useOrganizationsView } from "@/hooks/useOrganizationsView";
+import type { OrganizationsViewMode } from "@/lib/utils/organizations-view";
+import { cn } from "@/lib/utils";
 import {
   Drawer,
   DrawerClose,
@@ -53,6 +56,8 @@ export function Organization() {
   const [organizations, setOrganizations] = useState<Organization[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isDialogOpen, setIsDialogOpen] = useState<boolean>(false);
+  // Cards or the compact list (#428); remembered per browser.
+  const { view, setView } = useOrganizationsView();
   const { user } = useAuth();
   const { sourceProvider, sourceUrl, sources } = useConfigStatus();
   const { navigationKey } = useNavigation();
@@ -778,6 +783,8 @@ export function Organization() {
             </DrawerContent>
           </Drawer>
           
+          <OrganizationsViewToggle view={view} onChange={setView} compact />
+
           <Button
             variant="outline"
             size="icon"
@@ -938,6 +945,8 @@ export function Organization() {
 
           {/* Action buttons */}
           <div className="flex items-center gap-2 ml-auto">
+            <OrganizationsViewToggle view={view} onChange={setView} />
+
             <Button
               variant="outline"
               size="icon"
@@ -991,6 +1000,7 @@ export function Organization() {
         sourceProvider={sourceProvider}
         sourceUrl={sourceUrl}
         sources={sources}
+        view={view}
       />
 
       <AddOrganizationDialog
@@ -1063,6 +1073,76 @@ export function Organization() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  );
+}
+
+/**
+ * Cards or list switch for the Organizations page (#428). A segmented
+ * pair of icon buttons so it sits next to the other toolbar icons. The
+ * compact form is one button that flips to the other view, for the
+ * narrow toolbar where every icon costs search box width.
+ */
+function OrganizationsViewToggle({
+  view,
+  onChange,
+  compact = false,
+}: {
+  view: OrganizationsViewMode;
+  onChange: (next: OrganizationsViewMode) => void;
+  compact?: boolean;
+}) {
+  const options: { value: OrganizationsViewMode; label: string; Icon: typeof LayoutGrid }[] = [
+    { value: "cards", label: "Cards", Icon: LayoutGrid },
+    { value: "list", label: "List", Icon: List },
+  ];
+  if (compact) {
+    const next = options.find((option) => option.value !== view) ?? options[0];
+    return (
+      <Button
+        type="button"
+        variant="outline"
+        size="icon"
+        onClick={() => onChange(next.value)}
+        title={`Switch to ${next.label.toLowerCase()} view`}
+        aria-label={`Switch to ${next.label.toLowerCase()} view`}
+        className="h-10 w-10 shrink-0"
+        data-testid="organizations-view-toggle"
+      >
+        <next.Icon className="h-4 w-4" />
+      </Button>
+    );
+  }
+  return (
+    <div
+      role="radiogroup"
+      aria-label="Organizations view"
+      className="flex items-center h-10 rounded-md border border-input bg-background shrink-0"
+      data-testid="organizations-view-toggle"
+    >
+      {options.map(({ value, label, Icon }, index) => (
+        <Button
+          key={value}
+          type="button"
+          variant="ghost"
+          size="icon"
+          role="radio"
+          aria-checked={view === value}
+          aria-label={`${label} view`}
+          title={`${label} view`}
+          data-state={view === value ? "on" : "off"}
+          onClick={() => onChange(value)}
+          className={cn(
+            "h-full w-10 rounded-none",
+            index === 0 ? "rounded-l-md" : "rounded-r-md border-l border-input",
+            view === value
+              ? "bg-muted text-foreground hover:bg-muted"
+              : "text-muted-foreground hover:text-foreground"
+          )}
+        >
+          <Icon className="h-4 w-4" />
+        </Button>
+      ))}
     </div>
   );
 }

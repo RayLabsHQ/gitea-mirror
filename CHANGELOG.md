@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Raised the dependency floors for the advisories published on 2026-09-08: Astro 7.2.8 (remote code execution through AVIF image optimization, and an authorization bypass when stripping the configured base), @xmldom/xmldom 0.8.15 (eight parser and serializer issues), sharp 0.35.4 (libheif), svgo 4.1.0 (removeScripts sanitization) and js-yaml 4.3.2 (merge-key CPU use). Applied to both the application and the documentation site.
 
 ### Added
+- List view for the Organizations page (#428)
+  - A cards/list switch in the toolbar; the list shows one row per organization with its role, destination, repository counts, last mirrored time, status, the same actions as the cards and the source and destination links, so a few dozen organizations fit on one screen
+  - The choice is remembered per browser, next to the theme and time format preferences
 - Incremental issue and pull request sync (#449)
   - After a complete pass, the issues and pull request passes ask GitHub only for items updated since the last one (with a 10 minute margin), so comments, pull request details, commits and files are fetched only for what changed instead of for every item on every sync
   - The watermark is stored per repository in the metadata state and only moves when a pass finishes with no failed item
