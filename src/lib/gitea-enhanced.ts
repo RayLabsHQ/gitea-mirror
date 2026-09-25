@@ -8,6 +8,7 @@
 
 import type { Config } from "@/types/config";
 import { isRateLimitError } from "@/lib/rate-limit-gate";
+import { persistMetadataPassProgress } from "./metadata-progress-store";
 import {
   getRepositorySource,
   SOURCE_PROVIDER_LABELS,
@@ -1101,6 +1102,11 @@ export async function syncGiteaRepoEnhanced({
               giteaOwner: repoOwner,
               giteaRepoName: repoName,
               syncCursor: metadataState.syncCursors.issues,
+              passProgress: metadataState.passProgress.issues,
+              onPassProgress: async (progress) => {
+                metadataUpdated = true;
+                await persistMetadataPassProgress(repository.id, metadataState, "issues", progress);
+              },
             });
             if (issuesCursor) metadataState.syncCursors.issues = issuesCursor;
             metadataState.components.issues = true;
@@ -1139,6 +1145,11 @@ export async function syncGiteaRepoEnhanced({
               giteaOwner: repoOwner,
               giteaRepoName: repoName,
               syncCursor: metadataState.syncCursors.pullRequests,
+              passProgress: metadataState.passProgress.pullRequests,
+              onPassProgress: async (progress) => {
+                metadataUpdated = true;
+                await persistMetadataPassProgress(repository.id, metadataState, "pullRequests", progress);
+              },
             });
             if (pullRequestsCursor) metadataState.syncCursors.pullRequests = pullRequestsCursor;
             metadataState.components.pullRequests = true;
@@ -1321,7 +1332,17 @@ export async function syncGiteaRepoEnhanced({
       throw syncError;
     }
   } catch (error) {
-    console.error(`[Sync] Error while syncing repository ${repository.name}:`, error);
+    if (isRateLimitError(error)) {
+      // Expected and handled: the scheduler puts the row back and retries
+      // after the reset. One line instead of the whole error object.
+      console.warn(
+        `[Sync] Sync of ${repository.name} paused by the source rate limit: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    } else {
+      console.error(`[Sync] Error while syncing repository ${repository.name}:`, error);
+    }
 
     // Update repo with error status
     await db
@@ -1338,7 +1359,9 @@ export async function syncGiteaRepoEnhanced({
         userId: config.userId,
         repositoryId: repository.id,
         repositoryName: repository.name,
-        message: `Failed to sync repository: ${repository.name}`,
+        message: isRateLimitError(error)
+          ? `Sync paused by the source rate limit: ${repository.name}`
+          : `Failed to sync repository: ${repository.name}`,
         details: error instanceof Error ? error.message : "Unknown error",
         status: "failed",
       });

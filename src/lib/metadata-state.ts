@@ -36,11 +36,39 @@ export interface MetadataSyncCursors {
   pullRequests?: MetadataSyncCursor;
 }
 
+/**
+ * Progress of an issues or pull request pass that did not finish, most
+ * often because the source ran out of rate limit budget (#449 follow-up).
+ * The next run repeats the same pass and skips the items listed in
+ * `done`, as long as they have not changed since `startedAt`, so a pass
+ * over a large repository gets further every run instead of starting
+ * over each time.
+ */
+export interface MetadataPassProgress {
+  mode: MetadataPassPlan["mode"];
+  /** Listing start for an incremental pass; repeated as is on resume. */
+  since?: string;
+  /**
+   * When the listing of the first attempt started. Used as the watermark
+   * once the pass completes, so nothing that changed while it was
+   * interrupted is missed.
+   */
+  startedAt: string;
+  /** GitHub numbers finished by this pass, as inclusive ranges. */
+  done: Array<[number, number]>;
+}
+
+export interface MetadataPassProgressByKind {
+  issues?: MetadataPassProgress;
+  pullRequests?: MetadataPassProgress;
+}
+
 export interface RepositoryMetadataState {
   components: MetadataComponentsState;
   lastSyncedAt?: string;
   acknowledgedDeletions: AcknowledgedDeletion[];
   syncCursors: MetadataSyncCursors;
+  passProgress: MetadataPassProgressByKind;
 }
 
 /**
@@ -77,6 +105,7 @@ export function createDefaultMetadataState(): RepositoryMetadataState {
     components: { ...defaultComponents },
     acknowledgedDeletions: [],
     syncCursors: {},
+    passProgress: {},
   };
 }
 
@@ -123,6 +152,147 @@ export function planMetadataPass(
   return {
     mode: "incremental",
     since: new Date(lastPassMs - INCREMENTAL_SYNC_SAFETY_MARGIN_MS).toISOString(),
+  };
+}
+
+/**
+ * Collapse item numbers into sorted inclusive ranges, so a pass over
+ * thousands of issues stores a handful of pairs.
+ */
+export function toNumberRanges(numbers: Iterable<number>): Array<[number, number]> {
+  const sorted = [...new Set(numbers)]
+    .filter((n) => Number.isInteger(n))
+    .sort((a, b) => a - b);
+  const ranges: Array<[number, number]> = [];
+  for (const n of sorted) {
+    const last = ranges[ranges.length - 1];
+    if (last && n === last[1] + 1) {
+      last[1] = n;
+    } else {
+      ranges.push([n, n]);
+    }
+  }
+  return ranges;
+}
+
+export function numberInRanges(n: number, ranges: Array<[number, number]>): boolean {
+  return ranges.some(([from, to]) => n >= from && n <= to);
+}
+
+function parsePassProgress(raw: unknown): MetadataPassProgress | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const { mode, since, startedAt, done } = raw as {
+    mode?: unknown;
+    since?: unknown;
+    startedAt?: unknown;
+    done?: unknown;
+  };
+  if (mode !== "full" && mode !== "incremental") return undefined;
+  if (!isValidTimestamp(startedAt)) return undefined;
+  if (mode === "incremental" && !isValidTimestamp(since)) return undefined;
+  if (!Array.isArray(done)) return undefined;
+  const ranges = done.filter(
+    (entry): entry is [number, number] =>
+      Array.isArray(entry) &&
+      entry.length === 2 &&
+      Number.isInteger(entry[0]) &&
+      Number.isInteger(entry[1]) &&
+      entry[0] <= entry[1]
+  );
+  return mode === "incremental"
+    ? { mode, since: since as string, startedAt, done: ranges }
+    : { mode, startedAt, done: ranges };
+}
+
+/**
+ * Plan a pass, picking up an unfinished one when there is one. A resumed
+ * pass keeps its mode and `since`, and reports its original start so the
+ * watermark stored at the end covers the whole interrupted window.
+ */
+export function planMetadataPassWithProgress(
+  cursor: MetadataSyncCursor | undefined,
+  progress: MetadataPassProgress | undefined,
+  now: Date = new Date()
+): { plan: MetadataPassPlan; startedAt: Date; resume?: MetadataPassProgress } {
+  const startedAtMs = progress ? Date.parse(progress.startedAt) : NaN;
+  if (progress && Number.isFinite(startedAtMs) && startedAtMs <= now.getTime()) {
+    const plan: MetadataPassPlan =
+      progress.mode === "incremental" && progress.since
+        ? { mode: "incremental", since: progress.since }
+        : { mode: "full", reason: "resuming a full pass that did not finish" };
+    return { plan, startedAt: new Date(startedAtMs), resume: progress };
+  }
+  return { plan: planMetadataPass(cursor, now), startedAt: now };
+}
+
+/**
+ * Decides how much work an item needs in the current pass.
+ *
+ * - "skip": a resumed pass already finished it and it has not changed
+ *   since that pass started.
+ * - "unchanged": a full pass is revisiting an item that is already in
+ *   Gitea and has not changed since the last completed pass. Its
+ *   comments, commits and files cannot have changed either (each of
+ *   those bumps updated_at), so no per-item source call is needed.
+ * - "sync": everything else gets the full treatment.
+ */
+export function classifyPassItem({
+  number,
+  updatedAt,
+  plan,
+  cursor,
+  resume,
+  existsInDestination,
+}: {
+  number: number;
+  updatedAt: string | null | undefined;
+  plan: MetadataPassPlan;
+  cursor: MetadataSyncCursor | undefined;
+  resume: MetadataPassProgress | undefined;
+  existsInDestination: boolean;
+}): "skip" | "unchanged" | "sync" {
+  const updatedMs = updatedAt ? Date.parse(updatedAt) : NaN;
+  if (!Number.isFinite(updatedMs)) return "sync";
+
+  if (resume && numberInRanges(number, resume.done)) {
+    const resumeStartMs = Date.parse(resume.startedAt);
+    if (updatedMs < resumeStartMs - INCREMENTAL_SYNC_SAFETY_MARGIN_MS) {
+      return "skip";
+    }
+  }
+
+  if (plan.mode === "full" && cursor && existsInDestination) {
+    const lastPassMs = Date.parse(cursor.lastPassStartedAt);
+    if (
+      Number.isFinite(lastPassMs) &&
+      updatedMs < lastPassMs - INCREMENTAL_SYNC_SAFETY_MARGIN_MS
+    ) {
+      return "unchanged";
+    }
+  }
+
+  return "sync";
+}
+
+/**
+ * Progress to store for a pass that did not finish. Numbers finished by
+ * an earlier attempt of the same pass are kept.
+ */
+export function buildPassProgress(
+  plan: MetadataPassPlan,
+  startedAt: Date,
+  completed: Iterable<number>,
+  resume: MetadataPassProgress | undefined
+): MetadataPassProgress {
+  const numbers = new Set<number>(completed);
+  for (const [from, to] of resume?.done ?? []) {
+    for (let n = from; n <= to; n++) numbers.add(n);
+  }
+  return {
+    mode: plan.mode,
+    ...(plan.mode === "incremental" ? { since: plan.since } : {}),
+    startedAt: startedAt.toISOString(),
+    done: toNumberRanges(numbers),
   };
 }
 
@@ -202,6 +372,13 @@ export function parseRepositoryMetadataState(
     const pullRequests = parseSyncCursor(parsed.syncCursors.pullRequests);
     if (issues) base.syncCursors.issues = issues;
     if (pullRequests) base.syncCursors.pullRequests = pullRequests;
+  }
+
+  if (parsed.passProgress && typeof parsed.passProgress === "object") {
+    const issues = parsePassProgress(parsed.passProgress.issues);
+    const pullRequests = parsePassProgress(parsed.passProgress.pullRequests);
+    if (issues) base.passProgress.issues = issues;
+    if (pullRequests) base.passProgress.pullRequests = pullRequests;
   }
 
   return base;

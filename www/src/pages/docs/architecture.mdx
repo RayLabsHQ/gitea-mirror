@@ -158,6 +158,10 @@ The first issues pass and the first pull request pass list everything on GitHub.
 
 A full pass still runs when the last one is more than 7 days old, when the destination has no mirrored issues or pull requests (for example after it was recreated), and after Reset metadata. If any item fails, the watermark is not moved, so the next pass lists it again. Items deleted on GitHub are left on the destination, as before.
 
+A full pass lists every issue and pull request, but only fetches comments, pull request details, commits and files for the items that are missing on the destination or changed since the last completed pass. Everything else is corrected from the listing alone, so a weekly full pass over a large tracker costs about one request per hundred items.
+
+When a pass stops because the source is rate limited, the items it finished are saved with the repository. The next run repeats the same pass and skips them unless they changed in the meantime, so a pass that needs more than one hour of budget still completes over several runs. Once it completes, the watermark is set to the start of its first attempt.
+
 ### Ordering and concurrency
 
 Gitea assigns issue numbers on creation, so processing issues in parallel can produce numbering that does not match GitHub's. The concurrency settings default to 3 for issues and 5 for pull requests, trading some ordering fidelity for speed. Set both to 1 if you need the numbering to line up.

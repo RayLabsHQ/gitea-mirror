@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- Issue and pull request passes over large repositories finish across rate limit resets (#449 follow-up)
+  - A pass stopped by the rate limit keeps the numbers it finished, and the next run repeats the same pass and skips them unless they changed since it started; before, every run started over from the first item, so a repository too large for one hour of budget never completed a pass
+  - The weekly full pass no longer fetches comments for issues, or the detail, commits and files of pull requests, that are already in the destination and have not changed since the last completed pass; it lists everything and corrects title, body, state and labels from the listing
+  - A sync paused by the rate limit logs one line instead of the error object with every partial result, and its activity entry says it was paused
 - No request leaves the process while GitHub is rate limited (#437, second report)
   - The v3.37.0 change stopped the scheduler run from holding its lock through a rate limit, but every other request already queued in the run still went to GitHub and came back 403, and the retry helper sent each of them three more times; GitHub counts requests made while limited toward abuse detection and one account was suspended that way
   - Every GitHub client now holds its requests while the source is paused: a limit that resets within two minutes is waited out inside the request, a longer one fails the request at once without contacting GitHub, and the rate limit probe endpoint stays available so the pause can end early

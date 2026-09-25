@@ -8,8 +8,8 @@ import { isRateLimitError } from "@/lib/rate-limit-gate";
  */
 export class RateLimitedBatchError<R = unknown> extends Error {
   readonly status = 403;
-  readonly results: R[];
-  readonly cause: unknown;
+  declare readonly results: R[];
+  declare readonly cause: unknown;
 
   constructor(cause: unknown, results: R[], remaining: number) {
     super(
@@ -17,8 +17,10 @@ export class RateLimitedBatchError<R = unknown> extends Error {
         `(${cause instanceof Error ? cause.message : String(cause)})`
     );
     this.name = "RateLimitedBatchError";
-    this.cause = cause;
-    this.results = results;
+    // Not enumerable, so logging the error does not print every partial
+    // result and the whole source response it carries.
+    Object.defineProperty(this, "cause", { value: cause, enumerable: false });
+    Object.defineProperty(this, "results", { value: results, enumerable: false });
   }
 }
 

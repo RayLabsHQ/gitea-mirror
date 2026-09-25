@@ -30,11 +30,15 @@ import {
   listSources,
 } from "./sources";
 import { isRateLimitError } from "./rate-limit-gate";
+import { persistMetadataPassProgress } from "./metadata-progress-store";
 import {
   advanceMetadataSyncCursor,
+  buildPassProgress,
+  classifyPassItem,
   parseRepositoryMetadataState,
-  planMetadataPass,
+  planMetadataPassWithProgress,
   serializeRepositoryMetadataState,
+  type MetadataPassProgress,
   type MetadataSyncCursor,
 } from "./metadata-state";
 import {
@@ -1193,6 +1197,11 @@ export const mirrorGithubRepoToGitea = async ({
           giteaOwner: repoOwner,
           giteaRepoName: targetRepoName,
           syncCursor: metadataState.syncCursors.issues,
+          passProgress: metadataState.passProgress.issues,
+          onPassProgress: async (progress) => {
+            metadataUpdated = true;
+            await persistMetadataPassProgress(repository.id, metadataState, "issues", progress);
+          },
         });
         if (issuesCursor) metadataState.syncCursors.issues = issuesCursor;
         metadataState.components.issues = true;
@@ -1230,6 +1239,11 @@ export const mirrorGithubRepoToGitea = async ({
           giteaOwner: repoOwner,
           giteaRepoName: targetRepoName,
           syncCursor: metadataState.syncCursors.pullRequests,
+          passProgress: metadataState.passProgress.pullRequests,
+          onPassProgress: async (progress) => {
+            metadataUpdated = true;
+            await persistMetadataPassProgress(repository.id, metadataState, "pullRequests", progress);
+          },
         });
         if (pullRequestsCursor) metadataState.syncCursors.pullRequests = pullRequestsCursor;
         metadataState.components.pullRequests = true;
@@ -1989,6 +2003,11 @@ export async function mirrorGitHubRepoToGiteaOrg({
           giteaOwner: orgName,
           giteaRepoName: targetRepoName,
           syncCursor: metadataState.syncCursors.issues,
+          passProgress: metadataState.passProgress.issues,
+          onPassProgress: async (progress) => {
+            metadataUpdated = true;
+            await persistMetadataPassProgress(repository.id, metadataState, "issues", progress);
+          },
         });
         if (issuesCursor) metadataState.syncCursors.issues = issuesCursor;
         metadataState.components.issues = true;
@@ -2026,6 +2045,11 @@ export async function mirrorGitHubRepoToGiteaOrg({
           giteaOwner: orgName,
           giteaRepoName: targetRepoName,
           syncCursor: metadataState.syncCursors.pullRequests,
+          passProgress: metadataState.passProgress.pullRequests,
+          onPassProgress: async (progress) => {
+            metadataUpdated = true;
+            await persistMetadataPassProgress(repository.id, metadataState, "pullRequests", progress);
+          },
         });
         if (pullRequestsCursor) metadataState.syncCursors.pullRequests = pullRequestsCursor;
         metadataState.components.pullRequests = true;
@@ -2657,6 +2681,8 @@ export const mirrorGitRepoIssuesToGitea = async ({
   giteaOwner,
   giteaRepoName,
   syncCursor,
+  passProgress,
+  onPassProgress,
 }: {
   config: Partial<Config>;
   octokit: Octokit;
@@ -2668,6 +2694,14 @@ export const mirrorGitRepoIssuesToGitea = async ({
    * only issues updated since then are listed and reconciled.
    */
   syncCursor?: MetadataSyncCursor;
+  /** Unfinished pass to pick up where it stopped (#449 follow-up). */
+  passProgress?: MetadataPassProgress;
+  /**
+   * Called with the progress to keep when the pass does not finish, and
+   * with undefined once a resumed pass completes. The caller persists it
+   * right away, since a rate limit ends the sync with a throw.
+   */
+  onPassProgress?: (progress: MetadataPassProgress | undefined) => Promise<void> | void;
 }): Promise<MetadataSyncCursor | undefined> => {
   //things covered here are- issue, title, body, labels, comments and assignees
   // The source client arrives as `octokit` (anonymous for a public-only
@@ -2712,8 +2746,24 @@ export const mirrorGitRepoIssuesToGitea = async ({
   // milestone, title or body change all bump updated_at, so this is the
   // set that needs reconciling, and the per-issue comment listing below
   // only runs for it. The watermark is the time this listing started.
-  let plan = planMetadataPass(syncCursor);
-  const listingStartedAt = new Date();
+  const planned = planMetadataPassWithProgress(syncCursor, passProgress);
+  let plan = planned.plan;
+  let resume = planned.resume;
+  const passStartedAt = planned.startedAt;
+  if (resume) {
+    console.log(
+      `[Issues] Resuming an unfinished ${resume.mode} pass for ${repository.fullName} started at ${resume.startedAt}`
+    );
+  }
+  // GitHub numbers this pass has finished, kept if it does not complete.
+  const completedNumbers = new Set<number>();
+  const finishPass = async () => {
+    if (resume) await onPassProgress?.(undefined);
+    return advanceMetadataSyncCursor(syncCursor, plan.mode, passStartedAt);
+  };
+  const keepPassProgress = async () => {
+    await onPassProgress?.(buildPassProgress(plan, passStartedAt, completedNumbers, resume));
+  };
 
   const listGitHubIssues = async (since?: string) => {
     const listed = await octokit.paginate(
@@ -2774,7 +2824,7 @@ export const mirrorGitRepoIssuesToGitea = async ({
 
   if (filteredIssues.length === 0 && plan.mode === "full") {
     console.log(`No issues to mirror for ${repository.fullName}`);
-    return advanceMetadataSyncCursor(syncCursor, plan.mode, listingStartedAt);
+    return finishPass();
   }
 
   const ghIssueMarkerRegex = /\[GH-ISSUE #(\d+)\]/i;
@@ -2846,6 +2896,7 @@ export const mirrorGitRepoIssuesToGitea = async ({
       `[Issues] No mirrored issues found in Gitea for ${repoName}; ignoring the watermark and running a full pass`
     );
     plan = { mode: "full", reason: "destination has no mirrored issues" };
+    resume = undefined;
     filteredIssues = await listGitHubIssues();
     console.log(
       `Mirroring ${filteredIssues.length} issues from ${repository.fullName}`
@@ -2854,7 +2905,7 @@ export const mirrorGitRepoIssuesToGitea = async ({
 
   if (filteredIssues.length === 0) {
     console.log(`No issues to mirror for ${repository.fullName}`);
-    return advanceMetadataSyncCursor(syncCursor, plan.mode, listingStartedAt);
+    return finishPass();
   }
 
   // Get existing labels from Gitea
@@ -2885,10 +2936,27 @@ export const mirrorGitRepoIssuesToGitea = async ({
     );
   }
 
+  let unchangedIssueCount = 0;
+
   // Process issues in parallel with concurrency control
-  const mirroredIssues = await processWithRetry(
+  let mirroredIssues: unknown[];
+  try {
+    mirroredIssues = await processWithRetry(
     filteredIssues,
     async (issue) => {
+      const itemClass = classifyPassItem({
+        number: issue.number,
+        updatedAt: issue.updated_at,
+        plan,
+        cursor: syncCursor,
+        resume,
+        existsInDestination: giteaIssueByGitHubNumber.has(issue.number),
+      });
+      if (itemClass === "skip") {
+        completedNumbers.add(issue.number);
+        return issue;
+      }
+
       const githubLabelNames =
         issue.labels
           ?.map((l) => (typeof l === "string" ? l : l.name))
@@ -2964,6 +3032,48 @@ export const mirrorGitRepoIssuesToGitea = async ({
             );
           }
         }
+      }
+
+      // A full pass revisiting an issue that has not changed since the last
+      // completed pass: bring the Gitea copy in line from the listing alone
+      // (a renamed label, an edit made on the Gitea side) and skip the
+      // comment listing, which is the per-issue GitHub call.
+      if (itemClass === "unchanged" && existingIssue) {
+        const wantClosed = issue.state === "closed";
+        if (
+          existingIssue.title !== issuePayload.title ||
+          String(existingIssue.body ?? "") !== issuePayload.body ||
+          (existingIssue.state === "closed") !== wantClosed
+        ) {
+          await httpPatch(
+            `${config.giteaConfig!.url}/api/v1/repos/${giteaOwner}/${repoName}/issues/${existingIssue.number}`,
+            buildGiteaIssueEditPayload({
+              title: issuePayload.title,
+              body: issuePayload.body,
+              closed: wantClosed,
+            }),
+            {
+              Authorization: `token ${decryptedConfig.giteaConfig!.token}`,
+            }
+          );
+        }
+        const currentLabelIds = (Array.isArray(existingIssue.labels) ? existingIssue.labels : [])
+          .map((label: any) => Number(label?.id))
+          .sort((a: number, b: number) => a - b);
+        const wantedLabelIds = [...giteaLabelIds].sort((a, b) => a - b);
+        if (currentLabelIds.join(",") !== wantedLabelIds.join(",")) {
+          await reconcileGiteaIssueLabels({
+            config,
+            decryptedConfig,
+            giteaOwner,
+            repoName,
+            issueNumber: existingIssue.number,
+            labelIds: giteaLabelIds,
+          });
+        }
+        unchangedIssueCount++;
+        completedNumbers.add(issue.number);
+        return issue;
       }
 
       let targetIssueNumber: number;
@@ -3180,6 +3290,7 @@ export const mirrorGitRepoIssuesToGitea = async ({
         );
       }
 
+      completedNumbers.add(issue.number);
       return issue;
     },
     {
@@ -3201,9 +3312,23 @@ export const mirrorGitRepoIssuesToGitea = async ({
       },
     }
   );
+  } catch (error) {
+    // Stopped by the rate limit: keep what this pass finished so the run
+    // after the reset carries on from here instead of starting over.
+    if (isRateLimitError(error)) {
+      await keepPassProgress();
+      console.warn(
+        `[Issues] Pass for ${repository.fullName} stopped by the rate limit after ${completedNumbers.size} of ${filteredIssues.length} issue(s); the next run continues from there`
+      );
+    }
+    throw error;
+  }
 
   console.log(
-    `Completed mirroring ${filteredIssues.length} issues for ${repository.fullName}`
+    `Completed mirroring ${filteredIssues.length} issues for ${repository.fullName}` +
+      (unchangedIssueCount > 0
+        ? ` (${unchangedIssueCount} unchanged since the last pass, no GitHub calls)`
+        : "")
   );
 
   // processWithRetry logs and drops items that still fail after their
@@ -3213,10 +3338,11 @@ export const mirrorGitRepoIssuesToGitea = async ({
     console.warn(
       `[Issues] ${failedIssueCount} issue(s) failed for ${repository.fullName}; keeping the previous watermark so they are retried next run`
     );
+    await keepPassProgress();
     return undefined;
   }
 
-  return advanceMetadataSyncCursor(syncCursor, plan.mode, listingStartedAt);
+  return finishPass();
 };
 
 /**
@@ -4098,6 +4224,8 @@ export async function mirrorGitRepoPullRequestsToGitea({
   giteaOwner,
   giteaRepoName,
   syncCursor,
+  passProgress,
+  onPassProgress,
 }: {
   config: Partial<Config>;
   octokit: Octokit;
@@ -4109,6 +4237,9 @@ export async function mirrorGitRepoPullRequestsToGitea({
    * When set, only pull requests updated since then are processed.
    */
   syncCursor?: MetadataSyncCursor;
+  /** Unfinished pass to pick up where it stopped; see the issues pass. */
+  passProgress?: MetadataPassProgress;
+  onPassProgress?: (progress: MetadataPassProgress | undefined) => Promise<void> | void;
 }): Promise<MetadataSyncCursor | undefined> {
   // The source client arrives as `octokit`; see mirrorGitRepoIssuesToGitea.
   if (
@@ -4151,8 +4282,23 @@ export async function mirrorGitRepoPullRequestsToGitea({
   // the pull request entries. The detail, commits and files calls below
   // then only run for those. The watermark is the time this listing
   // started.
-  let plan = planMetadataPass(syncCursor);
-  const listingStartedAt = new Date();
+  const planned = planMetadataPassWithProgress(syncCursor, passProgress);
+  let plan = planned.plan;
+  let resume = planned.resume;
+  const passStartedAt = planned.startedAt;
+  if (resume) {
+    console.log(
+      `[Pull Requests] Resuming an unfinished ${resume.mode} pass for ${repository.fullName} started at ${resume.startedAt}`
+    );
+  }
+  const completedNumbers = new Set<number>();
+  const finishPass = async () => {
+    if (resume) await onPassProgress?.(undefined);
+    return advanceMetadataSyncCursor(syncCursor, plan.mode, passStartedAt);
+  };
+  const keepPassProgress = async () => {
+    await onPassProgress?.(buildPassProgress(plan, passStartedAt, completedNumbers, resume));
+  };
   type ListedPullRequest = Awaited<
     ReturnType<typeof octokit.rest.pulls.list>
   >["data"][number];
@@ -4207,6 +4353,7 @@ export async function mirrorGitRepoPullRequestsToGitea({
             html_url: entry.html_url,
             user: entry.user,
             created_at: entry.created_at,
+            updated_at: entry.updated_at,
             merged_at: (entry as any).pull_request?.merged_at ?? null,
           }) as unknown as ListedPullRequest
       );
@@ -4236,7 +4383,7 @@ export async function mirrorGitRepoPullRequestsToGitea({
 
   if (pullRequests.length === 0 && plan.mode === "full") {
     console.log(`No pull requests to mirror for ${repository.fullName}`);
-    return advanceMetadataSyncCursor(syncCursor, plan.mode, listingStartedAt);
+    return finishPass();
   }
 
   // Note: Gitea doesn't have a direct API to create pull requests from external sources
@@ -4320,6 +4467,7 @@ export async function mirrorGitRepoPullRequestsToGitea({
       `[Pull Requests] No mirrored pull requests found in Gitea for ${repoName}; ignoring the watermark and running a full pass`
     );
     plan = { mode: "full", reason: "destination has no mirrored pull requests" };
+    resume = undefined;
     pullRequests = await listAllPullRequests();
     listedFromIssues = false;
     console.log(
@@ -4329,7 +4477,7 @@ export async function mirrorGitRepoPullRequestsToGitea({
 
   if (pullRequests.length === 0) {
     console.log(`No pull requests to mirror for ${repository.fullName}`);
-    return advanceMetadataSyncCursor(syncCursor, plan.mode, listingStartedAt);
+    return finishPass();
   }
 
   const { processWithRetry } = await import("@/lib/utils/concurrency");
@@ -4348,11 +4496,31 @@ export async function mirrorGitRepoPullRequestsToGitea({
 
   let successCount = 0;
   let failedCount = 0;
+  let unchangedCount = 0;
 
-  const processedPullRequests = await processWithRetry(
+  let processedPullRequests: unknown[];
+  try {
+  processedPullRequests = await processWithRetry(
     pullRequests,
     async (listedPr) => {
       let pr = listedPr;
+      // Already finished by this pass, or a full pass revisiting a pull
+      // request that is in Gitea and has not changed since the last
+      // completed pass: its detail, commits and files are the same, so
+      // skip the three GitHub calls (#449 follow-up).
+      const itemClass = classifyPassItem({
+        number: listedPr.number,
+        updatedAt: (listedPr as { updated_at?: string | null }).updated_at,
+        plan,
+        cursor: syncCursor,
+        resume,
+        existsInDestination: existingPrIssuesByNumber.has(listedPr.number),
+      });
+      if (itemClass !== "sync") {
+        if (itemClass === "unchanged") unchangedCount++;
+        completedNumbers.add(listedPr.number);
+        return;
+      }
       try {
         // Fetch additional PR data for rich metadata
         const [prDetail, commits, files] = await Promise.all([
@@ -4526,6 +4694,7 @@ export async function mirrorGitRepoPullRequestsToGitea({
         }
 
         successCount++;
+        completedNumbers.add(pr.number);
         console.log(`[Pull Requests] ✅ Successfully created issue for PR #${pr.number}`);
       } catch (apiError) {
         // A rate limit refusal is not a reason to write a stripped down
@@ -4628,6 +4797,7 @@ export async function mirrorGitRepoPullRequestsToGitea({
           }
 
           successCount++;
+          completedNumbers.add(pr.number);
           console.log(`[Pull Requests] ✅ Created basic issue for PR #${pr.number}`);
         } catch (error) {
           failedCount++;
@@ -4643,8 +4813,23 @@ export async function mirrorGitRepoPullRequestsToGitea({
       retryDelay: 1000,
     }
   );
+  } catch (error) {
+    // Stopped by the rate limit: keep what this pass finished so the run
+    // after the reset carries on from here instead of starting over.
+    if (isRateLimitError(error)) {
+      await keepPassProgress();
+      console.warn(
+        `[Pull Requests] Pass for ${repository.fullName} stopped by the rate limit after ${completedNumbers.size} of ${pullRequests.length} pull request(s); the next run continues from there`
+      );
+    }
+    throw error;
+  }
 
-  console.log(`✅ Mirrored ${successCount}/${pullRequests.length} pull requests to Gitea as enriched issues (${failedCount} failed)`);
+  console.log(
+    `✅ Mirrored ${successCount}/${pullRequests.length} pull requests to Gitea as enriched issues (${failedCount} failed` +
+      (unchangedCount > 0 ? `, ${unchangedCount} unchanged since the last pass` : "") +
+      `)`
+  );
 
   // Keep the old watermark when any pull request failed so the next
   // pass lists it again.
@@ -4656,10 +4841,11 @@ export async function mirrorGitRepoPullRequestsToGitea({
     console.warn(
       `[Pull Requests] ${unfinishedPullRequests} pull request(s) failed for ${repository.fullName}; keeping the previous watermark so they are retried next run`
     );
+    await keepPassProgress();
     return undefined;
   }
 
-  return advanceMetadataSyncCursor(syncCursor, plan.mode, listingStartedAt);
+  return finishPass();
 }
 
 export async function mirrorGitRepoLabelsToGitea({
