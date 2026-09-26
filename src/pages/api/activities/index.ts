@@ -17,7 +17,9 @@ export const GET: APIRoute = async ({ request, locals }) => {
       .select()
       .from(mirrorJobs)
       .where(eq(mirrorJobs.userId, userId))
-      .orderBy(sql`${mirrorJobs.timestamp} DESC`);
+      // Timestamps are stored to the second; rowid keeps events written in
+      // the same second newest first too (#454).
+      .orderBy(sql`${mirrorJobs.timestamp} DESC, ${mirrorJobs}.rowid DESC`);
 
     const activities: MirrorJob[] = jobs.map((job) => ({
       id: job.id,

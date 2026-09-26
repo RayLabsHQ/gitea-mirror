@@ -1,3 +1,4 @@
+import { countLatestStatuses } from '@/lib/utils/activity-status';
 import { useCallback, useEffect, useState, useRef, useMemo } from 'react';
 import Fuse from 'fuse.js';
 import { Button } from '@/components/ui/button';
@@ -407,28 +408,9 @@ export function ActivityLog() {
 
   // Check if any filters are active
   // Counts the current state of each repository or organization, not every
-  // event: a repo that failed and then synced is only "synced". Activities
-  // arrive newest first, so the first entry seen for a subject is its state.
-  // Taken from the unfiltered set so the chips stay put when one is clicked.
-  const statusCounts = useMemo(() => {
-    const latestBySubject = new Map<string, string>();
-    activities.forEach((a) => {
-      const subject =
-        a.repositoryId ||
-        a.organizationId ||
-        a.repositoryName ||
-        a.organizationName;
-      // Events with no subject have no state of their own to report.
-      if (!subject || latestBySubject.has(subject)) return;
-      latestBySubject.set(subject, a.status);
-    });
-
-    const counts = new Map<string, number>();
-    latestBySubject.forEach((status) => {
-      counts.set(status, (counts.get(status) ?? 0) + 1);
-    });
-    return counts;
-  }, [activities]);
+  // event: a repo that failed and then synced is only "synced". Taken from
+  // the unfiltered set so the chips stay put when one is clicked.
+  const statusCounts = useMemo(() => countLatestStatuses(activities), [activities]);
 
   // Most actionable first, and only statuses that actually occurred.
   const statChips = ['failed', 'syncing', 'mirroring', 'imported', 'synced', 'mirrored']
