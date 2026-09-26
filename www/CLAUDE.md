@@ -11,18 +11,18 @@ This is the marketing website for Gitea Mirror, built with Astro and Tailwind CS
 ## Essential Commands
 
 ```bash
-bun install         # Install dependencies
-bun run dev         # Start development server (port 4321)
-bun run build       # Build for production
-bun run preview     # Preview production build
+pnpm install        # Install dependencies (pnpm-lock.yaml is the lockfile)
+pnpm dev            # Start development server (port 4321)
+pnpm build          # Build for production
+pnpm preview        # Preview production build
 ```
 
 ## Architecture & Key Concepts
 
 ### Technology Stack
-- **Framework**: Astro (v5.0.5) - Static site generator with React integration
+- **Framework**: Astro (v7) - Static site generator with React integration
 - **UI**: React (v19.0.0) + Tailwind CSS v4
-- **Runtime**: Bun
+- **Package manager**: pnpm. Do not commit a bun.lock: Cloudflare Pages installs with Bun when it finds one
 - **Styling**: Tailwind CSS v4 with Vite plugin
 
 ### Project Structure

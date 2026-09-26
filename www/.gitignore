@@ -5,6 +5,10 @@ dist/
 
 # dependencies
 node_modules/
+# pnpm-lock.yaml is the lockfile. Cloudflare Pages installs with Bun when a
+# bun.lock is present, and a stale one fails the build.
+bun.lock
+bun.lockb
 
 # logs
 npm-debug.log*
