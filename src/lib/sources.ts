@@ -17,6 +17,7 @@ import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { sources } from "@/lib/db/schema";
 import { decrypt, encrypt } from "@/lib/utils/encryption";
+import { resolveGitHubAccessToken } from "@/lib/github-app-credentials";
 import {
   SOURCE_PROVIDER_KINDS,
   SOURCE_PROVIDER_LABELS,
@@ -464,6 +465,13 @@ export function findSourceForOrganization(
  */
 export function decryptSourceToken(token: string | null | undefined): string {
   return token ? decrypt(token) : "";
+}
+
+export async function sourceAccessToken(source: SourceRecord): Promise<string> {
+  const token = decryptSourceToken(source.token);
+  return source.provider === "github"
+    ? resolveGitHubAccessToken(token, resolveGitHubApiBaseUrl(source.url) || process.env.GH_API_URL || process.env.GITHUB_API_URL || "https://api.github.com")
+    : token;
 }
 
 /**

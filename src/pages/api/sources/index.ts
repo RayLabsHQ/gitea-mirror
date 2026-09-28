@@ -8,6 +8,7 @@ import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 import { blockedOutboundUrlReason } from "@/lib/utils/outbound-url";
 import { createSecureErrorResponse } from "@/lib/utils";
 import { createSource } from "@/lib/sources";
+import { encodeGitHubAppCredentials } from "@/lib/github-app-credentials";
 import {
   isDuplicateSourceError,
   loadSourceApiItems,
@@ -43,6 +44,10 @@ export const POST: APIRoute = async ({ request, locals }) => {
       url?: unknown;
       username?: unknown;
       token?: unknown;
+      authType?: unknown;
+      appId?: unknown;
+      installationId?: unknown;
+      privateKey?: unknown;
       enabled?: unknown;
     };
 
@@ -56,9 +61,23 @@ export const POST: APIRoute = async ({ request, locals }) => {
       );
     }
     const provider = body.provider;
+    if (body.authType !== undefined && body.authType !== "app" && body.authType !== "pat") {
+      return new Response(JSON.stringify({ success: false, message: "Unknown authentication method." }), { status: 400 });
+    }
+    if (body.authType === "app" && provider !== "github") {
+      return new Response(JSON.stringify({ success: false, message: "GitHub App authentication requires a GitHub source." }), { status: 400 });
+    }
+    let token: string | undefined;
+    try {
+      token = body.authType === "app"
+        ? encodeGitHubAppCredentials({ appId: String(body.appId ?? ""), installationId: String(body.installationId ?? ""), privateKey: String(body.privateKey ?? "") })
+        : typeof body.token === "string" ? body.token : undefined;
+    } catch (error) {
+      return new Response(JSON.stringify({ success: false, message: (error as Error).message }), { status: 400 });
+    }
 
-    // GitLab and Gitea sources point at an instance; GitHub needs no URL.
-    if (provider !== "github") {
+    // All sources may point at their own instance; validate explicit URLs.
+    {
       const rawSourceUrl = typeof body.url === "string" ? body.url.trim() : "";
       if (rawSourceUrl && !isValidSourceUrl(rawSourceUrl)) {
         return new Response(
@@ -88,7 +107,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
         provider,
         url: typeof body.url === "string" ? body.url : undefined,
         username: typeof body.username === "string" ? body.username : undefined,
-        token: typeof body.token === "string" ? body.token : undefined,
+        token,
         enabled: typeof body.enabled === "boolean" ? body.enabled : undefined,
       });
     } catch (error) {

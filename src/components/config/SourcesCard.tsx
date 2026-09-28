@@ -178,6 +178,10 @@ type EditorState = {
   url: string;
   username: string;
   token: string;
+  authType: "pat" | "app";
+  appId: string;
+  installationId: string;
+  privateKey: string;
   /** Set once the lock dialog confirmed changing provider or instance URL. */
   sourceUnlocked: boolean;
 };
@@ -210,8 +214,9 @@ export function SourcesCard({ sources, onRefresh }: SourcesCardProps) {
   // An empty token field while editing keeps the stored one, so testing
   // and saving both fall back to it.
   const effectiveToken = editor?.token.trim() || editing?.token || "";
+  const isApp = provider === "github" && editor?.authType === "app";
   const isPublicOnlyDraft =
-    !!editor && !editor.username.trim() && !effectiveToken;
+    !!editor && !editor.username.trim() && !effectiveToken && !isApp;
 
   const refreshSources = async () => {
     setIsRefreshing(true);
@@ -243,6 +248,10 @@ export function SourcesCard({ sources, onRefresh }: SourcesCardProps) {
       url: "",
       username: "",
       token: "",
+      authType: "pat",
+      appId: "",
+      installationId: "",
+      privateKey: "",
       sourceUnlocked: false,
     });
   };
@@ -254,6 +263,10 @@ export function SourcesCard({ sources, onRefresh }: SourcesCardProps) {
       url: source.url ?? "",
       username: source.username ?? "",
       token: "",
+      authType: source.authType ?? "pat",
+      appId: source.appId ?? "",
+      installationId: source.installationId ?? "",
+      privateKey: "",
       sourceUnlocked: false,
     });
   };
@@ -276,7 +289,7 @@ export function SourcesCard({ sources, onRefresh }: SourcesCardProps) {
 
   const handleTestConnection = async () => {
     if (!editor) return;
-    if (!effectiveToken) {
+    if (!effectiveToken && !isApp) {
       toast.error(`${providerLabel} token is required to test the connection`);
       return;
     }
@@ -284,7 +297,14 @@ export function SourcesCard({ sources, onRefresh }: SourcesCardProps) {
     setIsTesting(true);
 
     try {
-      const result = await githubApi.testConnection(effectiveToken, {
+      const result = isApp ? await (async () => {
+        const response = await fetch(withBase("/api/github/test-connection"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ provider, url: editor.url, username: editor.username.trim(), authType: "app", appId: editor.appId, installationId: editor.installationId, privateKey: editor.privateKey, sourceId: editing?.id }),
+        });
+        return response.json();
+      })() : await githubApi.testConnection(effectiveToken, {
         provider,
         url: editor.url.trim() || undefined,
         username: editor.username.trim() || undefined,
@@ -314,12 +334,24 @@ export function SourcesCard({ sources, onRefresh }: SourcesCardProps) {
         provider,
         username: editor.username.trim(),
       };
+      if (provider === "github") {
+        body.authType = editor.authType;
+        if (isApp) {
+          body.appId = editor.appId;
+          body.installationId = editor.installationId;
+          body.privateKey = editor.privateKey;
+        }
+      }
       if (editor.url.trim()) {
         body.url = editor.url.trim();
       }
       // Empty token on edit keeps the stored one (existing save convention).
-      if (!editing || editor.token.trim()) {
+      if (!isApp && (!editing || editor.token.trim())) {
         body.token = editor.token.trim();
+      }
+      if (editing?.authType === "app" && editor.authType === "pat" && !editor.token.trim()) {
+        toast.error("Enter a personal access token to switch authentication methods");
+        return;
       }
       if (editing && (confirmSourceChange || editor.sourceUnlocked)) {
         body.confirmSourceChange = true;
@@ -505,7 +537,27 @@ export function SourcesCard({ sources, onRefresh }: SourcesCardProps) {
               )}
             </div>
 
-            <div className="space-y-1.5">
+            {provider === "github" && (
+              <div className="space-y-1.5">
+                <Label htmlFor="source-auth-type" className="text-xs font-medium text-muted-foreground">Authentication</Label>
+                <Select value={editor.authType} onValueChange={(authType: "pat" | "app") => setEditor((prev) => prev ? { ...prev, authType } : prev)}>
+                  <SelectTrigger id="source-auth-type"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="pat">Personal access token</SelectItem>
+                    <SelectItem value="app">GitHub App installation</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {isApp ? (
+              <div className="space-y-3">
+                <div className="space-y-1.5"><Label htmlFor="source-app-id">App ID</Label><Input id="source-app-id" name="appId" inputMode="numeric" value={editor.appId} onChange={handleFieldChange} /></div>
+                <div className="space-y-1.5"><Label htmlFor="source-installation-id">Installation ID</Label><Input id="source-installation-id" name="installationId" inputMode="numeric" value={editor.installationId} onChange={handleFieldChange} /></div>
+                <div className="space-y-1.5"><Label htmlFor="source-private-key">Private key (PEM)</Label><textarea id="source-private-key" name="privateKey" value={editor.privateKey} onChange={(event) => setEditor((prev) => prev ? { ...prev, privateKey: event.target.value } : prev)} placeholder={editing?.authType === "app" ? "Leave empty to keep the current key" : "-----BEGIN PRIVATE KEY-----"} className="min-h-28 w-full rounded-md border border-input bg-background p-2 font-mono text-xs" /></div>
+                <p className="text-[11px] text-muted-foreground">Install the App on repositories to mirror. Grant repository Contents read access, and Issues and Metadata read access for metadata mirroring. GitHub Apps cannot mirror a user's starred repositories.</p>
+              </div>
+            ) : <div className="space-y-1.5">
               <Label
                 htmlFor="source-token"
                 className="text-xs font-medium text-muted-foreground"
@@ -527,9 +579,9 @@ export function SourcesCard({ sources, onRefresh }: SourcesCardProps) {
               <p className="text-[11px] text-muted-foreground/80">
                 {providerMeta.tokenHint}
               </p>
-            </div>
+            </div>}
 
-            <div className="space-y-3 rounded-lg bg-muted/40 p-4">
+            {!isApp && <div className="space-y-3 rounded-lg bg-muted/40 p-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <KeyRound className="h-4 w-4 text-muted-foreground" />
@@ -563,7 +615,7 @@ export function SourcesCard({ sources, onRefresh }: SourcesCardProps) {
                   </code>
                 ))}
               </div>
-            </div>
+            </div>}
 
             <div className="flex items-center justify-between gap-2">
               <Button
@@ -571,7 +623,7 @@ export function SourcesCard({ sources, onRefresh }: SourcesCardProps) {
                 variant="outline"
                 size="sm"
                 onClick={handleTestConnection}
-                disabled={isTesting || !effectiveToken}
+                disabled={isTesting || (!effectiveToken && !isApp)}
               >
                 <PlugZap className="mr-1.5 h-3.5 w-3.5" />
                 {isTesting ? "Testing..." : "Test"}
@@ -591,7 +643,7 @@ export function SourcesCard({ sources, onRefresh }: SourcesCardProps) {
                   size="sm"
                   onClick={() => handleSave(false)}
                   disabled={
-                    isSaving || (!editor.username.trim() && !!editor.token.trim())
+                    isSaving || (isApp ? !editor.appId.trim() || !editor.installationId.trim() || (!editor.privateKey.trim() && editing?.authType !== "app") : !editor.username.trim() && !!editor.token.trim())
                   }
                 >
                   {isSaving ? "Saving..." : editing ? "Save changes" : "Add source"}
@@ -638,7 +690,8 @@ export function SourcesCard({ sources, onRefresh }: SourcesCardProps) {
                           {meta.badge}
                         </span>
                       )}
-                      {source.token === "" && (
+                      {source.authType === "app" && <span className="text-[11px] text-muted-foreground">GitHub App</span>}
+                      {source.token === "" && source.authType !== "app" && (
                         <span className="inline-flex items-center gap-1 rounded-full border border-border bg-muted/40 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
                           <Globe className="h-3 w-3" />
                           Public only

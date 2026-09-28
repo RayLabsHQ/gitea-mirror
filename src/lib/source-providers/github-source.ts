@@ -8,6 +8,7 @@
  */
 import type { Octokit } from "@octokit/rest";
 import type { Config } from "@/lib/db/schema";
+import { parseGitHubAppCredentials, resolveGitHubAccessToken } from "@/lib/github-app-credentials";
 import {
   createGitHubClient,
   createPublicGitHubClient,
@@ -117,9 +118,12 @@ export class GitHubSourceProvider implements SourceProvider {
     // A GitHub Enterprise source URL drives the API base; github.com (the
     // default) keeps the GH_API_URL env default.
     const apiBaseUrl = resolveGitHubApiBaseUrl(connection.url);
+    const app = parseGitHubAppCredentials(connection.token);
     // Tokenless: the throttled public client, never an empty token — anonymous
     // GitHub runs at 60 req/hr, so the onRateLimit backoff must stay attached.
-    this.octokit = connection.token.trim()
+    this.octokit = app
+      ? createPublicGitHubClient(apiBaseUrl, connection.userId)
+      : connection.token.trim()
       ? createGitHubClient(
           connection.token,
           connection.userId,
@@ -127,6 +131,14 @@ export class GitHubSourceProvider implements SourceProvider {
           apiBaseUrl
         )
       : createPublicGitHubClient(apiBaseUrl);
+    if (app) {
+      this.octokit.hook.before("request", async (options) => {
+        options.headers = {
+          ...options.headers,
+          authorization: `token ${await resolveGitHubAccessToken(connection.token, apiBaseUrl || githubApiBaseUrl())}`,
+        };
+      });
+    }
   }
 
   private stamp(repos: GitRepo[]): GitRepo[] {
@@ -141,6 +153,17 @@ export class GitHubSourceProvider implements SourceProvider {
     config: Partial<Config>,
     options: ListRepositoriesOptions = {}
   ): Promise<GitRepo[]> {
+    if (parseGitHubAppCredentials(this.connection.token)) {
+      const repos: GithubRestRepository[] = [];
+      let page = 1;
+      while (true) {
+        const { data } = await this.octokit.request("GET /installation/repositories", { per_page: 100, page });
+        repos.push(...data.repositories as GithubRestRepository[]);
+        if (repos.length >= data.total_count || data.repositories.length === 0) break;
+        page++;
+      }
+      return this.stamp(repos.map((repo) => mapGithubRestRepository(repo as GithubRestRepository, this.connection)));
+    }
     const repos = await getGithubRepositories({
       octokit: this.octokit,
       config,
@@ -152,6 +175,7 @@ export class GitHubSourceProvider implements SourceProvider {
   }
 
   async listStarredRepositories(config: Partial<Config>): Promise<GitRepo[]> {
+    if (parseGitHubAppCredentials(this.connection.token)) return [];
     const repos = await getGithubStarredRepositories({ octokit: this.octokit, config });
     return this.stamp(repos);
   }
@@ -160,6 +184,14 @@ export class GitHubSourceProvider implements SourceProvider {
     config: Partial<Config>,
     skipOrgNames?: Set<string>
   ): Promise<SourceOrganizationResult> {
+    if (parseGitHubAppCredentials(this.connection.token)) {
+      return this.listRepositories(config).then((repos) => ({
+        organizations: [...new Set(repos.map((repo) => repo.organization).filter((name): name is string => !!name))]
+          .filter((name) => !skipOrgNames?.has(name))
+          .map((name) => ({ name, avatarUrl: "", membershipRole: "member" as const, isIncluded: false, status: "imported" as const, repositoryCount: repos.filter((repo) => repo.organization === name).length, createdAt: new Date(), updatedAt: new Date() })),
+        failedOrgs: [],
+      }));
+    }
     return getGithubOrganizations({ octokit: this.octokit, config, skipOrgNames });
   }
 
@@ -232,6 +264,7 @@ export class GitHubSourceProvider implements SourceProvider {
   }
 
   async isRepositoryStarred(owner: string, name: string): Promise<boolean> {
+    if (parseGitHubAppCredentials(this.connection.token)) return false;
     try {
       await this.octokit.rest.activity.checkRepoIsStarredByAuthenticatedUser({
         owner,
@@ -245,6 +278,10 @@ export class GitHubSourceProvider implements SourceProvider {
   }
 
   async testConnection(): Promise<SourceAccount> {
+    if (parseGitHubAppCredentials(this.connection.token)) {
+      await this.octokit.request("GET /installation/repositories", { per_page: 1 });
+      return { login: this.connection.username };
+    }
     const { data } = await this.octokit.users.getAuthenticated();
     return { login: data.login, name: data.name, avatarUrl: data.avatar_url };
   }

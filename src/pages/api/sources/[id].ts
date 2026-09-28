@@ -22,6 +22,8 @@ import {
   updateSource,
 } from "@/lib/sources";
 import { toSourceApiItem } from "@/lib/sources-api";
+import { encodeGitHubAppCredentials, parseGitHubAppCredentials } from "@/lib/github-app-credentials";
+import { decryptSourceToken } from "@/lib/sources";
 
 /** Repositories imported from this source; they are what locks it. */
 async function countRepositoriesForSource(
@@ -59,6 +61,10 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
       url?: unknown;
       username?: unknown;
       token?: unknown;
+      authType?: unknown;
+      appId?: unknown;
+      installationId?: unknown;
+      privateKey?: unknown;
       enabled?: unknown;
       confirmSourceChange?: unknown;
     };
@@ -75,10 +81,24 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
     const provider: SourceProviderKind = isSourceProviderKind(body.provider)
       ? body.provider
       : existing.provider;
+    if (body.authType !== undefined && body.authType !== "app" && body.authType !== "pat") return jsonError("Unknown authentication method.", 400);
+    if (body.authType === "app" && provider !== "github") return jsonError("GitHub App authentication requires a GitHub source.", 400);
+    let token = typeof body.token === "string" ? body.token : undefined;
+    if (body.authType === "app") {
+      const prior = existing.provider === "github" ? parseGitHubAppCredentials(decryptSourceToken(existing.token)) : null;
+      try {
+        token = encodeGitHubAppCredentials({
+          appId: String(body.appId ?? ""),
+          installationId: String(body.installationId ?? ""),
+          privateKey: typeof body.privateKey === "string" && body.privateKey.trim() ? body.privateKey : prior?.privateKey ?? "",
+        });
+      } catch (error) {
+        return jsonError((error as Error).message, 400);
+      }
+    }
 
-    // GitLab and Gitea sources point at an instance; GitHub needs no URL.
+    // All sources may point at their own instance; validate explicit URLs.
     if (
-      provider !== "github" &&
       typeof body.url === "string" &&
       body.url.trim() &&
       !isValidSourceUrl(body.url)
@@ -88,7 +108,7 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
         400
       );
     }
-    if (provider !== "github" && typeof body.url === "string" && body.url.trim()) {
+    if (typeof body.url === "string" && body.url.trim()) {
       const blocked = await blockedOutboundUrlReason(body.url);
       if (blocked) return jsonError(blocked, 400);
     }
@@ -118,7 +138,7 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
       url: typeof body.url === "string" ? body.url : undefined,
       username: typeof body.username === "string" ? body.username : undefined,
       // An empty token keeps the stored one (the service preserves it).
-      token: typeof body.token === "string" ? body.token : undefined,
+      token,
       enabled: typeof body.enabled === "boolean" ? body.enabled : undefined,
     });
 

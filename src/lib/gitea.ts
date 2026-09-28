@@ -28,8 +28,10 @@ import {
   findSourceForOrganization,
   findSourceForRepository,
   listSources,
+  sourceAccessToken,
 } from "./sources";
 import { isRateLimitError } from "./rate-limit-gate";
+import { parseGitHubAppCredentials } from "./github-app-credentials";
 import { persistMetadataPassProgress } from "./metadata-progress-store";
 import {
   advanceMetadataSyncCursor,
@@ -774,7 +776,8 @@ export const mirrorGithubRepoToGitea = async ({
     const sourceConnection = repoSource
       ? sourceConnectionFromSource(repoSource, { userId: config.userId })
       : resolveSourceConnection(config);
-    const repoSourceToken = repoSource ? decryptSourceToken(repoSource.token) : "";
+    const repoSourceToken = repoSource ? await sourceAccessToken(repoSource) : "";
+    sourceConnection.token = repoSourceToken;
 
     // Get the correct owner based on the strategy (with organization overrides)
     let repoOwner = await getGiteaRepoOwnerAsync({
@@ -1085,7 +1088,7 @@ export const mirrorGithubRepoToGitea = async ({
       clone_addr: cloneAddress,
       repo_name: targetRepoName,
       mirror: true,
-      mirror_interval: config.giteaConfig?.mirrorInterval || "8h",
+      mirror_interval: repoSource && parseGitHubAppCredentials(decryptSourceToken(repoSource.token)) ? "0h" : config.giteaConfig?.mirrorInterval || "8h",
       wiki: mirrorOptions.wiki,
       // Gitea performs the LFS fetch inside its own migration, so a failure
       // here aborts the entire migration with nothing to salvage. That is why
@@ -1107,7 +1110,7 @@ export const mirrorGithubRepoToGitea = async ({
         buildSourceAuthPayload({
           provider: sourceConnection.provider,
           token: repoSourceToken,
-          username: sourceConnection.username,
+          username: repoSource && parseGitHubAppCredentials(decryptSourceToken(repoSource.token)) ? "x-access-token" : sourceConnection.username,
           repositoryOwner: repository.owner,
         })
       );
@@ -1675,7 +1678,8 @@ export async function mirrorGitHubRepoToGiteaOrg({
     const sourceConnection = repoSource
       ? sourceConnectionFromSource(repoSource, { userId: config.userId })
       : resolveSourceConnection(config);
-    const repoSourceToken = repoSource ? decryptSourceToken(repoSource.token) : "";
+    const repoSourceToken = repoSource ? await sourceAccessToken(repoSource) : "";
+    sourceConnection.token = repoSourceToken;
 
     // Determine the actual repository name to use (handle duplicates for starred repos)
     let targetRepoName = repository.name;
@@ -1895,7 +1899,7 @@ export async function mirrorGitHubRepoToGiteaOrg({
       uid: giteaOrgId,
       repo_name: targetRepoName,
       mirror: true,
-      mirror_interval: config.giteaConfig?.mirrorInterval || "8h",
+      mirror_interval: repoSource && parseGitHubAppCredentials(decryptSourceToken(repoSource.token)) ? "0h" : config.giteaConfig?.mirrorInterval || "8h",
       wiki: mirrorOptions.wiki,
       // Gitea performs the LFS fetch inside its own migration, so a failure
       // here aborts the entire migration with nothing to salvage. That is why
@@ -1916,7 +1920,7 @@ export async function mirrorGitHubRepoToGiteaOrg({
         buildSourceAuthPayload({
           provider: sourceConnection.provider,
           token: repoSourceToken,
-          username: sourceConnection.username,
+          username: repoSource && parseGitHubAppCredentials(decryptSourceToken(repoSource.token)) ? "x-access-token" : sourceConnection.username,
           repositoryOwner: repository.owner,
         })
       );

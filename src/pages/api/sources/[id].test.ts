@@ -5,6 +5,7 @@
  */
 
 import { describe, test, expect, mock, beforeEach } from "bun:test";
+import { encodeGitHubAppCredentials, parseGitHubAppCredentials } from "@/lib/github-app-credentials";
 
 let sourceRows: any[] = [];
 let repositoryCount = 0;
@@ -136,6 +137,17 @@ function remove(id: string, options?: { query?: string; body?: unknown }) {
 beforeEach(() => {
   sourceRows = [{ ...githubSource, token: encrypted("ghp_old") }];
   repositoryCount = 2;
+});
+
+test("editing App IDs preserves the private key without returning it", async () => {
+  const privateKey = "-----BEGIN PRIVATE KEY-----\nsecret\n-----END PRIVATE KEY-----";
+  sourceRows[0].token = encrypted(encodeGitHubAppCredentials({ appId: "123", installationId: "456", privateKey }));
+  const response = await put("source-1", { authType: "app", appId: "123", installationId: "789", privateKey: "" });
+  expect(response.status).toBe(200);
+  expect(parseGitHubAppCredentials(sourceRows[0].token.slice(4))).toEqual({ appId: "123", installationId: "789", privateKey });
+  const body = await response.json();
+  expect(body.source).toMatchObject({ authType: "app", installationId: "789", token: "" });
+  expect(JSON.stringify(body)).not.toContain("PRIVATE KEY");
 });
 
 describe("PUT /api/sources/:id", () => {

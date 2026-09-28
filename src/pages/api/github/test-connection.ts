@@ -2,6 +2,8 @@ import type { APIRoute } from "astro";
 import { createSecureErrorResponse } from "@/lib/utils";
 import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 import { assertSafeOutboundUrl, OutboundUrlError } from "@/lib/utils/outbound-url";
+import { encodeGitHubAppCredentials, parseGitHubAppCredentials } from "@/lib/github-app-credentials";
+import { decryptSourceToken, listSources } from "@/lib/sources";
 import {
   SOURCE_PROVIDER_LABELS,
   createSourceProvider,
@@ -34,7 +36,24 @@ export const POST: APIRoute = async ({ request, locals }) => {
   const label = SOURCE_PROVIDER_LABELS[provider];
 
   try {
-    if (!token) {
+    let credential = token;
+    if (body?.authType === "app") {
+      if (provider !== "github") return json({ success: false, message: "GitHub App requires a GitHub source" }, 400);
+      const source = typeof body.sourceId === "string"
+        ? (await listSources(authResult.userId)).find((item) => item.id === body.sourceId && item.provider === "github")
+        : null;
+      const previous = source ? parseGitHubAppCredentials(decryptSourceToken(source.token)) : null;
+      try {
+        credential = encodeGitHubAppCredentials({
+          appId: String(body.appId ?? ""),
+          installationId: String(body.installationId ?? ""),
+          privateKey: typeof body.privateKey === "string" && body.privateKey.trim() ? body.privateKey : previous?.privateKey ?? "",
+        });
+      } catch (error) {
+        return json({ success: false, message: (error as Error).message }, 400);
+      }
+    }
+    if (!credential) {
       return json({ success: false, message: `${label} token is required` }, 400);
     }
 
@@ -53,7 +72,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       provider,
       url: instanceUrl,
       username: typeof username === "string" ? username : "",
-      token,
+      token: credential,
     });
 
     const account = await sourceProvider.testConnection();

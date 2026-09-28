@@ -14,10 +14,12 @@ import {
   SOURCE_PROVIDER_LABELS,
 } from "@/lib/source-providers/kinds";
 import { sourceConnectionFromSource } from "@/lib/source-providers";
+import { parseGitHubAppCredentials } from "@/lib/github-app-credentials";
 import {
   decryptSourceToken,
   findSourceForRepository,
   listSources,
+  sourceAccessToken,
   resolveGitHubApiBaseUrl,
 } from "@/lib/sources";
 import type { Repository } from "./db/schema";
@@ -483,7 +485,7 @@ export async function syncGiteaRepoEnhanced({
     // every GitHub client below.
     const sources = config.userId ? await listSources(config.userId) : [];
     const repoSource = findSourceForRepository(repository, sources);
-    const repoSourceToken = repoSource ? decryptSourceToken(repoSource.token) : "";
+    const repoSourceToken = repoSource ? await sourceAccessToken(repoSource) : "";
     const repoSourceKind = getRepositorySource(repository).provider;
     const repoIsGitHub = repoSourceKind === "github";
 
@@ -927,6 +929,15 @@ export async function syncGiteaRepoEnhanced({
         console.warn(`[Sync] Failed to update mirror interval for ${repoOwner}/${repoName}:`, updateError);
         // Continue with sync even if interval update fails
       }
+    }
+
+    if (repoSource?.provider === "github" && parseGitHubAppCredentials(decryptSourceToken(repoSource.token))) {
+      await httpPatch(`${config.giteaConfig.url}/api/v1/repos/${repoOwner}/${repoName}`, {
+        mirror_username: "x-access-token",
+        mirror_password: repoSourceToken,
+        mirror_token: repoSourceToken,
+        mirror_interval: "0h",
+      }, { Authorization: `token ${decryptedConfig.giteaConfig.token}` });
     }
 
     // Perform the sync

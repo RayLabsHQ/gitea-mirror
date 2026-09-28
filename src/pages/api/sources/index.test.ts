@@ -5,6 +5,7 @@
  */
 
 import { describe, test, expect, mock, beforeEach } from "bun:test";
+import { encodeGitHubAppCredentials } from "@/lib/github-app-credentials";
 
 let sourceRows: any[] = [];
 let countRows: Array<{ sourceId: string | null; count: number }> = [];
@@ -135,6 +136,14 @@ beforeEach(() => {
 });
 
 describe("GET /api/sources", () => {
+  test("does not return a GitHub App private key", async () => {
+    sourceRows = [{ id: "app-1", userId: "user-1", name: "App", provider: "github", url: "https://github.com", username: "acme", token: encrypted(encodeGitHubAppCredentials({ appId: "123", installationId: "456", privateKey: "-----BEGIN PRIVATE KEY-----\nsecret\n-----END PRIVATE KEY-----" })), enabled: true }];
+    const response = await get();
+    const body = await response.json();
+    expect(body.sources[0]).toMatchObject({ authType: "app", appId: "123", installationId: "456", token: "" });
+    expect(JSON.stringify(body)).not.toContain("PRIVATE KEY");
+  });
+
   test("lists sources with repository counts, lock state and decrypted tokens", async () => {
     sourceRows = [
       {
@@ -190,6 +199,15 @@ describe("GET /api/sources", () => {
 });
 
 describe("POST /api/sources", () => {
+  test("creates an App source with encrypted credential data and no private key in the response", async () => {
+    const response = await post({ provider: "github", username: "acme", authType: "app", appId: "123", installationId: "456", privateKey: "-----BEGIN PRIVATE KEY-----\nsecret\n-----END PRIVATE KEY-----" });
+    expect(response.status).toBe(201);
+    expect(sourceRows[0].token).toContain("enc:github-app:v1:");
+    const body = await response.json();
+    expect(body.source).toMatchObject({ authType: "app", appId: "123", installationId: "456", token: "" });
+    expect(JSON.stringify(body)).not.toContain("PRIVATE KEY");
+  });
+
   test("rejects an unknown source provider", async () => {
     const response = await post({ provider: "bitbucket", username: "me", token: "t" });
     expect(response.status).toBe(400);
