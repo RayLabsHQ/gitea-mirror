@@ -2638,7 +2638,11 @@ export function buildGiteaIssueEditPayload(opts: {
   return payload;
 }
 
-/** Gitea milestone ids by title, as returned by mirrorGitRepoMilestonesToGitea. */
+/**
+ * Gitea milestone ids by title for the milestones that exist on GitHub, as
+ * returned by mirrorGitRepoMilestonesToGitea. Milestones made in Gitea
+ * alone are not in it.
+ */
 export type GiteaMilestoneIds = Map<string, number>;
 
 /**
@@ -2663,15 +2667,32 @@ export function resolveGiteaMilestoneId(
  * The milestone value to send when editing an existing Gitea issue: the
  * wanted id when it differs from what the issue carries, otherwise
  * undefined so the edit does not touch it (and Gitea writes no timeline
- * entry).
+ * entry). A milestone made in Gitea alone is never cleared, only one that
+ * mirrors a GitHub milestone.
  */
-export function giteaMilestoneChange(
+export function giteaMilestoneEdit(
   existingIssue: { milestone?: { id?: number } | null } | null | undefined,
-  wanted: number | undefined
+  milestoneIds: GiteaMilestoneIds | undefined,
+  githubMilestone: { title?: string | null } | null | undefined
 ): number | undefined {
+  const wanted = resolveGiteaMilestoneId(milestoneIds, githubMilestone);
   if (wanted === undefined) return undefined;
   const current = existingIssue?.milestone?.id ?? 0;
-  return current === wanted ? undefined : wanted;
+  if (current === wanted) return undefined;
+  if (wanted === 0 && ![...milestoneIds!.values()].includes(current)) return undefined;
+  return wanted;
+}
+
+/**
+ * Record a milestone edit on the cached Gitea issue, so a retry of the same
+ * item does not send it again.
+ */
+function rememberGiteaMilestone(
+  existingIssue: { milestone?: { id?: number } | null } | null | undefined,
+  milestone: number | undefined
+) {
+  if (!existingIssue || milestone === undefined) return;
+  existingIssue.milestone = milestone ? { id: milestone } : null;
 }
 
 /**
@@ -3102,7 +3123,7 @@ export const mirrorGitRepoIssuesToGitea = async ({
       // comment listing, which is the per-issue GitHub call.
       if (itemClass === "unchanged" && existingIssue) {
         const wantClosed = issue.state === "closed";
-        const milestoneChange = giteaMilestoneChange(existingIssue, wantedMilestoneId);
+        const milestoneChange = giteaMilestoneEdit(existingIssue, milestoneIds, issue.milestone);
         if (
           existingIssue.title !== issuePayload.title ||
           String(existingIssue.body ?? "") !== issuePayload.body ||
@@ -3121,6 +3142,7 @@ export const mirrorGitRepoIssuesToGitea = async ({
               Authorization: `token ${decryptedConfig.giteaConfig!.token}`,
             }
           );
+          rememberGiteaMilestone(existingIssue, milestoneChange);
         }
         const currentLabelIds = (Array.isArray(existingIssue.labels) ? existingIssue.labels : [])
           .map((label: any) => Number(label?.id))
@@ -3144,18 +3166,20 @@ export const mirrorGitRepoIssuesToGitea = async ({
       let targetIssueNumber: number;
       if (existingIssue) {
         targetIssueNumber = existingIssue.number;
+        const milestoneChange = giteaMilestoneEdit(existingIssue, milestoneIds, issue.milestone);
         await httpPatch(
           `${config.giteaConfig!.url}/api/v1/repos/${giteaOwner}/${repoName}/issues/${targetIssueNumber}`,
           buildGiteaIssueEditPayload({
             title: issuePayload.title,
             body: issuePayload.body,
             closed: issue.state === "closed",
-            milestone: giteaMilestoneChange(existingIssue, wantedMilestoneId),
+            milestone: milestoneChange,
           }),
           {
             Authorization: `token ${decryptedConfig.giteaConfig!.token}`,
           }
         );
+        rememberGiteaMilestone(existingIssue, milestoneChange);
       } else {
         // Defensive recheck before create: a previous retry attempt may
         // have already created this issue and then thrown. The common
@@ -3194,18 +3218,20 @@ export const mirrorGitRepoIssuesToGitea = async ({
           console.log(
             `[Issues] Recovered orphan from prior failed attempt for #${issue.number}; switching to PATCH`
           );
+          const milestoneChange = giteaMilestoneEdit(recheckHit, milestoneIds, issue.milestone);
           await httpPatch(
             `${config.giteaConfig!.url}/api/v1/repos/${giteaOwner}/${repoName}/issues/${targetIssueNumber}`,
             buildGiteaIssueEditPayload({
               title: issuePayload.title,
               body: issuePayload.body,
               closed: issue.state === "closed",
-              milestone: giteaMilestoneChange(recheckHit, wantedMilestoneId),
+              milestone: milestoneChange,
             }),
             {
               Authorization: `token ${decryptedConfig.giteaConfig!.token}`,
             }
           );
+          rememberGiteaMilestone(recheckHit, milestoneChange);
         } else {
           const createdIssue = await httpPost(
             `${config.giteaConfig!.url}/api/v1/repos/${giteaOwner}/${repoName}/issues`,
@@ -4514,7 +4540,7 @@ export async function mirrorGitRepoPullRequestsToGitea({
     if (!pageIssues.length) break;
 
     for (const issue of pageIssues) {
-      const match = String(issue.title || "").match(/\[PR #(\d+)\]/i);
+      const match = String(issue.title || "").match(/^\[PR #(\d+)\]/i);
       if (!match?.[1]) continue;
       const prNumber = Number.parseInt(match[1], 10);
       if (Number.isFinite(prNumber)) {
@@ -4592,20 +4618,28 @@ export async function mirrorGitRepoPullRequestsToGitea({
           unchangedCount++;
           // The listing carries the milestone, so a change on the Gitea
           // side (or an issue mirrored before #460) is fixed without the
-          // detail calls.
+          // detail calls. Best effort: a failed edit is retried by the
+          // next full pass and does not hold this one back.
           const existing = existingPrIssuesByNumber.get(listedPr.number);
-          const milestoneChange = giteaMilestoneChange(
-            existing,
-            resolveGiteaMilestoneId(milestoneIds, listedPr.milestone)
-          );
+          const milestoneChange = giteaMilestoneEdit(existing, milestoneIds, listedPr.milestone);
           if (existing && milestoneChange !== undefined) {
-            await httpPatch(
-              `${config.giteaConfig!.url}/api/v1/repos/${giteaOwner}/${repoName}/issues/${existing.number}`,
-              { milestone: milestoneChange },
-              {
-                Authorization: `token ${decryptedConfig.giteaConfig!.token}`,
-              }
-            );
+            try {
+              await httpPatch(
+                `${config.giteaConfig!.url}/api/v1/repos/${giteaOwner}/${repoName}/issues/${existing.number}`,
+                { milestone: milestoneChange },
+                {
+                  Authorization: `token ${decryptedConfig.giteaConfig!.token}`,
+                }
+              );
+              rememberGiteaMilestone(existing, milestoneChange);
+            } catch (milestoneError) {
+              if (isRateLimitError(milestoneError)) throw milestoneError;
+              console.error(
+                `[Pull Requests] Failed to set the milestone for PR #${listedPr.number}: ${
+                  milestoneError instanceof Error ? milestoneError.message : String(milestoneError)
+                }`
+              );
+            }
           }
         }
         completedNumbers.add(listedPr.number);
@@ -4711,7 +4745,7 @@ export async function mirrorGitRepoPullRequestsToGitea({
             );
             const candidates = Array.isArray(recheck.data) ? recheck.data : [];
             const hit = candidates.find((c: any) => {
-              const m = String(c.title || "").match(/\[PR #(\d+)\]/i);
+              const m = String(c.title || "").match(/^\[PR #(\d+)\]/i);
               return m && Number.parseInt(m[1], 10) === pr.number;
             });
             if (hit) {
@@ -4726,18 +4760,20 @@ export async function mirrorGitRepoPullRequestsToGitea({
           }
         }
         if (existingPrIssue) {
+          const milestoneChange = giteaMilestoneEdit(existingPrIssue, milestoneIds, listedPr.milestone);
           await httpPatch(
             `${config.giteaConfig!.url}/api/v1/repos/${giteaOwner}/${repoName}/issues/${existingPrIssue.number}`,
             buildGiteaIssueEditPayload({
               title: issueData.title,
               body: issueData.body,
               closed: issueData.closed,
-              milestone: giteaMilestoneChange(existingPrIssue, wantedMilestoneId),
+              milestone: milestoneChange,
             }),
             {
               Authorization: `token ${decryptedConfig.giteaConfig!.token}`,
             }
           );
+          rememberGiteaMilestone(existingPrIssue, milestoneChange);
         } else {
           console.log(`[Pull Requests] Creating enriched issue for PR #${pr.number}: ${pr.title}`);
           const createdPrIssue = await httpPost(
@@ -4818,7 +4854,7 @@ export async function mirrorGitRepoPullRequestsToGitea({
               );
               const candidates = Array.isArray(recheck.data) ? recheck.data : [];
               const hit = candidates.find((c: any) => {
-                const m = String(c.title || "").match(/\[PR #(\d+)\]/i);
+                const m = String(c.title || "").match(/^\[PR #(\d+)\]/i);
                 return m && Number.parseInt(m[1], 10) === pr.number;
               });
               if (hit) {
@@ -4833,18 +4869,20 @@ export async function mirrorGitRepoPullRequestsToGitea({
             }
           }
           if (existingPrIssue) {
+            const milestoneChange = giteaMilestoneEdit(existingPrIssue, milestoneIds, listedPr.milestone);
             await httpPatch(
               `${config.giteaConfig!.url}/api/v1/repos/${giteaOwner}/${repoName}/issues/${existingPrIssue.number}`,
               buildGiteaIssueEditPayload({
                 title: basicIssueData.title,
                 body: basicIssueData.body,
                 closed: basicIssueData.closed,
-                milestone: giteaMilestoneChange(existingPrIssue, wantedMilestoneId),
+                milestone: milestoneChange,
               }),
               {
                 Authorization: `token ${decryptedConfig.giteaConfig!.token}`,
               }
             );
+            rememberGiteaMilestone(existingPrIssue, milestoneChange);
           } else {
             const createdBasicPrIssue = await httpPost(
               `${config.giteaConfig!.url}/api/v1/repos/${giteaOwner}/${repoName}/issues`,
@@ -5204,7 +5242,8 @@ export async function mirrorGitRepoMilestonesToGitea({
         );
         // Track locally so a duplicate within `milestones` (shouldn't
         // happen, but defensive) doesn't trigger a second POST.
-        existingMilestones.set(milestone.title, created.data?.id);
+        const createdId = created.data?.id;
+        existingMilestones.set(milestone.title, typeof createdId === "number" ? createdId : 0);
         mirroredCount++;
       } catch (error) {
         console.error(
@@ -5215,7 +5254,12 @@ export async function mirrorGitRepoMilestonesToGitea({
   }
 
   console.log(`✅ Mirrored ${mirroredCount} new milestones to Gitea`);
-  return existingMilestones;
+  // Only the milestones that mirror a GitHub one: a milestone made in
+  // Gitea alone is never assigned or cleared by the issues passes.
+  const githubTitles = new Set(milestones.map((m) => m.title));
+  return new Map(
+    [...existingMilestones].filter(([title, id]) => githubTitles.has(title) && id > 0)
+  );
 }
 
 /**

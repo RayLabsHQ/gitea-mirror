@@ -17,7 +17,7 @@ import { describe, test, expect } from "bun:test";
 import {
   buildGiteaIssueEditPayload,
   buildGiteaIssueLabelsPayload,
-  giteaMilestoneChange,
+  giteaMilestoneEdit,
   resolveGiteaMilestoneId,
 } from "@/lib/gitea";
 
@@ -66,12 +66,19 @@ describe("issue milestones (#460)", () => {
     expect(resolveGiteaMilestoneId(undefined, null)).toBeUndefined();
   });
 
-  test("only reports a change when the issue carries a different milestone", () => {
-    expect(giteaMilestoneChange({ milestone: null }, 7)).toBe(7);
-    expect(giteaMilestoneChange({ milestone: { id: 7 } }, 7)).toBeUndefined();
-    expect(giteaMilestoneChange({ milestone: { id: 7 } }, 0)).toBe(0);
-    expect(giteaMilestoneChange({}, 0)).toBeUndefined();
-    expect(giteaMilestoneChange({ milestone: { id: 7 } }, undefined)).toBeUndefined();
+  test("only edits when the issue carries a different milestone", () => {
+    expect(giteaMilestoneEdit({ milestone: null }, ids, { title: "v1.0" })).toBe(7);
+    expect(giteaMilestoneEdit({ milestone: { id: 7 } }, ids, { title: "v1.0" })).toBeUndefined();
+    expect(giteaMilestoneEdit({ milestone: { id: 7 } }, ids, null)).toBe(0);
+    expect(giteaMilestoneEdit({}, ids, null)).toBeUndefined();
+    expect(giteaMilestoneEdit({ milestone: { id: 7 } }, undefined, null)).toBeUndefined();
+  });
+
+  test("never clears a milestone made in Gitea alone", () => {
+    // 42 is not in the map: no GitHub milestone has its title.
+    expect(giteaMilestoneEdit({ milestone: { id: 42 } }, ids, null)).toBeUndefined();
+    // GitHub does name a milestone, so it wins over the Gitea-only one.
+    expect(giteaMilestoneEdit({ milestone: { id: 42 } }, ids, { title: "v1.0" })).toBe(7);
   });
 });
 
