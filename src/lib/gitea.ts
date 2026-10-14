@@ -1178,6 +1178,43 @@ export const mirrorGithubRepoToGitea = async ({
       }
     }
 
+    // Milestones go first so the issues and pull requests passes below
+    // can assign each item to its milestone (#460).
+    let milestoneIds: GiteaMilestoneIds | undefined;
+    const shouldMirrorMilestones = mirrorOptions.mirrorMilestones && octokit !== null;
+
+    console.log(
+      `[Metadata] Milestone mirroring check: mirrorMilestones=${mirrorOptions.mirrorMilestones}, isStarred=${repository.isStarred}, starredCodeOnly=${config.githubConfig?.starredCodeOnly}, shouldMirrorMilestones=${shouldMirrorMilestones}`
+    );
+
+    if (shouldMirrorMilestones) {
+      try {
+        milestoneIds = await mirrorGitRepoMilestonesToGitea({
+          config,
+          octokit,
+          repository,
+          giteaOwner: repoOwner,
+          giteaRepoName: targetRepoName,
+        });
+        metadataState.components.milestones = true;
+        metadataUpdated = true;
+        console.log(
+          `[Metadata] Successfully mirrored milestones for ${repository.name}`
+        );
+      } catch (error) {
+        // A rate limit is not this repository's fault and the other
+        // components would run into the same wall: fail the mirror so the
+        // scheduler puts the row back and retries after the reset (#437).
+        if (isRateLimitError(error)) throw error;
+        console.error(
+          `[Metadata] Failed to mirror milestones for ${repository.name}: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+        // Continue with other metadata operations even if milestones fail
+      }
+    }
+
     // Reconcile metadata on every sync (matches the release path above).
     // The underlying mirror* functions are idempotent: issues/PRs are
     // matched via [GH-ISSUE #N] / [GH-PR #N] markers and PATCHed in place,
@@ -1193,6 +1230,7 @@ export const mirrorGithubRepoToGitea = async ({
         const issuesCursor = await mirrorGitRepoIssuesToGitea({
           config,
           octokit,
+          milestoneIds,
           repository,
           giteaOwner: repoOwner,
           giteaRepoName: targetRepoName,
@@ -1235,6 +1273,7 @@ export const mirrorGithubRepoToGitea = async ({
         const pullRequestsCursor = await mirrorGitRepoPullRequestsToGitea({
           config,
           octokit,
+          milestoneIds,
           repository,
           giteaOwner: repoOwner,
           giteaRepoName: targetRepoName,
@@ -1298,40 +1337,6 @@ export const mirrorGithubRepoToGitea = async ({
           }`
         );
         // Continue with other metadata operations even if labels fail
-      }
-    }
-
-    const shouldMirrorMilestones = mirrorOptions.mirrorMilestones && octokit !== null;
-
-    console.log(
-      `[Metadata] Milestone mirroring check: mirrorMilestones=${mirrorOptions.mirrorMilestones}, isStarred=${repository.isStarred}, starredCodeOnly=${config.githubConfig?.starredCodeOnly}, shouldMirrorMilestones=${shouldMirrorMilestones}`
-    );
-
-    if (shouldMirrorMilestones) {
-      try {
-        await mirrorGitRepoMilestonesToGitea({
-          config,
-          octokit,
-          repository,
-          giteaOwner: repoOwner,
-          giteaRepoName: targetRepoName,
-        });
-        metadataState.components.milestones = true;
-        metadataUpdated = true;
-        console.log(
-          `[Metadata] Successfully mirrored milestones for ${repository.name}`
-        );
-      } catch (error) {
-        // A rate limit is not this repository's fault and the other
-        // components would run into the same wall: fail the mirror so the
-        // scheduler puts the row back and retries after the reset (#437).
-        if (isRateLimitError(error)) throw error;
-        console.error(
-          `[Metadata] Failed to mirror milestones for ${repository.name}: ${
-            error instanceof Error ? error.message : String(error)
-          }`
-        );
-        // Continue with other metadata operations even if milestones fail
       }
     }
 
@@ -1986,6 +1991,43 @@ export async function mirrorGitHubRepoToGiteaOrg({
       }
     }
 
+    // Milestones go first so the issues and pull requests passes below
+    // can assign each item to its milestone (#460).
+    let milestoneIds: GiteaMilestoneIds | undefined;
+    const shouldMirrorMilestones = mirrorOptions.mirrorMilestones && octokit !== null;
+
+    console.log(
+      `[Metadata] Milestone mirroring check: mirrorMilestones=${mirrorOptions.mirrorMilestones}, isStarred=${repository.isStarred}, starredCodeOnly=${config.githubConfig?.starredCodeOnly}, shouldMirrorMilestones=${shouldMirrorMilestones}`
+    );
+
+    if (shouldMirrorMilestones) {
+      try {
+        milestoneIds = await mirrorGitRepoMilestonesToGitea({
+          config,
+          octokit,
+          repository,
+          giteaOwner: orgName,
+          giteaRepoName: targetRepoName,
+        });
+        metadataState.components.milestones = true;
+        metadataUpdated = true;
+        console.log(
+          `[Metadata] Successfully mirrored milestones for ${repository.name} to org ${orgName}/${targetRepoName}`
+        );
+      } catch (error) {
+        // A rate limit is not this repository's fault and the other
+        // components would run into the same wall: fail the mirror so the
+        // scheduler puts the row back and retries after the reset (#437).
+        if (isRateLimitError(error)) throw error;
+        console.error(
+          `[Metadata] Failed to mirror milestones for ${repository.name} to org ${orgName}/${targetRepoName}: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+        // Continue with other metadata operations even if milestones fail
+      }
+    }
+
     // Reconcile metadata on every sync. See note in mirrorGithubRepoToGitea
     // above. The underlying mirror* functions are idempotent.
     const shouldMirrorIssuesThisRun = mirrorOptions.mirrorIssues && octokit !== null;
@@ -1999,6 +2041,7 @@ export async function mirrorGitHubRepoToGiteaOrg({
         const issuesCursor = await mirrorGitRepoIssuesToGitea({
           config,
           octokit,
+          milestoneIds,
           repository,
           giteaOwner: orgName,
           giteaRepoName: targetRepoName,
@@ -2041,6 +2084,7 @@ export async function mirrorGitHubRepoToGiteaOrg({
         const pullRequestsCursor = await mirrorGitRepoPullRequestsToGitea({
           config,
           octokit,
+          milestoneIds,
           repository,
           giteaOwner: orgName,
           giteaRepoName: targetRepoName,
@@ -2104,40 +2148,6 @@ export async function mirrorGitHubRepoToGiteaOrg({
           }`
         );
         // Continue with other metadata operations even if labels fail
-      }
-    }
-
-    const shouldMirrorMilestones = mirrorOptions.mirrorMilestones && octokit !== null;
-
-    console.log(
-      `[Metadata] Milestone mirroring check: mirrorMilestones=${mirrorOptions.mirrorMilestones}, isStarred=${repository.isStarred}, starredCodeOnly=${config.githubConfig?.starredCodeOnly}, shouldMirrorMilestones=${shouldMirrorMilestones}`
-    );
-
-    if (shouldMirrorMilestones) {
-      try {
-        await mirrorGitRepoMilestonesToGitea({
-          config,
-          octokit,
-          repository,
-          giteaOwner: orgName,
-          giteaRepoName: targetRepoName,
-        });
-        metadataState.components.milestones = true;
-        metadataUpdated = true;
-        console.log(
-          `[Metadata] Successfully mirrored milestones for ${repository.name} to org ${orgName}/${targetRepoName}`
-        );
-      } catch (error) {
-        // A rate limit is not this repository's fault and the other
-        // components would run into the same wall: fail the mirror so the
-        // scheduler puts the row back and retries after the reset (#437).
-        if (isRateLimitError(error)) throw error;
-        console.error(
-          `[Metadata] Failed to mirror milestones for ${repository.name} to org ${orgName}/${targetRepoName}: ${
-            error instanceof Error ? error.message : String(error)
-          }`
-        );
-        // Continue with other metadata operations even if milestones fail
       }
     }
 
@@ -2616,8 +2626,52 @@ export function buildGiteaIssueEditPayload(opts: {
   title: string;
   body: string;
   closed: boolean;
-}): { title: string; body: string; state: "open" | "closed" } {
-  return { title: opts.title, body: opts.body, state: opts.closed ? "closed" : "open" };
+  /** Gitea milestone id to set, 0 to clear it, undefined to leave it alone. */
+  milestone?: number;
+}): { title: string; body: string; state: "open" | "closed"; milestone?: number } {
+  const payload: { title: string; body: string; state: "open" | "closed"; milestone?: number } = {
+    title: opts.title,
+    body: opts.body,
+    state: opts.closed ? "closed" : "open",
+  };
+  if (opts.milestone !== undefined) payload.milestone = opts.milestone;
+  return payload;
+}
+
+/** Gitea milestone ids by title, as returned by mirrorGitRepoMilestonesToGitea. */
+export type GiteaMilestoneIds = Map<string, number>;
+
+/**
+ * The Gitea milestone a mirrored issue or pull request should carry (#460):
+ * the id of the milestone with the same title, 0 when the GitHub item has
+ * none, or undefined when it cannot be told (milestones are not mirrored
+ * for this repository, or this one is missing in Gitea). Undefined means
+ * leave the Gitea side as it is.
+ */
+export function resolveGiteaMilestoneId(
+  milestoneIds: GiteaMilestoneIds | undefined,
+  githubMilestone: { title?: string | null } | null | undefined
+): number | undefined {
+  if (!milestoneIds) return undefined;
+  const title = githubMilestone?.title;
+  if (!title) return 0;
+  const id = milestoneIds.get(title);
+  return typeof id === "number" && id > 0 ? id : undefined;
+}
+
+/**
+ * The milestone value to send when editing an existing Gitea issue: the
+ * wanted id when it differs from what the issue carries, otherwise
+ * undefined so the edit does not touch it (and Gitea writes no timeline
+ * entry).
+ */
+export function giteaMilestoneChange(
+  existingIssue: { milestone?: { id?: number } | null } | null | undefined,
+  wanted: number | undefined
+): number | undefined {
+  if (wanted === undefined) return undefined;
+  const current = existingIssue?.milestone?.id ?? 0;
+  return current === wanted ? undefined : wanted;
 }
 
 /**
@@ -2683,12 +2737,18 @@ export const mirrorGitRepoIssuesToGitea = async ({
   syncCursor,
   passProgress,
   onPassProgress,
+  milestoneIds,
 }: {
   config: Partial<Config>;
   octokit: Octokit;
   repository: Repository;
   giteaOwner: string;
   giteaRepoName?: string;
+  /**
+   * Gitea milestone ids by title from the milestones pass that ran just
+   * before (#460). Without it the issues' milestones are left untouched.
+   */
+  milestoneIds?: GiteaMilestoneIds;
   /**
    * Watermark from the previous completed issues pass (#449). When set,
    * only issues updated since then are listed and reconciled.
@@ -3004,12 +3064,14 @@ export const mirrorGitRepoIssuesToGitea = async ({
       const mirroredTitle = `${issueMarker} ${issue.title}`;
       const issueBody = `${issueOriginHeader}\nOriginal GitHub issue: ${issue.html_url}${originalAssignees}\n\n${issue.body ?? ""}`;
 
+      const wantedMilestoneId = resolveGiteaMilestoneId(milestoneIds, issue.milestone);
       const issuePayload: any = {
         title: mirroredTitle,
         body: issueBody,
         closed: issue.state === "closed",
         labels: giteaLabelIds,
       };
+      if (wantedMilestoneId) issuePayload.milestone = wantedMilestoneId;
 
       let existingIssue = giteaIssueByGitHubNumber.get(issue.number);
       if (!existingIssue) {
@@ -3040,10 +3102,12 @@ export const mirrorGitRepoIssuesToGitea = async ({
       // comment listing, which is the per-issue GitHub call.
       if (itemClass === "unchanged" && existingIssue) {
         const wantClosed = issue.state === "closed";
+        const milestoneChange = giteaMilestoneChange(existingIssue, wantedMilestoneId);
         if (
           existingIssue.title !== issuePayload.title ||
           String(existingIssue.body ?? "") !== issuePayload.body ||
-          (existingIssue.state === "closed") !== wantClosed
+          (existingIssue.state === "closed") !== wantClosed ||
+          milestoneChange !== undefined
         ) {
           await httpPatch(
             `${config.giteaConfig!.url}/api/v1/repos/${giteaOwner}/${repoName}/issues/${existingIssue.number}`,
@@ -3051,6 +3115,7 @@ export const mirrorGitRepoIssuesToGitea = async ({
               title: issuePayload.title,
               body: issuePayload.body,
               closed: wantClosed,
+              milestone: milestoneChange,
             }),
             {
               Authorization: `token ${decryptedConfig.giteaConfig!.token}`,
@@ -3085,6 +3150,7 @@ export const mirrorGitRepoIssuesToGitea = async ({
             title: issuePayload.title,
             body: issuePayload.body,
             closed: issue.state === "closed",
+            milestone: giteaMilestoneChange(existingIssue, wantedMilestoneId),
           }),
           {
             Authorization: `token ${decryptedConfig.giteaConfig!.token}`,
@@ -3134,6 +3200,7 @@ export const mirrorGitRepoIssuesToGitea = async ({
               title: issuePayload.title,
               body: issuePayload.body,
               closed: issue.state === "closed",
+              milestone: giteaMilestoneChange(recheckHit, wantedMilestoneId),
             }),
             {
               Authorization: `token ${decryptedConfig.giteaConfig!.token}`,
@@ -4226,12 +4293,15 @@ export async function mirrorGitRepoPullRequestsToGitea({
   syncCursor,
   passProgress,
   onPassProgress,
+  milestoneIds,
 }: {
   config: Partial<Config>;
   octokit: Octokit;
   repository: Repository;
   giteaOwner: string;
   giteaRepoName?: string;
+  /** Gitea milestone ids by title; see the issues pass (#460). */
+  milestoneIds?: GiteaMilestoneIds;
   /**
    * Watermark from the previous completed pull request pass (#449).
    * When set, only pull requests updated since then are processed.
@@ -4355,6 +4425,7 @@ export async function mirrorGitRepoPullRequestsToGitea({
             created_at: entry.created_at,
             updated_at: entry.updated_at,
             merged_at: (entry as any).pull_request?.merged_at ?? null,
+            milestone: entry.milestone ?? null,
           }) as unknown as ListedPullRequest
       );
   };
@@ -4517,10 +4588,30 @@ export async function mirrorGitRepoPullRequestsToGitea({
         existsInDestination: existingPrIssuesByNumber.has(listedPr.number),
       });
       if (itemClass !== "sync") {
-        if (itemClass === "unchanged") unchangedCount++;
+        if (itemClass === "unchanged") {
+          unchangedCount++;
+          // The listing carries the milestone, so a change on the Gitea
+          // side (or an issue mirrored before #460) is fixed without the
+          // detail calls.
+          const existing = existingPrIssuesByNumber.get(listedPr.number);
+          const milestoneChange = giteaMilestoneChange(
+            existing,
+            resolveGiteaMilestoneId(milestoneIds, listedPr.milestone)
+          );
+          if (existing && milestoneChange !== undefined) {
+            await httpPatch(
+              `${config.giteaConfig!.url}/api/v1/repos/${giteaOwner}/${repoName}/issues/${existing.number}`,
+              { milestone: milestoneChange },
+              {
+                Authorization: `token ${decryptedConfig.giteaConfig!.token}`,
+              }
+            );
+          }
+        }
         completedNumbers.add(listedPr.number);
         return;
       }
+      const wantedMilestoneId = resolveGiteaMilestoneId(milestoneIds, listedPr.milestone);
       try {
         // Fetch additional PR data for rich metadata
         const [prDetail, commits, files] = await Promise.all([
@@ -4601,6 +4692,7 @@ export async function mirrorGitRepoPullRequestsToGitea({
           body: richBody,
           labels: pullRequestLabelId ? [pullRequestLabelId] : [],
           closed: pr.state === "closed" || pr.merged_at !== null,
+          ...(wantedMilestoneId ? { milestone: wantedMilestoneId } : {}),
         };
 
         let existingPrIssue = existingPrIssuesByNumber.get(pr.number);
@@ -4640,6 +4732,7 @@ export async function mirrorGitRepoPullRequestsToGitea({
               title: issueData.title,
               body: issueData.body,
               closed: issueData.closed,
+              milestone: giteaMilestoneChange(existingPrIssue, wantedMilestoneId),
             }),
             {
               Authorization: `token ${decryptedConfig.giteaConfig!.token}`,
@@ -4707,6 +4800,7 @@ export async function mirrorGitRepoPullRequestsToGitea({
           body: `**Original Pull Request:** ${pr.html_url}\n\n**State:** ${pr.state}\n**Merged:** ${pr.merged_at ? 'Yes' : 'No'}\n\n---\n\n${pr.body || 'No description provided'}`,
           labels: pullRequestLabelId ? [pullRequestLabelId] : [],
           closed: pr.state === "closed" || pr.merged_at !== null,
+          ...(wantedMilestoneId ? { milestone: wantedMilestoneId } : {}),
         };
         
         try {
@@ -4745,6 +4839,7 @@ export async function mirrorGitRepoPullRequestsToGitea({
                 title: basicIssueData.title,
                 body: basicIssueData.body,
                 closed: basicIssueData.closed,
+                milestone: giteaMilestoneChange(existingPrIssue, wantedMilestoneId),
               }),
               {
                 Authorization: `token ${decryptedConfig.giteaConfig!.token}`,
@@ -4991,7 +5086,7 @@ export async function mirrorGitRepoMilestonesToGitea({
   repository: Repository;
   giteaOwner: string;
   giteaRepoName?: string;
-}) {
+}): Promise<GiteaMilestoneIds> {
   // The source client arrives as `octokit`; see mirrorGitRepoIssuesToGitea.
   if (!config.giteaConfig?.token || !config.giteaConfig?.url) {
     throw new Error("Missing destination configuration.");
@@ -5034,7 +5129,7 @@ export async function mirrorGitRepoMilestonesToGitea({
 
   if (milestones.length === 0) {
     console.log(`No milestones to mirror for ${repository.fullName}`);
-    return;
+    return new Map();
   }
 
   // Get existing milestones from Gitea. Two correctness requirements:
@@ -5054,7 +5149,10 @@ export async function mirrorGitRepoMilestonesToGitea({
   // page 1 and re-POSTs every milestone past index 50 on every sync.
   // (Repro: post-fix deploy on Subnet-Calculator leaked 9 unique
   // milestones past page 1 of a 74-row /milestones response.)
-  const existingMilestones = new Set<string>();
+  // Title to Gitea id, so issues and pull requests can be assigned to
+  // their milestone afterwards (#460). The first id seen for a title
+  // wins when older syncs left duplicates behind.
+  const existingMilestones: GiteaMilestoneIds = new Map();
   const milestonesPerPage = 50;
   let milestonesPage = 1;
   let milestonesFetched = 0;
@@ -5069,7 +5167,9 @@ export async function mirrorGitRepoMilestonesToGitea({
       ? giteaMilestonesRes.data
       : [];
     if (!pageMilestones.length) break;
-    for (const ms of pageMilestones) existingMilestones.add(ms.title);
+    for (const ms of pageMilestones) {
+      if (!existingMilestones.has(ms.title)) existingMilestones.set(ms.title, ms.id);
+    }
     milestonesFetched += pageMilestones.length;
 
     const linkHeader = giteaMilestonesRes.headers.get("link") || "";
@@ -5090,7 +5190,7 @@ export async function mirrorGitRepoMilestonesToGitea({
   for (const milestone of milestones) {
     if (!existingMilestones.has(milestone.title)) {
       try {
-        await httpPost(
+        const created = await httpPost(
           `${config.giteaConfig.url}/api/v1/repos/${giteaOwner}/${repoName}/milestones`,
           {
             title: milestone.title,
@@ -5104,7 +5204,7 @@ export async function mirrorGitRepoMilestonesToGitea({
         );
         // Track locally so a duplicate within `milestones` (shouldn't
         // happen, but defensive) doesn't trigger a second POST.
-        existingMilestones.add(milestone.title);
+        existingMilestones.set(milestone.title, created.data?.id);
         mirroredCount++;
       } catch (error) {
         console.error(
@@ -5115,6 +5215,7 @@ export async function mirrorGitRepoMilestonesToGitea({
   }
 
   console.log(`✅ Mirrored ${mirroredCount} new milestones to Gitea`);
+  return existingMilestones;
 }
 
 /**

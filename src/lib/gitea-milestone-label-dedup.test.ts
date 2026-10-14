@@ -146,7 +146,8 @@ describe("milestone dedup on sync", () => {
     // Defensive: if `milestones` ever contains a same-named entry
     // twice (unlikely but cheap to guard), we shouldn't POST it twice.
     expect(
-      /existingMilestones\.add\(\s*milestone\.title\s*\)/.test(body),
+      // A map since #460 (title to id, for issue assignment).
+      /existingMilestones\.set\(\s*milestone\.title\b/.test(body),
       "after a successful create, the new milestone title must be added to existingMilestones"
     ).toBe(true);
   });

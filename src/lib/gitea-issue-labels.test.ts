@@ -14,7 +14,12 @@
  */
 
 import { describe, test, expect } from "bun:test";
-import { buildGiteaIssueEditPayload, buildGiteaIssueLabelsPayload } from "@/lib/gitea";
+import {
+  buildGiteaIssueEditPayload,
+  buildGiteaIssueLabelsPayload,
+  giteaMilestoneChange,
+  resolveGiteaMilestoneId,
+} from "@/lib/gitea";
 
 describe("buildGiteaIssueEditPayload (#334 sibling)", () => {
   test("edit body never carries `labels` (Gitea's EditIssueOption ignores it)", () => {
@@ -34,6 +39,39 @@ describe("buildGiteaIssueEditPayload (#334 sibling)", () => {
   test("maps the closed flag to Gitea's `state`", () => {
     expect(buildGiteaIssueEditPayload({ title: "t", body: "b", closed: true }).state).toBe("closed");
     expect(buildGiteaIssueEditPayload({ title: "t", body: "b", closed: false }).state).toBe("open");
+  });
+});
+
+describe("issue milestones (#460)", () => {
+  const ids = new Map([["v1.0", 7]]);
+
+  test("the edit body carries a milestone only when one is given", () => {
+    expect(buildGiteaIssueEditPayload({ title: "t", body: "b", closed: false })).not.toHaveProperty(
+      "milestone"
+    );
+    expect(
+      buildGiteaIssueEditPayload({ title: "t", body: "b", closed: false, milestone: 7 }).milestone
+    ).toBe(7);
+    // 0 is how Gitea clears a milestone, so it has to survive.
+    expect(
+      buildGiteaIssueEditPayload({ title: "t", body: "b", closed: false, milestone: 0 }).milestone
+    ).toBe(0);
+  });
+
+  test("resolves the Gitea id by title, 0 for none, undefined when unknown", () => {
+    expect(resolveGiteaMilestoneId(ids, { title: "v1.0" })).toBe(7);
+    expect(resolveGiteaMilestoneId(ids, null)).toBe(0);
+    expect(resolveGiteaMilestoneId(ids, { title: "missing" })).toBeUndefined();
+    expect(resolveGiteaMilestoneId(undefined, { title: "v1.0" })).toBeUndefined();
+    expect(resolveGiteaMilestoneId(undefined, null)).toBeUndefined();
+  });
+
+  test("only reports a change when the issue carries a different milestone", () => {
+    expect(giteaMilestoneChange({ milestone: null }, 7)).toBe(7);
+    expect(giteaMilestoneChange({ milestone: { id: 7 } }, 7)).toBeUndefined();
+    expect(giteaMilestoneChange({ milestone: { id: 7 } }, 0)).toBe(0);
+    expect(giteaMilestoneChange({}, 0)).toBeUndefined();
+    expect(giteaMilestoneChange({ milestone: { id: 7 } }, undefined)).toBeUndefined();
   });
 });
 
