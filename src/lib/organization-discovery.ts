@@ -24,6 +24,7 @@ import {
   selectNewRepositoriesByIdentity,
 } from '@/lib/repo-utils';
 import { resolveOrganizationSkipForks } from '@/lib/utils/mirror-overrides';
+import { triggerNewRepositoriesNotification } from '@/lib/notification-service';
 import type { SourceRecord } from '@/lib/sources';
 
 /** The organization fields re-discovery reads. */
@@ -152,6 +153,18 @@ export async function rediscoverRepositoriesForOrganization({
         .onConflictDoNothing({ target: [repositories.userId, repositories.sourceId, repositories.normalizedFullName] });
     }
     console.log(`${logPrefix} Re-discovered ${repoRecords.length} new repositories for organization ${organization.name} on source ${source.name} for user ${userId} during ${phase}`);
+
+    // "New repository discovered" notification (settings > notifications).
+    // Fire-and-forget: a failing provider must never break discovery, and
+    // the service itself swallows every error.
+    triggerNewRepositoriesNotification({
+      userId,
+      organizationName: organization.name,
+      repositoryNames: repoRecords.map(repo => repo.fullName ?? '').filter(Boolean),
+      details: `Discovered during ${phase} on source ${source.name}.`,
+    }).catch(error => {
+      console.error(`${logPrefix} Failed to send the new repository notification for organization ${organization.name}:`, error);
+    });
   }
   if (alreadyTracked.length > 0) {
     console.log(`${logPrefix} Organization ${organization.name}: ${alreadyTracked.length} repositories are already tracked for user ${userId} on the same host, not adding them again under source ${source.name}`);

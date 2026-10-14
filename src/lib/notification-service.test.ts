@@ -18,7 +18,7 @@ mock.module("@/lib/utils/encryption", () => ({
 }));
 
 // Import after mocks are set up — db is already mocked via setup.bun.ts
-import { sendNotification, testNotification } from "./notification-service";
+import { sendNotification, testNotification, buildNewRepositoriesNotificationEvent, MAX_LISTED_NEW_REPOSITORIES } from "./notification-service";
 import type { NotificationConfig } from "@/types/config";
 
 describe("sendNotification", () => {
@@ -330,5 +330,53 @@ describe("testNotification", () => {
     const result = await testNotification(config);
     expect(result.success).toBe(false);
     expect(result.error).toContain("Unknown provider");
+  });
+});
+
+describe("buildNewRepositoriesNotificationEvent", () => {
+  test("reports the discovered repositories of one organization in a single event", () => {
+    const event = buildNewRepositoriesNotificationEvent({
+      organizationName: "gitea",
+      repositoryNames: ["gitea/alpha", "gitea/beta"],
+      details: "Discovered during scheduled sync on source github.",
+    });
+
+    expect(event.type).toBe("new_repo");
+    expect(event.title).toBe("New Repositories: gitea");
+    expect(event.message).toContain("2 new repositories discovered for gitea:");
+    expect(event.message).toContain("- gitea/alpha");
+    expect(event.message).toContain("- gitea/beta");
+    expect(event.message).toContain("Details: Discovered during scheduled sync on source github.");
+  });
+
+  test("uses the singular wording for a single repository", () => {
+    const event = buildNewRepositoriesNotificationEvent({
+      organizationName: "gitea",
+      repositoryNames: ["gitea/alpha"],
+    });
+
+    expect(event.message).toContain("1 new repository discovered for gitea:");
+    expect(event.message).not.toContain("more");
+  });
+
+  test("caps the listed repositories so a large import stays readable", () => {
+    const names = Array.from({ length: MAX_LISTED_NEW_REPOSITORIES + 5 }, (_, i) => `gitea/repo-${i}`);
+    const event = buildNewRepositoriesNotificationEvent({
+      organizationName: "gitea",
+      repositoryNames: names,
+    });
+
+    expect(event.message).toContain("15 new repositories discovered for gitea:");
+    expect(event.message).toContain(`- ${names[MAX_LISTED_NEW_REPOSITORIES - 1]}`);
+    expect(event.message).not.toContain(names[MAX_LISTED_NEW_REPOSITORIES]);
+    expect(event.message).toContain("- and 5 more");
+  });
+
+  test("falls back to a placeholder when the organization is unknown", () => {
+    const event = buildNewRepositoriesNotificationEvent({
+      repositoryNames: ["someone/repo"],
+    });
+
+    expect(event.title).toBe("New Repositories: Unknown");
   });
 });

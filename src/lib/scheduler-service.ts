@@ -25,6 +25,7 @@ import { isMirrorableGitHubRepo } from '@/lib/repo-eligibility';
 import { loadOrganizationForkPolicies, orgForkSkipDecision } from '@/lib/utils/mirror-overrides';
 import { createMirrorJob } from '@/lib/helpers';
 import { rediscoverRepositoriesForOrganization } from '@/lib/organization-discovery';
+import { triggerNewRepositoriesNotification } from '@/lib/notification-service';
 import { getNextScheduledRun, isCronExpression, normalizeTimezone } from '@/lib/utils/schedule-utils';
 import { resetStuckMirrorStatuses } from '@/lib/stuck-status-recovery';
 import { isRateLimitError, rateLimitGateKey, rateLimitedUntil } from '@/lib/rate-limit-gate';
@@ -270,6 +271,28 @@ async function importRepositoriesFromSources(
             .onConflictDoNothing({ target: [repositories.userId, repositories.sourceId, repositories.normalizedFullName] });
         }
         console.log(`[Scheduler] Successfully imported ${newRepos.length} new repositories for user ${userId} from source ${source.name}`);
+
+        // "New repository discovered" notifications (settings > notifications).
+        // Grouped per owner/organization so a large import produces one alert
+        // per owner instead of one per repository. Fire-and-forget: the service
+        // swallows every error, and a failing provider must not break the run.
+        const newReposByOwner = new Map<string, string[]>();
+        for (const repo of newRepos) {
+          const ownerLabel = repo.organization || repo.owner || 'Unknown';
+          const names = newReposByOwner.get(ownerLabel) ?? [];
+          names.push(repo.fullName);
+          newReposByOwner.set(ownerLabel, names);
+        }
+        for (const [ownerLabel, names] of newReposByOwner) {
+          triggerNewRepositoriesNotification({
+            userId,
+            organizationName: ownerLabel,
+            repositoryNames: names,
+            details: `Auto-imported during ${phase} from source ${source.name}.`,
+          }).catch(notificationError => {
+            console.error(`[Scheduler] Failed to send the new repository notification for ${ownerLabel}:`, notificationError);
+          });
+        }
 
         for (const repo of newRepos) {
           const sourceLabel = repo.isStarred ? 'starred' : 'owned';
