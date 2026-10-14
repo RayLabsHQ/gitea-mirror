@@ -12,7 +12,8 @@ const mockMirrorGitHubReleasesToGitea = mock(() => Promise.resolve());
 const mockMirrorGitRepoIssuesToGitea = mock(() => Promise.resolve(undefined));
 const mockMirrorGitRepoPullRequestsToGitea = mock(() => Promise.resolve(undefined));
 const mockMirrorGitRepoLabelsToGitea = mock(() => Promise.resolve());
-const mockMirrorGitRepoMilestonesToGitea = mock(() => Promise.resolve());
+const mockMilestoneIds = new Map<string, number>([["v1.0", 7]]);
+const mockMirrorGitRepoMilestonesToGitea = mock(() => Promise.resolve(mockMilestoneIds));
 const mockSyncRepositoryMetadataToGitea = mock(() => Promise.resolve());
 const mockGetGiteaRepoOwnerAsync = mock(() => Promise.resolve("starred"));
 const mockCreatePreSyncBundleBackup = mock(() =>
@@ -1576,6 +1577,12 @@ describe("Enhanced Gitea Operations", () => {
       expect(mockMirrorGitRepoMilestonesToGitea).toHaveBeenCalledTimes(1);
       // Labels should be skipped because issues already import them
       expect(mockMirrorGitRepoLabelsToGitea).not.toHaveBeenCalled();
+      // Milestones run first and their ids reach the issues and pull
+      // requests passes, which assign each item to its milestone (#460).
+      const issuesArgs = (mockMirrorGitRepoIssuesToGitea.mock.calls[0] as any[])[0];
+      const pullsArgs = (mockMirrorGitRepoPullRequestsToGitea.mock.calls[0] as any[])[0];
+      expect(issuesArgs.milestoneIds).toBe(mockMilestoneIds);
+      expect(pullsArgs.milestoneIds).toBe(mockMilestoneIds);
     });
 
     test("skips issues and PRs when metadata shows they were already synced", async () => {
