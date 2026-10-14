@@ -17,6 +17,7 @@ import { describe, test, expect } from "bun:test";
 import {
   buildGiteaIssueEditPayload,
   buildGiteaIssueLabelsPayload,
+  buildGiteaMilestoneEditPayload,
   giteaMilestoneEdit,
   resolveGiteaMilestoneId,
 } from "@/lib/gitea";
@@ -79,6 +80,50 @@ describe("issue milestones (#460)", () => {
     expect(giteaMilestoneEdit({ milestone: { id: 42 } }, ids, null)).toBeUndefined();
     // GitHub does name a milestone, so it wins over the Gitea-only one.
     expect(giteaMilestoneEdit({ milestone: { id: 42 } }, ids, { title: "v1.0" })).toBe(7);
+  });
+});
+
+describe("buildGiteaMilestoneEditPayload (#460 follow-up)", () => {
+  test("no edit when state, due day and description match", () => {
+    expect(
+      buildGiteaMilestoneEditPayload(
+        // Created from GitHub: Gitea keeps the instant, shown in its own zone.
+        { state: "open", due_on: "2026-11-01T00:00:00-07:00", description: "d" },
+        { state: "open", due_on: "2026-11-01T07:00:00Z", description: "d" }
+      )
+    ).toBeNull();
+    expect(
+      buildGiteaMilestoneEditPayload(
+        // Edited through the API: moved to the end of the day.
+        { state: "closed", due_on: "2026-12-15T23:59:59+09:00", description: null },
+        { state: "closed", due_on: "2026-12-15T08:00:00Z", description: null }
+      )
+    ).toBeNull();
+    // Year 9999 is how Gitea stores no deadline.
+    expect(
+      buildGiteaMilestoneEditPayload(
+        { state: "open", due_on: "9999-12-31T23:59:59-08:00", description: "" },
+        { state: "open", due_on: null, description: "" }
+      )
+    ).toBeNull();
+  });
+
+  test("carries over a close, a due date and a description", () => {
+    expect(
+      buildGiteaMilestoneEditPayload(
+        { state: "open", due_on: null, description: "old" },
+        { state: "closed", due_on: "2026-12-15T08:00:00Z", description: "new" }
+      )
+    ).toEqual({ state: "closed", due_on: "2026-12-15T12:00:00Z", description: "new" });
+  });
+
+  test("clears a removed due date with Gitea's no-deadline value", () => {
+    expect(
+      buildGiteaMilestoneEditPayload(
+        { state: "open", due_on: "2026-11-01T00:00:00-07:00", description: "" },
+        { state: "open", due_on: null, description: "" }
+      )
+    ).toEqual({ due_on: "9999-12-31T00:00:00Z" });
   });
 });
 

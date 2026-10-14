@@ -5112,6 +5112,56 @@ export async function mirrorGitRepoLabelsToGitea({
   console.log(`✅ Mirrored ${mirroredCount} new labels to Gitea`);
 }
 
+/**
+ * Gitea treats a deadline in year 9999 as none, and its edit endpoint
+ * ignores an empty `due_on`, so this is how a removed due date is cleared.
+ */
+const GITEA_NO_MILESTONE_DEADLINE = "9999-12-31T00:00:00Z";
+
+/**
+ * A milestone due date as a calendar day. Gitea moves an edited deadline
+ * to the end of that day in its own time zone and reports it with that
+ * offset, so the date part of what it returns is the day it holds. A year
+ * of 9999 is how it stores no deadline.
+ */
+function giteaMilestoneDueDay(value: string | null | undefined): string | null {
+  const day = /^(\d{4})-\d{2}-\d{2}/.exec(value ?? "");
+  if (!day || Number(day[1]) >= 9999) return null;
+  return day[0];
+}
+
+/** GitHub due dates are instants in UTC; the day is their UTC date. */
+function githubMilestoneDueDay(value: string | null | undefined): string | null {
+  const ms = value ? Date.parse(value) : NaN;
+  return Number.isFinite(ms) ? new Date(ms).toISOString().slice(0, 10) : null;
+}
+
+/**
+ * The edit that brings an already mirrored Gitea milestone in line with
+ * its GitHub milestone (state, due date, description), or null when they
+ * already match.
+ */
+export function buildGiteaMilestoneEditPayload(
+  gitea: { state?: string | null; due_on?: string | null; description?: string | null },
+  github: { state?: string | null; due_on?: string | null; description?: string | null }
+): { state?: string; due_on?: string; description?: string } | null {
+  const edit: { state?: string; due_on?: string; description?: string } = {};
+  const wantState = github.state === "closed" ? "closed" : "open";
+  if ((gitea.state === "closed" ? "closed" : "open") !== wantState) edit.state = wantState;
+
+  const wantDay = githubMilestoneDueDay(github.due_on);
+  if (wantDay !== giteaMilestoneDueDay(gitea.due_on)) {
+    // Noon UTC lands on the same day in any server time zone within 11
+    // hours of UTC, which is the day Gitea then keeps.
+    edit.due_on = wantDay ? `${wantDay}T12:00:00Z` : GITEA_NO_MILESTONE_DEADLINE;
+  }
+
+  const wantDescription = github.description ?? "";
+  if ((gitea.description ?? "") !== wantDescription) edit.description = wantDescription;
+
+  return Object.keys(edit).length > 0 ? edit : null;
+}
+
 export async function mirrorGitRepoMilestonesToGitea({
   config,
   octokit,
@@ -5191,6 +5241,8 @@ export async function mirrorGitRepoMilestonesToGitea({
   // their milestone afterwards (#460). The first id seen for a title
   // wins when older syncs left duplicates behind.
   const existingMilestones: GiteaMilestoneIds = new Map();
+  // The Gitea milestone behind each id above, to bring it in line below.
+  const giteaMilestoneByTitle = new Map<string, any>();
   const milestonesPerPage = 50;
   let milestonesPage = 1;
   let milestonesFetched = 0;
@@ -5206,7 +5258,10 @@ export async function mirrorGitRepoMilestonesToGitea({
       : [];
     if (!pageMilestones.length) break;
     for (const ms of pageMilestones) {
-      if (!existingMilestones.has(ms.title)) existingMilestones.set(ms.title, ms.id);
+      if (!existingMilestones.has(ms.title)) {
+        existingMilestones.set(ms.title, ms.id);
+        giteaMilestoneByTitle.set(ms.title, ms);
+      }
     }
     milestonesFetched += pageMilestones.length;
 
@@ -5225,7 +5280,31 @@ export async function mirrorGitRepoMilestonesToGitea({
   }
 
   let mirroredCount = 0;
+  let updatedCount = 0;
   for (const milestone of milestones) {
+    const giteaMilestone = giteaMilestoneByTitle.get(milestone.title);
+    if (giteaMilestone) {
+      // Already mirrored: carry over a close, reopen, due date or
+      // description change made on GitHub since.
+      const edit = buildGiteaMilestoneEditPayload(giteaMilestone, milestone);
+      if (!edit) continue;
+      try {
+        await httpPatch(
+          `${config.giteaConfig.url}/api/v1/repos/${giteaOwner}/${repoName}/milestones/${giteaMilestone.id}`,
+          edit,
+          {
+            Authorization: `token ${decryptedConfig.giteaConfig.token}`,
+          }
+        );
+        updatedCount++;
+      } catch (error) {
+        if (isRateLimitError(error)) throw error;
+        console.error(
+          `Failed to update milestone "${milestone.title}": ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+      continue;
+    }
     if (!existingMilestones.has(milestone.title)) {
       try {
         const created = await httpPost(
@@ -5253,7 +5332,7 @@ export async function mirrorGitRepoMilestonesToGitea({
     }
   }
 
-  console.log(`✅ Mirrored ${mirroredCount} new milestones to Gitea`);
+  console.log(`✅ Mirrored ${mirroredCount} new milestones to Gitea, updated ${updatedCount}`);
   // Only the milestones that mirror a GitHub one: a milestone made in
   // Gitea alone is never assigned or cleared by the issues passes.
   const githubTitles = new Set(milestones.map((m) => m.title));
