@@ -8,6 +8,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
   const userId = authResult.userId;
 
   // Create a new ReadableStream for SSE
+  let cancelStream: (() => void) | undefined;
   const stream = new ReadableStream({
     start(controller) {
       const encoder = new TextEncoder();
@@ -47,12 +48,30 @@ export const GET: APIRoute = async ({ request, locals }) => {
         }
       }, 30000);
 
-      // Cleanup on close
-      request.signal.addEventListener("abort", () => {
+      // Cleanup on close. When the client disconnects, the node adapter
+      // cancels the stream reader and then fires this abort; on Bun 1.4 the
+      // cancel has already closed the stream, so close() throws
+      // ERR_INVALID_STATE inside an event listener, an uncaught exception
+      // that took the whole process down (#465).
+      let closed = false;
+      const stop = () => {
+        if (closed) return;
+        closed = true;
         clearInterval(pollInterval);
         clearInterval(heartbeatInterval);
-        controller.close();
+      };
+      request.signal.addEventListener("abort", () => {
+        stop();
+        try {
+          controller.close();
+        } catch {
+          // Already closed by the reader cancel.
+        }
       });
+      cancelStream = stop;
+    },
+    cancel() {
+      cancelStream?.();
     },
   });
 
