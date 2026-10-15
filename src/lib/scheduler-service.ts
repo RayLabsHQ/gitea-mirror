@@ -274,10 +274,17 @@ async function importRepositoriesFromSources(
 
         // "New repository discovered" notifications (settings > notifications).
         // Grouped per owner/organization so a large import produces one alert
-        // per owner instead of one per repository. Fire-and-forget: the service
-        // swallows every error, and a failing provider must not break the run.
+        // per owner instead of one per repository. Starred repositories are the
+        // exception: they can come from any number of owners, so they share a
+        // single "Starred" alert. Fire-and-forget: the service swallows every
+        // error, and a failing provider must not break the run.
         const newReposByOwner = new Map<string, string[]>();
+        const starredRepoNames: string[] = [];
         for (const repo of newRepos) {
+          if (repo.isStarred) {
+            starredRepoNames.push(repo.fullName);
+            continue;
+          }
           const ownerLabel = repo.organization || repo.owner || 'Unknown';
           const names = newReposByOwner.get(ownerLabel) ?? [];
           names.push(repo.fullName);
@@ -286,11 +293,21 @@ async function importRepositoriesFromSources(
         for (const [ownerLabel, names] of newReposByOwner) {
           triggerNewRepositoriesNotification({
             userId,
-            organizationName: ownerLabel,
+            groupLabel: ownerLabel,
             repositoryNames: names,
             details: `Auto-imported during ${phase} from source ${source.name}.`,
           }).catch(notificationError => {
             console.error(`[Scheduler] Failed to send the new repository notification for ${ownerLabel}:`, notificationError);
+          });
+        }
+        if (starredRepoNames.length > 0) {
+          triggerNewRepositoriesNotification({
+            userId,
+            starred: true,
+            repositoryNames: starredRepoNames,
+            details: `Auto-imported during ${phase} from source ${source.name}.`,
+          }).catch(notificationError => {
+            console.error('[Scheduler] Failed to send the starred repository notification:', notificationError);
           });
         }
 

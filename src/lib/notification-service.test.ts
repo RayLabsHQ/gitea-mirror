@@ -18,7 +18,7 @@ mock.module("@/lib/utils/encryption", () => ({
 }));
 
 // Import after mocks are set up — db is already mocked via setup.bun.ts
-import { sendNotification, testNotification, buildNewRepositoriesNotificationEvent, MAX_LISTED_NEW_REPOSITORIES } from "./notification-service";
+import { sendNotification, testNotification, buildNewRepositoriesNotificationEvent, MAX_LISTED_NEW_REPOSITORIES, STARRED_GROUP_LABEL } from "./notification-service";
 import type { NotificationConfig } from "@/types/config";
 
 describe("sendNotification", () => {
@@ -334,9 +334,9 @@ describe("testNotification", () => {
 });
 
 describe("buildNewRepositoriesNotificationEvent", () => {
-  test("reports the discovered repositories of one organization in a single event", () => {
+  test("reports the discovered repositories of one owner in a single event", () => {
     const event = buildNewRepositoriesNotificationEvent({
-      organizationName: "gitea",
+      groupLabel: "gitea",
       repositoryNames: ["gitea/alpha", "gitea/beta"],
       details: "Discovered during scheduled sync on source github.",
     });
@@ -351,7 +351,7 @@ describe("buildNewRepositoriesNotificationEvent", () => {
 
   test("uses the singular wording for a single repository", () => {
     const event = buildNewRepositoriesNotificationEvent({
-      organizationName: "gitea",
+      groupLabel: "gitea",
       repositoryNames: ["gitea/alpha"],
     });
 
@@ -359,10 +359,22 @@ describe("buildNewRepositoriesNotificationEvent", () => {
     expect(event.message).not.toContain("more");
   });
 
+  test("labels starred imports without naming an owner", () => {
+    // Stars come from any number of owners, so they are reported as one group.
+    const event = buildNewRepositoriesNotificationEvent({
+      starred: true,
+      repositoryNames: ["alpha/one", "beta/two"],
+    });
+
+    expect(event.title).toBe(`New Repositories: ${STARRED_GROUP_LABEL}`);
+    expect(event.message).toContain("2 new starred repositories discovered:");
+    expect(event.message).not.toContain("for Starred");
+  });
+
   test("caps the listed repositories so a large import stays readable", () => {
     const names = Array.from({ length: MAX_LISTED_NEW_REPOSITORIES + 5 }, (_, i) => `gitea/repo-${i}`);
     const event = buildNewRepositoriesNotificationEvent({
-      organizationName: "gitea",
+      groupLabel: "gitea",
       repositoryNames: names,
     });
 
@@ -372,7 +384,7 @@ describe("buildNewRepositoriesNotificationEvent", () => {
     expect(event.message).toContain("- and 5 more");
   });
 
-  test("falls back to a placeholder when the organization is unknown", () => {
+  test("falls back to a placeholder when the group is unknown", () => {
     const event = buildNewRepositoriesNotificationEvent({
       repositoryNames: ["someone/repo"],
     });

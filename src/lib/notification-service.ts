@@ -248,7 +248,7 @@ export async function triggerJobNotification({
 }
 
 /**
- * The "New repository discovered" event for one organization.
+ * The "New repository discovered" event for one group of imports.
  *
  * A source can publish dozens of new repositories between two scheduler
  * ticks, so they are reported as a single notification instead of one alert
@@ -257,23 +257,32 @@ export async function triggerJobNotification({
  */
 export const MAX_LISTED_NEW_REPOSITORIES = 10;
 
+/** Label for the single group that collects every starred import. */
+export const STARRED_GROUP_LABEL = "Starred";
+
 export function buildNewRepositoriesNotificationEvent({
-  organizationName,
+  groupLabel,
+  starred = false,
   repositoryNames,
   details,
 }: {
-  organizationName?: string | null;
+  groupLabel?: string | null;
+  /** Starred imports share one group, so the wording drops the owner. */
+  starred?: boolean;
   repositoryNames: string[];
   details?: string;
 }): NotificationEvent {
-  const orgLabel = organizationName || "Unknown";
+  const label = groupLabel || (starred ? STARRED_GROUP_LABEL : "Unknown");
+  const count = repositoryNames.length;
   const listed = repositoryNames.slice(0, MAX_LISTED_NEW_REPOSITORIES);
   const overflow = repositoryNames.length - listed.length;
 
   return {
-    title: `New Repositories: ${orgLabel}`,
+    title: `New Repositories: ${label}`,
     message: [
-      `${repositoryNames.length} new ${repositoryNames.length === 1 ? "repository" : "repositories"} discovered for ${orgLabel}:`,
+      starred
+        ? `${count} new starred ${count === 1 ? "repository" : "repositories"} discovered:`
+        : `${count} new ${count === 1 ? "repository" : "repositories"} discovered for ${label}:`,
       listed.map((name) => `\n- ${name}`).join(""),
       overflow > 0 ? `\n- and ${overflow} more` : "",
       details ? `\nDetails: ${details}` : "",
@@ -284,19 +293,22 @@ export function buildNewRepositoriesNotificationEvent({
 
 /**
  * Notifies the user about repositories that were newly discovered and
- * imported for one of their organizations (the "New repository discovered"
- * event).
+ * imported (the "New repository discovered" event). Imports are reported per
+ * owner or organization, except starred repositories, which arrive as one
+ * group because their owners are arbitrary.
  *
  * Called fire-and-forget from the discovery passes, so it NEVER throws.
  */
 export async function triggerNewRepositoriesNotification({
   userId,
-  organizationName,
+  groupLabel,
+  starred = false,
   repositoryNames,
   details,
 }: {
   userId: string;
-  organizationName?: string | null;
+  groupLabel?: string | null;
+  starred?: boolean;
   /** Full names of the repositories that were imported. */
   repositoryNames: string[];
   details?: string;
@@ -313,7 +325,8 @@ export async function triggerNewRepositoriesNotification({
     }
 
     const event = buildNewRepositoriesNotificationEvent({
-      organizationName,
+      groupLabel,
+      starred,
       repositoryNames,
       details,
     });

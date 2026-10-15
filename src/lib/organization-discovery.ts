@@ -159,7 +159,7 @@ export async function rediscoverRepositoriesForOrganization({
     // the service itself swallows every error.
     triggerNewRepositoriesNotification({
       userId,
-      organizationName: organization.name,
+      groupLabel: organization.name,
       repositoryNames: repoRecords.map(repo => repo.fullName ?? '').filter(Boolean),
       details: `Discovered during ${phase} on source ${source.name}.`,
     }).catch(error => {

@@ -510,7 +510,7 @@ describe.skipIf(!isChild)("Scheduler public-only sources (WP4)", () => {
     expect(mockTriggerNewRepositoriesNotification).toHaveBeenCalledTimes(1);
     expect(mockTriggerNewRepositoriesNotification.mock.calls[0][0]).toMatchObject({
       userId: "user-1",
-      organizationName: "pinned-org",
+      groupLabel: "pinned-org",
       repositoryNames: ["pinned-org/newly-published"],
     });
 
@@ -554,10 +554,11 @@ describe.skipIf(!isChild)("Scheduler public-only sources (WP4)", () => {
     expect(consoleLines.some((line) => line.includes("already tracked") && line.includes("pinned-org"))).toBe(true);
   });
 
-  test("auto-imported personal and starred repositories notify once per owner", async () => {
-    // The personal/starred auto-import path groups by owner: the user's own
-    // repositories carry no organization and fall back to the owner name,
-    // starred repositories keep theirs. One alert per owner, not per repo.
+  test("auto-imported repositories notify once per owner and once for all stars", async () => {
+    // The personal auto-import path groups by owner: the user's own
+    // repositories carry no organization and fall back to the owner name.
+    // Starred repositories are the exception - their owners are arbitrary, so
+    // every star shares a single notification instead of one per owner.
     sourceRows = [personalSource];
     orgRows = [];
     configRows = [
@@ -574,6 +575,12 @@ describe.skipIf(!isChild)("Scheduler public-only sources (WP4)", () => {
         fullName: "other-org/starred-gamma",
         isStarred: true,
       }),
+      makeGitRepo("starred-delta", {
+        owner: "another-user",
+        organization: null,
+        fullName: "another-user/starred-delta",
+        isStarred: true,
+      }),
     ];
 
     await schedulerLoop();
@@ -587,15 +594,15 @@ describe.skipIf(!isChild)("Scheduler public-only sources (WP4)", () => {
     expect(calls).toContainEqual(
       expect.objectContaining({
         userId: "user-1",
-        organizationName: "majmcccloud",
+        groupLabel: "majmcccloud",
         repositoryNames: ["majmcccloud/own-alpha", "majmcccloud/own-beta"],
       })
     );
     expect(calls).toContainEqual(
       expect.objectContaining({
         userId: "user-1",
-        organizationName: "other-org",
-        repositoryNames: ["other-org/starred-gamma"],
+        starred: true,
+        repositoryNames: ["other-org/starred-gamma", "another-user/starred-delta"],
       })
     );
   });

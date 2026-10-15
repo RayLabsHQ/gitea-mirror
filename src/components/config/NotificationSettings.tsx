@@ -503,7 +503,7 @@ export function NotificationSettings({
           <CardSection>
             <SwitchRow
               label="New repository discovered"
-              description="Notify when new repositories are discovered for one of your organizations"
+              description="Notify when new repositories are discovered and imported"
               checked={notificationConfig.notifyOnNewRepo}
               onCheckedChange={(checked) =>
                 onNotificationChange({
