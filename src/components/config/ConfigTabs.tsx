@@ -108,6 +108,9 @@ export function ConfigTabs() {
       notifyOnSyncError: true,
       notifyOnSyncSuccess: false,
       notifyOnNewRepo: false,
+      notifyOnNewOwnRepo: true,
+      notifyOnNewOrgRepo: true,
+      notifyOnNewStarredRepo: true,
     },
   });
   const { user } = useAuth();
@@ -608,8 +611,10 @@ export function ConfigTabs() {
           },
           advancedOptions:
             response.advancedOptions || prev.advancedOptions,
-          notificationConfig:
-            (response as any).notificationConfig || prev.notificationConfig,
+          notificationConfig: {
+            ...prev.notificationConfig,
+            ...((response as any).notificationConfig ?? {}), // Merge so a row saved before a switch existed keeps its default
+          },
         }));
 
       }

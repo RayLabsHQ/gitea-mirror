@@ -13,6 +13,7 @@ import { Bell, Activity, Send, Info } from "lucide-react";
 import { toast } from "sonner";
 import type { NotificationConfig } from "@/types/config";
 import { withBase } from "@/lib/base-path";
+import { cn } from "@/lib/utils";
 import {
   SettingsCard,
   SectionTitle,
@@ -502,8 +503,8 @@ export function NotificationSettings({
           <CardDivider />
           <CardSection>
             <SwitchRow
-              label="New repository discovered"
-              description="Notify when new repositories are discovered and imported"
+              label="New repositories discovered"
+              description="Notify when new repositories are discovered and imported; choose below which ones"
               checked={notificationConfig.notifyOnNewRepo}
               onCheckedChange={(checked) =>
                 onNotificationChange({
@@ -512,6 +513,50 @@ export function NotificationSettings({
                 })
               }
             />
+            {/* Sub-options of the switch above: they only apply while it is on. */}
+            <div
+              className={cn(
+                "space-y-4 border-l-2 border-border pl-5",
+                notificationConfig.notifyOnNewRepo ? "" : "opacity-60"
+              )}
+            >
+              <SwitchRow
+                label="In your account"
+                description="Repositories owned by your account"
+                checked={notificationConfig.notifyOnNewOwnRepo}
+                disabled={!notificationConfig.notifyOnNewRepo}
+                onCheckedChange={(checked) =>
+                  onNotificationChange({
+                    ...notificationConfig,
+                    notifyOnNewOwnRepo: checked,
+                  })
+                }
+              />
+              <SwitchRow
+                label="In an organization"
+                description="Repositories of one of your organizations"
+                checked={notificationConfig.notifyOnNewOrgRepo}
+                disabled={!notificationConfig.notifyOnNewRepo}
+                onCheckedChange={(checked) =>
+                  onNotificationChange({
+                    ...notificationConfig,
+                    notifyOnNewOrgRepo: checked,
+                  })
+                }
+              />
+              <SwitchRow
+                label="Starred repositories"
+                description="Repositories you starred; all stars share one notification"
+                checked={notificationConfig.notifyOnNewStarredRepo}
+                disabled={!notificationConfig.notifyOnNewRepo}
+                onCheckedChange={(checked) =>
+                  onNotificationChange({
+                    ...notificationConfig,
+                    notifyOnNewStarredRepo: checked,
+                  })
+                }
+              />
+            </div>
           </CardSection>
         </SettingsCard>
       )}

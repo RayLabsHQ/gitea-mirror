@@ -32,6 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Raised the dependency floors for the advisories published on 2026-09-08: Astro 7.2.8 (remote code execution through AVIF image optimization, and an authorization bypass when stripping the configured base), @xmldom/xmldom 0.8.15 (eight parser and serializer issues), sharp 0.35.4 (libheif), svgo 4.1.0 (removeScripts sanitization) and js-yaml 4.3.2 (merge-key CPU use). Applied to both the application and the documentation site.
 
 ### Added
+- Notifications for newly discovered repositories
+  - "New repositories discovered" on the Notifications page, with three sub-switches under it: new repositories in your own account, in one of your organizations, and starred repositories
+  - The scheduled sync, the boot auto-start and Sync Organization send them once per group with the repositories that were imported; all stars share a single "Starred" alert because their owners are arbitrary, and a long list is cut to the first 10 names plus an "and N more" line
+  - The stored configuration gains `notifyOnNewOwnRepo`, `notifyOnNewOrgRepo` and `notifyOnNewStarredRepo` (default on) below the existing `notifyOnNewRepo` master switch; no migration is needed because they live inside the existing JSON column, and a row saved before them behaves as all three on
 - List view for the Organizations page (#428)
   - A cards/list switch in the toolbar; the list shows one row per organization with its role, destination, repository counts, last mirrored time, status, the same actions as the cards and the source and destination links, so a few dozen organizations fit on one screen
   - The choice is remembered per browser, next to the theme and time format preferences

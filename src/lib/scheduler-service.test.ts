@@ -510,6 +510,7 @@ describe.skipIf(!isChild)("Scheduler public-only sources (WP4)", () => {
     expect(mockTriggerNewRepositoriesNotification).toHaveBeenCalledTimes(1);
     expect(mockTriggerNewRepositoriesNotification.mock.calls[0][0]).toMatchObject({
       userId: "user-1",
+      kind: "organization",
       groupLabel: "pinned-org",
       repositoryNames: ["pinned-org/newly-published"],
     });
@@ -594,6 +595,7 @@ describe.skipIf(!isChild)("Scheduler public-only sources (WP4)", () => {
     expect(calls).toContainEqual(
       expect.objectContaining({
         userId: "user-1",
+        kind: "own",
         groupLabel: "majmcccloud",
         repositoryNames: ["majmcccloud/own-alpha", "majmcccloud/own-beta"],
       })
@@ -601,7 +603,7 @@ describe.skipIf(!isChild)("Scheduler public-only sources (WP4)", () => {
     expect(calls).toContainEqual(
       expect.objectContaining({
         userId: "user-1",
-        starred: true,
+        kind: "starred",
         repositoryNames: ["other-org/starred-gamma", "another-user/starred-delta"],
       })
     );
