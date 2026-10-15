@@ -76,6 +76,9 @@ COPY --from=builder /app/docker-entrypoint.sh ./docker-entrypoint.sh
 COPY --from=builder /app/scripts/runtime-server.ts ./scripts/runtime-server.ts
 COPY --from=builder /app/drizzle ./drizzle
 
+# Database commands must use the bundled script: sources are not shipped.
+RUN sed -i 's#bun scripts/manage-db.ts#bun dist/scripts/manage-db.js#g' package.json
+
 # Remove build-only packages that are not needed at runtime
 # (esbuild, vite, rollup, tailwind, svgo — all only used during `astro build`)
 RUN rm -rf node_modules/esbuild node_modules/@esbuild \

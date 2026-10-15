@@ -83,7 +83,9 @@ interface Recorded {
 }
 
 /** Destination Gitea with a fixed set of issues already present. */
-function fakeGitea(existingIssues: Array<{ number: number; title: string }>) {
+function fakeGitea(
+  existingIssues: Array<{ number: number; title: string; milestone?: { id: number } | null }>
+) {
   const requests: Recorded[] = [];
   let nextNumber = 1000;
 
@@ -747,5 +749,237 @@ describe.skipIf(!isChild)("mirrorGitRepoPullRequestsToGitea incremental sync", (
 
     expect(cursor).toBeUndefined();
     expect(github.callsTo("pulls.get").map((c) => c.params.pull_number)).toEqual([5]);
+  });
+});
+
+describe.skipIf(!isChild)("milestone assignment (#460)", () => {
+  const milestoneIds = new Map<string, number>([
+    ["v1.0", 7],
+    ["v2.0", 8],
+  ]);
+  const weekOldFullPass = (): MetadataSyncCursor => ({
+    lastPassStartedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+    lastFullPassStartedAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString(),
+  });
+  const patchesTo = (gitea: ReturnType<typeof fakeGitea>, number: number) =>
+    gitea.requests
+      .filter((r) => r.method === "PATCH" && r.url === `${DEST_API}/issues/${number}`)
+      .map((r) => JSON.parse(r.body!));
+  const created = (gitea: ReturnType<typeof fakeGitea>) =>
+    gitea.requests
+      .filter((r) => r.method === "POST" && r.url === `${DEST_API}/issues`)
+      .map((r) => JSON.parse(r.body!));
+
+  it("creates issues with their milestone", async () => {
+    const gitea = fakeGitea([]);
+    const github = fakeOctokit({
+      issueListing: [ghIssue(1, { milestone: { title: "v1.0" } }), ghIssue(2, { milestone: null })],
+    });
+
+    await mirrorGitRepoIssuesToGitea({
+      config,
+      octokit: github.octokit,
+      repository,
+      giteaOwner: DEST_OWNER,
+      giteaRepoName: DEST_REPO,
+      milestoneIds,
+    });
+
+    const [first, second] = created(gitea);
+    expect(first.milestone).toBe(7);
+    expect(second.milestone).toBeUndefined();
+  });
+
+  it("assigns a milestone set on GitHub after the issue was mirrored", async () => {
+    const gitea = fakeGitea([{ number: 11, title: "[GH-ISSUE #1] Issue 1", milestone: null }]);
+    const github = fakeOctokit({ issueListing: [ghIssue(1, { milestone: { title: "v2.0" } })] });
+
+    await mirrorGitRepoIssuesToGitea({
+      config,
+      octokit: github.octokit,
+      repository,
+      giteaOwner: DEST_OWNER,
+      giteaRepoName: DEST_REPO,
+      syncCursor: recentCursor(),
+      milestoneIds,
+    });
+
+    expect(patchesTo(gitea, 11).map((p) => p.milestone)).toEqual([8]);
+  });
+
+  it("fixes and clears milestones on unchanged issues during a full pass", async () => {
+    const gitea = fakeGitea([
+      // Mirrored before #460: no milestone in Gitea yet.
+      { number: 11, title: "[GH-ISSUE #1] Issue 1", milestone: null },
+      // Milestone removed on GitHub.
+      { number: 12, title: "[GH-ISSUE #2] Issue 2", milestone: { id: 7 } },
+      // Already right: the edit leaves it alone.
+      { number: 13, title: "[GH-ISSUE #3] Issue 3", milestone: { id: 8 } },
+      // On a milestone made in Gitea alone: kept.
+      { number: 14, title: "[GH-ISSUE #4] Issue 4", milestone: { id: 99 } },
+    ]);
+    const github = fakeOctokit({
+      issueListing: [
+        ghIssue(1, { milestone: { title: "v1.0" } }),
+        ghIssue(2, { milestone: null }),
+        ghIssue(3, { milestone: { title: "v2.0" } }),
+        ghIssue(4, { milestone: null }),
+      ],
+    });
+
+    await mirrorGitRepoIssuesToGitea({
+      config,
+      octokit: github.octokit,
+      repository,
+      giteaOwner: DEST_OWNER,
+      giteaRepoName: DEST_REPO,
+      syncCursor: weekOldFullPass(),
+      milestoneIds,
+    });
+
+    // All three are unchanged, so no comment listing runs.
+    expect(github.callsTo("issues.listComments")).toHaveLength(0);
+    expect(patchesTo(gitea, 11).map((p) => p.milestone)).toEqual([7]);
+    expect(patchesTo(gitea, 12).map((p) => p.milestone)).toEqual([0]);
+    expect(patchesTo(gitea, 13).every((p) => !("milestone" in p))).toBe(true);
+    expect(patchesTo(gitea, 14).every((p) => !("milestone" in p))).toBe(true);
+  });
+
+  it("leaves milestones alone when they are not mirrored or not found", async () => {
+    const gitea = fakeGitea([{ number: 11, title: "[GH-ISSUE #1] Issue 1", milestone: { id: 7 } }]);
+    const github = fakeOctokit({
+      issueListing: [
+        ghIssue(1, { milestone: null }),
+        ghIssue(2, { milestone: { title: "v1.0" } }),
+      ],
+    });
+
+    await mirrorGitRepoIssuesToGitea({
+      config,
+      octokit: github.octokit,
+      repository,
+      giteaOwner: DEST_OWNER,
+      giteaRepoName: DEST_REPO,
+      syncCursor: recentCursor(),
+    });
+
+    expect(patchesTo(gitea, 11).every((p) => !("milestone" in p))).toBe(true);
+    expect(created(gitea)[0].milestone).toBeUndefined();
+
+    // A milestone Gitea does not have is not cleared from the issue either.
+    const gitea2 = fakeGitea([{ number: 11, title: "[GH-ISSUE #1] Issue 1", milestone: { id: 7 } }]);
+    await mirrorGitRepoIssuesToGitea({
+      config,
+      octokit: fakeOctokit({ issueListing: [ghIssue(1, { milestone: { title: "v9" } })] }).octokit,
+      repository,
+      giteaOwner: DEST_OWNER,
+      giteaRepoName: DEST_REPO,
+      syncCursor: recentCursor(),
+      milestoneIds,
+    });
+    expect(patchesTo(gitea2, 11).every((p) => !("milestone" in p))).toBe(true);
+  });
+
+  it("assigns milestones to pull requests, new and unchanged", async () => {
+    const gitea = fakeGitea([{ number: 21, title: "[PR #1] PR 1", milestone: null }]);
+    const github = fakeOctokit({
+      issueListing: [],
+      pullListing: [
+        ghPull(1, { updated_at: "2026-01-01T00:00:00Z", milestone: { title: "v1.0" } }),
+        ghPull(2, { milestone: { title: "v2.0" } }),
+      ],
+    });
+
+    await mirrorGitRepoPullRequestsToGitea({
+      config,
+      octokit: github.octokit,
+      repository,
+      giteaOwner: DEST_OWNER,
+      giteaRepoName: DEST_REPO,
+      syncCursor: weekOldFullPass(),
+      milestoneIds,
+    });
+
+    // #1 is unchanged: no detail calls, only the milestone is patched.
+    expect(github.callsTo("pulls.get").map((c) => c.params.pull_number)).toEqual([2]);
+    expect(patchesTo(gitea, 21)).toEqual([{ milestone: 7 }]);
+    expect(created(gitea).map((c) => c.milestone)).toEqual([8]);
+  });
+
+  it("carries the milestone through an incremental pull request listing", async () => {
+    const gitea = fakeGitea([{ number: 21, title: "[PR #1] PR 1", milestone: null }]);
+    const github = fakeOctokit({
+      issueListing: [
+        { ...ghIssue(1), title: "PR 1", pull_request: { merged_at: null }, milestone: { title: "v2.0" } },
+      ],
+    });
+
+    await mirrorGitRepoPullRequestsToGitea({
+      config,
+      octokit: github.octokit,
+      repository,
+      giteaOwner: DEST_OWNER,
+      giteaRepoName: DEST_REPO,
+      syncCursor: recentCursor(),
+      milestoneIds,
+    });
+
+    expect(patchesTo(gitea, 21).map((p) => p.milestone)).toEqual([8]);
+  });
+
+  it("does not take a mirrored issue that mentions [PR #N] for that pull request", async () => {
+    const gitea = fakeGitea([
+      { number: 21, title: "[PR #1] PR 1", milestone: null },
+      { number: 40, title: "[GH-ISSUE #40] Revert [PR #1]", milestone: null },
+    ]);
+    const github = fakeOctokit({
+      issueListing: [],
+      pullListing: [ghPull(1, { updated_at: "2026-01-01T00:00:00Z", milestone: { title: "v1.0" } })],
+    });
+
+    await mirrorGitRepoPullRequestsToGitea({
+      config,
+      octokit: github.octokit,
+      repository,
+      giteaOwner: DEST_OWNER,
+      giteaRepoName: DEST_REPO,
+      syncCursor: weekOldFullPass(),
+      milestoneIds,
+    });
+
+    expect(patchesTo(gitea, 21)).toEqual([{ milestone: 7 }]);
+    expect(patchesTo(gitea, 40)).toEqual([]);
+  });
+
+  it("finishes the pass when the milestone edit of an unchanged pull request fails", async () => {
+    fakeGitea([{ number: 21, title: "[PR #1] PR 1", milestone: null }]);
+    let milestoneEdits = 0;
+    globalThis.fetch = ((original) =>
+      (async (input: any, init?: any) => {
+        const url = typeof input === "string" ? input : String(input);
+        if (String(init?.method ?? "GET").toUpperCase() === "PATCH" && url === `${DEST_API}/issues/21`) {
+          milestoneEdits += 1;
+          return new Response("boom", { status: 500 });
+        }
+        return original(input, init);
+      }) as unknown as typeof fetch)(globalThis.fetch);
+    const github = fakeOctokit({
+      issueListing: [],
+      pullListing: [ghPull(1, { updated_at: "2026-01-01T00:00:00Z", milestone: { title: "v1.0" } })],
+    });
+
+    const cursor = await mirrorGitRepoPullRequestsToGitea({
+      config,
+      octokit: github.octokit,
+      repository,
+      giteaOwner: DEST_OWNER,
+      giteaRepoName: DEST_REPO,
+      syncCursor: weekOldFullPass(),
+      milestoneIds,
+    });
+
+    // Tried once, not retried, and the pass still completes.
+    expect(milestoneEdits).toBe(1);
+    expect(cursor).toBeDefined();
   });
 });

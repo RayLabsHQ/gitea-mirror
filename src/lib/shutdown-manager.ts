@@ -147,6 +147,11 @@ async function executeShutdownCallbacks(): Promise<void> {
 /**
  * Perform graceful shutdown of the application
  */
+/** Exit status for a completed shutdown: 1 after a crash, 0 after a signal. */
+export function shutdownExitCode(signal: string): number {
+  return signal === 'UNCAUGHT_EXCEPTION' || signal === 'UNHANDLED_REJECTION' ? 1 : 0;
+}
+
 export async function gracefulShutdown(signal: string = 'UNKNOWN'): Promise<void> {
   if (shutdownInProgress) {
     console.log('⚠️  Shutdown already in progress, ignoring additional signal');
@@ -187,8 +192,10 @@ export async function gracefulShutdown(signal: string = 'UNKNOWN'): Promise<void
       shutdownTimeout = null;
     }
 
-    // Exit with success code
-    process.exit(0);
+    // A shutdown forced by a crash exits non-zero so a supervisor with
+    // Restart=on-failure (the Proxmox script's unit) starts the service
+    // again; a signal-driven stop is a clean exit (#465).
+    process.exit(shutdownExitCode(signal));
 
   } catch (error) {
     console.error('\n❌ Error during graceful shutdown:', error);

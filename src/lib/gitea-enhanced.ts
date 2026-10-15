@@ -42,7 +42,7 @@ import {
   strategyNeedsDetection,
 } from "./repo-backup";
 import { detectForcePush } from "./utils/force-push-detection";
-import { sanitizeRepoNameAlphaDashDot } from "./gitea";
+import { sanitizeRepoNameAlphaDashDot, type GiteaMilestoneIds } from "./gitea";
 import {
   parseRepositoryMetadataState,
   serializeRepositoryMetadataState,
@@ -1087,6 +1087,44 @@ export async function syncGiteaRepoEnhanced({
         }
       }
 
+      // Milestones go first so the issues and pull requests passes below
+      // can assign each item to its milestone (#460).
+      let milestoneIds: GiteaMilestoneIds | undefined;
+      if (shouldMirrorMilestones) {
+        const octokit = ensureOctokit();
+        if (!octokit) {
+          console.warn(
+            `[Sync] Skipping milestone mirroring for ${repository.name}: Missing GitHub token`
+          );
+        } else {
+          try {
+            milestoneIds = await dependencies.mirrorGitRepoMilestonesToGitea({
+              config,
+              octokit,
+              repository,
+              giteaOwner: repoOwner,
+              giteaRepoName: repoName,
+            });
+            metadataState.components.milestones = true;
+            metadataUpdated = true;
+            console.log(
+              `[Sync] Mirrored milestones for ${repository.name} after sync`
+            );
+          } catch (milestoneError) {
+            // Rate limited: fail the sync so the scheduler restores the row and
+            // retries after the reset instead of running the next component (#437).
+            if (isRateLimitError(milestoneError)) throw milestoneError;
+            console.error(
+              `[Sync] Failed to mirror milestones for ${repository.name}: ${
+                milestoneError instanceof Error
+                  ? milestoneError.message
+                  : String(milestoneError)
+              }`
+            );
+          }
+        }
+      }
+
       if (shouldMirrorIssuesThisRun) {
         const octokit = ensureOctokit();
         if (!octokit) {
@@ -1098,6 +1136,7 @@ export async function syncGiteaRepoEnhanced({
             const issuesCursor = await dependencies.mirrorGitRepoIssuesToGitea({
               config,
               octokit,
+              milestoneIds,
               repository,
               giteaOwner: repoOwner,
               giteaRepoName: repoName,
@@ -1141,6 +1180,7 @@ export async function syncGiteaRepoEnhanced({
             const pullRequestsCursor = await dependencies.mirrorGitRepoPullRequestsToGitea({
               config,
               octokit,
+              milestoneIds,
               repository,
               giteaOwner: repoOwner,
               giteaRepoName: repoName,
@@ -1199,41 +1239,6 @@ export async function syncGiteaRepoEnhanced({
                 labelError instanceof Error
                   ? labelError.message
                   : String(labelError)
-              }`
-            );
-          }
-        }
-      }
-
-      if (shouldMirrorMilestones) {
-        const octokit = ensureOctokit();
-        if (!octokit) {
-          console.warn(
-            `[Sync] Skipping milestone mirroring for ${repository.name}: Missing GitHub token`
-          );
-        } else {
-          try {
-            await dependencies.mirrorGitRepoMilestonesToGitea({
-              config,
-              octokit,
-              repository,
-              giteaOwner: repoOwner,
-              giteaRepoName: repoName,
-            });
-            metadataState.components.milestones = true;
-            metadataUpdated = true;
-            console.log(
-              `[Sync] Mirrored milestones for ${repository.name} after sync`
-            );
-          } catch (milestoneError) {
-            // Rate limited: fail the sync so the scheduler restores the row and
-            // retries after the reset instead of running the next component (#437).
-            if (isRateLimitError(milestoneError)) throw milestoneError;
-            console.error(
-              `[Sync] Failed to mirror milestones for ${repository.name}: ${
-                milestoneError instanceof Error
-                  ? milestoneError.message
-                  : String(milestoneError)
               }`
             );
           }
