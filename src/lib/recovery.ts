@@ -9,6 +9,8 @@ import { db, repositories, organizations, mirrorJobs, configs } from './db';
 import { eq, and, lt, inArray, sql } from 'drizzle-orm';
 import { mirrorRepositoryToDestination, syncRepositoryOnDestination } from './mirror-dispatch';
 import { createGitHubClient, createPublicGitHubClient } from './github';
+import { GitHubSourceProvider } from './source-providers/github-source';
+import { sourceConnectionFromSource } from './source-providers';
 import type { Octokit } from '@octokit/rest';
 import {
   decryptSourceToken,
@@ -301,6 +303,9 @@ async function recoverMirrorJob(job: any, remainingItemIds: string[]) {
         if (repoSource?.provider === 'github') {
           try {
             const decryptedToken = decryptSourceToken(repoSource.token);
+            if (decryptedToken.startsWith('github-app:v1:')) {
+              octokit = new GitHubSourceProvider(sourceConnectionFromSource(repoSource, { userId: config.userId })).octokit;
+            } else {
             // A tokenless GitHub source gets the anonymous public client
             // (60 req/hr), the same resolution the job routes use; an empty
             // token must never reach createGitHubClient, which would send
@@ -313,6 +318,7 @@ async function recoverMirrorJob(job: any, remainingItemIds: string[]) {
                   resolveGitHubApiBaseUrl(repoSource.url)
                 )
               : createPublicGitHubClient(resolveGitHubApiBaseUrl(repoSource.url));
+            }
           } catch (error) {
             throw new Error(`Failed to create GitHub client: ${error instanceof Error ? error.message : String(error)}`);
           }

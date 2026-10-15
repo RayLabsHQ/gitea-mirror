@@ -130,6 +130,9 @@ export interface SourceApiRecord {
   url: string;
   username: string;
   token: string;
+  authType?: "pat" | "app";
+  appId?: string;
+  installationId?: string;
   enabled: boolean;
   repositoryCount: number;
   locked: boolean;

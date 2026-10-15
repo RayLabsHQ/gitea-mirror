@@ -22,6 +22,10 @@ Picking GitLab or Gitea/Forgejo shows an **Instance URL** field. Leave it empty 
 
 The **Test** button on the card checks the token against the selected host.
 
+For a GitHub source, **Authentication** can also be set to **GitHub App installation**. Create a GitHub App with repository **Contents** and **Metadata** read permissions; grant **Issues** and **Pull requests** read permissions if mirroring that metadata. Install it on the repositories to back up, enter the installation account or organization under **Username**, then enter its App ID, installation ID and PEM private key in the Sources card. The private key is encrypted at rest and is not returned by the source API. The App sees only repositories selected for its installation; it cannot discover a user's starred repositories or star lists. PAT authentication remains available for those workflows.
+
+App installation tokens expire, so Gitea Mirror refreshes them before its own scheduled or manual mirror sync and disables Gitea's independent pull schedule for App-backed repositories. Keep the Gitea Mirror scheduler enabled for ongoing App-backed mirrors. Existing PAT mirrors continue using their usual interval.
+
 ## What is mirrored
 
 The mirror itself is done by Gitea's pull mirror, which treats every source as a plain git remote. The differences are in what the source API offers.

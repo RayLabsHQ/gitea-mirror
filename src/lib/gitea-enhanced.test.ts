@@ -1,6 +1,7 @@
 import { describe, test, expect, mock, beforeEach, afterEach } from "bun:test";
 import { createMockResponse, mockFetch } from "@/tests/mock-fetch";
 import { getRepositorySource } from "@/lib/source-providers/kinds";
+import { encodeGitHubAppCredentials } from "@/lib/github-app-credentials";
 
 // Mock the helpers module before importing gitea-enhanced
 const mockCreateMirrorJob = mock(() => Promise.resolve("mock-job-id"));
@@ -102,6 +103,7 @@ mock.module("@/lib/sources", () => ({
     );
   },
   decryptSourceToken: (token: string | null | undefined) => token ?? "",
+  sourceAccessToken: async (source: { token?: string | null }) => source.token?.startsWith("github-app:v1:") ? "ghs_fresh" : source.token ?? "",
   resolveGitHubApiBaseUrl: (url: string | null | undefined) => {
     const trimmed = url?.trim().replace(/\/+$/, "") ?? "";
     if (!trimmed || trimmed === "https://github.com") return undefined;
@@ -970,6 +972,33 @@ describe("Enhanced Gitea Operations", () => {
       expect(mirrorSyncCalls).toHaveLength(1);
       expect(String(mirrorSyncCalls[0][0])).toContain("/api/v1/repos/starred/test-repo/mirror-sync");
       expect(String(mirrorSyncCalls[0][0])).not.toContain("/api/v1/repos/ceph/test-repo/mirror-sync");
+    });
+
+    test("refreshes App mirror credentials before triggering a sync", async () => {
+      const originalToken = sourceRows[0].token;
+      sourceRows[0].token = encodeGitHubAppCredentials({ appId: "123", installationId: "456", privateKey: "-----BEGIN PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----" });
+      try {
+        const config = {
+          userId: "user123",
+          githubConfig: { username: "testuser", token: "", privateRepositories: false, mirrorStarred: false },
+          giteaConfig: { url: "https://gitea.example.com", token: "encrypted-token", defaultOwner: "testuser", mirrorReleases: false },
+        } as unknown as Partial<Config>;
+        const repository = {
+          id: "repo-1", sourceId: "source-1", name: "test-repo", fullName: "ceph/test-repo",
+          owner: "ceph", cloneUrl: "https://github.com/ceph/test-repo.git", isPrivate: false,
+          isStarred: false, status: repoStatusEnum.parse("mirrored"), visibility: "public",
+          userId: "user123", mirroredLocation: "starred/test-repo", createdAt: new Date(), updatedAt: new Date(),
+        } as Repository;
+        await syncGiteaRepoEnhanced({ config, repository });
+        expect(mockHttpPatch.mock.calls).toContainEqual([
+          "https://gitea.example.com/api/v1/repos/starred/test-repo",
+          { mirror_username: "x-access-token", mirror_password: "ghs_fresh", mirror_token: "ghs_fresh", mirror_interval: "0h" },
+          { Authorization: "token encrypted-token" },
+        ]);
+        expect(mockHttpPost.mock.calls.some((call) => String(call[0]).includes("/mirror-sync"))).toBe(true);
+      } finally {
+        sourceRows[0].token = originalToken;
+      }
     });
 
     test("finds a mirror transferred to another owner through the search and syncs it there (#400)", async () => {

@@ -334,7 +334,7 @@ export function createGitHubClient(
  * schedule retries. Never pass an empty token to createGitHubClient
  * instead — Octokit treats `auth: ""` as an invalid credential header.
  */
-export function createPublicGitHubClient(apiBaseUrl?: string): Octokit {
+export function createPublicGitHubClient(apiBaseUrl?: string, userId?: string): Octokit {
   // Same base URL resolution as createGitHubClient: an explicit apiBaseUrl
   // (a GitHub Enterprise source's /api/v3) replaces the env default;
   // otherwise support GH_API_URL (preferred) or GITHUB_API_URL (may conflict
@@ -356,13 +356,13 @@ export function createPublicGitHubClient(apiBaseUrl?: string): Octokit {
         "x-github-api-version": "2022-11-28", // Use a stable API version
       },
     },
-    throttle: githubThrottleOptions(),
+    throttle: githubThrottleOptions(userId),
   });
 
   // Anonymous clients share one gate key, so one exhausted 60 req/hr budget
   // pauses every tokenless source together.
   installRateLimitGate(octokit, {
-    key: rateLimitGateKey(undefined),
+    key: rateLimitGateKey(userId),
     maxWaitMs: RATE_LIMIT_FAST_FAIL_THRESHOLD_SECONDS * 1000,
   });
 

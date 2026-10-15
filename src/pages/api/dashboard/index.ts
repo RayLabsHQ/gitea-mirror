@@ -1,6 +1,6 @@
 import type { APIRoute } from "astro";
 import { db, repositories, organizations, mirrorJobs, configs } from "@/lib/db";
-import { eq, count, and, sql, or } from "drizzle-orm";
+import { eq, count, and, sql, or, isNotNull } from "drizzle-orm";
 import { jsonResponse, createSecureErrorResponse } from "@/lib/utils";
 import type { DashboardApiResponse } from "@/types/dashboard";
 import { requireAuthenticatedUserId } from "@/lib/auth-guards";
@@ -19,6 +19,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
       [{ value: repoCount }],
       [{ value: orgCount }],
       [{ value: mirroredCount }],
+      [latestMirrored],
     ] = await Promise.all([
       db
         .select()
@@ -66,7 +67,18 @@ export const GET: APIRoute = async ({ request, locals }) => {
             )
           )
         ),
+      db
+        .select({ lastMirrored: repositories.lastMirrored })
+        .from(repositories)
+        .where(and(eq(repositories.userId, userId), isNotNull(repositories.lastMirrored)))
+        .orderBy(sql`${repositories.lastMirrored} DESC`)
+        .limit(1),
     ]);
+
+    const scheduledRun = userConfig?.scheduleConfig.lastRun;
+    const lastSync = latestMirrored?.lastMirrored && scheduledRun
+      ? new Date(Math.max(+latestMirrored.lastMirrored, +new Date(scheduledRun)))
+      : latestMirrored?.lastMirrored ?? scheduledRun ?? null;
 
     const successResponse: DashboardApiResponse = {
       success: true,
@@ -77,7 +89,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
       repositories: userRepos,
       organizations: userOrgs,
       activities: userLogs,
-      lastSync: userConfig?.scheduleConfig.lastRun ?? null,
+      lastSync,
     };
 
     return jsonResponse({ data: successResponse });

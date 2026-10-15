@@ -19,8 +19,10 @@ import {
   decryptSourceToken,
   findSourceForRepository,
   listSources,
+  sourceAccessToken,
 } from "@/lib/sources";
 import { buildSourceAuthPayload } from "@/lib/utils/mirror-source-auth";
+import { parseGitHubAppCredentials } from "@/lib/github-app-credentials";
 import {
   assertRepositoryMatchesConfiguredDestination,
   createPushTargetFromConfig,
@@ -58,18 +60,18 @@ export function parseMirroredLocation(location: string | null | undefined): { ow
  * own source row. Sources are loaded once per push by the caller and passed
  * down so batches never query per repository.
  */
-export function resolveSourceCredentials(
+export async function resolveSourceCredentials(
   config: Partial<Config>,
   repository: Repository,
   sources: SourceRecord[]
-): GitCredentials | null {
+): Promise<GitCredentials | null> {
   const source = findSourceForRepository(repository, sources);
   if (!source) return null;
   const connection = sourceConnectionFromSource(source, { userId: config.userId });
   const payload = buildSourceAuthPayload({
     provider: connection.provider,
-    token: decryptSourceToken(source.token),
-    username: connection.username,
+    token: await sourceAccessToken(source),
+    username: source.provider === "github" && parseGitHubAppCredentials(connection.token) ? "x-access-token" : connection.username,
     repositoryOwner: repository.owner,
   });
   if (!("auth_username" in payload) || !payload.auth_password) return null;
@@ -148,7 +150,7 @@ export async function pushMirrorRepository({
     const outcome = await runPushMirror({
       clonePath: clonePathForRepository(repository),
       sourceCloneUrl: repository.cloneUrl,
-      sourceCredentials: resolveSourceCredentials(config, repository, sources),
+      sourceCredentials: await resolveSourceCredentials(config, repository, sources),
       target: target ?? createPushTargetFromConfig(config),
       owner,
       name,

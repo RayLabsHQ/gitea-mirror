@@ -17,6 +17,8 @@ import { db, organizations, repositories } from "@/lib/db";
 import type { Config, Repository } from "@/lib/db/schema";
 import { usesPushEngine } from "@/lib/destination-connection";
 import { createGitHubClient, createPublicGitHubClient } from "@/lib/github";
+import { GitHubSourceProvider } from "@/lib/source-providers/github-source";
+import { sourceConnectionFromSource } from "@/lib/source-providers";
 import { createMirrorJob } from "@/lib/helpers";
 import {
   decryptSourceToken,
@@ -188,6 +190,10 @@ function createRepositoryOctokitResolver(
   return (repository) => {
     const source = findSourceForRepository(repository, sources);
     if (!source || source.provider !== "github") return null;
+
+    if (decryptSourceToken(source.token).startsWith("github-app:v1:")) {
+      return new GitHubSourceProvider(sourceConnectionFromSource(source, { userId })).octokit;
+    }
 
     const token = decryptSourceToken(source.token);
     // A tokenless GitHub source still gets an anonymous public client

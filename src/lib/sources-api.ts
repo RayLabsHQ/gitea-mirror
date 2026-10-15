@@ -9,6 +9,7 @@
  */
 import { eq, sql } from "drizzle-orm";
 import type { SourceProviderKind } from "@/lib/source-providers/kinds";
+import { parseGitHubAppCredentials } from "@/lib/github-app-credentials";
 
 /** One source as the API returns it: the stored row plus its lock state. */
 export interface SourceApiItem {
@@ -18,6 +19,9 @@ export interface SourceApiItem {
   url: string;
   username: string;
   token: string;
+  authType: "pat" | "app";
+  appId?: string;
+  installationId?: string;
   enabled: boolean;
   repositoryCount: number;
   locked: boolean;
@@ -39,13 +43,18 @@ export async function toSourceApiItem(
   repositoryCount: number
 ): Promise<SourceApiItem> {
   const { decryptSourceToken } = await import("@/lib/sources");
+  const token = decryptSourceToken(source.token);
+  const app = source.provider === "github" ? parseGitHubAppCredentials(token) : null;
   return {
     id: source.id,
     name: source.name,
     provider: source.provider,
     url: source.url ?? "",
     username: source.username,
-    token: decryptSourceToken(source.token),
+    token: app ? "" : token,
+    authType: app ? "app" : "pat",
+    appId: app?.appId,
+    installationId: app?.installationId,
     enabled: source.enabled,
     repositoryCount,
     locked: repositoryCount > 0,
