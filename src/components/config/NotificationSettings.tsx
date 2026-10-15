@@ -503,10 +503,8 @@ export function NotificationSettings({
           <CardSection>
             <SwitchRow
               label="New repository discovered"
-              description="Notify when a new GitHub repository is auto-imported"
-              badge="SOON"
+              description="Notify when new repositories are discovered and imported"
               checked={notificationConfig.notifyOnNewRepo}
-              disabled
               onCheckedChange={(checked) =>
                 onNotificationChange({
                   ...notificationConfig,
