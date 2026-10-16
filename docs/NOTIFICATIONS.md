@@ -107,9 +107,12 @@ The secret is encrypted at rest.
 |-------|---------|-------------|
 | Sync errors | On | A mirror job failed |
 | Sync success | Off | A mirror job completed successfully |
-| New repo discovered | Off | New repositories were discovered and imported |
+| New repositories discovered | Off | New repositories were discovered and imported; the three switches below select which ones |
+| &nbsp;&nbsp;In your account | On | Repositories owned by your account |
+| &nbsp;&nbsp;In an organization | On | Repositories of one of your organizations |
+| &nbsp;&nbsp;Starred repositories | On | Repositories you starred, all stars in one alert |
 
-The "New repo discovered" event is sent once per owner (account or organization) per discovery pass (scheduled sync, boot auto-start and the manual "Mirror Organization" sync), listing the repositories that were imported. Starred repositories are the exception: they arrive as a single "Starred" notification because their owners are arbitrary. A large import is capped to the first 10 names plus an "and N more" line so one pass never floods your provider.
+The three group switches are sub-options of "New repositories discovered": they only apply while that switch is on, and a configuration saved before they existed counts as all three on (they are keys inside the stored settings JSON, so no database migration is involved). Each enabled group is sent once per group per discovery pass (scheduled sync, boot auto-start and the manual "Mirror Organization" sync), listing the repositories that were imported: one alert per account, one per organization, and a single "Starred" alert for every star because their owners are arbitrary. A large import is capped to the first 10 names plus an "and N more" line so one pass never floods your provider.
 
 ## Testing
 

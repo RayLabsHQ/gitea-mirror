@@ -184,7 +184,11 @@ export interface NotificationConfig {
   provider: "ntfy" | "apprise" | "gotify" | "webhook";
   notifyOnSyncError: boolean;
   notifyOnSyncSuccess: boolean;
+  /** Master switch for the discovery alerts below. */
   notifyOnNewRepo: boolean;
+  notifyOnNewOwnRepo: boolean;
+  notifyOnNewOrgRepo: boolean;
+  notifyOnNewStarredRepo: boolean;
   ntfy?: NtfyConfig;
   apprise?: AppriseConfig;
   gotify?: GotifyConfig;

@@ -260,29 +260,63 @@ export const MAX_LISTED_NEW_REPOSITORIES = 10;
 /** Label for the single group that collects every starred import. */
 export const STARRED_GROUP_LABEL = "Starred";
 
+/**
+ * Which group of discovered repositories a notification belongs to. Stars come
+ * from any number of owners, so they form one group of their own.
+ */
+export type NewRepositoryGroupKind = "own" | "organization" | "starred";
+
+/**
+ * Whether one group reports. The group switches are sub-options of
+ * notifyOnNewRepo, so a group only reports while the master switch is on. A
+ * stored row that predates them has no group keys, which counts as on.
+ */
+export function isNewRepositoryGroupEnabled(
+  config: Pick<
+    NotificationConfig,
+    | "enabled"
+    | "notifyOnNewRepo"
+    | "notifyOnNewOwnRepo"
+    | "notifyOnNewOrgRepo"
+    | "notifyOnNewStarredRepo"
+  >,
+  kind: NewRepositoryGroupKind,
+): boolean {
+  if (!config.enabled || config.notifyOnNewRepo !== true) {
+    return false;
+  }
+  if (kind === "starred") {
+    return config.notifyOnNewStarredRepo !== false;
+  }
+  if (kind === "organization") {
+    return config.notifyOnNewOrgRepo !== false;
+  }
+  return config.notifyOnNewOwnRepo !== false;
+}
+
 export function buildNewRepositoriesNotificationEvent({
+  kind,
   groupLabel,
-  starred = false,
   repositoryNames,
   details,
 }: {
+  kind: NewRepositoryGroupKind;
   groupLabel?: string | null;
-  /** Starred imports share one group, so the wording drops the owner. */
-  starred?: boolean;
   repositoryNames: string[];
   details?: string;
 }): NotificationEvent {
-  const label = groupLabel || (starred ? STARRED_GROUP_LABEL : "Unknown");
+  const label = kind === "starred" ? STARRED_GROUP_LABEL : groupLabel || "Unknown";
   const count = repositoryNames.length;
+  const noun = count === 1 ? "repository" : "repositories";
   const listed = repositoryNames.slice(0, MAX_LISTED_NEW_REPOSITORIES);
   const overflow = repositoryNames.length - listed.length;
 
   return {
     title: `New Repositories: ${label}`,
     message: [
-      starred
-        ? `${count} new starred ${count === 1 ? "repository" : "repositories"} discovered:`
-        : `${count} new ${count === 1 ? "repository" : "repositories"} discovered for ${label}:`,
+      kind === "starred"
+        ? `${count} new starred ${noun} discovered:`
+        : `${count} new ${noun} discovered for ${label}:`,
       listed.map((name) => `\n- ${name}`).join(""),
       overflow > 0 ? `\n- and ${overflow} more` : "",
       details ? `\nDetails: ${details}` : "",
@@ -293,22 +327,22 @@ export function buildNewRepositoriesNotificationEvent({
 
 /**
  * Notifies the user about repositories that were newly discovered and
- * imported (the "New repository discovered" event). Imports are reported per
- * owner or organization, except starred repositories, which arrive as one
- * group because their owners are arbitrary.
+ * imported. The notifyOnNewRepo switch gates the alerts and the three group
+ * switches (own, organization, starred) select which groups report; each group
+ * arrives as a single notification instead of one per repository.
  *
  * Called fire-and-forget from the discovery passes, so it NEVER throws.
  */
 export async function triggerNewRepositoriesNotification({
   userId,
+  kind,
   groupLabel,
-  starred = false,
   repositoryNames,
   details,
 }: {
   userId: string;
+  kind: NewRepositoryGroupKind;
   groupLabel?: string | null;
-  starred?: boolean;
   /** Full names of the repositories that were imported. */
   repositoryNames: string[];
   details?: string;
@@ -320,13 +354,13 @@ export async function triggerNewRepositoriesNotification({
 
     const notificationConfig = await loadNotificationConfig(userId);
 
-    if (!notificationConfig?.enabled || !notificationConfig.notifyOnNewRepo) {
+    if (!notificationConfig || !isNewRepositoryGroupEnabled(notificationConfig, kind)) {
       return;
     }
 
     const event = buildNewRepositoriesNotificationEvent({
+      kind,
       groupLabel,
-      starred,
       repositoryNames,
       details,
     });

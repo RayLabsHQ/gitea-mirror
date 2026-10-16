@@ -272,38 +272,42 @@ async function importRepositoriesFromSources(
         }
         console.log(`[Scheduler] Successfully imported ${newRepos.length} new repositories for user ${userId} from source ${source.name}`);
 
-        // "New repository discovered" notifications (settings > notifications).
-        // Grouped per owner/organization so a large import produces one alert
-        // per owner instead of one per repository. Starred repositories are the
-        // exception: they can come from any number of owners, so they share a
-        // single "Starred" alert. Fire-and-forget: the service swallows every
-        // error, and a failing provider must not break the run.
-        const newReposByOwner = new Map<string, string[]>();
+        // New repository notifications (settings > notifications). The
+        // notifyOnNewRepo master switch gates them and the own/organization/
+        // starred sub-switches select the groups; every group produces one alert
+        // instead of one per repository.
+        // Starred repositories always share a single group because their owners
+        // are arbitrary. Fire-and-forget: the service swallows every error, and
+        // a failing provider must not break the run.
+        const newReposByGroup = new Map<string, { kind: 'own' | 'organization'; label: string; names: string[] }>();
         const starredRepoNames: string[] = [];
         for (const repo of newRepos) {
           if (repo.isStarred) {
             starredRepoNames.push(repo.fullName);
             continue;
           }
-          const ownerLabel = repo.organization || repo.owner || 'Unknown';
-          const names = newReposByOwner.get(ownerLabel) ?? [];
-          names.push(repo.fullName);
-          newReposByOwner.set(ownerLabel, names);
+          const kind: 'own' | 'organization' = repo.organization ? 'organization' : 'own';
+          const label = repo.organization || repo.owner || 'Unknown';
+          const groupKey = `${kind}:${label}`;
+          const group = newReposByGroup.get(groupKey) ?? { kind, label, names: [] };
+          group.names.push(repo.fullName);
+          newReposByGroup.set(groupKey, group);
         }
-        for (const [ownerLabel, names] of newReposByOwner) {
+        for (const group of newReposByGroup.values()) {
           triggerNewRepositoriesNotification({
             userId,
-            groupLabel: ownerLabel,
-            repositoryNames: names,
+            kind: group.kind,
+            groupLabel: group.label,
+            repositoryNames: group.names,
             details: `Auto-imported during ${phase} from source ${source.name}.`,
           }).catch(notificationError => {
-            console.error(`[Scheduler] Failed to send the new repository notification for ${ownerLabel}:`, notificationError);
+            console.error(`[Scheduler] Failed to send the new repository notification for ${group.label}:`, notificationError);
           });
         }
         if (starredRepoNames.length > 0) {
           triggerNewRepositoriesNotification({
             userId,
-            starred: true,
+            kind: 'starred',
             repositoryNames: starredRepoNames,
             details: `Auto-imported during ${phase} from source ${source.name}.`,
           }).catch(notificationError => {

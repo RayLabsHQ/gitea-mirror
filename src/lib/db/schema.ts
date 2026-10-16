@@ -212,7 +212,11 @@ export const notificationConfigSchema = z.object({
   provider: z.enum(["ntfy", "apprise", "gotify", "webhook"]).default("ntfy"),
   notifyOnSyncError: z.boolean().default(true),
   notifyOnSyncSuccess: z.boolean().default(false),
+  // Master switch; the three group switches below only apply while it is on.
   notifyOnNewRepo: z.boolean().default(false),
+  notifyOnNewOwnRepo: z.boolean().default(true),
+  notifyOnNewOrgRepo: z.boolean().default(true),
+  notifyOnNewStarredRepo: z.boolean().default(true),
   ntfy: ntfyConfigSchema.optional(),
   apprise: appriseConfigSchema.optional(),
   gotify: gotifyConfigSchema.optional(),
@@ -471,6 +475,9 @@ export const configs = sqliteTable("configs", {
     .$type<z.infer<typeof cleanupConfigSchema>>()
     .notNull(),
 
+  // Do not add the group switches to this default: SQLite can only change a column
+  // default by rebuilding the configs table, and the schema defaults already cover a
+  // row written without them.
   notificationConfig: text("notification_config", { mode: "json" })
     .$type<z.infer<typeof notificationConfigSchema>>()
     .notNull()
