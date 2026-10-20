@@ -349,8 +349,8 @@ export function SourcesCard({ sources, onRefresh }: SourcesCardProps) {
       if (!isApp && (!editing || editor.token.trim())) {
         body.token = editor.token.trim();
       }
-      if (editing?.authType === "app" && editor.authType === "pat" && !editor.token.trim()) {
-        toast.error("Enter a personal access token to switch authentication methods");
+      if (editing?.authType === "app" && !isApp && !editor.token.trim()) {
+        toast.error("Enter a token to stop using the GitHub App credentials");
         return;
       }
       if (editing && (confirmSourceChange || editor.sourceUnlocked)) {

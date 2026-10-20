@@ -17,7 +17,11 @@ import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { sources } from "@/lib/db/schema";
 import { decrypt, encrypt } from "@/lib/utils/encryption";
-import { resolveGitHubAccessToken } from "@/lib/github-app-credentials";
+import {
+  isGitHubAppCredential,
+  parseGitHubAppCredentials,
+  resolveGitHubAccessToken,
+} from "@/lib/github-app-credentials";
 import {
   SOURCE_PROVIDER_KINDS,
   SOURCE_PROVIDER_LABELS,
@@ -467,11 +471,38 @@ export function decryptSourceToken(token: string | null | undefined): string {
   return token ? decrypt(token) : "";
 }
 
-export async function sourceAccessToken(source: SourceRecord): Promise<string> {
+/** True when a source authenticates as a GitHub App installation. */
+export function isGitHubAppSource(source: Pick<SourceRecord, "provider" | "token">): boolean {
   const token = decryptSourceToken(source.token);
-  return source.provider === "github"
-    ? resolveGitHubAccessToken(token, resolveGitHubApiBaseUrl(source.url) || process.env.GH_API_URL || process.env.GITHUB_API_URL || "https://api.github.com")
-    : token;
+  if (!isGitHubAppCredential(token)) return false;
+  // An App credential on a non-GitHub row (a provider switch that kept the
+  // stored value) must never be sent anywhere as a token.
+  if (source.provider !== "github") {
+    throw new Error("This source holds GitHub App credentials but is not a GitHub source. Enter a token for it.");
+  }
+  return parseGitHubAppCredentials(token) !== null;
+}
+
+/**
+ * The token to authenticate to a source with: the stored PAT, or a fresh
+ * installation token for a GitHub App source.
+ */
+export async function sourceAccessToken(
+  source: SourceRecord,
+  options: { minValidityMs?: number } = {}
+): Promise<string> {
+  const token = decryptSourceToken(source.token);
+  if (source.provider !== "github") {
+    if (isGitHubAppCredential(token)) {
+      throw new Error("This source holds GitHub App credentials but is not a GitHub source. Enter a token for it.");
+    }
+    return token;
+  }
+  return resolveGitHubAccessToken(
+    token,
+    resolveGitHubApiBaseUrl(source.url) || process.env.GH_API_URL || process.env.GITHUB_API_URL || "https://api.github.com",
+    options
+  );
 }
 
 /**

@@ -8,7 +8,7 @@ import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 import { blockedOutboundUrlReason } from "@/lib/utils/outbound-url";
 import { createSecureErrorResponse } from "@/lib/utils";
 import { createSource } from "@/lib/sources";
-import { encodeGitHubAppCredentials } from "@/lib/github-app-credentials";
+import { encodeGitHubAppCredentials, isGitHubAppCredential } from "@/lib/github-app-credentials";
 import {
   isDuplicateSourceError,
   loadSourceApiItems,
@@ -72,6 +72,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
       token = body.authType === "app"
         ? encodeGitHubAppCredentials({ appId: String(body.appId ?? ""), installationId: String(body.installationId ?? ""), privateKey: String(body.privateKey ?? "") })
         : typeof body.token === "string" ? body.token : undefined;
+      if (body.authType !== "app" && isGitHubAppCredential(token)) {
+        throw new Error("Use the GitHub App fields to enter App credentials.");
+      }
     } catch (error) {
       return new Response(JSON.stringify({ success: false, message: (error as Error).message }), { status: 400 });
     }

@@ -9,6 +9,11 @@ export interface GitHubAppCredentials {
 
 const PREFIX = "github-app:v1:";
 
+/** True for a stored App credential, valid or not; never send one as a token. */
+export function isGitHubAppCredential(value: string | null | undefined): boolean {
+  return typeof value === "string" && value.startsWith(PREFIX);
+}
+
 export function encodeGitHubAppCredentials(credentials: GitHubAppCredentials): string {
   if (!/^\d+$/.test(credentials.appId) || !/^\d+$/.test(credentials.installationId) ||
       !credentials.privateKey.includes("-----BEGIN") || !credentials.privateKey.includes("PRIVATE KEY-----")) {
@@ -34,13 +39,23 @@ export function parseGitHubAppCredentials(value: string): GitHubAppCredentials |
 
 const installationTokens = new Map<string, { token: string; expiresAt: number }>();
 
-export async function resolveGitHubAccessToken(value: string, apiBaseUrl = "https://api.github.com"): Promise<string> {
+/**
+ * The token to authenticate with: a PAT as is, or an installation token for
+ * App credentials. `minValidityMs` is how long a cached installation token
+ * must still be valid; a token handed to Gitea for a queued mirror pull needs
+ * more headroom than one used for an API call made right away.
+ */
+export async function resolveGitHubAccessToken(
+  value: string,
+  apiBaseUrl = "https://api.github.com",
+  { minValidityMs = 60_000 }: { minValidityMs?: number } = {}
+): Promise<string> {
   const credentials = parseGitHubAppCredentials(value);
   if (!credentials) return value;
 
   const cacheKey = createHash("sha256").update(`${apiBaseUrl}:${credentials.appId}:${credentials.installationId}:${credentials.privateKey}`).digest("hex");
   const cached = installationTokens.get(cacheKey);
-  if (cached && cached.expiresAt > Date.now() + 60_000) return cached.token;
+  if (cached && cached.expiresAt > Date.now() + minValidityMs) return cached.token;
 
   const jwt = sign({}, credentials.privateKey, {
     algorithm: "RS256",

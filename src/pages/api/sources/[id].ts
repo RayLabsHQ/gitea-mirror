@@ -22,7 +22,11 @@ import {
   updateSource,
 } from "@/lib/sources";
 import { toSourceApiItem } from "@/lib/sources-api";
-import { encodeGitHubAppCredentials, parseGitHubAppCredentials } from "@/lib/github-app-credentials";
+import {
+  encodeGitHubAppCredentials,
+  isGitHubAppCredential,
+  parseGitHubAppCredentials,
+} from "@/lib/github-app-credentials";
 import { decryptSourceToken } from "@/lib/sources";
 
 /** Repositories imported from this source; they are what locks it. */
@@ -95,6 +99,22 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
       } catch (error) {
         return jsonError((error as Error).message, 400);
       }
+    } else if (isGitHubAppCredential(token)) {
+      return jsonError("Use the GitHub App fields to enter App credentials.", 400);
+    }
+    // The stored App credential holds the private key. Moving the source to
+    // another provider or to token auth without a new token would keep it,
+    // return it from the API and send it to the new host as the token.
+    if (
+      body.authType !== "app" &&
+      (provider !== "github" || body.authType === "pat") &&
+      !token?.trim() &&
+      isGitHubAppCredential(decryptSourceToken(existing.token))
+    ) {
+      return jsonError(
+        `Enter a ${SOURCE_PROVIDER_LABELS[provider]} token to stop using the GitHub App credentials on this source.`,
+        400
+      );
     }
 
     // All sources may point at their own instance; validate explicit URLs.

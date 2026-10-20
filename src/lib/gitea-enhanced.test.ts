@@ -2,6 +2,7 @@ import { describe, test, expect, mock, beforeEach, afterEach } from "bun:test";
 import { createMockResponse, mockFetch } from "@/tests/mock-fetch";
 import { getRepositorySource } from "@/lib/source-providers/kinds";
 import { encodeGitHubAppCredentials } from "@/lib/github-app-credentials";
+import { clearDestinationVersionCache } from "@/lib/gitea-mirror-credentials";
 
 // Mock the helpers module before importing gitea-enhanced
 const mockCreateMirrorJob = mock(() => Promise.resolve("mock-job-id"));
@@ -104,6 +105,8 @@ mock.module("@/lib/sources", () => ({
   },
   decryptSourceToken: (token: string | null | undefined) => token ?? "",
   sourceAccessToken: async (source: { token?: string | null }) => source.token?.startsWith("github-app:v1:") ? "ghs_fresh" : source.token ?? "",
+  isGitHubAppSource: (source: { provider?: string; token?: string | null }) =>
+    source.provider === "github" && !!source.token?.startsWith("github-app:v1:"),
   resolveGitHubApiBaseUrl: (url: string | null | undefined) => {
     const trimmed = url?.trim().replace(/\/+$/, "") ?? "";
     if (!trimmed || trimmed === "https://github.com") return undefined;
@@ -125,8 +128,14 @@ let orgTestContext = "";
 let getOrgCalled = false;
 let createOrgCalled = false;
 
+// The destination version, for the GitHub App credential refresh check.
+let giteaVersion = "1.27.0";
+
 const mockHttpGet = mock(async (url: string, headers?: any) => {
   // Return different responses based on URL patterns
+  if (url.endsWith("/api/v1/version")) {
+    return { data: { version: giteaVersion }, status: 200, statusText: "OK", headers: new Headers() };
+  }
   
   // Handle user authentication endpoint
   if (url.includes("/api/v1/user")) {
@@ -974,31 +983,80 @@ describe("Enhanced Gitea Operations", () => {
       expect(String(mirrorSyncCalls[0][0])).not.toContain("/api/v1/repos/ceph/test-repo/mirror-sync");
     });
 
-    test("refreshes App mirror credentials before triggering a sync", async () => {
-      const originalToken = sourceRows[0].token;
-      sourceRows[0].token = encodeGitHubAppCredentials({ appId: "123", installationId: "456", privateKey: "-----BEGIN PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----" });
-      try {
-        const config = {
-          userId: "user123",
-          githubConfig: { username: "testuser", token: "", privateRepositories: false, mirrorStarred: false },
-          giteaConfig: { url: "https://gitea.example.com", token: "encrypted-token", defaultOwner: "testuser", mirrorReleases: false },
-        } as unknown as Partial<Config>;
-        const repository = {
-          id: "repo-1", sourceId: "source-1", name: "test-repo", fullName: "ceph/test-repo",
-          owner: "ceph", cloneUrl: "https://github.com/ceph/test-repo.git", isPrivate: false,
-          isStarred: false, status: repoStatusEnum.parse("mirrored"), visibility: "public",
-          userId: "user123", mirroredLocation: "starred/test-repo", createdAt: new Date(), updatedAt: new Date(),
-        } as Repository;
-        await syncGiteaRepoEnhanced({ config, repository });
-        expect(mockHttpPatch.mock.calls).toContainEqual([
-          "https://gitea.example.com/api/v1/repos/starred/test-repo",
-          { mirror_username: "x-access-token", mirror_password: "ghs_fresh", mirror_token: "ghs_fresh", mirror_interval: "0h" },
-          { Authorization: "token encrypted-token" },
+    describe("GitHub App sources", () => {
+      const appConfig = {
+        userId: "user123",
+        githubConfig: { username: "testuser", token: "", privateRepositories: false, mirrorStarred: false },
+        giteaConfig: { url: "https://gitea.example.com", token: "encrypted-token", defaultOwner: "testuser", mirrorReleases: false, mirrorInterval: "8h" },
+      } as unknown as Partial<Config>;
+      const appRepository = () => ({
+        id: "repo-1", sourceId: "source-1", name: "test-repo", fullName: "ceph/test-repo",
+        owner: "ceph", cloneUrl: "https://github.com/ceph/test-repo.git", isPrivate: false,
+        isStarred: false, status: repoStatusEnum.parse("mirrored"), visibility: "public",
+        userId: "user123", mirroredLocation: "starred/test-repo", createdAt: new Date(), updatedAt: new Date(),
+      } as Repository);
+      // Injected so the sync makes no GitHub calls with the fake token.
+      const appDependencies = {
+        getGiteaRepoOwnerAsync: mockGetGiteaRepoOwnerAsync,
+        mirrorGitHubReleasesToGitea: mockMirrorGitHubReleasesToGitea,
+        mirrorGitRepoIssuesToGitea: mockMirrorGitRepoIssuesToGitea,
+        mirrorGitRepoPullRequestsToGitea: mockMirrorGitRepoPullRequestsToGitea,
+        mirrorGitRepoLabelsToGitea: mockMirrorGitRepoLabelsToGitea,
+        mirrorGitRepoMilestonesToGitea: mockMirrorGitRepoMilestonesToGitea,
+        syncRepositoryMetadataToGitea: mockSyncRepositoryMetadataToGitea,
+      };
+      let originalToken: string;
+
+      beforeEach(() => {
+        originalToken = sourceRows[0].token;
+        sourceRows[0].token = encodeGitHubAppCredentials({ appId: "123", installationId: "456", privateKey: "-----BEGIN PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----" });
+        clearDestinationVersionCache();
+      });
+
+      afterEach(() => {
+        sourceRows[0].token = originalToken;
+        giteaVersion = "1.27.0";
+        clearDestinationVersionCache();
+      });
+
+      test("refreshes the mirror credentials before triggering a sync", async () => {
+        await syncGiteaRepoEnhanced({ config: appConfig, repository: appRepository() }, appDependencies);
+        const repoPatches = mockHttpPatch.mock.calls.filter(
+          (call) => call[0] === "https://gitea.example.com/api/v1/repos/starred/test-repo"
+        );
+        // Only the credential refresh: the configured 8h interval is not
+        // re-applied, since Gitea would then pull with an expired token.
+        expect(repoPatches).toEqual([
+          [
+            "https://gitea.example.com/api/v1/repos/starred/test-repo",
+            { mirror_username: "x-access-token", mirror_token: "ghs_fresh", mirror_interval: "0h" },
+            { Authorization: "token encrypted-token" },
+          ],
         ]);
         expect(mockHttpPost.mock.calls.some((call) => String(call[0]).includes("/mirror-sync"))).toBe(true);
-      } finally {
-        sourceRows[0].token = originalToken;
-      }
+      });
+
+      test("accepts the Gitea 28+ version line", async () => {
+        giteaVersion = "29.0.0+dev-160-g55186ca39b";
+        await syncGiteaRepoEnhanced({ config: appConfig, repository: appRepository() }, appDependencies);
+        expect(mockHttpPost.mock.calls.some((call) => String(call[0]).includes("/mirror-sync"))).toBe(true);
+      });
+
+      test("refuses to sync on Gitea 1.26, which ignores mirror credentials", async () => {
+        giteaVersion = "1.26.1";
+        await expect(
+          syncGiteaRepoEnhanced({ config: appConfig, repository: appRepository() }, appDependencies)
+        ).rejects.toThrow("GitHub App sources need Gitea 1.27 or later");
+        expect(mockHttpPost.mock.calls.some((call) => String(call[0]).includes("/mirror-sync"))).toBe(false);
+      });
+
+      test("refuses to sync on Forgejo", async () => {
+        giteaVersion = "11.0.3+gitea-1.22.0";
+        await expect(
+          syncGiteaRepoEnhanced({ config: appConfig, repository: appRepository() }, appDependencies)
+        ).rejects.toThrow("GitHub App sources need Gitea 1.27 or later");
+        expect(mockHttpPost.mock.calls.some((call) => String(call[0]).includes("/mirror-sync"))).toBe(false);
+      });
     });
 
     test("finds a mirror transferred to another owner through the search and syncs it there (#400)", async () => {

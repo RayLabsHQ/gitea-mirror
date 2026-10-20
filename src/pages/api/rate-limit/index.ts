@@ -6,9 +6,9 @@ import { jsonResponse, createSecureErrorResponse } from "@/lib/utils";
 import { RateLimitManager } from "@/lib/rate-limit-manager";
 import { createGitHubClient } from "@/lib/github";
 import { getDecryptedGitHubToken } from "@/lib/utils/config-encryption";
-import { createSourceProviderFromConfig } from "@/lib/source-providers";
-import { parseGitHubAppCredentials } from "@/lib/github-app-credentials";
-import { GitHubSourceProvider } from "@/lib/source-providers/github-source";
+import { createGitHubAppClient } from "@/lib/github-app-client";
+import { isGitHubAppCredential } from "@/lib/github-app-credentials";
+import { resolveGitHubApiBaseUrl } from "@/lib/sources";
 import { configs } from "@/lib/db";
 import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 
@@ -35,8 +35,11 @@ export const GET: APIRoute = async ({ request, locals }) => {
       if (config && config.githubConfig?.token && resolveSourceProviderKind(config) === "github") {
         const decryptedToken = getDecryptedGitHubToken(config);
         const githubUsername = config.githubConfig?.owner || undefined;
-        const octokit = parseGitHubAppCredentials(decryptedToken)
-          ? (createSourceProviderFromConfig(config, { userId }) as GitHubSourceProvider).octokit
+        const octokit = isGitHubAppCredential(decryptedToken)
+          ? createGitHubAppClient(decryptedToken, {
+              userId,
+              apiBaseUrl: resolveGitHubApiBaseUrl(config.githubConfig?.url),
+            })
           : createGitHubClient(decryptedToken, userId, githubUsername);
         
         // This will update the rate limit in the database

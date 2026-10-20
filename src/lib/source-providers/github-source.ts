@@ -8,10 +8,12 @@
  */
 import type { Octokit } from "@octokit/rest";
 import type { Config } from "@/lib/db/schema";
-import { parseGitHubAppCredentials, resolveGitHubAccessToken } from "@/lib/github-app-credentials";
+import { parseGitHubAppCredentials } from "@/lib/github-app-credentials";
+import { createGitHubAppClient } from "@/lib/github-app-client";
 import {
   createGitHubClient,
   createPublicGitHubClient,
+  filterGithubRepositories,
   getGithubOrganizations,
   getGithubRepositories,
   getGithubStarredRepositories,
@@ -122,7 +124,7 @@ export class GitHubSourceProvider implements SourceProvider {
     // Tokenless: the throttled public client, never an empty token — anonymous
     // GitHub runs at 60 req/hr, so the onRateLimit backoff must stay attached.
     this.octokit = app
-      ? createPublicGitHubClient(apiBaseUrl, connection.userId)
+      ? createGitHubAppClient(connection.token, { userId: connection.userId, apiBaseUrl })
       : connection.token.trim()
       ? createGitHubClient(
           connection.token,
@@ -131,14 +133,6 @@ export class GitHubSourceProvider implements SourceProvider {
           apiBaseUrl
         )
       : createPublicGitHubClient(apiBaseUrl);
-    if (app) {
-      this.octokit.hook.before("request", async (options) => {
-        options.headers = {
-          ...options.headers,
-          authorization: `token ${await resolveGitHubAccessToken(connection.token, apiBaseUrl || githubApiBaseUrl())}`,
-        };
-      });
-    }
   }
 
   private stamp(repos: GitRepo[]): GitRepo[] {
@@ -162,7 +156,14 @@ export class GitHubSourceProvider implements SourceProvider {
         if (repos.length >= data.total_count || data.repositories.length === 0) break;
         page++;
       }
-      return this.stamp(repos.map((repo) => mapGithubRestRepository(repo as GithubRestRepository, this.connection)));
+      // Same account filters as the token listing. The installation account
+      // (the source's username) is the one whose personal repos are skipped.
+      const filtered = filterGithubRepositories(repos, config, {
+        includeAllOrgsOverride: options.includeAllOrgsOverride,
+        orgForkOverrides: options.orgForkOverrides,
+        authenticatedUserLogin: this.connection.username || config.githubConfig?.owner || "",
+      });
+      return this.stamp(filtered.map((repo) => mapGithubRestRepository(repo, this.connection)));
     }
     const repos = await getGithubRepositories({
       octokit: this.octokit,
@@ -185,7 +186,9 @@ export class GitHubSourceProvider implements SourceProvider {
     skipOrgNames?: Set<string>
   ): Promise<SourceOrganizationResult> {
     if (parseGitHubAppCredentials(this.connection.token)) {
-      return this.listRepositories(config).then((repos) => ({
+      // Every installation org is listed, like the token path's org listing;
+      // the allowlist only narrows which repositories get imported.
+      return this.listRepositories(config, { includeAllOrgsOverride: true }).then((repos) => ({
         organizations: [...new Set(repos.map((repo) => repo.organization).filter((name): name is string => !!name))]
           .filter((name) => !skipOrgNames?.has(name))
           .map((name) => ({ name, avatarUrl: "", membershipRole: "member" as const, isIncluded: false, status: "imported" as const, repositoryCount: repos.filter((repo) => repo.organization === name).length, createdAt: new Date(), updatedAt: new Date() })),

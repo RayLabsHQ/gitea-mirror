@@ -144,6 +144,14 @@ describe("GET /api/sources", () => {
     expect(JSON.stringify(body)).not.toContain("PRIVATE KEY");
   });
 
+  test("never returns App credentials stored on a non-GitHub source", async () => {
+    sourceRows = [{ id: "gl-1", userId: "user-1", name: "GitLab", provider: "gitlab", url: "https://gitlab.example.com", username: "acme", token: encrypted(encodeGitHubAppCredentials({ appId: "123", installationId: "456", privateKey: "-----BEGIN PRIVATE KEY-----\nsecret\n-----END PRIVATE KEY-----" })), enabled: true }];
+    const response = await get();
+    const body = await response.json();
+    expect(body.sources[0]).toMatchObject({ provider: "gitlab", authType: "pat", token: "" });
+    expect(JSON.stringify(body)).not.toContain("PRIVATE KEY");
+  });
+
   test("lists sources with repository counts, lock state and decrypted tokens", async () => {
     sourceRows = [
       {

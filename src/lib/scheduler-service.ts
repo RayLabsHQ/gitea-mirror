@@ -409,9 +409,9 @@ async function createOctokitResolverForSources(
   sources: SourceRecord[]
 ): Promise<(repo: { sourceId?: string | null }) => Promise<Octokit | null>> {
   const { decryptSourceToken, resolveGitHubApiBaseUrl } = await import('@/lib/sources');
-  const { GitHubSourceProvider } = await import('@/lib/source-providers/github-source');
-  const { sourceConnectionFromSource, createSourceProviderFromConfig } = await import('@/lib/source-providers');
   const { createGitHubClient, createPublicGitHubClient } = await import('@/lib/github');
+  const { createGitHubAppClient } = await import('@/lib/github-app-client');
+  const { isGitHubAppCredential } = await import('@/lib/github-app-credentials');
 
   const sourcesById = new Map(sources.map(source => [source.id, source]));
   const clientsBySourceId = new Map<string, Octokit | null>();
@@ -429,8 +429,8 @@ async function createOctokitResolverForSources(
           const sourceToken = decryptSourceToken(source.token);
           clientsBySourceId.set(
             source.id,
-            sourceToken.startsWith('github-app:v1:')
-              ? new GitHubSourceProvider(sourceConnectionFromSource(source, { userId })).octokit
+            isGitHubAppCredential(sourceToken)
+              ? createGitHubAppClient(sourceToken, { userId, apiBaseUrl: resolveGitHubApiBaseUrl(source.url) })
               : sourceToken
               ? createGitHubClient(
                   sourceToken,
@@ -450,9 +450,13 @@ async function createOctokitResolverForSources(
     if (configClient === undefined) {
       const { resolveSourceProviderKind } = await import('@/lib/source-providers');
       if (resolveSourceProviderKind(config) === 'github') {
-        configClient = getDecryptedGitHubToken(config).startsWith('github-app:v1:')
-          ? (createSourceProviderFromConfig(config, { userId }) as InstanceType<typeof GitHubSourceProvider>).octokit
-          : createGitHubClient(getDecryptedGitHubToken(config), userId, config.githubConfig?.owner);
+        const configToken = getDecryptedGitHubToken(config);
+        configClient = isGitHubAppCredential(configToken)
+          ? createGitHubAppClient(configToken, {
+              userId,
+              apiBaseUrl: resolveGitHubApiBaseUrl(config.githubConfig?.url),
+            })
+          : createGitHubClient(configToken, userId, config.githubConfig?.owner);
       } else {
         configClient = null;
       }

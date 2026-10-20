@@ -51,6 +51,33 @@ test("GitHub App lists installed repositories without using user or starred APIs
   expect(await provider.listStarredRepositories({})).toEqual([]);
 });
 
+test("GitHub App listing applies the same account filters as the token listing", async () => {
+  const provider = new GitHubSourceProvider({ ...connection, token: encodeGitHubAppCredentials({
+    appId: "123", installationId: "456", privateKey: "-----BEGIN PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----",
+  }) });
+  const personal = { ...repo(4, "dotfiles", "me"), owner: { login: "me", type: "User" } };
+  const repositories = [
+    repo(1, "tool"),
+    { ...repo(2, "forked"), fork: true },
+    repo(3, "other-tool", "other-org"),
+    personal,
+  ];
+  const request = mock(async () => ({ data: { total_count: repositories.length, repositories } }));
+  Object.defineProperty(provider, "octokit", { value: { request } });
+  const config = {
+    githubConfig: { skipForks: true, skipPersonalRepos: true, includeOrganizations: ["acme"] },
+  } as any;
+
+  expect((await provider.listRepositories(config)).map((item) => item.fullName)).toEqual(["acme/tool"]);
+  // Cleanup lists past the allowlist, like the token path.
+  expect(
+    (await provider.listRepositories(config, { includeAllOrgsOverride: true })).map((item) => item.fullName)
+  ).toEqual(["acme/tool", "other-org/other-tool"]);
+  // Every installation org is discovered; the allowlist only narrows imports.
+  const { organizations } = await provider.listOrganizations(config);
+  expect(organizations.map((org) => org.name).sort()).toEqual(["acme", "other-org"]);
+});
+
 test("GitHub App Octokit authenticates requests with an installation token", async () => {
   const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048, privateKeyEncoding: { type: "pkcs8", format: "pem" }, publicKeyEncoding: { type: "spki", format: "pem" } });
   const provider = new GitHubSourceProvider({ ...connection, token: encodeGitHubAppCredentials({ appId: "789", installationId: "987", privateKey }) });
