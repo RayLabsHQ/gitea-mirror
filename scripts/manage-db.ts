@@ -221,7 +221,7 @@ async function resetPassword() {
   }
 
   const sqlite = new Database(dbPath);
-  const db = drizzle({ client: sqlite });
+  const db = drizzle({ client: sqlite, schema: { users, accounts, sessions } });
 
   try {
     const user = await db.query.users.findFirst({

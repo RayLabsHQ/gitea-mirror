@@ -11,6 +11,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
   let isClosed = false;
   const POLL_INTERVAL = 5000; // Poll every 5 seconds (reduced from 2 seconds for low-traffic usage)
 
+  let cancelStream: (() => void) | undefined;
   const stream = new ReadableStream({
     start(controller) {
       const encoder = new TextEncoder();
@@ -73,20 +74,30 @@ export const GET: APIRoute = async ({ request, locals }) => {
         }
       }, 30000);
 
-      // Handle client disconnection
+      // Handle client disconnection. The reader cancel runs first on Bun 1.4
+      // and closes the stream, so close() can throw ERR_INVALID_STATE here;
+      // inside an event listener that is an uncaught exception (#465).
       request.signal?.addEventListener("abort", () => {
         if (!isClosed) {
           isClosed = true;
           if (pollIntervalId) {
             clearInterval(pollIntervalId);
           }
-          controller.close();
+          try {
+            controller.close();
+          } catch {
+            // Already closed by the reader cancel.
+          }
         }
       });
+      cancelStream = () => {
+        isClosed = true;
+        if (pollIntervalId) clearInterval(pollIntervalId);
+        clearInterval(heartbeatInterval);
+      };
     },
     cancel() {
-      // Extra safety in case cancel is triggered
-      isClosed = true;
+      cancelStream?.();
     },
   });
 

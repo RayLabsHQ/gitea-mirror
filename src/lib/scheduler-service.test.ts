@@ -213,10 +213,30 @@ const publicOnlySource = {
   updatedAt: new Date(0),
 };
 
-const mockListRepositories = mock(async () => {
-  throw new Error("personal discovery must not run for a public-only source");
-});
-const mockListStarredRepositories = mock(async () => []);
+// A token source: personal and starred discovery run for it. Only the tests
+// that exercise those paths add it to sourceRows.
+const personalSource = {
+  id: "source-personal",
+  userId: "user-1",
+  name: "GitHub (token)",
+  provider: "github",
+  url: "https://github.com",
+  username: "majmcccloud",
+  token: "encrypted-token",
+  enabled: true,
+  createdAt: new Date(0),
+  updatedAt: new Date(0),
+};
+
+// What listSources returns; reset to the public-only source before each test.
+let sourceRows: any[] = [publicOnlySource];
+
+// Personal and starred listings, empty by default so the public-only
+// scenarios never see them (those tests assert listRepositories is not called).
+let personalRepoListings: any[] = [];
+let starredRepoListings: any[] = [];
+const mockListRepositories = mock(async () => personalRepoListings);
+const mockListStarredRepositories = mock(async () => starredRepoListings);
 const orgRepoListings = new Map<string, any[]>();
 const mockListOrganizationRepositories = mock(async (name: string) =>
   orgRepoListings.get(name) ?? []
@@ -228,6 +248,9 @@ const mockCreateSourceProviderFromSource = mock(() => ({
   listStarredRepositories: mockListStarredRepositories,
   listOrganizationRepositories: mockListOrganizationRepositories,
 }));
+// The "New repository discovered" notification is fire-and-forget; the child
+// suite only asserts that discovery hands the imported repositories over.
+const mockTriggerNewRepositoriesNotification = mock(async () => {});
 
 if (isChild) {
   mock.module("@/lib/db", () => {
@@ -295,7 +318,7 @@ if (isChild) {
 
   mock.module("@/lib/sources", () => ({
     listSources: mock(async (userId: string) =>
-      publicOnlySource.userId === userId ? [publicOnlySource] : []
+      sourceRows.filter((source) => source.userId === userId)
     ),
     ensureSourcesFromConfig: mock(async () => {}),
     decryptSourceToken: (token: string | null | undefined) => token ?? "",
@@ -319,6 +342,13 @@ if (isChild) {
   mock.module("@/lib/mirror-dispatch", () => ({
     mirrorRepositoryToDestination: mockMirrorRepositoryToDestination,
     syncRepositoryOnDestination: mockSyncRepositoryOnDestination,
+  }));
+
+  mock.module("@/lib/notification-service", () => ({
+    triggerNewRepositoriesNotification: mockTriggerNewRepositoriesNotification,
+    triggerJobNotification: mock(async () => {}),
+    sendNotification: mock(async () => {}),
+    testNotification: mock(async () => ({ success: true })),
   }));
 }
 
@@ -418,10 +448,14 @@ describe.skipIf(!isChild)("Scheduler public-only sources (WP4)", () => {
     repoInsertAttempts = 0;
     clearAllRateLimits();
     orgRepoListings.clear();
+    sourceRows = [publicOnlySource];
+    personalRepoListings = [];
+    starredRepoListings = [];
     mockListRepositories.mockClear();
     mockListStarredRepositories.mockClear();
     mockListOrganizationRepositories.mockClear();
     mockCreateSourceProviderFromSource.mockClear();
+    mockTriggerNewRepositoriesNotification.mockClear();
   });
 
   test("a destination-only config runs the scheduled sync instead of skipping it", async () => {
@@ -471,6 +505,15 @@ describe.skipIf(!isChild)("Scheduler public-only sources (WP4)", () => {
     expect(orgRepoNames).toEqual(["existing", "newly-published"]);
     expect(orgUpdates.some((data) => data.repositoryCount === 3)).toBe(true);
 
+    // The "New repository discovered" notification covers only the repositories
+    // this pass actually imported, grouped per organization.
+    expect(mockTriggerNewRepositoriesNotification).toHaveBeenCalledTimes(1);
+    expect(mockTriggerNewRepositoriesNotification.mock.calls[0][0]).toMatchObject({
+      userId: "user-1",
+      groupLabel: "pinned-org",
+      repositoryNames: ["pinned-org/newly-published"],
+    });
+
     const attemptsAfterFirstRun = repoInsertAttempts;
     expect(attemptsAfterFirstRun).toBeGreaterThan(0);
 
@@ -509,6 +552,59 @@ describe.skipIf(!isChild)("Scheduler public-only sources (WP4)", () => {
     expect(sharedRows[0].sourceId).toBe("source-personal");
     expect(repoRows.some((row) => row.normalizedFullName === "pinned-org/fresh")).toBe(true);
     expect(consoleLines.some((line) => line.includes("already tracked") && line.includes("pinned-org"))).toBe(true);
+  });
+
+  test("auto-imported repositories notify once per owner and once for all stars", async () => {
+    // The personal auto-import path groups by owner: the user's own
+    // repositories carry no organization and fall back to the owner name.
+    // Starred repositories are the exception - their owners are arbitrary, so
+    // every star shares a single notification instead of one per owner.
+    sourceRows = [personalSource];
+    orgRows = [];
+    configRows = [
+      { ...makeSchedulerConfig(), githubConfig: { token: "encrypted-token", includeStarred: true } },
+    ];
+    personalRepoListings = [
+      makeGitRepo("own-alpha", { owner: "majmcccloud", organization: null, fullName: "majmcccloud/own-alpha" }),
+      makeGitRepo("own-beta", { owner: "majmcccloud", organization: null, fullName: "majmcccloud/own-beta" }),
+    ];
+    starredRepoListings = [
+      makeGitRepo("starred-gamma", {
+        owner: "other-org",
+        organization: "other-org",
+        fullName: "other-org/starred-gamma",
+        isStarred: true,
+      }),
+      makeGitRepo("starred-delta", {
+        owner: "another-user",
+        organization: null,
+        fullName: "another-user/starred-delta",
+        isStarred: true,
+      }),
+    ];
+
+    await schedulerLoop();
+
+    expect(mockListRepositories).toHaveBeenCalledTimes(1);
+    expect(mockListStarredRepositories).toHaveBeenCalledTimes(1);
+    expect(repoRows.some((row) => row.normalizedFullName === "majmcccloud/own-beta")).toBe(true);
+
+    const calls = mockTriggerNewRepositoriesNotification.mock.calls.map(([args]) => args);
+    expect(calls).toHaveLength(2);
+    expect(calls).toContainEqual(
+      expect.objectContaining({
+        userId: "user-1",
+        groupLabel: "majmcccloud",
+        repositoryNames: ["majmcccloud/own-alpha", "majmcccloud/own-beta"],
+      })
+    );
+    expect(calls).toContainEqual(
+      expect.objectContaining({
+        userId: "user-1",
+        starred: true,
+        repositoryNames: ["other-org/starred-gamma", "another-user/starred-delta"],
+      })
+    );
   });
 });
 // ---------------------------------------------------------------------------
@@ -568,6 +664,9 @@ describe.skipIf(!isChild)("Scheduler rate limit gate (#437)", () => {
     configUpdates = [];
     repoInsertAttempts = 0;
     orgRepoListings.clear();
+    sourceRows = [publicOnlySource];
+    personalRepoListings = [];
+    starredRepoListings = [];
     mockListOrganizationRepositories.mockClear();
     mockMirrorRepositoryToDestination.mockClear();
     mockSyncRepositoryOnDestination.mockClear();

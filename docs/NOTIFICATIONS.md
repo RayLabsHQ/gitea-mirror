@@ -107,7 +107,9 @@ The secret is encrypted at rest.
 |-------|---------|-------------|
 | Sync errors | On | A mirror job failed |
 | Sync success | Off | A mirror job completed successfully |
-| New repo discovered | Off | Not yet implemented; the toggle is disabled in the UI |
+| New repo discovered | Off | New repositories were discovered and imported |
+
+The "New repo discovered" event is sent once per owner (account or organization) per discovery pass (scheduled sync, boot auto-start and the manual "Mirror Organization" sync), listing the repositories that were imported. Starred repositories are the exception: they arrive as a single "Starred" notification because their owners are arbitrary. A large import is capped to the first 10 names plus an "and N more" line so one pass never floods your provider.
 
 ## Testing
 

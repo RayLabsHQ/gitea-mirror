@@ -117,6 +117,65 @@ export async function testNotification(
 }
 
 /**
+ * The user's stored notification config, or undefined when they have none.
+ * Prefers the active and most-recently-updated row to avoid picking a stale
+ * inactive stub when multiple rows exist (see issue #271).
+ */
+async function loadNotificationConfig(
+  userId: string,
+): Promise<NotificationConfig | undefined> {
+  const configResults = await db
+    .select()
+    .from(configs)
+    .where(eq(configs.userId, userId))
+    .orderBy(sql`${configs.isActive} DESC`, sql`${configs.updatedAt} DESC`)
+    .limit(1);
+
+  if (configResults.length === 0) {
+    return undefined;
+  }
+
+  return configResults[0].notificationConfig as NotificationConfig | undefined;
+}
+
+/**
+ * Copy of a stored config with the ACTIVE provider's credential decrypted.
+ *
+ * Only the active provider is decrypted so stale credentials on the inactive
+ * provider cannot drop the whole notification.
+ */
+function decryptNotificationConfig(
+  notificationConfig: NotificationConfig,
+): NotificationConfig {
+  const decryptedConfig = { ...notificationConfig };
+  if (decryptedConfig.provider === "ntfy" && decryptedConfig.ntfy?.token) {
+    decryptedConfig.ntfy = {
+      ...decryptedConfig.ntfy,
+      token: decrypt(decryptedConfig.ntfy.token),
+    };
+  }
+  if (decryptedConfig.provider === "apprise" && decryptedConfig.apprise?.token) {
+    decryptedConfig.apprise = {
+      ...decryptedConfig.apprise,
+      token: decrypt(decryptedConfig.apprise.token),
+    };
+  }
+  if (decryptedConfig.provider === "gotify" && decryptedConfig.gotify?.token) {
+    decryptedConfig.gotify = {
+      ...decryptedConfig.gotify,
+      token: decrypt(decryptedConfig.gotify.token),
+    };
+  }
+  if (decryptedConfig.provider === "webhook" && decryptedConfig.webhook?.secret) {
+    decryptedConfig.webhook = {
+      ...decryptedConfig.webhook,
+      secret: decrypt(decryptedConfig.webhook.secret),
+    };
+  }
+  return decryptedConfig;
+}
+
+/**
  * Loads the user's notification config from the database and triggers
  * a notification if the event type matches the user's preferences.
  *
@@ -144,21 +203,7 @@ export async function triggerJobNotification({
       return;
     }
 
-    // Fetch user's config from database — prefer active and most-recently-updated
-    // to avoid picking a stale inactive stub when multiple rows exist (see issue #271).
-    const configResults = await db
-      .select()
-      .from(configs)
-      .where(eq(configs.userId, userId))
-      .orderBy(sql`${configs.isActive} DESC`, sql`${configs.updatedAt} DESC`)
-      .limit(1);
-
-    if (configResults.length === 0) {
-      return;
-    }
-
-    const userConfig = configResults[0];
-    const notificationConfig = userConfig.notificationConfig as NotificationConfig | undefined;
+    const notificationConfig = await loadNotificationConfig(userId);
 
     if (!notificationConfig?.enabled) {
       return;
@@ -177,31 +222,7 @@ export async function triggerJobNotification({
 
     // Only decrypt the active provider's token to avoid failures from stale
     // credentials on the inactive provider dropping the entire notification
-    const decryptedConfig = { ...notificationConfig };
-    if (decryptedConfig.provider === "ntfy" && decryptedConfig.ntfy?.token) {
-      decryptedConfig.ntfy = {
-        ...decryptedConfig.ntfy,
-        token: decrypt(decryptedConfig.ntfy.token),
-      };
-    }
-    if (decryptedConfig.provider === "apprise" && decryptedConfig.apprise?.token) {
-      decryptedConfig.apprise = {
-        ...decryptedConfig.apprise,
-        token: decrypt(decryptedConfig.apprise.token),
-      };
-    }
-    if (decryptedConfig.provider === "gotify" && decryptedConfig.gotify?.token) {
-      decryptedConfig.gotify = {
-        ...decryptedConfig.gotify,
-        token: decrypt(decryptedConfig.gotify.token),
-      };
-    }
-    if (decryptedConfig.provider === "webhook" && decryptedConfig.webhook?.secret) {
-      decryptedConfig.webhook = {
-        ...decryptedConfig.webhook,
-        secret: decrypt(decryptedConfig.webhook.secret),
-      };
-    }
+    const decryptedConfig = decryptNotificationConfig(notificationConfig);
 
     // Build event
     const repoLabel = repositoryName || organizationName || "Unknown";
@@ -223,5 +244,95 @@ export async function triggerJobNotification({
     await sendNotification(decryptedConfig, event);
   } catch (error) {
     console.error("[NotificationService] Background notification failed:", error);
+  }
+}
+
+/**
+ * The "New repository discovered" event for one group of imports.
+ *
+ * A source can publish dozens of new repositories between two scheduler
+ * ticks, so they are reported as a single notification instead of one alert
+ * per repository, and the list is capped so a large import cannot bury every
+ * other notification.
+ */
+export const MAX_LISTED_NEW_REPOSITORIES = 10;
+
+/** Label for the single group that collects every starred import. */
+export const STARRED_GROUP_LABEL = "Starred";
+
+export function buildNewRepositoriesNotificationEvent({
+  groupLabel,
+  starred = false,
+  repositoryNames,
+  details,
+}: {
+  groupLabel?: string | null;
+  /** Starred imports share one group, so the wording drops the owner. */
+  starred?: boolean;
+  repositoryNames: string[];
+  details?: string;
+}): NotificationEvent {
+  const label = groupLabel || (starred ? STARRED_GROUP_LABEL : "Unknown");
+  const count = repositoryNames.length;
+  const listed = repositoryNames.slice(0, MAX_LISTED_NEW_REPOSITORIES);
+  const overflow = repositoryNames.length - listed.length;
+
+  return {
+    title: `New Repositories: ${label}`,
+    message: [
+      starred
+        ? `${count} new starred ${count === 1 ? "repository" : "repositories"} discovered:`
+        : `${count} new ${count === 1 ? "repository" : "repositories"} discovered for ${label}:`,
+      listed.map((name) => `\n- ${name}`).join(""),
+      overflow > 0 ? `\n- and ${overflow} more` : "",
+      details ? `\nDetails: ${details}` : "",
+    ].join(""),
+    type: "new_repo",
+  };
+}
+
+/**
+ * Notifies the user about repositories that were newly discovered and
+ * imported (the "New repository discovered" event). Imports are reported per
+ * owner or organization, except starred repositories, which arrive as one
+ * group because their owners are arbitrary.
+ *
+ * Called fire-and-forget from the discovery passes, so it NEVER throws.
+ */
+export async function triggerNewRepositoriesNotification({
+  userId,
+  groupLabel,
+  starred = false,
+  repositoryNames,
+  details,
+}: {
+  userId: string;
+  groupLabel?: string | null;
+  starred?: boolean;
+  /** Full names of the repositories that were imported. */
+  repositoryNames: string[];
+  details?: string;
+}): Promise<void> {
+  try {
+    if (repositoryNames.length === 0) {
+      return;
+    }
+
+    const notificationConfig = await loadNotificationConfig(userId);
+
+    if (!notificationConfig?.enabled || !notificationConfig.notifyOnNewRepo) {
+      return;
+    }
+
+    const event = buildNewRepositoriesNotificationEvent({
+      groupLabel,
+      starred,
+      repositoryNames,
+      details,
+    });
+
+    await sendNotification(decryptNotificationConfig(notificationConfig), event);
+  } catch (error) {
+    console.error("[NotificationService] New repository notification failed:", error);
   }
 }
