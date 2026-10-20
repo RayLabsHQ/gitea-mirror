@@ -1,5 +1,7 @@
 import type { APIRoute } from "astro";
 import type { SourceRecord } from "@/lib/sources";
+import { createGitHubAppClient } from "@/lib/github-app-client";
+import { isGitHubAppCredential } from "@/lib/github-app-credentials";
 import {
   decryptSourceToken,
   findSourceForRepository,
@@ -94,6 +96,9 @@ export const POST: APIRoute = async ({ request, locals }) => {
       const octokitForSource = (source: SourceRecord | null) => {
         if (!source || source.provider !== "github") return null;
         const token = decryptSourceToken(source.token);
+        if (isGitHubAppCredential(token)) {
+          return createGitHubAppClient(token, { userId, apiBaseUrl: resolveGitHubApiBaseUrl(source.url) });
+        }
         // A tokenless GitHub source still gets an anonymous public client
         // (60 req/hr) so public-repo metadata mirrors; an empty token must
         // never reach createGitHubClient, which would send `auth: ""`.

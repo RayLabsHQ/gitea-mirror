@@ -334,7 +334,7 @@ export function createGitHubClient(
  * schedule retries. Never pass an empty token to createGitHubClient
  * instead — Octokit treats `auth: ""` as an invalid credential header.
  */
-export function createPublicGitHubClient(apiBaseUrl?: string): Octokit {
+export function createPublicGitHubClient(apiBaseUrl?: string, userId?: string): Octokit {
   // Same base URL resolution as createGitHubClient: an explicit apiBaseUrl
   // (a GitHub Enterprise source's /api/v3) replaces the env default;
   // otherwise support GH_API_URL (preferred) or GITHUB_API_URL (may conflict
@@ -356,13 +356,13 @@ export function createPublicGitHubClient(apiBaseUrl?: string): Octokit {
         "x-github-api-version": "2022-11-28", // Use a stable API version
       },
     },
-    throttle: githubThrottleOptions(),
+    throttle: githubThrottleOptions(userId),
   });
 
   // Anonymous clients share one gate key, so one exhausted 60 req/hr budget
   // pauses every tokenless source together.
   installRateLimitGate(octokit, {
-    key: rateLimitGateKey(undefined),
+    key: rateLimitGateKey(userId),
     maxWaitMs: RATE_LIMIT_FAST_FAIL_THRESHOLD_SECONDS * 1000,
   });
 
@@ -390,6 +390,63 @@ export async function getGithubRepoCloneUrl({
     url: data.html_url,
     cloneUrl: data.clone_url,
   };
+}
+
+/**
+ * The account filters a repository listing honors: skipForks (with
+ * per-organization pins), skipPersonalRepos and the includeOrganizations
+ * allowlist. Shared by the token listing and the GitHub App installation
+ * listing so both import the same repositories.
+ */
+export function filterGithubRepositories<
+  T extends { fork?: boolean; owner: { login: string; type?: string } },
+>(
+  repos: T[],
+  config: Partial<Config>,
+  {
+    includeAllOrgsOverride,
+    orgForkOverrides,
+    authenticatedUserLogin,
+  }: {
+    includeAllOrgsOverride?: boolean;
+    orgForkOverrides?: Map<string, boolean>;
+    authenticatedUserLogin: string;
+  }
+): T[] {
+  const forkSkipFor = orgForkSkipDecision(orgForkOverrides, config);
+  const skipPersonalRepos = config.githubConfig?.skipPersonalRepos ?? false;
+  // Opt-in organization allowlist. When non-empty, only repos owned by the
+  // listed organizations are imported; org repos from any other org the user
+  // happens to be a member of are dropped. Empty = import all org repos
+  // (backward-compatible default). Owned/collaborator repos are unaffected.
+  const includeOrgs = includeAllOrgsOverride
+    ? []
+    : config.githubConfig?.includeOrganizations ?? [];
+  const allowedOrgs = new Set(
+    includeOrgs.map((org) => org.trim().toLowerCase()).filter(Boolean),
+  );
+
+  return repos.filter((repo) => {
+    const skipForks = forkSkipFor(
+      repo.owner.type === "Organization" ? repo.owner.login : undefined
+    );
+    const isForkAllowed = !skipForks || !repo.fork;
+    // When skipPersonalRepos is true, drop repos owned by the authenticated user
+    // (owner.type === "User" and owner.login matches the configured GitHub username).
+    // Org repos have owner.type === "Organization" so they are always kept.
+    const isPersonalRepo =
+      skipPersonalRepos &&
+      authenticatedUserLogin.length > 0 &&
+      repo.owner.login === authenticatedUserLogin &&
+      repo.owner.type === "User";
+    // When an allowlist is configured, only keep org repos whose owning org
+    // is listed. Non-org repos (owned/collaborator) are never restricted here.
+    const isOrgAllowed =
+      allowedOrgs.size === 0 ||
+      repo.owner.type !== "Organization" ||
+      allowedOrgs.has(repo.owner.login.toLowerCase());
+    return isForkAllowed && !isPersonalRepo && isOrgAllowed;
+  });
 }
 
 /**
@@ -435,41 +492,11 @@ export async function getGithubRepositories({
       { per_page: 100, affiliation },
     );
 
-    const forkSkipFor = orgForkSkipDecision(orgForkOverrides, config);
-    const skipPersonalRepos = config.githubConfig?.skipPersonalRepos ?? false;
-    // The authenticated user's login — used to identify personally-owned repos
-    const authenticatedUserLogin = config.githubConfig?.owner ?? "";
-    // Opt-in organization allowlist. When non-empty, only repos owned by the
-    // listed organizations are imported; org repos from any other org the user
-    // happens to be a member of are dropped. Empty = import all org repos
-    // (backward-compatible default). Owned/collaborator repos are unaffected.
-    const includeOrgs = includeAllOrgsOverride
-      ? []
-      : config.githubConfig?.includeOrganizations ?? [];
-    const allowedOrgs = new Set(
-      includeOrgs.map((org) => org.trim().toLowerCase()).filter(Boolean),
-    );
-
-    const filteredRepos = repos.filter((repo) => {
-      const skipForks = forkSkipFor(
-        repo.owner.type === "Organization" ? repo.owner.login : undefined
-      );
-      const isForkAllowed = !skipForks || !repo.fork;
-      // When skipPersonalRepos is true, drop repos owned by the authenticated user
-      // (owner.type === "User" and owner.login matches the configured GitHub username).
-      // Org repos have owner.type === "Organization" so they are always kept.
-      const isPersonalRepo =
-        skipPersonalRepos &&
-        authenticatedUserLogin.length > 0 &&
-        repo.owner.login === authenticatedUserLogin &&
-        repo.owner.type === "User";
-      // When an allowlist is configured, only keep org repos whose owning org
-      // is listed. Non-org repos (owned/collaborator) are never restricted here.
-      const isOrgAllowed =
-        allowedOrgs.size === 0 ||
-        repo.owner.type !== "Organization" ||
-        allowedOrgs.has(repo.owner.login.toLowerCase());
-      return isForkAllowed && !isPersonalRepo && isOrgAllowed;
+    const filteredRepos = filterGithubRepositories(repos, config, {
+      includeAllOrgsOverride,
+      orgForkOverrides,
+      // The authenticated user's login — used to identify personally-owned repos
+      authenticatedUserLogin: config.githubConfig?.owner ?? "",
     });
 
     return filteredRepos.map((repo) => ({

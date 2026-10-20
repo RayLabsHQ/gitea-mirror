@@ -22,6 +22,12 @@ import {
   updateSource,
 } from "@/lib/sources";
 import { toSourceApiItem } from "@/lib/sources-api";
+import {
+  encodeGitHubAppCredentials,
+  isGitHubAppCredential,
+  parseGitHubAppCredentials,
+} from "@/lib/github-app-credentials";
+import { decryptSourceToken } from "@/lib/sources";
 
 /** Repositories imported from this source; they are what locks it. */
 async function countRepositoriesForSource(
@@ -59,6 +65,10 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
       url?: unknown;
       username?: unknown;
       token?: unknown;
+      authType?: unknown;
+      appId?: unknown;
+      installationId?: unknown;
+      privateKey?: unknown;
       enabled?: unknown;
       confirmSourceChange?: unknown;
     };
@@ -75,10 +85,40 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
     const provider: SourceProviderKind = isSourceProviderKind(body.provider)
       ? body.provider
       : existing.provider;
-
-    // GitLab and Gitea sources point at an instance; GitHub needs no URL.
+    if (body.authType !== undefined && body.authType !== "app" && body.authType !== "pat") return jsonError("Unknown authentication method.", 400);
+    if (body.authType === "app" && provider !== "github") return jsonError("GitHub App authentication requires a GitHub source.", 400);
+    let token = typeof body.token === "string" ? body.token : undefined;
+    if (body.authType === "app") {
+      const prior = existing.provider === "github" ? parseGitHubAppCredentials(decryptSourceToken(existing.token)) : null;
+      try {
+        token = encodeGitHubAppCredentials({
+          appId: String(body.appId ?? ""),
+          installationId: String(body.installationId ?? ""),
+          privateKey: typeof body.privateKey === "string" && body.privateKey.trim() ? body.privateKey : prior?.privateKey ?? "",
+        });
+      } catch (error) {
+        return jsonError((error as Error).message, 400);
+      }
+    } else if (isGitHubAppCredential(token)) {
+      return jsonError("Use the GitHub App fields to enter App credentials.", 400);
+    }
+    // The stored App credential holds the private key. Moving the source to
+    // another provider or to token auth without a new token would keep it,
+    // return it from the API and send it to the new host as the token.
     if (
-      provider !== "github" &&
+      body.authType !== "app" &&
+      (provider !== "github" || body.authType === "pat") &&
+      !token?.trim() &&
+      isGitHubAppCredential(decryptSourceToken(existing.token))
+    ) {
+      return jsonError(
+        `Enter a ${SOURCE_PROVIDER_LABELS[provider]} token to stop using the GitHub App credentials on this source.`,
+        400
+      );
+    }
+
+    // All sources may point at their own instance; validate explicit URLs.
+    if (
       typeof body.url === "string" &&
       body.url.trim() &&
       !isValidSourceUrl(body.url)
@@ -88,7 +128,7 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
         400
       );
     }
-    if (provider !== "github" && typeof body.url === "string" && body.url.trim()) {
+    if (typeof body.url === "string" && body.url.trim()) {
       const blocked = await blockedOutboundUrlReason(body.url);
       if (blocked) return jsonError(blocked, 400);
     }
@@ -118,7 +158,7 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
       url: typeof body.url === "string" ? body.url : undefined,
       username: typeof body.username === "string" ? body.username : undefined,
       // An empty token keeps the stored one (the service preserves it).
-      token: typeof body.token === "string" ? body.token : undefined,
+      token,
       enabled: typeof body.enabled === "boolean" ? body.enabled : undefined,
     });
 

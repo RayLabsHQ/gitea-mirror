@@ -17,6 +17,8 @@ import { db, organizations, repositories } from "@/lib/db";
 import type { Config, Repository } from "@/lib/db/schema";
 import { usesPushEngine } from "@/lib/destination-connection";
 import { createGitHubClient, createPublicGitHubClient } from "@/lib/github";
+import { createGitHubAppClient } from "@/lib/github-app-client";
+import { isGitHubAppCredential } from "@/lib/github-app-credentials";
 import { createMirrorJob } from "@/lib/helpers";
 import {
   decryptSourceToken,
@@ -190,6 +192,9 @@ function createRepositoryOctokitResolver(
     if (!source || source.provider !== "github") return null;
 
     const token = decryptSourceToken(source.token);
+    if (isGitHubAppCredential(token)) {
+      return createGitHubAppClient(token, { userId, apiBaseUrl: resolveGitHubApiBaseUrl(source.url) });
+    }
     // A tokenless GitHub source still gets an anonymous public client
     // (60 req/hr) so public-repo metadata mirrors; an empty token must never
     // reach createGitHubClient, which would send `auth: ""`.

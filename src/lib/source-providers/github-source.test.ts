@@ -1,5 +1,7 @@
 import { describe, expect, mock, test } from "bun:test";
 import { GitHubSourceProvider, type GithubRestRepository } from "./github-source";
+import { encodeGitHubAppCredentials } from "@/lib/github-app-credentials";
+import { generateKeyPairSync } from "node:crypto";
 
 type ListForOrgParams = { org: string; type: "public" | "private" | "member"; per_page: number };
 type OrgReposPage = (GithubRestRepository & { id: number })[];
@@ -34,6 +36,70 @@ const connection = {
   token: "gh-secret",
   userId: "u1",
 };
+
+test("GitHub App lists installed repositories without using user or starred APIs", async () => {
+  const provider = new GitHubSourceProvider({ ...connection, token: encodeGitHubAppCredentials({
+    appId: "123", installationId: "456", privateKey: "-----BEGIN PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----",
+  }) });
+  const request = mock(async (route: string) => {
+    expect(route).toBe("GET /installation/repositories");
+    return { data: { total_count: 1, repositories: [repo(1, "private-tool")] } };
+  });
+  Object.defineProperty(provider, "octokit", { value: { request } });
+  const repos = await provider.listRepositories({});
+  expect(repos.map((item) => item.fullName)).toEqual(["acme/private-tool"]);
+  expect(await provider.listStarredRepositories({})).toEqual([]);
+});
+
+test("GitHub App listing applies the same account filters as the token listing", async () => {
+  const provider = new GitHubSourceProvider({ ...connection, token: encodeGitHubAppCredentials({
+    appId: "123", installationId: "456", privateKey: "-----BEGIN PRIVATE KEY-----\ntest\n-----END PRIVATE KEY-----",
+  }) });
+  const personal = { ...repo(4, "dotfiles", "me"), owner: { login: "me", type: "User" } };
+  const repositories = [
+    repo(1, "tool"),
+    { ...repo(2, "forked"), fork: true },
+    repo(3, "other-tool", "other-org"),
+    personal,
+  ];
+  const request = mock(async () => ({ data: { total_count: repositories.length, repositories } }));
+  Object.defineProperty(provider, "octokit", { value: { request } });
+  const config = {
+    githubConfig: { skipForks: true, skipPersonalRepos: true, includeOrganizations: ["acme"] },
+  } as any;
+
+  expect((await provider.listRepositories(config)).map((item) => item.fullName)).toEqual(["acme/tool"]);
+  // Cleanup lists past the allowlist, like the token path.
+  expect(
+    (await provider.listRepositories(config, { includeAllOrgsOverride: true })).map((item) => item.fullName)
+  ).toEqual(["acme/tool", "other-org/other-tool"]);
+  // Every installation org is discovered; the allowlist only narrows imports.
+  const { organizations } = await provider.listOrganizations(config);
+  expect(organizations.map((org) => org.name).sort()).toEqual(["acme", "other-org"]);
+});
+
+test("GitHub App Octokit authenticates requests with an installation token", async () => {
+  const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048, privateKeyEncoding: { type: "pkcs8", format: "pem" }, publicKeyEncoding: { type: "spki", format: "pem" } });
+  const provider = new GitHubSourceProvider({ ...connection, token: encodeGitHubAppCredentials({ appId: "789", installationId: "987", privateKey }) });
+  const originalFetch = globalThis.fetch;
+  const requests: string[] = [];
+  globalThis.fetch = (async (input, init) => {
+    const url = String(input);
+    requests.push(url);
+    if (url.endsWith("/access_tokens")) {
+      return new Response(JSON.stringify({ token: "ghs_live", expires_at: new Date(Date.now() + 3600_000).toISOString() }), { status: 201, headers: { "Content-Type": "application/json" } });
+    }
+    expect(new Headers(init?.headers).get("authorization")).toBe("token ghs_live");
+    return new Response(JSON.stringify({ total_count: 1, repositories: [repo(1, "private-tool")] }), { status: 200, headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
+  try {
+    expect(await provider.testConnection()).toEqual({ login: "me" });
+    expect((await provider.listRepositories({})).map((item) => item.fullName)).toEqual(["acme/private-tool"]);
+    expect(requests).toHaveLength(3);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
 
 function installOctokitDouble(
   provider: GitHubSourceProvider,

@@ -5,6 +5,7 @@
  */
 
 import { describe, test, expect, mock, beforeEach } from "bun:test";
+import { encodeGitHubAppCredentials, parseGitHubAppCredentials } from "@/lib/github-app-credentials";
 
 let sourceRows: any[] = [];
 let repositoryCount = 0;
@@ -136,6 +137,66 @@ function remove(id: string, options?: { query?: string; body?: unknown }) {
 beforeEach(() => {
   sourceRows = [{ ...githubSource, token: encrypted("ghp_old") }];
   repositoryCount = 2;
+});
+
+test("editing App IDs preserves the private key without returning it", async () => {
+  const privateKey = "-----BEGIN PRIVATE KEY-----\nsecret\n-----END PRIVATE KEY-----";
+  sourceRows[0].token = encrypted(encodeGitHubAppCredentials({ appId: "123", installationId: "456", privateKey }));
+  const response = await put("source-1", { authType: "app", appId: "123", installationId: "789", privateKey: "" });
+  expect(response.status).toBe(200);
+  expect(parseGitHubAppCredentials(sourceRows[0].token.slice(4))).toEqual({ appId: "123", installationId: "789", privateKey });
+  const body = await response.json();
+  expect(body.source).toMatchObject({ authType: "app", installationId: "789", token: "" });
+  expect(JSON.stringify(body)).not.toContain("PRIVATE KEY");
+});
+
+describe("PUT /api/sources/:id with stored GitHub App credentials", () => {
+  const privateKey = "-----BEGIN PRIVATE KEY-----\nsecret\n-----END PRIVATE KEY-----";
+  let appToken: string;
+
+  beforeEach(() => {
+    appToken = encrypted(encodeGitHubAppCredentials({ appId: "123", installationId: "456", privateKey }));
+    sourceRows[0].token = appToken;
+  });
+
+  test("refuses a provider switch that would keep the App credentials", async () => {
+    const response = await put("source-1", {
+      provider: "gitlab",
+      url: "https://gitlab.example.com",
+      confirmSourceChange: true,
+    });
+    expect(response.status).toBe(400);
+    const text = await response.text();
+    expect(text).toContain("GitLab token");
+    expect(text).not.toContain("PRIVATE KEY");
+    expect(sourceRows[0]).toMatchObject({ provider: "github", token: appToken });
+  });
+
+  test("refuses switching to token auth without a token", async () => {
+    const response = await put("source-1", { authType: "pat" });
+    expect(response.status).toBe(400);
+    expect(sourceRows[0].token).toBe(appToken);
+  });
+
+  test("a provider switch with a new token replaces the App credentials", async () => {
+    const response = await put("source-1", {
+      provider: "gitlab",
+      url: "https://gitlab.example.com",
+      token: "glpat-new",
+      confirmSourceChange: true,
+    });
+    expect(response.status).toBe(200);
+    expect(sourceRows[0]).toMatchObject({ provider: "gitlab", token: encrypted("glpat-new") });
+  });
+
+  test("refuses App credentials sent through the token field", async () => {
+    sourceRows[0].token = encrypted("ghp_old");
+    const response = await put("source-1", {
+      token: encodeGitHubAppCredentials({ appId: "1", installationId: "2", privateKey }),
+    });
+    expect(response.status).toBe(400);
+    expect(sourceRows[0].token).toBe(encrypted("ghp_old"));
+  });
 });
 
 describe("PUT /api/sources/:id", () => {
