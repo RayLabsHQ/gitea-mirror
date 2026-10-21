@@ -205,6 +205,10 @@ bun run setup
 bun run dev
 ```
 
+## One-Click Deploy
+
+[![Deploy on RepoCloud](https://d16t0pc4846x52.cloudfront.net/deploylobe.svg)](https://repocloud.io/details/Gitea%20Mirror/)
+
 ## Usage
 
 1. **First Time Setup**
