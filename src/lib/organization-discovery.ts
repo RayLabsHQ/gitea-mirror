@@ -154,11 +154,12 @@ export async function rediscoverRepositoriesForOrganization({
     }
     console.log(`${logPrefix} Re-discovered ${repoRecords.length} new repositories for organization ${organization.name} on source ${source.name} for user ${userId} during ${phase}`);
 
-    // "New repository discovered" notification (settings > notifications).
+    // New repository notification for an organization (settings > notifications).
     // Fire-and-forget: a failing provider must never break discovery, and
     // the service itself swallows every error.
     triggerNewRepositoriesNotification({
       userId,
+      kind: 'organization',
       groupLabel: organization.name,
       repositoryNames: repoRecords.map(repo => repo.fullName ?? '').filter(Boolean),
       details: `Discovered during ${phase} on source ${source.name}.`,
