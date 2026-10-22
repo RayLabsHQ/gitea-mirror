@@ -1404,8 +1404,8 @@ describe("release type filter", () => {
         // literal globs that match nothing, silently dropping every release.
         const entries = splitReleaseTagEntries("/^v\\d{1,3}\\.\\d+$/, v2.*");
         expect(entries).toEqual(["/^v\\d{1,3}\\.\\d+$/", "v2.*"]);
-        expect(compileReleaseTagPattern(entries[0])?.test("v1.23.4")).toBe(true);
-        expect(compileReleaseTagPattern(entries[0])?.test("v1.2345.6")).toBe(false);
+        expect(compileReleaseTagPattern(entries[0])?.test("v123.4")).toBe(true);
+        expect(compileReleaseTagPattern(entries[0])?.test("v1234.4")).toBe(false);
         expect(compileReleaseTagPattern(entries[1])?.test("v2.0")).toBe(true);
       });
 

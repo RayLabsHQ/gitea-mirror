@@ -307,12 +307,19 @@ export function compileReleaseTagPattern(pattern: unknown): RegExp | null {
   if (trimmed.length > 2 && trimmed.startsWith("/")) {
     const closing = trimmed.lastIndexOf("/");
     if (closing > 0) {
-      const body = trimmed.slice(1, closing);
-      if (body) {
-        try {
-          return new RegExp(body, releaseTagPatternFlags(trimmed.slice(closing + 1)));
-        } catch {
-          return null;
+      const trailing = trimmed.slice(closing + 1);
+      // Anything after the closing slash has to be regex flags. Junk like the
+      // `bar` in `/foo, /bar` means the "regex" was really an unterminated one
+      // that swallowed a later slash, so reject it rather than silently
+      // dropping the junk and compiling something the user never wrote.
+      if (/^[imsuy]*$/.test(trailing)) {
+        const body = trimmed.slice(1, closing);
+        if (body) {
+          try {
+            return new RegExp(body, releaseTagPatternFlags(trailing));
+          } catch {
+            return null;
+          }
         }
       }
     }
