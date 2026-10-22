@@ -10,6 +10,25 @@
 import { describe, test, expect, mock, beforeEach, afterEach } from "bun:test";
 import { createMockResponse, mockFetch } from "@/tests/mock-fetch";
 
+const CHILD_FLAG = "GM_RELEASES_ROUTE_ISOLATED";
+const isChild = !!process.env[CHILD_FLAG];
+
+if (!isChild) {
+  test("repositories [id] releases route — isolated child suite", () => {
+    const res = Bun.spawnSync({
+      cmd: [process.execPath, "test", import.meta.path],
+      env: { ...process.env, [CHILD_FLAG]: "1" },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    if (res.exitCode !== 0) {
+      console.error(res.stdout.toString());
+      console.error(res.stderr.toString());
+    }
+    expect(res.exitCode).toBe(0);
+  }, 60_000);
+}
+
 let repoRows: any[] = [];
 let configRows: any[] = [];
 const mockRepositories = {};
@@ -25,39 +44,47 @@ const mockDb = {
   })),
 };
 
-// The route pulls in the auth module, which imports every table, so the
-// mock has to name them all.
-mock.module("@/lib/db", () => ({
-  db: mockDb,
-  repositories: mockRepositories,
-  configs: mockConfigs,
-  organizations: {},
-  users: {},
-  mirrorJobs: {},
-  events: {},
-  accounts: {},
-  sessions: {},
-  verificationTokens: {},
-  verifications: {},
-  oauthClients: {},
-  oauthAccessTokens: {},
-  oauthRefreshTokens: {},
-  oauthConsents: {},
-  jwkss: {},
-  ssoProviders: {},
-  apikeys: {},
-  rateLimits: {},
-}));
-
-// Only the owner lookup is needed from the destination client; the releases
-// themselves arrive through the fake fetch below.
+// bun's mock.module is process-wide and leaks into other test files, so in the
+// shared test process this file registers nothing: it re-runs itself in an
+// isolated child process (the same harness as organizations/[id].test.ts).
 const mockGetOwner = mock(async () => "mirrors");
-mock.module("@/lib/gitea", () => ({
-  getGiteaRepoOwnerAsync: mockGetOwner,
-  getGiteaRepoOwner: () => "mirrors",
-}));
 
-const { GET } = await import("./releases");
+if (isChild) {
+  // The route pulls in the auth module, which imports every table, so the
+  // mock has to name them all.
+  mock.module("@/lib/db", () => ({
+    db: mockDb,
+    repositories: mockRepositories,
+    configs: mockConfigs,
+    organizations: {},
+    users: {},
+    mirrorJobs: {},
+    events: {},
+    accounts: {},
+    sessions: {},
+    verificationTokens: {},
+    verifications: {},
+    oauthClients: {},
+    oauthAccessTokens: {},
+    oauthRefreshTokens: {},
+    oauthConsents: {},
+    jwkss: {},
+    ssoProviders: {},
+    apikeys: {},
+    rateLimits: {},
+  }));
+
+  // Only the owner lookup is needed from the destination client; the releases
+  // themselves arrive through the fake fetch below.
+  mock.module("@/lib/gitea", () => ({
+    getGiteaRepoOwnerAsync: mockGetOwner,
+    getGiteaRepoOwner: () => "mirrors",
+  }));
+}
+
+const { GET } = isChild
+  ? await import("./releases")
+  : { GET: undefined as any };
 
 const repoRow = {
   id: "r1",
@@ -94,7 +121,8 @@ let requestedUrls: string[] = [];
 function servePages(pages: unknown[]) {
   requestedUrls = [];
   let index = 0;
-  globalThis.fetch = mockFetch(async () => {
+  globalThis.fetch = mockFetch(async (url: string) => {
+    requestedUrls.push(url);
     const batch = pages[index++];
     return batch instanceof Response ? batch : createMockResponse(batch);
   }) as unknown as typeof globalThis.fetch;
@@ -125,7 +153,7 @@ afterEach(() => {
   globalThis.fetch = realFetch;
 });
 
-describe("GET /api/repositories/:id/releases", () => {
+describe.skipIf(!isChild)("GET /api/repositories/:id/releases", () => {
   test("reads the destination at the place the mirror was put", async () => {
     servePages([
       [
