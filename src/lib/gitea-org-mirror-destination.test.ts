@@ -182,6 +182,8 @@ mock.module("@/lib/sources", () => ({
   findSourceForOrganization: (org: { sourceId?: string | null }, list: any[]) =>
     org.sourceId ? list.find((source: any) => source.id === org.sourceId) ?? null : null,
   decryptSourceToken: (token: string | null | undefined) => token ?? "",
+  sourceAccessToken: async (source: { token?: string | null }) => source.token ?? "",
+  isGitHubAppSource: () => false,
   resolveGitHubApiBaseUrl: (url: string | null | undefined) => {
     const trimmed = url?.trim().replace(/\/+$/, "") ?? "";
     if (!trimmed || trimmed === "https://github.com") return undefined;

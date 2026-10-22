@@ -136,7 +136,13 @@ export function ConfigTabs() {
   // githubConfig check only covers APIs that predate multi-source support.
   const isSourceConnected = (): boolean => {
     if (sources.length > 0) {
-      return sources.some((source) => Boolean(source.token && source.token.trim()));
+      return sources.some((source) => {
+        if (!source.enabled) return false;
+        if (source.authType === 'app') {
+          return Boolean(source.appId?.trim() && source.installationId?.trim());
+        }
+        return Boolean(source.token && source.token.trim());
+      });
     }
     const { githubConfig } = config;
     return !!(githubConfig.username.trim() && githubConfig.token.trim());

@@ -9,6 +9,8 @@ import { db, repositories, organizations, mirrorJobs, configs } from './db';
 import { eq, and, lt, inArray, sql } from 'drizzle-orm';
 import { mirrorRepositoryToDestination, syncRepositoryOnDestination } from './mirror-dispatch';
 import { createGitHubClient, createPublicGitHubClient } from './github';
+import { createGitHubAppClient } from './github-app-client';
+import { isGitHubAppCredential } from './github-app-credentials';
 import type { Octokit } from '@octokit/rest';
 import {
   decryptSourceToken,
@@ -305,7 +307,12 @@ async function recoverMirrorJob(job: any, remainingItemIds: string[]) {
             // (60 req/hr), the same resolution the job routes use; an empty
             // token must never reach createGitHubClient, which would send
             // `auth: ""` and 401 on every call.
-            octokit = decryptedToken
+            octokit = isGitHubAppCredential(decryptedToken)
+              ? createGitHubAppClient(decryptedToken, {
+                  userId: config.userId || undefined,
+                  apiBaseUrl: resolveGitHubApiBaseUrl(repoSource.url),
+                })
+              : decryptedToken
               ? createGitHubClient(
                   decryptedToken,
                   config.userId || undefined,

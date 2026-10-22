@@ -442,7 +442,8 @@ export const GET: APIRoute = async ({ request, locals }) => {
       
       // Decrypt tokens
       if (githubConfig.token) {
-        githubConfig.token = decrypt(githubConfig.token);
+        const token = decrypt(githubConfig.token);
+        githubConfig.token = token.startsWith("github-app:v1:") ? "" : token;
       }
       
       if (giteaConfig.token) {

@@ -14,10 +14,12 @@ import {
   SOURCE_PROVIDER_LABELS,
 } from "@/lib/source-providers/kinds";
 import { sourceConnectionFromSource } from "@/lib/source-providers";
+import { refreshMirrorCredentials } from "./gitea-mirror-credentials";
 import {
-  decryptSourceToken,
   findSourceForRepository,
+  isGitHubAppSource,
   listSources,
+  sourceAccessToken,
   resolveGitHubApiBaseUrl,
 } from "@/lib/sources";
 import type { Repository } from "./db/schema";
@@ -483,7 +485,8 @@ export async function syncGiteaRepoEnhanced({
     // every GitHub client below.
     const sources = config.userId ? await listSources(config.userId) : [];
     const repoSource = findSourceForRepository(repository, sources);
-    const repoSourceToken = repoSource ? decryptSourceToken(repoSource.token) : "";
+    const repoUsesGitHubApp = repoSource ? isGitHubAppSource(repoSource) : false;
+    const repoSourceToken = repoSource ? await sourceAccessToken(repoSource) : "";
     const repoSourceKind = getRepositorySource(repository).provider;
     const repoIsGitHub = repoSourceKind === "github";
 
@@ -904,16 +907,18 @@ export async function syncGiteaRepoEnhanced({
     }
 
     // Update mirror interval if needed
-    // NOTE: Gitea/Forgejo's PATCH /repos/{owner}/{repo} API does not support
-    // updating mirror credentials (mirror_username/mirror_password). Repos that
-    // were originally migrated without credentials must be deleted and re-mirrored.
+    // NOTE: Gitea before 1.27 and Forgejo ignore mirror credentials
+    // (mirror_username/mirror_password) on PATCH /repos/{owner}/{repo}. Repos
+    // that were migrated without credentials must be deleted and re-mirrored
+    // there; GitHub App repos, which need a new token every sync, are refused
+    // on those destinations (gitea-mirror-credentials.ts).
     //
     // Skipped for archived repos: archiveGiteaRepo deliberately disabled
     // Gitea's own periodic pulling, and the documented contract
     // (AutomationSettings.tsx: "Archive ... disables automatic syncs—use
     // Manual Sync when you want to refresh") says a Manual Sync refreshes
     // once without re-enabling any automatic syncing.
-    if (config.giteaConfig?.mirrorInterval && !isArchivedRepo) {
+    if (config.giteaConfig?.mirrorInterval && !isArchivedRepo && !repoUsesGitHubApp) {
       try {
         console.log(`[Sync] Updating mirror interval for ${repoOwner}/${repoName} to ${config.giteaConfig.mirrorInterval}`);
         const updateUrl = `${config.giteaConfig.url}/api/v1/repos/${repoOwner}/${repoName}`;
@@ -927,6 +932,18 @@ export async function syncGiteaRepoEnhanced({
         console.warn(`[Sync] Failed to update mirror interval for ${repoOwner}/${repoName}:`, updateError);
         // Continue with sync even if interval update fails
       }
+    }
+
+    // A GitHub App installation token expires within an hour: hand Gitea a
+    // fresh one with enough headroom for its queued pull, before the sync.
+    if (repoUsesGitHubApp && repoSource) {
+      await refreshMirrorCredentials({
+        config,
+        giteaToken: decryptedConfig.giteaConfig.token,
+        owner: repoOwner,
+        repo: repoName,
+        accessToken: await sourceAccessToken(repoSource, { minValidityMs: 30 * 60_000 }),
+      });
     }
 
     // Perform the sync

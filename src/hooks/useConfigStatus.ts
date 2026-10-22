@@ -42,6 +42,13 @@ const cacheSubscribers = new Set<() => void>();
 // of them at once, and without this each would fire its own request.
 let inFlightRequest: { userId: string; promise: Promise<ConfigApiResponse> } | null = null;
 
+export function hasConfiguredSource(configResponse: ConfigApiResponse | null): boolean {
+  return Boolean(
+    configResponse?.githubConfig?.token ||
+    configResponse?.sources?.some(source => source.provider === 'github' && source.authType === 'app')
+  );
+}
+
 function fetchConfigOnce(userId: string): Promise<ConfigApiResponse> {
   if (inFlightRequest && inFlightRequest.userId === userId) {
     return inFlightRequest.promise;
@@ -107,13 +114,9 @@ export function useConfigStatus(): ConfigStatus {
     if (isCacheValid && hasCheckedRef.current) {
       const configResponse = configCache.data!;
 
-      // Only token/url are actually required at runtime: the GitHub token is
-      // self-authenticating for listForAuthenticatedUser, and a Gitea username
-      // isn't needed under single-org / flat mirror strategies. Users who
-      // configure via env vars without GITHUB_USERNAME / GITEA_USERNAME set
-      // (or who otherwise left those blank) were being locked out of the
-      // dashboard even though mirroring worked fine (see issue #271).
-      const isGitHubConfigured = !!configResponse?.githubConfig?.token;
+      // App private keys are redacted from the config response, so connected
+      // App sources count alongside a visible PAT for dashboard access.
+      const isGitHubConfigured = hasConfiguredSource(configResponse);
 
       const isGiteaConfigured = !!(
         configResponse?.giteaConfig?.url &&
@@ -158,13 +161,8 @@ export function useConfigStatus(): ConfigStatus {
         userId: user.id
       };
 
-      // Only token/url are actually required at runtime: the GitHub token is
-      // self-authenticating for listForAuthenticatedUser, and a Gitea username
-      // isn't needed under single-org / flat mirror strategies. Users who
-      // configure via env vars without GITHUB_USERNAME / GITEA_USERNAME set
-      // (or who otherwise left those blank) were being locked out of the
-      // dashboard even though mirroring worked fine (see issue #271).
-      const isGitHubConfigured = !!configResponse?.githubConfig?.token;
+      // Match the cached path: a redacted App source is still configured.
+      const isGitHubConfigured = hasConfiguredSource(configResponse);
 
       const isGiteaConfigured = !!(
         configResponse?.giteaConfig?.url &&

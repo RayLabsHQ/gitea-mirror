@@ -7,6 +7,7 @@ import {
   getGithubStarredListNames,
 } from "@/lib/github";
 import { getDecryptedGitHubToken } from "@/lib/utils/config-encryption";
+import { parseGitHubAppCredentials } from "@/lib/github-app-credentials";
 import { jsonResponse, createSecureErrorResponse } from "@/lib/utils";
 import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 
@@ -45,6 +46,9 @@ export const GET: APIRoute = async ({ request, locals }) => {
     }
 
     const token = getDecryptedGitHubToken(config);
+    if (parseGitHubAppCredentials(token)) {
+      return jsonResponse({ data: { success: true, lists: [] }, status: 200 });
+    }
     const githubUsername = config.githubConfig?.owner || undefined;
     const octokit = createGitHubClient(token, userId, githubUsername);
     const lists = await getGithubStarredListNames({ octokit });

@@ -27,9 +27,12 @@ import {
   decryptSourceToken,
   findSourceForOrganization,
   findSourceForRepository,
+  isGitHubAppSource,
   listSources,
+  sourceAccessToken,
 } from "./sources";
 import { isRateLimitError } from "./rate-limit-gate";
+import { assertMirrorCredentialUpdateSupported } from "./gitea-mirror-credentials";
 import { persistMetadataPassProgress } from "./metadata-progress-store";
 import {
   advanceMetadataSyncCursor,
@@ -774,7 +777,14 @@ export const mirrorGithubRepoToGitea = async ({
     const sourceConnection = repoSource
       ? sourceConnectionFromSource(repoSource, { userId: config.userId })
       : resolveSourceConnection(config);
-    const repoSourceToken = repoSource ? decryptSourceToken(repoSource.token) : "";
+    // A GitHub App installation token expires within an hour, so the mirror
+    // can only keep pulling where Gitea lets each sync replace it.
+    const repoUsesGitHubApp = repoSource ? isGitHubAppSource(repoSource) : false;
+    if (repoUsesGitHubApp) {
+      await assertMirrorCredentialUpdateSupported(config, decryptedConfig.giteaConfig.token);
+    }
+    const repoSourceToken = repoSource ? await sourceAccessToken(repoSource) : "";
+    sourceConnection.token = repoSourceToken;
 
     // Get the correct owner based on the strategy (with organization overrides)
     let repoOwner = await getGiteaRepoOwnerAsync({
@@ -1085,7 +1095,9 @@ export const mirrorGithubRepoToGitea = async ({
       clone_addr: cloneAddress,
       repo_name: targetRepoName,
       mirror: true,
-      mirror_interval: config.giteaConfig?.mirrorInterval || "8h",
+      // App-backed mirrors are pulled only when this app has refreshed the
+      // token; Gitea's own schedule would pull with an expired one.
+      mirror_interval: repoUsesGitHubApp ? "0h" : config.giteaConfig?.mirrorInterval || "8h",
       wiki: mirrorOptions.wiki,
       // Gitea performs the LFS fetch inside its own migration, so a failure
       // here aborts the entire migration with nothing to salvage. That is why
@@ -1107,7 +1119,7 @@ export const mirrorGithubRepoToGitea = async ({
         buildSourceAuthPayload({
           provider: sourceConnection.provider,
           token: repoSourceToken,
-          username: sourceConnection.username,
+          username: repoUsesGitHubApp ? "x-access-token" : sourceConnection.username,
           repositoryOwner: repository.owner,
         })
       );
@@ -1680,7 +1692,14 @@ export async function mirrorGitHubRepoToGiteaOrg({
     const sourceConnection = repoSource
       ? sourceConnectionFromSource(repoSource, { userId: config.userId })
       : resolveSourceConnection(config);
-    const repoSourceToken = repoSource ? decryptSourceToken(repoSource.token) : "";
+    // A GitHub App installation token expires within an hour, so the mirror
+    // can only keep pulling where Gitea lets each sync replace it.
+    const repoUsesGitHubApp = repoSource ? isGitHubAppSource(repoSource) : false;
+    if (repoUsesGitHubApp) {
+      await assertMirrorCredentialUpdateSupported(config, decryptedConfig.giteaConfig.token);
+    }
+    const repoSourceToken = repoSource ? await sourceAccessToken(repoSource) : "";
+    sourceConnection.token = repoSourceToken;
 
     // Determine the actual repository name to use (handle duplicates for starred repos)
     let targetRepoName = repository.name;
@@ -1900,7 +1919,9 @@ export async function mirrorGitHubRepoToGiteaOrg({
       uid: giteaOrgId,
       repo_name: targetRepoName,
       mirror: true,
-      mirror_interval: config.giteaConfig?.mirrorInterval || "8h",
+      // App-backed mirrors are pulled only when this app has refreshed the
+      // token; Gitea's own schedule would pull with an expired one.
+      mirror_interval: repoUsesGitHubApp ? "0h" : config.giteaConfig?.mirrorInterval || "8h",
       wiki: mirrorOptions.wiki,
       // Gitea performs the LFS fetch inside its own migration, so a failure
       // here aborts the entire migration with nothing to salvage. That is why
@@ -1921,7 +1942,7 @@ export async function mirrorGitHubRepoToGiteaOrg({
         buildSourceAuthPayload({
           provider: sourceConnection.provider,
           token: repoSourceToken,
-          username: sourceConnection.username,
+          username: repoUsesGitHubApp ? "x-access-token" : sourceConnection.username,
           repositoryOwner: repository.owner,
         })
       );
