@@ -27,6 +27,7 @@ import {
   normalizeReleaseTagPatterns,
   releaseMatchesTagFilters,
   releaseMatchesType,
+  splitReleaseTagEntries,
 } from "@/lib/utils/mirror-overrides";
 import type { ReleaseType } from "@/lib/db/schema";
 import { withBase } from "@/lib/base-path";
@@ -66,10 +67,8 @@ type PreviewState =
  * during a mirror run.
  */
 function readTagRuleDraft(text: string): { patterns: string[]; unusable: string[] } {
-  const entries = text
-    .split(",")
-    .map((entry) => entry.trim())
-    .filter(Boolean);
+  // Commas inside /.../ belong to the regex, not to the list.
+  const entries = splitReleaseTagEntries(text);
   const patterns = normalizeReleaseTagPatterns(entries) ?? [];
   const kept = new Set(patterns.map((pattern) => pattern.toLowerCase()));
   const unusable = entries.filter(

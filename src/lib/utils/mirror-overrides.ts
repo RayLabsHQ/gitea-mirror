@@ -214,6 +214,51 @@ export function normalizeReleaseTagPatterns(value: unknown): string[] | undefine
   return patterns.length > 0 ? patterns : undefined;
 }
 
+/**
+ * Split a tag rules box into entries on commas that sit OUTSIDE a /.../ pair.
+ *
+ * Regex bodies legitimately contain commas - `^v\d{1,3}\.\d+$` is full of them -
+ * so a naive split(",") turns one regex into two globs that match nothing. A
+ * backslash escapes the next character, which keeps `\/` from closing the body
+ * early. Slashes that do not open an entry (mid-glob, as in `a/b`) are literal.
+ *
+ * An unterminated `/` swallows the rest of the text into one entry; the compile
+ * step then rejects it, so the dialog can flag the typo instead of storing a
+ * glob that silently matches nothing.
+ */
+export function splitReleaseTagEntries(text: string): string[] {
+  const entries: string[] = [];
+  let current = "";
+  let insideRegex = false;
+  for (let i = 0; i < text.length; i++) {
+    const char = text[i];
+    if (insideRegex) {
+      if (char === "\\") {
+        current += char;
+        i++;
+        if (i < text.length) current += text[i];
+        continue;
+      }
+      if (char === "/") insideRegex = false;
+      current += char;
+      continue;
+    }
+    if (char === "/" && current.trim() === "") {
+      insideRegex = true;
+      current += char;
+      continue;
+    }
+    if (char === ",") {
+      entries.push(current);
+      current = "";
+      continue;
+    }
+    current += char;
+  }
+  entries.push(current);
+  return entries.map((entry) => entry.trim()).filter(Boolean);
+}
+
 /** Escape everything that has a meaning inside a regular expression. */
 function escapeRegexChars(value: string): string {
   return value.replace(/[.+^${}()|[\]\\]/g, "\\$&");
@@ -271,6 +316,11 @@ export function compileReleaseTagPattern(pattern: unknown): RegExp | null {
         }
       }
     }
+    // A leading slash with no closing slash is an unfinished regex, not a tag
+    // spelled with a leading slash (tags cannot start with one). Rejecting it
+    // lets the dialog flag the typo instead of keeping a glob that silently
+    // matches nothing.
+    return null;
   }
 
   try {

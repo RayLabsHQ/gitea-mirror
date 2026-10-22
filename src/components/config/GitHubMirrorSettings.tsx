@@ -143,6 +143,32 @@ export function GitHubMirrorSettings({
     (mirrorOptions.releaseIncludeTags?.length ?? 0) +
     (mirrorOptions.releaseExcludeTags?.length ?? 0);
 
+  // Global rules hit every repository, so the tag dialog also offers the
+  // preview picker here, listing the whole account. The list is fetched once,
+  // lazily, the first time the dialog opens.
+  const [globalPreviewRepos, setGlobalPreviewRepos] = React.useState<
+    { id: string; label: string }[] | null
+  >(null);
+  React.useEffect(() => {
+    if (!tagRulesOpen || globalPreviewRepos !== null) return;
+    let cancelled = false;
+    fetch("/api/repositories/preview-repositories")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((payload) => {
+        if (cancelled) return;
+        const data = payload?.data ?? payload;
+        setGlobalPreviewRepos(
+          Array.isArray(data?.repositories) ? data.repositories : []
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setGlobalPreviewRepos([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tagRulesOpen, globalPreviewRepos]);
+
   const normalizeStarListNames = React.useCallback((lists: string[] | undefined): string[] => {
     if (!Array.isArray(lists)) return [];
 
@@ -1013,7 +1039,7 @@ export function GitHubMirrorSettings({
                     type="button"
                     variant="link"
                     size="sm"
-                    className="h-auto p-0 text-[13px] font-normal text-[#665ee8] hover:text-[#665ee8]"
+                    className="h-auto p-0 text-[13px] font-normal"
                     onClick={() => setTagRulesOpen(true)}
                   >
                     Custom tag rules...
@@ -1064,6 +1090,8 @@ export function GitHubMirrorSettings({
         onOpenChange={setTagRulesOpen}
         includeTags={mirrorOptions.releaseIncludeTags ?? []}
         excludeTags={mirrorOptions.releaseExcludeTags ?? []}
+        previewRepositories={globalPreviewRepos}
+        releaseType={mirrorOptions.releaseType}
         onSave={(includeTags, excludeTags) => {
           // Both fields in one call: handleMirrorChange would spread the same
           // stale mirrorOptions twice and drop the first list.

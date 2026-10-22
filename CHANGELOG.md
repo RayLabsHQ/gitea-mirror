@@ -41,10 +41,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `RELEASE_TYPE=all|stable` seeds the global default, and no migration is needed because the value lives inside the existing JSON columns
 - Filter mirrored releases by tag name with **Include tags** and **Exclude tags**
   - **Custom tag rules...** opens a dialog holding the two lists, both in the mirror settings and in the per organization and per repository **Mirror options** dialog, where leaving both empty means the level above
-  - A pattern is a glob over the whole tag (`v*`, `v1.*`, `*-rc.*`, `?` for one character) or a regular expression in slashes (`/^v\d+\.\d+\.\d+$/`), matched case-insensitively; exclude wins when both lists name the same tag, and a pattern that cannot compile is ignored instead of failing the run
+	- A pattern is a glob over the whole tag (`v*`, `v1.*`, `*-rc.*`, `?` for one character) or a regular expression in slashes (`/^v\d+\.\d+\.\d+$/`), matched case-insensitively; exclude wins when both lists name the same tag, and a pattern that cannot compile is ignored instead of failing the run. Commas inside the slashes belong to the expression (`/^v\d{1,3}\.\d+$/`), in the dialog and in the environment variables alike
   - This is the filter for projects that ship release candidates without marking them as pre-releases, which the type filter cannot separate
   - A tag filter widens the release scan like the type filter does, so the limit counts the releases that match, and the retention pass removes destination releases whose tag no longer matches, including ones the destination reports no pre-release flag for
-  - Opened from a repository, the dialog lists the releases the destination already holds and crosses out the ones the draft rules would delete on the next sync, so a pattern can be checked before saving
+	- The dialog lists the releases the destination already holds and crosses out the ones the draft rules would delete on the next sync, so a pattern can be checked before saving. Opened from a repository it previews that one; from an organization or the global settings it adds a picker over the repositories the rules cover
   - `RELEASE_INCLUDE_TAGS` and `RELEASE_EXCLUDE_TAGS` seed the global lists; the values live in the existing JSON columns, so no migration is needed
 - Notifications for newly discovered repositories
   - "New repositories discovered" on the Notifications page, with three sub-switches under it: new repositories in your own account, in one of your organizations, and starred repositories

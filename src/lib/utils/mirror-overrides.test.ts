@@ -31,6 +31,7 @@ import {
   RELEASE_SCAN_WINDOW,
   resolveMirrorOptions,
   resolveOrganizationSkipForks,
+  splitReleaseTagEntries,
   STARRED_CLAMPED_KEYS,
   UI_MIRROR_OVERRIDE_KEYS,
 } from "./mirror-overrides";
@@ -1384,6 +1385,39 @@ describe("release type filter", () => {
       expect(compileReleaseTagPattern("")).toBeNull();
       expect(compileReleaseTagPattern(true)).toBeNull();
       expect(compileReleaseTagPatterns(["v*", "/v1(/", ""])).toHaveLength(1);
+    });
+
+    test("an unterminated slash pattern is rejected, not treated as a glob", () => {
+      // /... with no closing slash is an unfinished regex. Globbing it would
+      // store a pattern that silently matches nothing.
+      expect(compileReleaseTagPattern("/^v\\d{1")).toBeNull();
+      expect(compileReleaseTagPatterns(["/^v\\d{1"])).toHaveLength(0);
+    });
+
+    describe("splitReleaseTagEntries", () => {
+      test("splits plain globs on commas and trims away empty entries", () => {
+        expect(splitReleaseTagEntries(" v* , *-rc.* ,, ")).toEqual(["v*", "*-rc.*"]);
+      });
+
+      test("keeps commas inside the regex form intact", () => {
+        // The bug this guards: a regex quantifier like {1,3} split into two
+        // literal globs that match nothing, silently dropping every release.
+        const entries = splitReleaseTagEntries("/^v\\d{1,3}\\.\\d+$/, v2.*");
+        expect(entries).toEqual(["/^v\\d{1,3}\\.\\d+$/", "v2.*"]);
+        expect(compileReleaseTagPattern(entries[0])?.test("v1.23.4")).toBe(true);
+        expect(compileReleaseTagPattern(entries[0])?.test("v1.2345.6")).toBe(false);
+        expect(compileReleaseTagPattern(entries[1])?.test("v2.0")).toBe(true);
+      });
+
+      test("a backslash keeps an escaped slash from closing the regex early", () => {
+        expect(splitReleaseTagEntries("/a\\/b,c/, d")).toEqual(["/a\\/b,c/", "d"]);
+      });
+
+      test("an unterminated regex swallows the rest so the compile step flags it", () => {
+        const entries = splitReleaseTagEntries("/foo, /bar");
+        expect(entries).toEqual(["/foo, /bar"]);
+        expect(compileReleaseTagPattern(entries[0])).toBeNull();
+      });
     });
 
     test("include restricts, exclude wins when both name a tag", () => {

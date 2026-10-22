@@ -11,7 +11,7 @@ import { isSourceProviderKind, type SourceProviderKind } from '@/lib/source-prov
 import { DESTINATION_PROVIDER_DEFAULT_URLS, isDestinationProviderKind, type DestinationProviderKind } from '@/lib/destination-kinds';
 import { hasDestinationChanged, hasSourceChanged, loadConfigLocks } from '@/lib/config-locks';
 import type { SourceUpdateInput } from '@/lib/sources';
-import { normalizeReleaseAssetLimit, normalizeReleaseTagPatterns, normalizeReleaseType } from '@/lib/utils/mirror-overrides';
+import { normalizeReleaseAssetLimit, normalizeReleaseTagPatterns, normalizeReleaseType, splitReleaseTagEntries } from '@/lib/utils/mirror-overrides';
 
 interface EnvConfig {
   github: {
@@ -121,13 +121,14 @@ function parseEnvConfig(): EnvConfig {
   const starredLists = process.env.MIRROR_STARRED_LISTS
     ? process.env.MIRROR_STARRED_LISTS.split(',').map((list) => list.trim()).filter(Boolean)
     : undefined;
-  // Release tag patterns are comma separated too. A pattern that contains a
-  // comma has to be written as a regex, which is what the slash form is for.
+  // Release tag patterns are comma separated, but a comma inside the slash
+  // form belongs to the regular expression (^v\d{1,3}\.\d+$), so the split
+  // skips commas inside /.../ - the same rules the dialog applies.
   const releaseIncludeTags = process.env.RELEASE_INCLUDE_TAGS
-    ? process.env.RELEASE_INCLUDE_TAGS.split(',').map((tag) => tag.trim()).filter(Boolean)
+    ? splitReleaseTagEntries(process.env.RELEASE_INCLUDE_TAGS)
     : undefined;
   const releaseExcludeTags = process.env.RELEASE_EXCLUDE_TAGS
-    ? process.env.RELEASE_EXCLUDE_TAGS.split(',').map((tag) => tag.trim()).filter(Boolean)
+    ? splitReleaseTagEntries(process.env.RELEASE_EXCLUDE_TAGS)
     : undefined;
 
   return {
