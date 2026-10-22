@@ -12,6 +12,7 @@ import {
   Building2,
   ChevronDown,
   GitFork,
+  TriangleAlert,
 } from 'lucide-react';
 import { Card } from '../ui/card';
 import { cn, formatDate, formatLastSyncTime } from '@/lib/utils';
@@ -82,6 +83,13 @@ export const STATUS_PRESENTATION: Record<
     short: 'imported',
     tone: 'text-blue-600 dark:text-blue-400',
     wash: 'bg-blue-500/10',
+  },
+  warning: {
+    Icon: TriangleAlert,
+    label: 'Configuration warning',
+    short: 'warning',
+    tone: 'text-amber-600 dark:text-amber-400',
+    wash: 'bg-amber-500/10',
   },
 };
 

@@ -18,7 +18,7 @@ mock.module("@/lib/utils/encryption", () => ({
 }));
 
 // Import after mocks are set up — db is already mocked via setup.bun.ts
-import { sendNotification, testNotification, buildNewRepositoriesNotificationEvent, isNewRepositoryGroupEnabled, MAX_LISTED_NEW_REPOSITORIES, STARRED_GROUP_LABEL } from "./notification-service";
+import { sendNotification, testNotification, buildNewRepositoriesNotificationEvent, buildAllReleasesRemovedNotificationEvent, triggerAllReleasesRemovedNotification, isNewRepositoryGroupEnabled, MAX_LISTED_NEW_REPOSITORIES, STARRED_GROUP_LABEL } from "./notification-service";
 import type { NotificationConfig } from "@/types/config";
 
 describe("sendNotification", () => {
@@ -506,5 +506,56 @@ describe("isNewRepositoryGroupEnabled", () => {
     expect(isNewRepositoryGroupEnabled(legacyRow, "own")).toBe(true);
     expect(isNewRepositoryGroupEnabled(legacyRow, "organization")).toBe(true);
     expect(isNewRepositoryGroupEnabled(legacyRow, "starred")).toBe(true);
+  });
+});
+
+describe("buildAllReleasesRemovedNotificationEvent", () => {
+  test("names the repository and the destination that lost its releases", () => {
+    const event = buildAllReleasesRemovedNotificationEvent({
+      repositoryName: "demo",
+      destination: "mirrors/demo",
+      removedCount: 3,
+    });
+
+    expect(event.title).toBe("All Releases Removed: demo");
+    expect(event.type).toBe("sync_error");
+    expect(event.message).toContain("3 releases deleted from mirrors/demo");
+    expect(event.message).toContain("include/exclude tag patterns");
+  });
+
+  test("uses the singular when a single release was removed", () => {
+    const event = buildAllReleasesRemovedNotificationEvent({
+      repositoryName: "demo",
+      destination: "mirrors/demo",
+      removedCount: 1,
+    });
+
+    expect(event.message).toContain("1 release deleted");
+  });
+});
+
+describe("triggerAllReleasesRemovedNotification", () => {
+  test("stays silent when nothing was removed", async () => {
+    await triggerAllReleasesRemovedNotification({
+      userId: "user-1",
+      repositoryName: "demo",
+      destination: "mirrors/demo",
+      removedCount: 0,
+    });
+
+    expect(mockFetch).toHaveBeenCalledTimes(0);
+  });
+
+  test("never throws when the user has no notification config", async () => {
+    // The setup db mock resolves to no rows, so the config lookup finds none
+    // and no provider is contacted.
+    await triggerAllReleasesRemovedNotification({
+      userId: "user-1",
+      repositoryName: "demo",
+      destination: "mirrors/demo",
+      removedCount: 2,
+    });
+
+    expect(mockFetch).toHaveBeenCalledTimes(0);
   });
 });

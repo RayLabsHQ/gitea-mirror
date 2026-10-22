@@ -374,6 +374,7 @@ export const mirrorJobSchema = z.object({
       "synced",
       "archived",
       "pending-approval",
+      "warning", // Activity-log alert (e.g. release filters emptied a destination); never a repository status
     ])
     .default("imported"),
   message: z.string(),

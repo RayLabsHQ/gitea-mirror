@@ -17,7 +17,7 @@
  * gitea-org-mirror-destination.test.ts) where the real modules are loaded.
  */
 
-import { afterEach, describe, expect, it, test } from "bun:test";
+import { afterEach, describe, expect, it, mock, test } from "bun:test";
 import type { Config } from "@/types/config";
 import type { Repository } from "@/lib/db/schema";
 import type { SourceConnection } from "@/lib/source-providers/types";
@@ -41,6 +41,44 @@ if (!isChild) {
   }, 60_000);
 }
 
+// Both gitea.ts and helpers.ts bind to the notification service. Replace it in
+// the child before importing them so the all-releases-removed warning can be
+// captured without loading providers or touching the database.
+interface RemovalNotice {
+  userId: string;
+  repositoryName: string;
+  destination: string;
+  removedCount: number;
+}
+let removalNotices: RemovalNotice[] = [];
+
+// gitea.ts is the only module that pulls ./helpers into this import graph and
+// only uses createMirrorJob from it. Capture the activity rows it writes so the
+// all-releases-removed warning can be asserted without touching the database.
+interface ActivityJob {
+  status: string;
+  message?: string;
+  details?: string;
+  skipNotification?: boolean;
+  skipDuplicateEvent?: boolean;
+}
+let activityJobs: ActivityJob[] = [];
+
+if (isChild) {
+  mock.module("@/lib/notification-service", () => ({
+    triggerAllReleasesRemovedNotification: async (notice: RemovalNotice) => {
+      removalNotices.push(notice);
+    },
+    triggerJobNotification: async () => {},
+  }));
+  mock.module("@/lib/helpers", () => ({
+    createMirrorJob: async (job: ActivityJob) => {
+      activityJobs.push(job);
+      return "activity-job";
+    },
+  }));
+}
+
 const { mirrorGiteaSourceReleasesToGitea, mirrorGitHubReleasesToGitea } = isChild
   ? await import("@/lib/gitea")
   : ({} as typeof import("@/lib/gitea"));
@@ -54,6 +92,8 @@ const realFetch = globalThis.fetch;
 
 afterEach(() => {
   globalThis.fetch = realFetch;
+  removalNotices = [];
+  activityJobs = [];
 });
 
 const config = {
@@ -464,6 +504,53 @@ describe.skipIf(!isChild)("release type filter", () => {
     await mirrorFromGitea(giteaConnection("source-token"));
 
     expect(world.deletes()).toHaveLength(0);
+  });
+});
+
+describe.skipIf(!isChild)("all releases removed warning", () => {
+  it("warns when the filters leave the destination with no releases", async () => {
+    const world = fakeWorld({
+      sourceReleases: [giteaRelease("v2.1.0-beta.1", { prerelease: true })],
+      destinationReleases: [
+        destinationRelease("v2.0.0-beta", 21, true),
+        destinationRelease("v1.9.0-beta", 22, true),
+      ],
+    });
+
+    await mirrorFromGitea(giteaConnection("source-token"), { releaseType: "stable" });
+
+    expect(world.deletes()).toHaveLength(2);
+    expect(removalNotices).toEqual([
+      {
+        userId: "user-1",
+        repositoryName: DEST_REPO,
+        destination: `${DEST_OWNER}/${DEST_REPO}`,
+        removedCount: 2,
+      },
+    ]);
+    expect(activityJobs).toHaveLength(1);
+    expect(activityJobs[0]).toMatchObject({
+      status: "warning",
+      message: `All releases removed from ${DEST_OWNER}/${DEST_REPO}`,
+      skipNotification: true,
+      skipDuplicateEvent: true,
+    });
+  });
+
+  it("stays quiet while at least one release survives the filters", async () => {
+    const world = fakeWorld({
+      sourceReleases: [giteaRelease("v2.0.0")],
+      destinationReleases: [
+        destinationRelease("v2.0.0-beta", 21, true),
+        destinationRelease("v1.9.0", 22, false),
+      ],
+    });
+
+    await mirrorFromGitea(giteaConnection("source-token"), { releaseType: "stable" });
+
+    expect(world.deletes().map((r) => r.url)).toEqual([`${DEST_API}/releases/21`]);
+    expect(removalNotices).toHaveLength(0);
+    expect(activityJobs).toHaveLength(0);
   });
 });
 

@@ -31,6 +31,7 @@ import {
   listSources,
   sourceAccessToken,
 } from "./sources";
+import { triggerAllReleasesRemovedNotification } from "./notification-service";
 import { isRateLimitError } from "./rate-limit-gate";
 import { assertMirrorCredentialUpdateSupported } from "./gitea-mirror-credentials";
 import { persistMetadataPassProgress } from "./metadata-progress-store";
@@ -4457,6 +4458,48 @@ async function mirrorSourceReleasesToGiteaLocked({
           (rel) => !excludedIds.has(rel.id)
         );
       }
+    }
+
+    // The filters emptied a destination that had releases. The sync itself
+    // succeeded, so no job-failure notification would fire; without this the
+    // user would only notice the gone releases on the Gitea site. The activity
+    // log gets its own row (like the force-push alerts) and the push channels
+    // get the same warning through the "Sync errors" switch.
+    if (allGiteaReleases.length > 0 && retainedReleases.length === 0) {
+      const userId = config.userId ?? repository.userId;
+      const removedCount = allGiteaReleases.length;
+
+      void triggerAllReleasesRemovedNotification({
+        userId,
+        repositoryName: repository.name,
+        destination: `${repoOwner}/${repoName}`,
+        removedCount,
+      });
+
+      // skipNotification keeps the row out of the push notification system:
+      // triggerAllReleasesRemovedNotification covers that side with its own
+      // message. skipDuplicateEvent stops the row's `repo-<id>-warning` key
+      // from swallowing the sync's own completion event on the event stream;
+      // the terminal update already refreshes the activity view. The row uses
+      // the activity-only "warning" status so it stands out from plain syncs.
+      await createMirrorJob({
+        userId,
+        repositoryId: repository.id,
+        repositoryName: repository.name,
+        status: "warning",
+        skipNotification: true,
+        skipDuplicateEvent: true,
+        message: `All releases removed from ${repoOwner}/${repoName}`,
+        details:
+          `${removedCount} release${removedCount === 1 ? "" : "s"} deleted by the release filters; the destination now has none.` +
+          " Check the include/exclude tag patterns and the pre-release setting.",
+      }).catch((activityError) => {
+        console.error(
+          `[Releases] Failed to record the all-releases-removed activity for ${repository.fullName}: ${
+            activityError instanceof Error ? activityError.message : String(activityError)
+          }`
+        );
+      });
     }
 
     if (retainedReleases.length > releaseLimit) {

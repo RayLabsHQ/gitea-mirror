@@ -413,7 +413,7 @@ export function ActivityLog() {
   const statusCounts = useMemo(() => countLatestStatuses(activities), [activities]);
 
   // Most actionable first, and only statuses that actually occurred.
-  const statChips = ['failed', 'syncing', 'mirroring', 'imported', 'synced', 'mirrored']
+  const statChips = ['failed', 'warning', 'syncing', 'mirroring', 'imported', 'synced', 'mirrored']
     .filter((status) => (statusCounts.get(status) ?? 0) > 0)
     .slice(0, 4);
 
@@ -522,6 +522,7 @@ export function ActivityLog() {
                               <span className={`h-2 w-2 rounded-full ${
                                 s === 'synced' ? 'bg-green-500' :
                                 s === 'failed' ? 'bg-red-500' :
+                                s === 'warning' ? 'bg-amber-500' :
                                 s === 'syncing' ? 'bg-blue-500' :
                                 'bg-yellow-500'
                               }`} />
@@ -781,6 +782,7 @@ export function ActivityLog() {
                       <span className={`h-2 w-2 rounded-full ${
                         s === 'synced' ? 'bg-green-500' :
                         s === 'failed' ? 'bg-red-500' :
+                        s === 'warning' ? 'bg-amber-500' :
                         s === 'syncing' ? 'bg-blue-500' :
                         'bg-yellow-500'
                       }`} />

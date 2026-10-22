@@ -15,6 +15,7 @@ export const repoStatusEnum = z.enum([
   "synced",
   "archived",
   "pending-approval", // Blocked by force-push detection, needs manual approval
+  "warning", // Activity-only alert (e.g. release filters emptied a destination); never stored as a repository status
 ]);
 
 export type RepoStatus = z.infer<typeof repoStatusEnum>;
