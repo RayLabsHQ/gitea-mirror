@@ -1,5 +1,5 @@
 import type { Config } from "@/types/config";
-import type { MirrorOverrides, Repository } from "@/lib/db/schema";
+import type { MirrorOverrides, ReleaseType, Repository } from "@/lib/db/schema";
 import { mirrorOverridesSchema } from "@/lib/db/schema";
 import {
   normalizeSourceProviderKind,
@@ -39,6 +39,36 @@ export const MIRROR_OVERRIDE_LIMIT_KEYS = ["releaseLimit", "releaseAssetLimit"] 
 export type MirrorOverrideLimitKey = (typeof MIRROR_OVERRIDE_LIMIT_KEYS)[number];
 
 /**
+ * The choice-based mirror options that can be overridden per organization and
+ * per repository. Kept apart from the flags and the limits because both the
+ * tri-state toggles and the numeric rows in the dialog assume those shapes.
+ *
+ * `releaseType` decides which releases are candidates at all; `releaseLimit`
+ * then decides how many of the matching ones are kept.
+ */
+export const MIRROR_OVERRIDE_CHOICE_KEYS = ["releaseType"] as const;
+
+export type MirrorOverrideChoiceKey =
+  (typeof MIRROR_OVERRIDE_CHOICE_KEYS)[number];
+
+/**
+ * The tag-pattern mirror options that can be overridden per organization and
+ * per repository. Kept apart from the flags, limits and choices because all of
+ * those assume a scalar value; these hold a list of patterns.
+ *
+ * `releaseIncludeTags` keeps only the releases whose tag matches one of the
+ * patterns, `releaseExcludeTags` drops the ones that do. Both run after
+ * `releaseType` and before `releaseLimit`.
+ */
+export const MIRROR_OVERRIDE_PATTERN_KEYS = [
+  "releaseIncludeTags",
+  "releaseExcludeTags",
+] as const;
+
+export type MirrorOverridePatternKey =
+  (typeof MIRROR_OVERRIDE_PATTERN_KEYS)[number];
+
+/**
  * Organization-tier selection overrides: per-organization switches that steer
  * which source repositories are imported and mirrored, not what a mirror
  * contains. They are kept apart from `MIRROR_OVERRIDE_KEYS` because that list
@@ -53,6 +83,27 @@ export type OrgSelectionOverrideKey = (typeof ORG_SELECTION_OVERRIDE_KEYS)[numbe
 /** Matches `giteaConfigSchema.releaseLimit`'s default. */
 export const DEFAULT_RELEASE_LIMIT = 10;
 
+/** Matches `giteaConfigSchema.releaseType`'s default. */
+export const DEFAULT_RELEASE_TYPE: ReleaseType = "all";
+
+/**
+ * How many releases the mirror looks at when any release filter is active.
+ *
+ * Filtering happens before the limit, so without a wider window a repository
+ * whose newest releases are all filtered out would mirror nothing at all when
+ * asked for the other kind. 100 is GitHub's maximum page size, so it costs one
+ * extra page at most.
+ */
+export const RELEASE_SCAN_WINDOW = 100;
+
+/**
+ * Bounds on stored tag patterns. They are compiled into regular expressions on
+ * every mirror run, so a hand-edited row holding thousands of them cannot be
+ * allowed to turn a sync into a regex benchmark.
+ */
+export const MAX_RELEASE_TAG_PATTERNS = 20;
+export const MAX_RELEASE_TAG_PATTERN_LENGTH = 200;
+
 /**
  * Fully resolved mirror options: every flag has a definite boolean value, the
  * release limit a definite positive integer, and the asset limit either a
@@ -61,6 +112,9 @@ export const DEFAULT_RELEASE_LIMIT = 10;
 export type ResolvedMirrorOptions = Record<MirrorOverrideKey, boolean> & {
   releaseLimit: number;
   releaseAssetLimit: number | null;
+  releaseType: ReleaseType;
+  releaseIncludeTags: string[];
+  releaseExcludeTags: string[];
 };
 
 /**
@@ -71,6 +125,9 @@ export type ResolvedMirrorOptions = Record<MirrorOverrideKey, boolean> & {
 export type InheritedMirrorOptions = Partial<Record<MirrorOverrideKey, boolean>> & {
   releaseLimit?: number;
   releaseAssetLimit?: number | null;
+  releaseType?: ReleaseType;
+  releaseIncludeTags?: string[];
+  releaseExcludeTags?: string[];
   skipForks?: boolean;
 };
 
@@ -99,6 +156,188 @@ export function normalizeReleaseAssetLimit(value: unknown): number | undefined {
   return limit >= 0 ? limit : undefined;
 }
 
+const RELEASE_TYPES: readonly ReleaseType[] = ["all", "stable"];
+
+/**
+ * Sanitize a release type from any tier into one of the known values, or
+ * `undefined` when it is absent or unusable (so the next tier out is
+ * consulted). Case is folded so a hand-written `RELEASE_TYPE=Stable` env var
+ * behaves the same as the value the UI writes.
+ */
+export function normalizeReleaseType(value: unknown): ReleaseType | undefined {
+  if (typeof value !== "string") return undefined;
+  const type = value.trim().toLowerCase();
+  return RELEASE_TYPES.find((candidate) => candidate === type);
+}
+
+/**
+ * Whether a release belongs to the configured type.
+ *
+ * The `prerelease` flag is the only signal: GitHub and Gitea both report it.
+ * A source that does not report it (`undefined`/`null`) counts as a normal
+ * release, which keeps `stable` from silently dropping everything.
+ */
+export function releaseMatchesType(
+  release: { prerelease?: boolean | null },
+  releaseType: ReleaseType
+): boolean {
+  if (releaseType === "all") return true;
+  return release.prerelease !== true;
+}
+
+/**
+ * Sanitize a tag-pattern list from any tier into a usable list, or `undefined`
+ * when it is absent or unusable (so the next tier out is consulted). Entries
+ * that are not non-empty strings are ignored one by one, duplicates collapse,
+ * and the list is capped so a hand-edited row cannot grow past what a mirror
+ * run should compile.
+ *
+ * An empty list is deliberately not a pin: clearing the field in the UI means
+ * "inherit", the same way an empty release-limit box does.
+ */
+export function normalizeReleaseTagPatterns(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+
+  const seen = new Set<string>();
+  const patterns: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== "string") continue;
+    const pattern = entry.trim();
+    if (!pattern || pattern.length > MAX_RELEASE_TAG_PATTERN_LENGTH) continue;
+    const key = pattern.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    patterns.push(pattern);
+    if (patterns.length >= MAX_RELEASE_TAG_PATTERNS) break;
+  }
+
+  return patterns.length > 0 ? patterns : undefined;
+}
+
+/** Escape everything that has a meaning inside a regular expression. */
+function escapeRegexChars(value: string): string {
+  return value.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Turn a whole-string glob into a regular expression source. */
+function globToRegexSource(glob: string): string {
+  let source = "";
+  for (const char of glob) {
+    if (char === "*") source += ".*";
+    else if (char === "?") source += ".";
+    else source += escapeRegexChars(char);
+  }
+  return `^(?:${source})$`;
+}
+
+/** Keep any flags the user asked for, but always match case-insensitively. */
+function releaseTagPatternFlags(flags: string): string {
+  const cleaned = flags
+    .split("")
+    .filter((flag) => "imsuy".includes(flag))
+    .join("");
+  return cleaned.includes("i") ? cleaned : `${cleaned}i`;
+}
+
+/**
+ * Compile one stored tag pattern.
+ *
+ * A pattern wrapped in slashes (`/v1\.\d+$/`) is a JavaScript regular
+ * expression, which is the escape hatch for whoever needs it. Anything else is a
+ * glob matched against the whole tag name: `*` is any run of characters, `?` is
+ * exactly one, everything else is literal. So `*-rc.*` skips `v1.0-rc.1` and
+ * `v2.0-rc2`, while plain `rc` matches nothing but a tag spelled `rc`. Case is
+ * ignored either way, because upstreams spell their tags however they like.
+ *
+ * Returns `null` for a pattern that cannot be used, including a regular
+ * expression that does not compile. Dropping it beats throwing: one typo must
+ * not stop a mirror run.
+ */
+export function compileReleaseTagPattern(pattern: unknown): RegExp | null {
+  if (typeof pattern !== "string") return null;
+
+  const trimmed = pattern.trim();
+  if (!trimmed) return null;
+
+  if (trimmed.length > 2 && trimmed.startsWith("/")) {
+    const closing = trimmed.lastIndexOf("/");
+    if (closing > 0) {
+      const body = trimmed.slice(1, closing);
+      if (body) {
+        try {
+          return new RegExp(body, releaseTagPatternFlags(trimmed.slice(closing + 1)));
+        } catch {
+          return null;
+        }
+      }
+    }
+  }
+
+  try {
+    return new RegExp(globToRegexSource(trimmed), "i");
+  } catch {
+    return null;
+  }
+}
+
+/** Compile a whole list, dropping the entries that cannot be used. */
+export function compileReleaseTagPatterns(
+  patterns: readonly unknown[] | null | undefined
+): RegExp[] {
+  if (!Array.isArray(patterns)) return [];
+
+  const compiled: RegExp[] = [];
+  for (const pattern of patterns) {
+    const regex = compileReleaseTagPattern(pattern);
+    if (regex) compiled.push(regex);
+  }
+  return compiled;
+}
+
+/** True when at least one compiled pattern matches the tag. */
+export function releaseTagMatchesAny(
+  tag: string,
+  patterns: readonly RegExp[]
+): boolean {
+  return patterns.some((pattern) => pattern.test(tag ?? ""));
+}
+
+/**
+ * Whether a tag survives the include and exclude lists.
+ *
+ * Exclude wins when a tag is named by both, because "only these, except that
+ * one" is the only reading that makes such a configuration mean anything.
+ */
+export function releaseMatchesTagFilters(
+  tag: string,
+  includePatterns: readonly RegExp[],
+  excludePatterns: readonly RegExp[]
+): boolean {
+  if (includePatterns.length > 0 && !releaseTagMatchesAny(tag, includePatterns)) {
+    return false;
+  }
+  if (excludePatterns.length > 0 && releaseTagMatchesAny(tag, excludePatterns)) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * How many releases to fetch before filtering. Without a filter the limit is
+ * enough; with one (a release type or either tag list), the newest releases may
+ * all be filtered out, so the mirror looks further back before applying
+ * `releaseLimit`.
+ */
+export function releaseScanLimit(
+  releaseLimit: number,
+  releaseType: ReleaseType,
+  hasTagFilter = false
+): number {
+  return releaseType === "all" && !hasTagFilter
+    ? releaseLimit
+    : Math.max(releaseLimit, RELEASE_SCAN_WINDOW);
+}
+
 /** Per-key sanitizers for the numeric overrides. */
 const LIMIT_NORMALIZERS: Record<
   MirrorOverrideLimitKey,
@@ -106,6 +345,23 @@ const LIMIT_NORMALIZERS: Record<
 > = {
   releaseLimit: normalizeReleaseLimit,
   releaseAssetLimit: normalizeReleaseAssetLimit,
+};
+
+/** Per-key sanitizers for the choice overrides. */
+const CHOICE_NORMALIZERS: Record<
+  MirrorOverrideChoiceKey,
+  (value: unknown) => ReleaseType | undefined
+> = {
+  releaseType: normalizeReleaseType,
+};
+
+/** Per-key sanitizers for the tag-pattern overrides. */
+const PATTERN_NORMALIZERS: Record<
+  MirrorOverridePatternKey,
+  (value: unknown) => string[] | undefined
+> = {
+  releaseIncludeTags: normalizeReleaseTagPatterns,
+  releaseExcludeTags: normalizeReleaseTagPatterns,
 };
 
 /**
@@ -234,6 +490,9 @@ export function mirrorOptionsToFlags(
         mirrorReleases?: boolean;
         releaseLimit?: number;
         releaseAssetLimit?: number | null;
+        releaseType?: ReleaseType;
+        releaseIncludeTags?: string[];
+        releaseExcludeTags?: string[];
         mirrorMetadata?: boolean;
         metadataComponents?: {
           issues?: boolean;
@@ -261,6 +520,11 @@ export function mirrorOptionsToFlags(
       normalizeReleaseLimit(mirrorOptions?.releaseLimit) ?? DEFAULT_RELEASE_LIMIT,
     releaseAssetLimit:
       normalizeReleaseAssetLimit(mirrorOptions?.releaseAssetLimit) ?? null,
+    releaseType: normalizeReleaseType(mirrorOptions?.releaseType) ?? DEFAULT_RELEASE_TYPE,
+    releaseIncludeTags:
+      normalizeReleaseTagPatterns(mirrorOptions?.releaseIncludeTags) ?? [],
+    releaseExcludeTags:
+      normalizeReleaseTagPatterns(mirrorOptions?.releaseExcludeTags) ?? [],
   };
 }
 
@@ -276,7 +540,7 @@ export const MIRROR_GATING_REASONS = {
 /** key -> reason it cannot take effect. Absent key means editable. */
 export type MirrorOverrideGating = Partial<
   Record<
-    MirrorOverrideKey | MirrorOverrideLimitKey | OrgSelectionOverrideKey,
+    MirrorOverrideKey | MirrorOverrideLimitKey | MirrorOverrideChoiceKey | MirrorOverridePatternKey | OrgSelectionOverrideKey,
     string
   >
 >;
@@ -323,6 +587,9 @@ export function getMirrorOverrideGating({
     }
     gating.releaseLimit = MIRROR_GATING_REASONS.pushTarget;
     gating.releaseAssetLimit = MIRROR_GATING_REASONS.pushTarget;
+    gating.releaseType = MIRROR_GATING_REASONS.pushTarget;
+    gating.releaseIncludeTags = MIRROR_GATING_REASONS.pushTarget;
+    gating.releaseExcludeTags = MIRROR_GATING_REASONS.pushTarget;
     return gating;
   }
 
@@ -342,24 +609,31 @@ export function getMirrorOverrideGating({
     gating.mirrorLabels = MIRROR_GATING_REASONS.labelsFollowIssues;
   }
 
-  // The release limit rides along with releases: inherit the starred reason
-  // when that is what disabled releases, otherwise report releases being off.
-  // Only an explicit `false` counts; an unknown value leaves the field open.
+  // The release limit and the release filters ride along with releases:
+  // inherit the starred reason when that is what disabled releases, otherwise
+  // report releases being off. Only an explicit `false` counts; an unknown
+  // value leaves the fields open.
   if (gating.mirrorReleases) {
     gating.releaseLimit = gating.mirrorReleases;
+    gating.releaseType = gating.mirrorReleases;
   } else if (effective.mirrorReleases === false) {
     gating.releaseLimit = MIRROR_GATING_REASONS.releasesOff;
+    gating.releaseType = MIRROR_GATING_REASONS.releasesOff;
   }
-  // The asset limit is read in the same place, so it shares the reason.
+  // The asset limit and both tag lists are read in the same place, so they
+  // share the reason.
   if (gating.releaseLimit) {
     gating.releaseAssetLimit = gating.releaseLimit;
+    for (const patternKey of MIRROR_OVERRIDE_PATTERN_KEYS) {
+      gating[patternKey] = gating.releaseLimit;
+    }
   }
 
   return gating;
 }
 
 export const MIRROR_OVERRIDE_LABELS: Record<
-  MirrorOverrideKey | MirrorOverrideLimitKey | OrgSelectionOverrideKey,
+  MirrorOverrideKey | MirrorOverrideLimitKey | MirrorOverrideChoiceKey | MirrorOverridePatternKey | OrgSelectionOverrideKey,
   string
 > = {
   lfs: "Git LFS files",
@@ -372,6 +646,9 @@ export const MIRROR_OVERRIDE_LABELS: Record<
   mirrorMilestones: "Milestones",
   releaseLimit: "Release limit",
   releaseAssetLimit: "Release asset limit",
+  releaseType: "Release type",
+  releaseIncludeTags: "Include tags",
+  releaseExcludeTags: "Exclude tags",
   skipForks: "Skip forks",
 };
 
@@ -415,13 +692,19 @@ export function hasMirrorOverrides(value: unknown): boolean {
 /** The keys an overrides object pins, for badges and summaries. */
 export function listOverriddenKeys(
   value: unknown
-): (MirrorOverrideKey | MirrorOverrideLimitKey | OrgSelectionOverrideKey)[] {
+): (MirrorOverrideKey | MirrorOverrideLimitKey | MirrorOverrideChoiceKey | MirrorOverridePatternKey | OrgSelectionOverrideKey)[] {
   const overrides = parseMirrorOverrides(value);
   if (!overrides) return [];
   return [
     ...MIRROR_OVERRIDE_KEYS.filter((key) => overrides[key] != null),
     ...MIRROR_OVERRIDE_LIMIT_KEYS.filter(
       (key) => LIMIT_NORMALIZERS[key](overrides[key]) !== undefined
+    ),
+    ...MIRROR_OVERRIDE_CHOICE_KEYS.filter(
+      (key) => CHOICE_NORMALIZERS[key](overrides[key]) !== undefined
+    ),
+    ...MIRROR_OVERRIDE_PATTERN_KEYS.filter(
+      (key) => PATTERN_NORMALIZERS[key](overrides[key]) !== undefined
     ),
     ...ORG_SELECTION_OVERRIDE_KEYS.filter((key) => overrides[key] != null),
   ];
@@ -448,6 +731,14 @@ export function normalizeMirrorOverrides(
     const limit = LIMIT_NORMALIZERS[key](overrides[key]);
     if (limit !== undefined) cleaned[key] = limit;
   }
+  for (const key of MIRROR_OVERRIDE_CHOICE_KEYS) {
+    const choice = CHOICE_NORMALIZERS[key](overrides[key]);
+    if (choice !== undefined) cleaned[key] = choice;
+  }
+  for (const key of MIRROR_OVERRIDE_PATTERN_KEYS) {
+    const patterns = PATTERN_NORMALIZERS[key](overrides[key]);
+    if (patterns !== undefined) cleaned[key] = patterns;
+  }
   for (const key of ORG_SELECTION_OVERRIDE_KEYS) {
     const flag = overrides[key];
     if (typeof flag === "boolean") cleaned[key] = flag;
@@ -462,7 +753,9 @@ export function normalizeMirrorOverrides(
  * Precedence is per field, most specific tier wins:
  *   repository override -> organization override -> global config -> default
  * where the default is `false` for flags, DEFAULT_RELEASE_LIMIT for the
- * release limit, and `null` (every mirrored release) for the asset limit.
+ * release limit, `null` (every mirrored release) for the asset limit,
+ * DEFAULT_RELEASE_TYPE for which releases are candidates, and an empty list for
+ * the tag patterns (no tag filter).
  *
  * `starredCodeOnly` is applied last as a hard clamp. It is a "code only, no
  * metadata" switch for starred repos, so it forces every metadata flag off
@@ -519,6 +812,31 @@ export function resolveMirrorOptions({
     normalizeReleaseAssetLimit(org?.releaseAssetLimit) ??
     normalizeReleaseAssetLimit(globalConfig?.releaseAssetLimit) ??
     null;
+
+  // Same precedence for the release type. A value no tier recognizes (a typo
+  // typed straight into the database, say) falls back to mirroring every
+  // release rather than to a filter that would hide work from the user.
+  resolved.releaseType =
+    normalizeReleaseType(repo?.releaseType) ??
+    normalizeReleaseType(org?.releaseType) ??
+    normalizeReleaseType(globalConfig?.releaseType) ??
+    DEFAULT_RELEASE_TYPE;
+
+  // And the same for the tag lists. No tier pins one means no filter, which is
+  // what every configuration predating the option does. A tier that pins an
+  // empty or unusable list is not a pin either, so the next tier out still
+  // applies: clearing the box in the UI means inherit, not "no patterns here".
+  resolved.releaseIncludeTags =
+    normalizeReleaseTagPatterns(repo?.releaseIncludeTags) ??
+    normalizeReleaseTagPatterns(org?.releaseIncludeTags) ??
+    normalizeReleaseTagPatterns(globalConfig?.releaseIncludeTags) ??
+    [];
+
+  resolved.releaseExcludeTags =
+    normalizeReleaseTagPatterns(repo?.releaseExcludeTags) ??
+    normalizeReleaseTagPatterns(org?.releaseExcludeTags) ??
+    normalizeReleaseTagPatterns(globalConfig?.releaseExcludeTags) ??
+    [];
 
   // Starred repos with starredCodeOnly mirror code and nothing else. This
   // clamp intentionally outranks explicit per-repo overrides: the setting

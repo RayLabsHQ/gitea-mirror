@@ -213,6 +213,9 @@ Control what content gets mirrored from GitHub to Gitea.
 |----------|-------------|---------|---------|
 | `MIRROR_RELEASES` | Mirror GitHub releases | `false` | `true`, `false` |
 | `RELEASE_LIMIT` | Maximum number of releases to mirror per repository | `10` | Number (1-100) |
+| `RELEASE_TYPE` | Which releases are candidates: `all` mirrors everything, `stable` skips what the source marks as a pre-release. With a filter active the release limit counts the releases that match, and releases of the other kind are removed from Gitea on the next sync | `all` | `all`, `stable` |
+| `RELEASE_INCLUDE_TAGS` | Comma separated tag patterns; only releases whose tag matches are mirrored. A pattern is a glob over the whole tag (`v1.*`, `*-rc.*`, `?` for one character) or a regular expression in slashes (`/^v\d+\.\d+\.\d+$/`), matched case-insensitively | empty | any list of globs or `/regex/` |
+| `RELEASE_EXCLUDE_TAGS` | Comma separated tag patterns in the same syntax; releases whose tag matches are skipped, and an excluded tag wins over `RELEASE_INCLUDE_TAGS` | empty | any list of globs or `/regex/` |
 | `RELEASE_ASSET_LIMIT` | Upload release assets only for the newest N mirrored releases. Older releases still get their notes and tag. Unset means assets for every mirrored release, `0` means release notes only. Lowering it never deletes assets already uploaded | unset (all) | Number (0 or more) |
 | `MIRROR_WIKI` | Mirror wiki content | `false` | `true`, `false` |
 | `MIRROR_METADATA` | Master toggle for metadata mirroring | `false` | `true`, `false` |

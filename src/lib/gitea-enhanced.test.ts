@@ -11,6 +11,7 @@ mock.module("@/lib/helpers", () => ({
 }));
 
 const mockMirrorGitHubReleasesToGitea = mock(() => Promise.resolve());
+const mockMirrorGiteaSourceReleasesToGitea = mock(() => Promise.resolve());
 const mockMirrorGitRepoIssuesToGitea = mock(() => Promise.resolve(undefined));
 const mockMirrorGitRepoPullRequestsToGitea = mock(() => Promise.resolve(undefined));
 const mockMirrorGitRepoLabelsToGitea = mock(() => Promise.resolve());
@@ -462,6 +463,7 @@ describe("Enhanced Gitea Operations", () => {
     mockDb.insert.mockClear();
     mockDb.update.mockClear();
     mockMirrorGitHubReleasesToGitea.mockClear();
+    mockMirrorGiteaSourceReleasesToGitea.mockClear();
     mockMirrorGitRepoIssuesToGitea.mockClear();
     mockMirrorGitRepoPullRequestsToGitea.mockClear();
     mockMirrorGitRepoLabelsToGitea.mockClear();
@@ -860,6 +862,7 @@ describe("Enhanced Gitea Operations", () => {
       expect(releaseCall.octokit).toBeDefined();
       // No override anywhere: the resolved default limit is handed through.
       expect(releaseCall.releaseLimit).toBe(10);
+      expect(releaseCall.releaseType).toBe("all");
 
       // Description/topics are reconciled on every sync, against the resolved
       // target, with the Gitea repo info already fetched during target
@@ -873,7 +876,7 @@ describe("Enhanced Gitea Operations", () => {
       expect(metadataCall.current?.mirror).toBe(true);
     });
 
-    test("passes the per-repository release limit through to the release mirror", async () => {
+    test("passes the per-repository release limit and release type through to the release mirror", async () => {
       const config: Partial<Config> = {
         userId: "user123",
         githubConfig: {
@@ -888,6 +891,8 @@ describe("Enhanced Gitea Operations", () => {
           defaultOwner: "testuser",
           mirrorReleases: true,
           releaseLimit: 25,
+          releaseType: "all",
+          releaseIncludeTags: ["v*"],
         },
       };
 
@@ -902,7 +907,11 @@ describe("Enhanced Gitea Operations", () => {
         status: repoStatusEnum.parse("mirrored"),
         visibility: "public",
         userId: "user123",
-        mirrorOverrides: { releaseLimit: 3 },
+        mirrorOverrides: {
+          releaseLimit: 3,
+          releaseType: "stable",
+          releaseExcludeTags: ["*-rc.*"],
+        },
         createdAt: new Date(),
         updatedAt: new Date(),
       };
@@ -923,6 +932,12 @@ describe("Enhanced Gitea Operations", () => {
       expect(mockMirrorGitHubReleasesToGitea).toHaveBeenCalledTimes(1);
       const releaseCall = mockMirrorGitHubReleasesToGitea.mock.calls[0][0] as any;
       expect(releaseCall.releaseLimit).toBe(3);
+      // The repository tier wins over the global "all" default.
+      expect(releaseCall.releaseType).toBe("stable");
+      // The repository sets no include list, so the global one still applies,
+      // alongside the repository's own exclude list.
+      expect(releaseCall.releaseIncludeTags).toEqual(["v*"]);
+      expect(releaseCall.releaseExcludeTags).toEqual(["*-rc.*"]);
     });
 
     test("prefers recorded mirroredLocation when owner resolution changes", async () => {
@@ -1883,6 +1898,88 @@ describe("Enhanced Gitea Operations", () => {
         const metadataCall = mockSyncRepositoryMetadataToGitea.mock.calls[0][0];
         expect(metadataCall.octokit).toBeNull();
         expect(mockMirrorGitHubReleasesToGitea).not.toHaveBeenCalled();
+      } finally {
+        sourceRows.splice(0, sourceRows.length, ...originalRows);
+      }
+    });
+
+    test("forwards the release filters to a Gitea source release mirror", async () => {
+      // The Gitea/Forgejo source path has its own release mirror (#440); it has
+      // to receive the same resolved filters as the GitHub path.
+      const originalRows = sourceRows.splice(
+        0,
+        sourceRows.length,
+        {
+          id: "source-gitea",
+          userId: "user123",
+          name: "Gitea",
+          provider: "gitea",
+          url: "https://git.example.com",
+          username: "",
+          token: "source-token",
+          enabled: true,
+          createdAt: new Date(0),
+          updatedAt: new Date(0),
+        }
+      );
+      try {
+        const config: Partial<Config> = {
+          userId: "user123",
+          githubConfig: {
+            username: "testuser",
+            token: "github-token",
+            privateRepositories: false,
+            mirrorStarred: false,
+          },
+          giteaConfig: {
+            url: "https://gitea.example.com",
+            token: "encrypted-token",
+            defaultOwner: "testuser",
+            mirrorReleases: true,
+            releaseIncludeTags: ["v*"],
+          },
+        };
+
+        const repository: Repository = {
+          id: "repo795",
+          name: "mirror-repo",
+          fullName: "group/mirror-repo",
+          owner: "group",
+          cloneUrl: "https://git.example.com/group/mirror-repo.git",
+          isPrivate: false,
+          isStarred: false,
+          status: repoStatusEnum.parse("mirrored"),
+          visibility: "public",
+          userId: "user123",
+          sourceId: "source-gitea",
+          sourceProvider: "gitea",
+          sourceUrl: "https://git.example.com",
+          mirrorOverrides: { releaseExcludeTags: ["*-rc.*"] },
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+
+        const result = await syncGiteaRepoEnhanced(
+          { config, repository },
+          {
+            getGiteaRepoOwnerAsync: mockGetGiteaRepoOwnerAsync,
+            mirrorGitHubReleasesToGitea: mockMirrorGitHubReleasesToGitea,
+            mirrorGiteaSourceReleasesToGitea: mockMirrorGiteaSourceReleasesToGitea,
+            mirrorGitRepoIssuesToGitea: mockMirrorGitRepoIssuesToGitea,
+            mirrorGitRepoPullRequestsToGitea: mockMirrorGitRepoPullRequestsToGitea,
+            mirrorGitRepoLabelsToGitea: mockMirrorGitRepoLabelsToGitea,
+            mirrorGitRepoMilestonesToGitea: mockMirrorGitRepoMilestonesToGitea,
+            syncRepositoryMetadataToGitea: mockSyncRepositoryMetadataToGitea,
+          }
+        );
+
+        expect(result).toEqual({ success: true });
+        expect(mockMirrorGitHubReleasesToGitea).not.toHaveBeenCalled();
+        expect(mockMirrorGiteaSourceReleasesToGitea).toHaveBeenCalledTimes(1);
+        const releaseCall = mockMirrorGiteaSourceReleasesToGitea.mock.calls[0][0] as any;
+        expect(releaseCall.connection.token).toBe("source-token");
+        expect(releaseCall.releaseIncludeTags).toEqual(["v*"]);
+        expect(releaseCall.releaseExcludeTags).toEqual(["*-rc.*"]);
       } finally {
         sourceRows.splice(0, sourceRows.length, ...originalRows);
       }

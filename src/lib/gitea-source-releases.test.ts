@@ -90,6 +90,8 @@ interface DestinationOptions {
   existingRelease?: { id: number; name: string; body: string; tag_name: string };
   /** Tags the destination already has. Defaults to every source tag. */
   destinationTags?: string[];
+  /** Releases already on the destination, as the retention pass lists them. */
+  destinationReleases?: Array<Record<string, unknown>>;
 }
 
 function fakeWorld(options: DestinationOptions) {
@@ -161,9 +163,14 @@ function fakeWorld(options: DestinationOptions) {
       return json({ id: 77 });
     }
 
+    // The retention pass removing a release.
+    if (method === "DELETE" && /\/releases\/\d+$/.test(url)) {
+      return new Response(null, { status: 204 });
+    }
+
     // The retention pass lists everything the destination has.
     if (method === "GET" && url.startsWith(`${DEST_API}/releases?`)) {
-      return json([]);
+      return json(options.destinationReleases ?? []);
     }
 
     throw new Error(`unexpected request: ${method} ${url}`);
@@ -173,6 +180,12 @@ function fakeWorld(options: DestinationOptions) {
     requests,
     creates: () => requests.filter((r) => r.method === "POST" && r.url === `${DEST_API}/releases`),
     patches: () => requests.filter((r) => r.method === "PATCH"),
+    deletes: () => requests.filter((r) => r.method === "DELETE"),
+    /** Tags of every release the mirror created on the destination. */
+    createdTags: () =>
+      requests
+        .filter((r) => r.method === "POST" && r.url === `${DEST_API}/releases`)
+        .map((r) => String(JSON.parse(r.body ?? "{}").tag_name)),
     uploads: () => requests.filter((r) => r.method === "POST" && r.url.includes("/assets?name=")),
     downloads: () =>
       requests.filter(
@@ -196,16 +209,37 @@ function giteaRelease(tag: string, extra: Record<string, unknown> = {}) {
   };
 }
 
-function mirrorFromGitea(connection: SourceConnection) {
+function mirrorFromGitea(
+  connection: SourceConnection,
+  overrides: {
+    releaseLimit?: number;
+    releaseType?: "all" | "stable";
+    releaseIncludeTags?: string[];
+    releaseExcludeTags?: string[];
+  } = {}
+) {
   return mirrorGiteaSourceReleasesToGitea({
     config,
     repository,
     connection,
     giteaOwner: DEST_OWNER,
     giteaRepoName: DEST_REPO,
-    releaseLimit: 10,
+    releaseLimit: overrides.releaseLimit ?? 10,
     releaseAssetLimit: null,
+    releaseType: overrides.releaseType,
+    releaseIncludeTags: overrides.releaseIncludeTags,
+    releaseExcludeTags: overrides.releaseExcludeTags,
   });
+}
+
+/** A destination release as the retention pass reads it. */
+function destinationRelease(tag: string, id: number, prerelease: boolean | null) {
+  return {
+    id,
+    tag_name: tag,
+    created_at: `2026-0${Math.max(1, 9 - id % 9)}-01T00:00:00Z`,
+    prerelease,
+  };
 }
 
 describe.skipIf(!isChild)("mirrorGiteaSourceReleasesToGitea", () => {
@@ -327,6 +361,255 @@ describe.skipIf(!isChild)("mirrorGiteaSourceReleasesToGitea", () => {
     // The source listing is anonymous too.
     const listing = world.requests.find((r) => r.url.startsWith(`${SOURCE_URL}/api/v1/`));
     expect(listing?.authorization).toBeNull();
+  });
+});
+
+describe.skipIf(!isChild)("release type filter", () => {
+  it("mirrors only the releases the source does not flag as pre-release", async () => {
+    const world = fakeWorld({
+      sourceReleases: [
+        giteaRelease("v2.1.0-beta.1", { prerelease: true }),
+        giteaRelease("v2.0.0"),
+        giteaRelease("v1.0.0"),
+      ],
+    });
+
+    await mirrorFromGitea(giteaConnection("source-token"), { releaseType: "stable" });
+
+    expect(world.createdTags()).toEqual(["v2.0.0", "v1.0.0"]);
+  });
+
+  it("mirrors every release when a stored value names a kind that no longer exists", async () => {
+    const world = fakeWorld({
+      sourceReleases: [
+        giteaRelease("v2.1.0-beta.1", { prerelease: true }),
+        giteaRelease("v2.0.0"),
+      ],
+    });
+
+    // A row saved while the filter offered pre-releases on their own must not
+    // turn into a filter nobody asked for; it falls back to no type filter.
+    await mirrorFromGitea(giteaConnection("source-token"), {
+      releaseType: "prerelease" as unknown as "stable",
+    });
+
+    expect(world.createdTags()).toEqual(["v2.1.0-beta.1", "v2.0.0"]);
+  });
+
+  it("looks further back so the limit counts the releases that match", async () => {
+    const world = fakeWorld({
+      sourceReleases: [
+        giteaRelease("v3.0.0-rc1", { prerelease: true }),
+        giteaRelease("v2.0.0"),
+        giteaRelease("v1.0.0"),
+      ],
+    });
+
+    await mirrorFromGitea(giteaConnection("source-token"), {
+      releaseLimit: 1,
+      releaseType: "stable",
+    });
+
+    // Asking the source for a single release would leave the pre-release as the
+    // only candidate; the filter widens the scan instead, so "the newest one"
+    // is the newest stable one.
+    expect(world.createdTags()).toEqual(["v2.0.0"]);
+    const listing = world.requests.find((r) => r.url.startsWith(`${SOURCE_URL}/api/v1/`));
+    expect(listing?.url).toContain("limit=50&page=1");
+  });
+
+  it("removes destination releases the filter excludes", async () => {
+    const world = fakeWorld({
+      sourceReleases: [giteaRelease("v2.0.0")],
+      destinationReleases: [
+        destinationRelease("v1.9.0-beta", 11, true),
+        destinationRelease("v1.8.0", 12, false),
+      ],
+    });
+
+    await mirrorFromGitea(giteaConnection("source-token"), { releaseType: "stable" });
+
+    expect(world.deletes().map((r) => r.url)).toEqual([`${DEST_API}/releases/11`]);
+  });
+
+  it("keeps a destination release whose pre-release flag is unknown", async () => {
+    const world = fakeWorld({
+      sourceReleases: [giteaRelease("v2.0.0")],
+      destinationReleases: [destinationRelease("v1.8.0", 12, null)],
+    });
+
+    await mirrorFromGitea(giteaConnection("source-token"), { releaseType: "stable" });
+
+    expect(world.deletes()).toHaveLength(0);
+  });
+
+  it("still runs retention when the filter excludes every source release", async () => {
+    const world = fakeWorld({
+      sourceReleases: [giteaRelease("v2.1.0-beta.1", { prerelease: true })],
+      destinationReleases: [destinationRelease("v2.1.0-beta.1", 21, true)],
+    });
+
+    await mirrorFromGitea(giteaConnection("source-token"), { releaseType: "stable" });
+
+    expect(world.creates()).toHaveLength(0);
+    expect(world.deletes().map((r) => r.url)).toEqual([`${DEST_API}/releases/21`]);
+  });
+
+  it("leaves the destination alone when every release is a candidate", async () => {
+    const world = fakeWorld({
+      sourceReleases: [giteaRelease("v2.0.0")],
+      destinationReleases: [destinationRelease("v1.9.0-beta", 11, true)],
+    });
+
+    await mirrorFromGitea(giteaConnection("source-token"));
+
+    expect(world.deletes()).toHaveLength(0);
+  });
+});
+
+describe.skipIf(!isChild)("release tag pattern filter", () => {
+  it("skips the source releases an exclude pattern names", async () => {
+    const world = fakeWorld({
+      sourceReleases: [
+        giteaRelease("v2.1.0-rc.1"),
+        giteaRelease("v2.0.0"),
+        giteaRelease("v1.0.0"),
+      ],
+    });
+
+    // The upstream never flagged anything as a pre-release, which is exactly the
+    // case the tag filter exists for.
+    await mirrorFromGitea(giteaConnection("source-token"), {
+      releaseExcludeTags: ["*-rc.*"],
+    });
+
+    expect(world.createdTags()).toEqual(["v2.0.0", "v1.0.0"]);
+  });
+
+  it("mirrors only the tags an include pattern names", async () => {
+    const world = fakeWorld({
+      sourceReleases: [giteaRelease("v2.0.0"), giteaRelease("v1.2.0"), giteaRelease("v1.0.0")],
+    });
+
+    await mirrorFromGitea(giteaConnection("source-token"), {
+      releaseIncludeTags: ["v1.*"],
+    });
+
+    expect(world.createdTags()).toEqual(["v1.2.0", "v1.0.0"]);
+  });
+
+  it("lets exclude win when both lists name a tag", async () => {
+    const world = fakeWorld({
+      sourceReleases: [giteaRelease("v2.0.0"), giteaRelease("v2.0.0-rc.1")],
+    });
+
+    await mirrorFromGitea(giteaConnection("source-token"), {
+      releaseIncludeTags: ["v*"],
+      releaseExcludeTags: ["*-rc.*"],
+    });
+
+    expect(world.createdTags()).toEqual(["v2.0.0"]);
+  });
+
+  it("matches case-insensitively", async () => {
+    const world = fakeWorld({
+      sourceReleases: [giteaRelease("V2.0.0"), giteaRelease("v1.0.0")],
+    });
+
+    await mirrorFromGitea(giteaConnection("source-token"), {
+      releaseIncludeTags: ["v2*"],
+    });
+
+    expect(world.createdTags()).toEqual(["V2.0.0"]);
+  });
+
+  it("treats a pattern in slashes as a regular expression", async () => {
+    const world = fakeWorld({
+      sourceReleases: [
+        giteaRelease("v1.2.3-rc.1"),
+        giteaRelease("v1.2.3"),
+        giteaRelease("nightly-20260101"),
+      ],
+    });
+
+    await mirrorFromGitea(giteaConnection("source-token"), {
+      releaseIncludeTags: ["/^v\\d+\\.\\d+\\.\\d+$/"],
+    });
+
+    expect(world.createdTags()).toEqual(["v1.2.3"]);
+  });
+
+  it("widens the scan window for a tag filter alone", async () => {
+    const world = fakeWorld({
+      sourceReleases: [
+        giteaRelease("nightly-20260201"),
+        giteaRelease("nightly-20260115"),
+        giteaRelease("v2.0.0"),
+      ],
+    });
+
+    await mirrorFromGitea(giteaConnection("source-token"), {
+      releaseLimit: 1,
+      releaseIncludeTags: ["v*"],
+    });
+
+    // A one-release scan would have found only nightlies and mirrored nothing;
+    // the filter looks further back so "the newest one" is the newest match.
+    expect(world.createdTags()).toEqual(["v2.0.0"]);
+    const listing = world.requests.find((r) => r.url.startsWith(`${SOURCE_URL}/api/v1/`));
+    expect(listing?.url).toContain("limit=50&page=1");
+  });
+
+  it("removes destination releases whose tag no longer matches", async () => {
+    const world = fakeWorld({
+      sourceReleases: [giteaRelease("v2.0.0")],
+      destinationReleases: [
+        // No pre-release flag: a tag pattern needs only the tag name, so unlike
+        // the type filter it can still clean these up.
+        destinationRelease("v1.9.0-beta", 11, null),
+        destinationRelease("v1.8.0", 12, null),
+      ],
+    });
+
+    await mirrorFromGitea(giteaConnection("source-token"), {
+      releaseExcludeTags: ["*-beta"],
+    });
+
+    expect(world.deletes().map((r) => r.url)).toEqual([`${DEST_API}/releases/11`]);
+  });
+
+  it("combines with the type filter and the count limit", async () => {
+    const world = fakeWorld({
+      sourceReleases: [
+        giteaRelease("v3.0.0-rc.1", { prerelease: true }),
+        giteaRelease("v2.9.0-beta.2"),
+        giteaRelease("v2.0.0"),
+        giteaRelease("v1.0.0"),
+      ],
+    });
+
+    await mirrorFromGitea(giteaConnection("source-token"), {
+      releaseLimit: 1,
+      releaseType: "stable",
+      releaseExcludeTags: ["*-beta*"],
+    });
+
+    expect(world.createdTags()).toEqual(["v2.0.0"]);
+  });
+
+  it("ignores a pattern that cannot compile instead of failing the run", async () => {
+    const world = fakeWorld({
+      sourceReleases: [giteaRelease("v2.0.0"), giteaRelease("v1.0.0")],
+    });
+
+    await mirrorFromGitea(giteaConnection("source-token"), {
+      releaseExcludeTags: ["/v1(/"],
+    });
+
+    // The broken pattern is dropped, which leaves no filter at all rather than a
+    // mirror run that throws.
+    expect(world.createdTags()).toEqual(["v2.0.0", "v1.0.0"]);
+    expect(world.deletes()).toHaveLength(0);
   });
 });
 

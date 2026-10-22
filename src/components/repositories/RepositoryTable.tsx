@@ -37,6 +37,8 @@ import {
   mirrorOptionsToFlags,
   normalizeReleaseAssetLimit,
   normalizeReleaseLimit,
+  normalizeReleaseTagPatterns,
+  normalizeReleaseType,
   type MirrorOverrideKey,
 } from "@/lib/utils/mirror-overrides";
 import { Card, CardContent } from "@/components/ui/card";
@@ -189,6 +191,12 @@ export default function RepositoryTable({
     if (orgReleaseLimit !== undefined) globals.releaseLimit = orgReleaseLimit;
     const orgReleaseAssetLimit = normalizeReleaseAssetLimit(orgOverrides.releaseAssetLimit);
     if (orgReleaseAssetLimit !== undefined) globals.releaseAssetLimit = orgReleaseAssetLimit;
+    const orgReleaseType = normalizeReleaseType(orgOverrides.releaseType);
+    if (orgReleaseType !== undefined) globals.releaseType = orgReleaseType;
+    const orgIncludeTags = normalizeReleaseTagPatterns(orgOverrides.releaseIncludeTags);
+    if (orgIncludeTags !== undefined) globals.releaseIncludeTags = orgIncludeTags;
+    const orgExcludeTags = normalizeReleaseTagPatterns(orgOverrides.releaseExcludeTags);
+    if (orgExcludeTags !== undefined) globals.releaseExcludeTags = orgExcludeTags;
     return globals;
   }, [mirrorOptions, orgOverrides]);
 
@@ -1201,6 +1209,7 @@ export default function RepositoryTable({
         }}
         targetKind="repository"
         targetName={overridesTarget?.fullName ?? ""}
+        targetId={overridesTarget?.id ?? null}
         value={overridesTarget?.mirrorOverrides ?? null}
         inheritedFrom={inheritedMirrorOptions}
         inheritedLoading={orgOverridesLoading}

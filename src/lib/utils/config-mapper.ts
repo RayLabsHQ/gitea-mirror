@@ -17,7 +17,7 @@ import { normalizeDestinationProviderKind } from "@/lib/destination-kinds";
 import { z } from "zod";
 import { githubConfigSchema, giteaConfigSchema, scheduleConfigSchema, cleanupConfigSchema } from "@/lib/db/schema";
 import { parseInterval } from "@/lib/utils/duration-parser";
-import { normalizeReleaseAssetLimit } from "@/lib/utils/mirror-overrides";
+import { normalizeReleaseAssetLimit, normalizeReleaseTagPatterns, normalizeReleaseType, DEFAULT_RELEASE_TYPE } from "@/lib/utils/mirror-overrides";
 import { buildClockCronExpression, normalizeTimezone, parseClockCronExpression } from "@/lib/utils/schedule-utils";
 
 // Use the actual database schema types
@@ -171,6 +171,13 @@ export function mapUiToDbConfig(
     // null is a real value here ("assets for every mirrored release"), so
     // it is stored as such rather than dropped.
     releaseAssetLimit: normalizeReleaseAssetLimit(mirrorOptions.releaseAssetLimit) ?? null,
+    // An unusable value falls back to "all" rather than storing a filter that
+    // would hide releases from the user.
+    releaseType: normalizeReleaseType(mirrorOptions.releaseType) ?? DEFAULT_RELEASE_TYPE,
+    // Junk entries are dropped one by one rather than rejected wholesale, so a
+    // stray comma in the input cannot discard the rest of the list.
+    releaseIncludeTags: normalizeReleaseTagPatterns(mirrorOptions.releaseIncludeTags) ?? [],
+    releaseExcludeTags: normalizeReleaseTagPatterns(mirrorOptions.releaseExcludeTags) ?? [],
     mirrorMetadata: mirrorOptions.mirrorMetadata,
     mirrorIssues: mirrorOptions.mirrorMetadata && mirrorOptions.metadataComponents.issues,
     mirrorPullRequests: mirrorOptions.mirrorMetadata && mirrorOptions.metadataComponents.pullRequests,
@@ -244,6 +251,9 @@ export function mapDbToUiConfig(dbConfig: any): {
     mirrorReleases: dbConfig.giteaConfig?.mirrorReleases || false,
     releaseLimit: dbConfig.giteaConfig?.releaseLimit || 10,
     releaseAssetLimit: normalizeReleaseAssetLimit(dbConfig.giteaConfig?.releaseAssetLimit) ?? null,
+    releaseType: normalizeReleaseType(dbConfig.giteaConfig?.releaseType) ?? DEFAULT_RELEASE_TYPE,
+    releaseIncludeTags: normalizeReleaseTagPatterns(dbConfig.giteaConfig?.releaseIncludeTags) ?? [],
+    releaseExcludeTags: normalizeReleaseTagPatterns(dbConfig.giteaConfig?.releaseExcludeTags) ?? [],
     mirrorLFS: dbConfig.giteaConfig?.lfs || false,
     mirrorMetadata: dbConfig.giteaConfig?.mirrorMetadata || false,
     metadataComponents: {

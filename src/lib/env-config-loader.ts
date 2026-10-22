@@ -11,7 +11,7 @@ import { isSourceProviderKind, type SourceProviderKind } from '@/lib/source-prov
 import { DESTINATION_PROVIDER_DEFAULT_URLS, isDestinationProviderKind, type DestinationProviderKind } from '@/lib/destination-kinds';
 import { hasDestinationChanged, hasSourceChanged, loadConfigLocks } from '@/lib/config-locks';
 import type { SourceUpdateInput } from '@/lib/sources';
-import { normalizeReleaseAssetLimit } from '@/lib/utils/mirror-overrides';
+import { normalizeReleaseAssetLimit, normalizeReleaseTagPatterns, normalizeReleaseType } from '@/lib/utils/mirror-overrides';
 
 interface EnvConfig {
   github: {
@@ -66,6 +66,9 @@ interface EnvConfig {
     mirrorMetadata?: boolean;
     releaseLimit?: number;
     releaseAssetLimit?: number;
+    releaseType?: string;
+    releaseIncludeTags?: string[];
+    releaseExcludeTags?: string[];
     issueConcurrency?: number;
     pullRequestConcurrency?: number;
   };
@@ -117,6 +120,14 @@ function parseEnvConfig(): EnvConfig {
     : undefined;
   const starredLists = process.env.MIRROR_STARRED_LISTS
     ? process.env.MIRROR_STARRED_LISTS.split(',').map((list) => list.trim()).filter(Boolean)
+    : undefined;
+  // Release tag patterns are comma separated too. A pattern that contains a
+  // comma has to be written as a regex, which is what the slash form is for.
+  const releaseIncludeTags = process.env.RELEASE_INCLUDE_TAGS
+    ? process.env.RELEASE_INCLUDE_TAGS.split(',').map((tag) => tag.trim()).filter(Boolean)
+    : undefined;
+  const releaseExcludeTags = process.env.RELEASE_EXCLUDE_TAGS
+    ? process.env.RELEASE_EXCLUDE_TAGS.split(',').map((tag) => tag.trim()).filter(Boolean)
     : undefined;
 
   return {
@@ -185,6 +196,9 @@ function parseEnvConfig(): EnvConfig {
       mirrorMetadata: process.env.MIRROR_METADATA === 'true',
       releaseLimit: process.env.RELEASE_LIMIT ? parseInt(process.env.RELEASE_LIMIT, 10) : undefined,
       releaseAssetLimit: process.env.RELEASE_ASSET_LIMIT ? parseInt(process.env.RELEASE_ASSET_LIMIT, 10) : undefined,
+      releaseType: process.env.RELEASE_TYPE,
+      releaseIncludeTags,
+      releaseExcludeTags,
       issueConcurrency: process.env.MIRROR_ISSUE_CONCURRENCY ? parseInt(process.env.MIRROR_ISSUE_CONCURRENCY, 10) : undefined,
       pullRequestConcurrency: process.env.MIRROR_PULL_REQUEST_CONCURRENCY ? parseInt(process.env.MIRROR_PULL_REQUEST_CONCURRENCY, 10) : undefined,
     },
@@ -382,6 +396,22 @@ export async function initializeConfigFromEnv(): Promise<void> {
         normalizeReleaseAssetLimit(envConfig.mirror.releaseAssetLimit) ??
         existingConfig?.[0]?.giteaConfig?.releaseAssetLimit ??
         null,
+      // all | stable. An unusable value (a typo in the env var)
+      // falls through to the stored value rather than storing a filter.
+      releaseType:
+        normalizeReleaseType(envConfig.mirror.releaseType) ??
+        existingConfig?.[0]?.giteaConfig?.releaseType ??
+        'all',
+      // Comma separated glob patterns (or the /regex/ form). An unset or unusable
+      // variable keeps what the UI stored, matching how RELEASE_TYPE behaves.
+      releaseIncludeTags:
+        normalizeReleaseTagPatterns(envConfig.mirror.releaseIncludeTags) ??
+        existingConfig?.[0]?.giteaConfig?.releaseIncludeTags ??
+        [],
+      releaseExcludeTags:
+        normalizeReleaseTagPatterns(envConfig.mirror.releaseExcludeTags) ??
+        existingConfig?.[0]?.giteaConfig?.releaseExcludeTags ??
+        [],
       issueConcurrency: envConfig.mirror.issueConcurrency && envConfig.mirror.issueConcurrency > 0
         ? envConfig.mirror.issueConcurrency
         : existingConfig?.[0]?.giteaConfig?.issueConcurrency ?? 3,

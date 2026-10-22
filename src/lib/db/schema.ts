@@ -53,6 +53,11 @@ export const backupStrategyEnum = z.enum([
   "block-on-force-push",
 ]);
 
+// Which releases are mirror candidates: every one, or only the ones the source
+// does not flag as a pre-release.
+export const releaseTypeEnum = z.enum(["all", "stable"]);
+export type ReleaseType = z.infer<typeof releaseTypeEnum>;
+
 /**
  * Per-object overrides for the global mirror options in `giteaConfigSchema`.
  *
@@ -73,6 +78,22 @@ export const backupStrategyEnum = z.enum([
  * assets are uploaded only for the newest N mirrored releases. 0 is a real
  * value (notes only); null/absent means inherit.
  *
+ * `releaseType` sits alongside those limits and decides which releases are
+ * candidates at all (`all`, or `stable` = everything the source does not flag as
+ * a pre-release). It is a plain optional string rather than a strict enum for
+ * the same reason as the limits: a stored typo must degrade to "inherit" for
+ * that field alone. `normalizeReleaseType` does the sanitizing, and the global
+ * default is `giteaConfigSchema.releaseType`.
+ *
+ * `releaseIncludeTags` and `releaseExcludeTags` filter by tag name on top of
+ * that, for the many projects that never set the pre-release flag but tag
+ * `v1.2.3-rc.1`. They are `z.unknown()` rather than `z.array(z.string())`
+ * because a hand-written `"releaseExcludeTags": "*-rc*"` (a bare string, not a
+ * list) would otherwise fail the parse of the whole object and silently drop
+ * the LFS opt-out stored next to it. `normalizeReleaseTagPatterns` accepts a
+ * list of strings and ignores everything else, and an empty list is not a pin:
+ * clearing the field means inherit.
+ *
  * `skipForks` is organization-tier only: it opts an organization out of
  * importing and mirroring forked repositories without touching the global
  * `githubConfig.skipForks` switch. Null/absent inherits that global value.
@@ -91,6 +112,9 @@ export const mirrorOverridesSchema = z.object({
   mirrorMilestones: z.boolean().nullable().optional(),
   releaseLimit: z.number().nullable().optional(),
   releaseAssetLimit: z.number().nullable().optional(),
+  releaseType: z.string().nullable().optional(),
+  releaseIncludeTags: z.unknown().nullable().optional(),
+  releaseExcludeTags: z.unknown().nullable().optional(),
   skipForks: z.boolean().nullable().optional(),
 });
 
@@ -129,6 +153,15 @@ export const giteaConfigSchema = z.object({
   // Upload assets only for the newest N mirrored releases. null/absent means
   // every mirrored release gets its assets; 0 means release notes only.
   releaseAssetLimit: z.number().nullable().optional(),
+  // Which releases are candidates: every one, or only the ones not flagged as a
+  // pre-release. The limit is applied after filtering.
+  releaseType: releaseTypeEnum.default("all"),
+  // Tag patterns narrowing that further: include keeps only matching tags,
+  // exclude drops matching ones. Applied after `releaseType`, before the limit.
+  // Empty list means no filter, which is what every config stored before this
+  // option existed behaves.
+  releaseIncludeTags: z.array(z.string()).default([]),
+  releaseExcludeTags: z.array(z.string()).default([]),
   mirrorMetadata: z.boolean().default(false),
   mirrorIssues: z.boolean().default(false),
   mirrorPullRequests: z.boolean().default(false),
