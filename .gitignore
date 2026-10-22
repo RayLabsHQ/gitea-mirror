@@ -54,3 +54,4 @@ tests/e2e/git-repos/
 /playwright/.cache/
 /playwright/.auth/
 .playwright-mcp/
+/.vs
