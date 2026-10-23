@@ -15,10 +15,15 @@ export const repoStatusEnum = z.enum([
   "synced",
   "archived",
   "pending-approval", // Blocked by force-push detection, needs manual approval
-  "warning", // Activity-only alert (e.g. release filters emptied a destination); never stored as a repository status
 ]);
 
 export type RepoStatus = z.infer<typeof repoStatusEnum>;
+
+// Activity entries carry every repository status plus "warning", an alert
+// (e.g. release filters emptied a destination) that a repository never has.
+export const activityStatusEnum = z.enum([...repoStatusEnum.options, "warning"]);
+
+export type ActivityStatus = z.infer<typeof activityStatusEnum>;
 
 export const repositoryVisibilityEnum = z.enum([
   "public",

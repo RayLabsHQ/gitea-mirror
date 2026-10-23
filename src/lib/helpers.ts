@@ -1,4 +1,4 @@
-import type { RepoStatus } from "@/types/Repository";
+import type { ActivityStatus, RepoStatus } from "@/types/Repository";
 import { db, mirrorJobs } from "./db";
 import { eq, and } from "drizzle-orm";
 import { buildInterruptedJobsCondition } from "./interrupted-job-detection";
@@ -31,7 +31,7 @@ export async function createMirrorJob({
   repositoryName?: string;
   details?: string;
   message: string;
-  status: RepoStatus;
+  status: ActivityStatus;
   jobType?: "mirror" | "sync" | "retry";
   batchId?: string;
   totalItems?: number;

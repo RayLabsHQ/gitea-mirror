@@ -855,7 +855,7 @@ describe("Enhanced Gitea Operations", () => {
       expect(result).toEqual({ success: true });
       expect(mockGetGiteaRepoOwnerAsync).toHaveBeenCalled();
       expect(mockMirrorGitHubReleasesToGitea).toHaveBeenCalledTimes(1);
-      const releaseCall = mockMirrorGitHubReleasesToGitea.mock.calls[0][0];
+      const releaseCall = mockMirrorGitHubReleasesToGitea.mock.calls[0][0] as any;
       expect(releaseCall.giteaOwner).toBe("starred");
       expect(releaseCall.giteaRepoName).toBe("mirror-repo");
       expect(releaseCall.config.githubConfig?.token).toBe("github-token");
@@ -1923,7 +1923,7 @@ describe("Enhanced Gitea Operations", () => {
         }
       );
       try {
-        const config: Partial<Config> = {
+        const config = {
           userId: "user123",
           githubConfig: {
             username: "testuser",
@@ -1938,9 +1938,9 @@ describe("Enhanced Gitea Operations", () => {
             mirrorReleases: true,
             releaseIncludeTags: ["v*"],
           },
-        };
+        } as unknown as Partial<Config>;
 
-        const repository: Repository = {
+        const repository = {
           id: "repo795",
           name: "mirror-repo",
           fullName: "group/mirror-repo",
@@ -1957,7 +1957,7 @@ describe("Enhanced Gitea Operations", () => {
           mirrorOverrides: { releaseExcludeTags: ["*-rc.*"] },
           createdAt: new Date(),
           updatedAt: new Date(),
-        };
+        } as unknown as Repository;
 
         const result = await syncGiteaRepoEnhanced(
           { config, repository },

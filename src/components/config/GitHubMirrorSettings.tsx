@@ -59,6 +59,7 @@ import {
 } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
 import { githubApi } from "@/lib/api";
+import { withBase } from "@/lib/base-path";
 import {
   sourceKindSupportsReleases,
   SOURCE_PROVIDER_LABELS,
@@ -152,7 +153,7 @@ export function GitHubMirrorSettings({
   React.useEffect(() => {
     if (!tagRulesOpen || globalPreviewRepos !== null) return;
     let cancelled = false;
-    fetch("/api/repositories/preview-repositories")
+    fetch(withBase("/api/repositories/preview-repositories"))
       .then((res) => (res.ok ? res.json() : null))
       .then((payload) => {
         if (cancelled) return;
