@@ -51,12 +51,14 @@
     "fast-uri": "^3.1.5",
     "fast-xml-builder": "^1.1.7",
     "js-yaml": "^4.3.2",
-    "smol-toml": "^1.7.1",
+    "smol-toml": "^1.9.0",
     "kysely": "^0.28.17",
     "lodash": "^4.18.1",
     "picomatch": "^4.0.4",
-    "sharp": "^0.35.4",
-    "svgo": "^4.1.0"
+    "sharp": "^0.35.5",
+    "svgo": "^4.1.0",
+    "source-map-js": "^1.2.2",
+    "http-cache-semantics": "^4.3.0"
   },
   "dependencies": {
     "@astrojs/mdx": "^7.0.3",

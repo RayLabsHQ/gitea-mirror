@@ -3,8 +3,8 @@
   "@id": "https://github.com/RayLabsHQ/gitea-mirror/blob/main/.vex/zlib-gz-vacate.vex.json",
   "author": "developer@arunavoray.dev",
   "role": "Gitea Mirror maintainer",
-  "timestamp": "2026-09-07T01:20:00Z",
-  "version": 1,
+  "timestamp": "2026-10-23T03:00:00Z",
+  "version": 2,
   "statements": [
     {
       "vulnerability": {
@@ -14,7 +14,7 @@
       "timestamp": "2026-09-07T01:20:00Z",
       "products": [
         { "@id": "pkg:docker/raylabshq/gitea-mirror" },
-        { "@id": "pkg:docker/ghcr.io/raylabshq/gitea-mirror" },
+        { "@id": "pkg:docker/raylabshq/gitea-mirror?repository_url=ghcr.io" },
         { "@id": "pkg:docker/gitea-mirror" },
         { "@id": "pkg:docker/library/gitea-mirror" }
       ],
