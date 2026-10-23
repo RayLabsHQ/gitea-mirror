@@ -1,22 +1,37 @@
 import { describe, expect, test } from "bun:test";
 import {
+  compileReleaseTagPattern,
+  compileReleaseTagPatterns,
   DEFAULT_RELEASE_LIMIT,
+  DEFAULT_RELEASE_TYPE,
   getMirrorOverrideGating,
   hasMirrorOverrides,
   listOverriddenKeys,
+  MAX_RELEASE_TAG_PATTERNS,
+  MAX_RELEASE_TAG_PATTERN_LENGTH,
   MIRROR_GATING_REASONS,
+  MIRROR_OVERRIDE_CHOICE_KEYS,
   MIRROR_OVERRIDE_KEYS,
   MIRROR_OVERRIDE_LABELS,
   MIRROR_OVERRIDE_LIMIT_KEYS,
+  MIRROR_OVERRIDE_PATTERN_KEYS,
   mirrorOptionsToFlags,
   normalizeMirrorOverrides,
   normalizeReleaseAssetLimit,
   normalizeReleaseLimit,
+  normalizeReleaseTagPatterns,
+  normalizeReleaseType,
   orgForkSkipDecision,
   parseMirrorOverrides,
   releaseGetsAssets,
+  releaseMatchesTagFilters,
+  releaseMatchesType,
+  releaseScanLimit,
+  releaseTagMatchesAny,
+  RELEASE_SCAN_WINDOW,
   resolveMirrorOptions,
   resolveOrganizationSkipForks,
+  splitReleaseTagEntries,
   STARRED_CLAMPED_KEYS,
   UI_MIRROR_OVERRIDE_KEYS,
 } from "./mirror-overrides";
@@ -560,7 +575,7 @@ describe("mirrorOptionsToFlags - client/server shape contract", () => {
       mapDbToUiConfig(dbConfig).mirrorOptions
     );
 
-    const stored = dbConfig.giteaConfig as Record<string, boolean>;
+    const stored = dbConfig.giteaConfig as unknown as Record<string, boolean>;
     expect(flags.lfs).toBe(stored.lfs);
     expect(flags.wiki).toBe(stored.wiki);
     expect(flags.mirrorIssues).toBe(stored.mirrorIssues);
@@ -1221,5 +1236,537 @@ describe("organization skip forks policy", () => {
       repository: makeRepo({ mirrorOverrides: { skipForks: true } as any }),
     });
     expect((resolved as any).skipForks).toBeUndefined();
+  });
+});
+
+describe("release type filter", () => {
+  describe("normalizeReleaseType", () => {
+    test("accepts the two known values", () => {
+      expect(normalizeReleaseType("all")).toBe("all");
+      expect(normalizeReleaseType("stable")).toBe("stable");
+    });
+
+    test("folds case and padding so a hand-written env var works", () => {
+      expect(normalizeReleaseType("Stable")).toBe("stable");
+      expect(normalizeReleaseType("  STABLE  ")).toBe("stable");
+    });
+
+    test("rejects unknown words and non-strings", () => {
+      expect(normalizeReleaseType("main")).toBeUndefined();
+      expect(normalizeReleaseType("beta")).toBeUndefined();
+      // The kind filter never offered pre-releases on their own, but a value
+      // saved while it did must fall through to the next tier rather than pin
+      // something the mirror no longer does.
+      expect(normalizeReleaseType("prerelease")).toBeUndefined();
+      expect(normalizeReleaseType("")).toBeUndefined();
+      expect(normalizeReleaseType(true)).toBeUndefined();
+      expect(normalizeReleaseType(1)).toBeUndefined();
+      expect(normalizeReleaseType(null)).toBeUndefined();
+      expect(normalizeReleaseType(undefined)).toBeUndefined();
+    });
+  });
+
+  describe("releaseMatchesType", () => {
+    test("all accepts every release", () => {
+      expect(releaseMatchesType({ prerelease: true }, "all")).toBe(true);
+      expect(releaseMatchesType({ prerelease: false }, "all")).toBe(true);
+      expect(releaseMatchesType({}, "all")).toBe(true);
+    });
+
+    test("stable keeps everything the source does not flag", () => {
+      expect(releaseMatchesType({ prerelease: false }, "stable")).toBe(true);
+      expect(releaseMatchesType({ prerelease: true }, "stable")).toBe(false);
+    });
+
+    test("a release with no flag counts as a normal release", () => {
+      // Dropping everything because a source omits the flag would silently
+      // empty a mirror, so unknown is treated as "not a pre-release".
+      expect(releaseMatchesType({}, "stable")).toBe(true);
+      expect(releaseMatchesType({ prerelease: null }, "stable")).toBe(true);
+    });
+
+    test("a filter splits a newest-first list", () => {
+      const releases = [
+        { prerelease: true },
+        { prerelease: false },
+        { prerelease: true },
+        {},
+      ];
+      expect(releases.filter((r) => releaseMatchesType(r, "stable"))).toHaveLength(2);
+      expect(releases.filter((r) => releaseMatchesType(r, "all"))).toHaveLength(4);
+    });
+  });
+
+  describe("releaseScanLimit", () => {
+    test("without a filter the limit is the window", () => {
+      expect(releaseScanLimit(10, "all")).toBe(10);
+    });
+
+    test("a filter looks back at least the scan window", () => {
+      expect(releaseScanLimit(3, "stable")).toBe(RELEASE_SCAN_WINDOW);
+      expect(releaseScanLimit(1, "stable")).toBe(RELEASE_SCAN_WINDOW);
+    });
+
+    test("a tag filter widens the window the same way", () => {
+      expect(releaseScanLimit(1, "all", true)).toBe(RELEASE_SCAN_WINDOW);
+      expect(releaseScanLimit(1, "all", false)).toBe(1);
+    });
+
+    test("a limit bigger than the window still wins", () => {
+      expect(releaseScanLimit(RELEASE_SCAN_WINDOW + 50, "stable")).toBe(
+        RELEASE_SCAN_WINDOW + 50
+      );
+    });
+  });
+
+  describe("release tag patterns", () => {
+    test("normalizeReleaseTagPatterns trims, dedupes and drops junk entries", () => {
+      expect(
+        normalizeReleaseTagPatterns(["  v1.0  ", "", 5, null, "v1.0", "V1.0", "rc"])
+      ).toEqual(["v1.0", "rc"]);
+    });
+
+    test("an empty or unusable list is absent, not an empty pin", () => {
+      // Clearing the box means inherit, so an empty list has to fall through to
+      // the next tier rather than pinning "no patterns" here.
+      expect(normalizeReleaseTagPatterns([])).toBeUndefined();
+      expect(normalizeReleaseTagPatterns(["", "  "])).toBeUndefined();
+      expect(normalizeReleaseTagPatterns("v*")).toBeUndefined();
+      expect(normalizeReleaseTagPatterns(null)).toBeUndefined();
+      expect(normalizeReleaseTagPatterns(undefined)).toBeUndefined();
+    });
+
+    test("over-long patterns are dropped and the list is capped", () => {
+      expect(
+        normalizeReleaseTagPatterns(["x".repeat(MAX_RELEASE_TAG_PATTERN_LENGTH + 1)])
+      ).toBeUndefined();
+      const many = Array.from(
+        { length: MAX_RELEASE_TAG_PATTERNS + 5 },
+        (_, index) => `v${index}`
+      );
+      expect(normalizeReleaseTagPatterns(many)).toHaveLength(MAX_RELEASE_TAG_PATTERNS);
+    });
+
+    test("a plain pattern is a whole-tag wildcard, case-insensitive", () => {
+      expect(compileReleaseTagPattern("*-rc.*")?.test("V1.0-rc.1")).toBe(true);
+      expect(compileReleaseTagPattern("*-rc.*")?.test("v1.0.0")).toBe(false);
+      expect(compileReleaseTagPattern("?")?.test("a")).toBe(true);
+      expect(compileReleaseTagPattern("?")?.test("ab")).toBe(false);
+      expect(compileReleaseTagPattern("RC")?.test("rc")).toBe(true);
+    });
+
+    test("a wildcard cannot start or end in the middle of a tag", () => {
+      expect(compileReleaseTagPattern("rc")?.test("v1.0-rc.1")).toBe(false);
+      expect(compileReleaseTagPattern("*rc*")?.test("v1.0-rc.1")).toBe(true);
+    });
+
+    test("dots and brackets are literal in a glob", () => {
+      expect(compileReleaseTagPattern("v1.0")?.test("v1.0")).toBe(true);
+      expect(compileReleaseTagPattern("v1.0")?.test("v1x0")).toBe(false);
+      expect(compileReleaseTagPattern("[bet]")?.test("[bet]")).toBe(true);
+      expect(compileReleaseTagPattern("[bet]")?.test("b")).toBe(false);
+    });
+
+    test("the slash form is a regular expression", () => {
+      const strict = compileReleaseTagPattern("/^v\\d+\\.\\d+\\.\\d+$/");
+      expect(strict?.test("v1.2.3")).toBe(true);
+      expect(strict?.test("v1.2.3-rc.1")).toBe(false);
+      expect(compileReleaseTagPattern("/rc/")?.test("v2.0-rc2")).toBe(true);
+    });
+
+    test("a regex keeps its own flags but always ignores case", () => {
+      expect(compileReleaseTagPattern("/^V\\d+$/i")?.test("v7")).toBe(true);
+      expect(compileReleaseTagPattern("/^V\\d+$/")?.test("v7")).toBe(true);
+    });
+
+    test("a pattern that cannot compile is dropped rather than thrown", () => {
+      // One typo in a stored pattern must not stop a mirror run.
+      expect(compileReleaseTagPattern("/v1(/")).toBeNull();
+      expect(compileReleaseTagPattern("")).toBeNull();
+      expect(compileReleaseTagPattern(true)).toBeNull();
+      expect(compileReleaseTagPatterns(["v*", "/v1(/", ""])).toHaveLength(1);
+    });
+
+    test("an unterminated slash pattern is rejected, not treated as a glob", () => {
+      // /... with no closing slash is an unfinished regex. Globbing it would
+      // store a pattern that silently matches nothing.
+      expect(compileReleaseTagPattern("/^v\\d{1")).toBeNull();
+      expect(compileReleaseTagPatterns(["/^v\\d{1"])).toHaveLength(0);
+    });
+
+    describe("splitReleaseTagEntries", () => {
+      test("splits plain globs on commas and trims away empty entries", () => {
+        expect(splitReleaseTagEntries(" v* , *-rc.* ,, ")).toEqual(["v*", "*-rc.*"]);
+      });
+
+      test("keeps commas inside the regex form intact", () => {
+        // The bug this guards: a regex quantifier like {1,3} split into two
+        // literal globs that match nothing, silently dropping every release.
+        const entries = splitReleaseTagEntries("/^v\\d{1,3}\\.\\d+$/, v2.*");
+        expect(entries).toEqual(["/^v\\d{1,3}\\.\\d+$/", "v2.*"]);
+        expect(compileReleaseTagPattern(entries[0])?.test("v123.4")).toBe(true);
+        expect(compileReleaseTagPattern(entries[0])?.test("v1234.4")).toBe(false);
+        expect(compileReleaseTagPattern(entries[1])?.test("v2.0")).toBe(true);
+      });
+
+      test("a backslash keeps an escaped slash from closing the regex early", () => {
+        expect(splitReleaseTagEntries("/a\\/b,c/, d")).toEqual(["/a\\/b,c/", "d"]);
+      });
+
+      test("an unterminated regex swallows the rest so the compile step flags it", () => {
+        const entries = splitReleaseTagEntries("/foo, /bar");
+        expect(entries).toEqual(["/foo, /bar"]);
+        expect(compileReleaseTagPattern(entries[0])).toBeNull();
+      });
+    });
+
+    test("include restricts, exclude wins when both name a tag", () => {
+      const include = compileReleaseTagPatterns(["v*"]);
+      const exclude = compileReleaseTagPatterns(["*-rc.*"]);
+      expect(releaseMatchesTagFilters("v1.2.3", include, exclude)).toBe(true);
+      expect(releaseMatchesTagFilters("next-1.2", include, exclude)).toBe(false);
+      expect(releaseMatchesTagFilters("v1.0-rc.1", include, exclude)).toBe(false);
+    });
+
+    test("no patterns means every tag passes", () => {
+      expect(releaseMatchesTagFilters("anything", [], [])).toBe(true);
+      expect(releaseTagMatchesAny("v1", [])).toBe(false);
+    });
+
+    test("a release with no tag name still evaluates", () => {
+      expect(releaseMatchesTagFilters("", compileReleaseTagPatterns(["*"]), [])).toBe(true);
+      expect(releaseMatchesTagFilters("", compileReleaseTagPatterns(["v*"]), [])).toBe(false);
+    });
+  });
+
+  describe("release tag pattern tiers and overrides", () => {
+    test("no tier means no filter", () => {
+      const resolved = resolveMirrorOptions({
+        config: makeConfig({ mirrorReleases: true }),
+        repository: makeRepo(),
+      });
+      expect(resolved.releaseIncludeTags).toEqual([]);
+      expect(resolved.releaseExcludeTags).toEqual([]);
+    });
+
+    test("organization beats global, repository beats organization", () => {
+      const config = makeConfig({
+        mirrorReleases: true,
+        releaseExcludeTags: ["*-rc.*"],
+      });
+
+      expect(
+        resolveMirrorOptions({ config, repository: makeRepo() }).releaseExcludeTags
+      ).toEqual(["*-rc.*"]);
+
+      expect(
+        resolveMirrorOptions({
+          config,
+          repository: makeRepo(),
+          orgOverrides: { releaseExcludeTags: ["*-beta.*"] },
+        }).releaseExcludeTags
+      ).toEqual(["*-beta.*"]);
+
+      expect(
+        resolveMirrorOptions({
+          config,
+          repository: makeRepo({
+            mirrorOverrides: { releaseExcludeTags: ["*-alpha.*"] },
+          }),
+          orgOverrides: { releaseExcludeTags: ["*-beta.*"] },
+        }).releaseExcludeTags
+      ).toEqual(["*-alpha.*"]);
+    });
+
+    test("an empty repository list inherits rather than clearing", () => {
+      // The documented consequence of "an empty list is not a pin": a repository
+      // cannot switch off a pattern its organization set.
+      expect(
+        resolveMirrorOptions({
+          config: makeConfig({ mirrorReleases: true, releaseExcludeTags: ["*-rc.*"] }),
+          repository: makeRepo({ mirrorOverrides: { releaseExcludeTags: [] } }),
+        }).releaseExcludeTags
+      ).toEqual(["*-rc.*"]);
+    });
+
+    test("include and exclude resolve independently of each other", () => {
+      const resolved = resolveMirrorOptions({
+        config: makeConfig({ mirrorReleases: true, releaseIncludeTags: ["v*"] }),
+        repository: makeRepo({
+          mirrorOverrides: { releaseExcludeTags: ["*-rc.*"] },
+        }),
+      });
+      expect(resolved.releaseIncludeTags).toEqual(["v*"]);
+      expect(resolved.releaseExcludeTags).toEqual(["*-rc.*"]);
+    });
+
+    test("junk entries are dropped one at a time, not the whole list", () => {
+      expect(
+        resolveMirrorOptions({
+          config: makeConfig({ mirrorReleases: true }),
+          repository: makeRepo({
+            mirrorOverrides: { releaseIncludeTags: ["v*", 7, "", "V*", null] },
+          }),
+        }).releaseIncludeTags
+      ).toEqual(["v*"]);
+    });
+
+    test("a pinned pattern list counts as an override", () => {
+      expect(hasMirrorOverrides({ releaseExcludeTags: ["v*"] })).toBe(true);
+      expect(listOverriddenKeys({ releaseIncludeTags: ["v*"] })).toEqual([
+        "releaseIncludeTags",
+      ]);
+    });
+
+    test("empty and junk pattern lists do not count", () => {
+      expect(hasMirrorOverrides({ releaseIncludeTags: [] })).toBe(false);
+      expect(hasMirrorOverrides({ releaseExcludeTags: null })).toBe(false);
+      expect(listOverriddenKeys({ releaseExcludeTags: [7, ""] })).toEqual([]);
+    });
+
+    test("normalizeMirrorOverrides keeps the usable patterns", () => {
+      expect(
+        normalizeMirrorOverrides({ releaseIncludeTags: [" v* ", "v*", 5] })
+      ).toEqual({ releaseIncludeTags: ["v*"] });
+      expect(normalizeMirrorOverrides({ releaseIncludeTags: [] })).toBeNull();
+    });
+
+    test("a junk pattern entry does not take the rest of the overrides with it", () => {
+      expect(
+        parseMirrorOverrides({ releaseIncludeTags: ["v*", 7], lfs: false })
+      ).toEqual({ releaseIncludeTags: ["v*", 7], lfs: false });
+      expect(
+        normalizeMirrorOverrides({ releaseIncludeTags: ["v*", 7], lfs: false })
+      ).toEqual({ releaseIncludeTags: ["v*"], lfs: false });
+    });
+
+    test("the pattern keys are their own group, with labels", () => {
+      expect(MIRROR_OVERRIDE_PATTERN_KEYS).toEqual([
+        "releaseIncludeTags",
+        "releaseExcludeTags",
+      ]);
+      expect(MIRROR_OVERRIDE_KEYS).not.toContain("releaseIncludeTags");
+      expect(MIRROR_OVERRIDE_LIMIT_KEYS).not.toContain("releaseExcludeTags");
+      expect(MIRROR_OVERRIDE_CHOICE_KEYS).not.toContain("releaseExcludeTags");
+      for (const key of MIRROR_OVERRIDE_PATTERN_KEYS) {
+        expect(MIRROR_OVERRIDE_LABELS[key]).toBeTruthy();
+      }
+    });
+
+    test("mirrorOptionsToFlags exposes the lists for the dialog hints", () => {
+      expect(mirrorOptionsToFlags({ mirrorReleases: true }).releaseIncludeTags).toEqual([]);
+      expect(
+        mirrorOptionsToFlags({ releaseExcludeTags: ["*-rc.*"] }).releaseExcludeTags
+      ).toEqual(["*-rc.*"]);
+    });
+
+    test("the pattern boxes are gated exactly like the release limit", () => {
+      const releasesOff = getMirrorOverrideGating({
+        targetKind: "repository",
+        effective: { mirrorReleases: false },
+      });
+      expect(releasesOff.releaseIncludeTags).toBe(MIRROR_GATING_REASONS.releasesOff);
+      expect(releasesOff.releaseExcludeTags).toBe(MIRROR_GATING_REASONS.releasesOff);
+
+      const starred = getMirrorOverrideGating({
+        targetKind: "repository",
+        isStarred: true,
+        starredCodeOnly: true,
+        effective: { mirrorReleases: true },
+      });
+      expect(starred.releaseIncludeTags).toBe(MIRROR_GATING_REASONS.starredCodeOnly);
+
+      const pushTarget = getMirrorOverrideGating({
+        targetKind: "repository",
+        effective: { mirrorReleases: true },
+        destinationProvider: "gitlab",
+      });
+      expect(pushTarget.releaseIncludeTags).toBe(MIRROR_GATING_REASONS.pushTarget);
+      expect(pushTarget.releaseExcludeTags).toBe(MIRROR_GATING_REASONS.pushTarget);
+
+      const editable = getMirrorOverrideGating({
+        targetKind: "organization",
+        effective: { mirrorReleases: true },
+      });
+      expect(editable.releaseIncludeTags).toBeUndefined();
+      expect(editable.releaseExcludeTags).toBeUndefined();
+    });
+  });
+
+  describe("resolveMirrorOptions", () => {
+    test("defaults to every release when no tier pins a type", () => {
+      const resolved = resolveMirrorOptions({
+        config: makeConfig({ mirrorReleases: true }),
+        repository: makeRepo(),
+      });
+      expect(resolved.releaseType).toBe(DEFAULT_RELEASE_TYPE);
+      expect(resolved.releaseType).toBe("all");
+    });
+
+    test("the global value applies when nothing overrides it", () => {
+      const resolved = resolveMirrorOptions({
+        config: makeConfig({ mirrorReleases: true, releaseType: "stable" }),
+        repository: makeRepo(),
+      });
+      expect(resolved.releaseType).toBe("stable");
+    });
+
+    test("organization beats global, repository beats organization", () => {
+      const config = makeConfig({ mirrorReleases: true, releaseType: "all" });
+
+      expect(
+        resolveMirrorOptions({
+          config,
+          repository: makeRepo(),
+          orgOverrides: { releaseType: "stable" },
+        }).releaseType
+      ).toBe("stable");
+
+      expect(
+        resolveMirrorOptions({
+          config,
+          repository: makeRepo({ mirrorOverrides: { releaseType: "all" } }),
+          orgOverrides: { releaseType: "stable" },
+        }).releaseType
+      ).toBe("all");
+    });
+
+    test("null in an override means inherit", () => {
+      const resolved = resolveMirrorOptions({
+        config: makeConfig({ mirrorReleases: true, releaseType: "stable" }),
+        repository: makeRepo({ mirrorOverrides: { releaseType: null } }),
+        orgOverrides: { releaseType: null },
+      });
+      expect(resolved.releaseType).toBe("stable");
+    });
+
+    test("an unusable value falls through to the next tier", () => {
+      const resolved = resolveMirrorOptions({
+        config: makeConfig({ mirrorReleases: true, releaseType: "all" }),
+        repository: makeRepo({ mirrorOverrides: { releaseType: "beta" } }),
+        orgOverrides: { releaseType: "stable" },
+      });
+      expect(resolved.releaseType).toBe("stable");
+    });
+
+    test("a tier with nothing usable lands on the default rather than a filter", () => {
+      const resolved = resolveMirrorOptions({
+        config: makeConfig({ mirrorReleases: true, releaseType: "weekly" }),
+        repository: makeRepo({ mirrorOverrides: { releaseType: "beta" } }),
+      });
+      expect(resolved.releaseType).toBe(DEFAULT_RELEASE_TYPE);
+    });
+
+    test("the release type is independent of the release limit", () => {
+      const resolved = resolveMirrorOptions({
+        config: makeConfig({ mirrorReleases: true, releaseLimit: 3 }),
+        repository: makeRepo({ mirrorOverrides: { releaseType: "stable" } }),
+      });
+      expect(resolved.releaseLimit).toBe(3);
+      expect(resolved.releaseType).toBe("stable");
+    });
+  });
+
+  describe("override helpers", () => {
+    test("a pinned release type counts as an override", () => {
+      expect(hasMirrorOverrides({ releaseType: "stable" })).toBe(true);
+      expect(listOverriddenKeys({ releaseType: "all" })).toEqual(["releaseType"]);
+    });
+
+    test("null and unusable values do not count", () => {
+      expect(hasMirrorOverrides({ releaseType: null })).toBe(false);
+      expect(hasMirrorOverrides({ releaseType: "beta" })).toBe(false);
+      expect(listOverriddenKeys({ releaseType: "beta" })).toEqual([]);
+    });
+
+    test("normalizeMirrorOverrides folds case and drops junk", () => {
+      expect(normalizeMirrorOverrides({ releaseType: "Stable" })).toEqual({
+        releaseType: "stable",
+      });
+      expect(normalizeMirrorOverrides({ releaseType: "beta" })).toBeNull();
+      expect(
+        normalizeMirrorOverrides({ releaseType: null, lfs: true })
+      ).toEqual({ lfs: true });
+    });
+
+    test("a junk release type does not take the rest of the overrides with it", () => {
+      // The stored column is loose on purpose: one bad field must not make the
+      // whole object unparseable and silently drop the LFS opt-out next to it.
+      expect(parseMirrorOverrides({ releaseType: "beta", lfs: false })).toEqual({
+        releaseType: "beta",
+        lfs: false,
+      });
+      expect(normalizeMirrorOverrides({ releaseType: "beta", lfs: false })).toEqual({
+        lfs: false,
+      });
+    });
+
+    test("the choice keys and labels agree", () => {
+      expect(MIRROR_OVERRIDE_CHOICE_KEYS).toEqual(["releaseType"]);
+      for (const key of MIRROR_OVERRIDE_CHOICE_KEYS) {
+        expect(MIRROR_OVERRIDE_LABELS[key]).toBeTruthy();
+      }
+    });
+
+    test("the choice keys are not walked as flags or limits", () => {
+      expect(MIRROR_OVERRIDE_KEYS).not.toContain("releaseType");
+      expect(MIRROR_OVERRIDE_LIMIT_KEYS).not.toContain("releaseType");
+    });
+  });
+
+  describe("mirrorOptionsToFlags", () => {
+    test("defaults to every release when the API sends no type", () => {
+      expect(mirrorOptionsToFlags({ mirrorReleases: true }).releaseType).toBe("all");
+      expect(
+        mirrorOptionsToFlags({ mirrorReleases: true, releaseType: null as any }).releaseType
+      ).toBe("all");
+    });
+
+    test("passes the stored value through", () => {
+      expect(mirrorOptionsToFlags({ releaseType: "stable" }).releaseType).toBe("stable");
+      // A value from a release that no longer offers this kind lands on the
+      // default instead of turning into a filter nothing asked for.
+      expect(mirrorOptionsToFlags({ releaseType: "prerelease" as any }).releaseType).toBe(
+        "all"
+      );
+    });
+  });
+
+  describe("getMirrorOverrideGating", () => {
+    test("the release type is disabled with the release limit when releases are off", () => {
+      const gating = getMirrorOverrideGating({
+        targetKind: "repository",
+        effective: { mirrorReleases: false },
+      });
+      expect(gating.releaseType).toBe(MIRROR_GATING_REASONS.releasesOff);
+      expect(gating.releaseLimit).toBe(MIRROR_GATING_REASONS.releasesOff);
+    });
+
+    test("the release type inherits the starred reason", () => {
+      const gating = getMirrorOverrideGating({
+        targetKind: "repository",
+        isStarred: true,
+        starredCodeOnly: true,
+        effective: { mirrorReleases: true },
+      });
+      expect(gating.releaseType).toBe(MIRROR_GATING_REASONS.starredCodeOnly);
+    });
+
+    test("the release type is editable while releases are on", () => {
+      const gating = getMirrorOverrideGating({
+        targetKind: "organization",
+        effective: { mirrorReleases: true },
+      });
+      expect(gating.releaseType).toBeUndefined();
+    });
+
+    test("a push target disables the release type", () => {
+      const gating = getMirrorOverrideGating({
+        targetKind: "repository",
+        effective: { mirrorReleases: true },
+        destinationProvider: "github",
+      });
+      expect(gating.releaseType).toBe(MIRROR_GATING_REASONS.pushTarget);
+    });
   });
 });

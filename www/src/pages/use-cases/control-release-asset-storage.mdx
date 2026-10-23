@@ -11,7 +11,7 @@ canonical: "https://gitea-mirror.raylabs.io/use-cases/control-release-asset-stor
 
 A GitHub release is a tag, some notes and, usually, a set of attached files: installers, tarballs, container bundles, model weights. The notes and the tag are a few kilobytes. The assets of a project that ships builds for five platforms every two weeks can run to gigabytes per year, and a mirror that copies all of them copies every historical build you will never install.
 
-Gitea Mirror has had a release limit for a while: mirror the newest N releases and skip the rest. Since version 3.30 there is a second, independent limit for assets, so you can keep the notes of every release you mirror and the binaries of only the recent ones.
+Gitea Mirror has had a release limit for a while: mirror the newest N releases and skip the rest. Since version 3.30 there is a second, independent limit for assets, so you can keep the notes of every release you mirror and the binaries of only the recent ones. A third control decides which releases count at all, so a project that ships a beta for every feature does not push the stable builds out of the limit.
 
 ## The two limits
 
@@ -23,6 +23,27 @@ On the **Configuration** page, next to the **Releases** switch in the mirror set
 | Assets for latest | `releaseAssetLimit` | How many of those also get their assets uploaded. Empty means all of them, `0` means notes and tag only, `N` means the newest N. |
 
 Releases are ordered newest first. A release past the asset limit is still created on Gitea with its notes and tag; it just does not get the files. The two limits are independent: "Latest 50, Assets for latest 3" keeps three years of changelog browsable with the last three builds downloadable.
+
+## Which releases count
+
+The **Pre-releases** switch under the two inputs decides which releases are candidates before either limit is applied: leave it on to mirror every release, or turn it off to skip everything the source marks as a pre-release, which is what most people mean by "back up the releases" when a project ships a beta for every feature. The per organization and per repository dialog carries the same choice under its **Releases** row: **All**, **Stable only**, or **Inherit**.
+
+The filter runs first, so **Latest** counts the releases that match. With **Stable only** and **Latest 10** the mirror looks further back than ten releases when it has to, and keeps the ten newest stable ones. Switching the type also prunes: on the next sync the releases of the other kind that are already on Gitea are removed. A release the destination has no pre-release flag for is left alone. Like the two limits, the type can be set per organization and per repository, and **Inherit** in the dialog means the global value.
+
+## Filter by tag name
+
+Plenty of projects ship a release candidate for every feature and never tick the pre-release box, so the type filter cannot tell them apart. **Custom tag rules...** opens a dialog with two lists that can: **Include tags** mirrors only releases whose tag matches, **Exclude tags** skips the ones that do, and an excluded tag wins when both lists name it.
+
+Patterns are comma separated, and each one is either a glob over the whole tag or a regular expression in slashes:
+
+| Pattern | Matches |
+|---|---|
+| `v1.*` | `v1.0.0`, `v1.4.2`, but not `v2.0.0` |
+| `*-rc.*` | `v2.1.0-rc.1`, `2.0-rc2` |
+| `v?` | `v1`, `v2`, but not `v10` |
+| `/^v\d+\.\d+\.\d+$/` | `v1.2.3`, not `v1.2.3-rc.1` or `nightly-20260101` |
+
+Matching ignores case, and a pattern that cannot compile is ignored rather than failing the run. A tag filter widens the search exactly like the type filter does, so **Latest 1** with `v*` still finds the newest real release behind a wall of nightlies. Releases whose tag no longer matches are removed from Gitea on the next sync, and unlike the type filter a tag pattern can clean up releases the destination has no pre-release flag for, because it only needs the tag name.
 
 ## Nothing already uploaded is deleted
 
@@ -36,11 +57,11 @@ Open **Configuration → Connections**, scroll to the mirror settings and make s
 
 ### 2. Override per organization
 
-Some organizations publish big artifacts, others publish none. Open the three-dot menu on an organization row and choose **Mirror options**. Both limits are there next to the switches, with **Inherit** meaning the global value. An organization that ships firmware images can get `0` assets while the rest of your account keeps the default.
+Some organizations publish big artifacts, others publish none. Open the three-dot menu on an organization row and choose **Mirror options**. The dialog has two tabs; the release limits and filters are on **Releases**, each with **Inherit** meaning the global value. An organization that ships firmware images can get `0` assets while the rest of your account keeps the default.
 
 ### 3. Override per repository
 
-The same dialog exists on repository rows, and a repository value wins over its organization, which wins over the global default. The dialog labels each row with what inherit resolves to right now, so you can see the effective value before you change it.
+The same dialog exists on repository rows, and a repository value wins over its organization, which wins over the global default. Each row there is labelled with what inherit resolves to right now, so you can see the effective value before you change it.
 
 ### 4. Environment
 
@@ -50,9 +71,12 @@ For deployments configured from the environment:
 MIRROR_RELEASES=true
 RELEASE_LIMIT=25
 RELEASE_ASSET_LIMIT=3     # unset for all, 0 for notes only
+RELEASE_TYPE=stable       # all or stable
+RELEASE_INCLUDE_TAGS=v*   # comma separated globs or /regex/
+RELEASE_EXCLUDE_TAGS=*-rc.*
 ```
 
-`RELEASE_ASSET_LIMIT` seeds the global setting on first boot, the same way the other mirror options do. The [environment variables page](/docs/environment-variables/) lists the rest.
+`RELEASE_ASSET_LIMIT`, `RELEASE_TYPE` and the two tag lists seed the global settings on first boot, the same way the other mirror options do. The [environment variables page](/docs/environment-variables/) lists the rest.
 
 ## Doing the disk math
 
@@ -68,7 +92,11 @@ Releases are read from the GitHub API. For GitLab and Gitea or Forgejo sources t
 
 ### Does lowering the release limit delete releases on Gitea?
 
-No. Neither limit deletes anything. Releases and assets that already exist stay until you remove them in Gitea.
+Yes for the release limit, no for the asset limit. The release limit is a retention setting: on the next sync the mirror removes the oldest releases past the newest N. The asset limit only decides whether a sync uploads, and lowering it never removes assets that already reached Gitea.
+
+### Can I skip beta and release candidate builds?
+
+Turn the **Pre-releases** switch off, or pick **Stable only** in the repository's **Mirror options**. Everything the source marks as a pre-release is then skipped, and the pre-releases already on Gitea are removed on the next sync.
 
 ### Do assets sync again if I raise the limit?
 

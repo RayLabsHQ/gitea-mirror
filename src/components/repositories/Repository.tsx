@@ -101,11 +101,14 @@ export default function Repository() {
 
   // Create a stable callback using useCallback
   const handleNewMessage = useCallback((data: MirrorJob) => {
+    // A "warning" entry is an activity alert, never a repository status.
+    const status = data.status;
+    if (status === "warning") return;
     if (data.repositoryId) {
       setRepositories((prevRepos) =>
         prevRepos.map((repo) =>
           repo.id === data.repositoryId
-            ? { ...repo, status: data.status, details: data.details }
+            ? { ...repo, status, details: data.details }
             : repo
         )
       );

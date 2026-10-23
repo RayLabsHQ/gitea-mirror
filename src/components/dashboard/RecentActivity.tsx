@@ -29,6 +29,8 @@ function activityIcon(status: MirrorJob["status"]) {
       return { Icon: Sparkles, color: "text-muted-foreground" };
     case "failed":
       return { Icon: TriangleAlert, color: "text-red-500" };
+    case "warning":
+      return { Icon: TriangleAlert, color: "text-amber-500" };
     default:
       return { Icon: Activity, color: "text-muted-foreground" };
   }
