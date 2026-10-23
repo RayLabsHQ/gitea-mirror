@@ -23,6 +23,17 @@ docker scout cves --vex-location .vex --vex-author developer@arunavoray.dev \
   --only-vex-affected ghcr.io/raylabshq/gitea-mirror:latest
 ```
 
+## Product IDs
+
+Each statement lists the image under every name Scout scans it as. A docker
+package URL carries the registry in the `repository_url` qualifier, and one
+without it means Docker Hub, so the published image needs
+`pkg:docker/raylabshq/gitea-mirror?repository_url=ghcr.io`. Writing the
+registry into the path (`pkg:docker/ghcr.io/raylabshq/gitea-mirror`) never
+matches. The PR scan of the locally built `gitea-mirror:scan` matches
+`pkg:docker/gitea-mirror`. Leaving the version out applies a statement to
+every tag.
+
 ## When to remove a statement
 
 Delete the statement once the Debian package it covers is fixed in the base
