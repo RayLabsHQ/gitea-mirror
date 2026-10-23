@@ -58,11 +58,12 @@
     "sharp": "^0.35.5",
     "svgo": "^4.1.0",
     "source-map-js": "^1.2.2",
-    "http-cache-semantics": "^4.3.0"
+    "http-cache-semantics": "^4.3.0",
+    "vite": "~8.1.6"
   },
   "dependencies": {
     "@astrojs/mdx": "^7.0.3",
-    "@astrojs/node": "^11.1.5",
+    "@astrojs/node": "^11.1.6",
     "@astrojs/react": "^6.0.1",
     "@better-auth/api-key": "1.7.2",
     "@better-auth/oauth-provider": "1.7.2",
@@ -93,7 +94,7 @@
     "@types/canvas-confetti": "^1.9.0",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
-    "astro": "^7.2.8",
+    "astro": "^7.3.5",
     "bcryptjs": "^3.0.3",
     "better-auth": "1.7.2",
     "buffer": "^6.0.3",
