@@ -268,6 +268,7 @@ export function OrganizationList({
       }}
       targetKind="organization"
       targetName={overridesTarget?.name ?? ""}
+      targetId={overridesTarget?.id ?? null}
       value={overridesTarget?.mirrorOverrides ?? null}
       destinationProvider={giteaConfig?.provider}
       inheritedFrom={{

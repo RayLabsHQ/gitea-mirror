@@ -1054,6 +1054,9 @@ export async function syncGiteaRepoEnhanced({
                 giteaRepoName: repoName,
                 releaseLimit: mirrorOptions.releaseLimit,
                 releaseAssetLimit: mirrorOptions.releaseAssetLimit,
+                releaseType: mirrorOptions.releaseType,
+                releaseIncludeTags: mirrorOptions.releaseIncludeTags,
+                releaseExcludeTags: mirrorOptions.releaseExcludeTags,
               });
               mirrored = true;
             }
@@ -1066,14 +1069,17 @@ export async function syncGiteaRepoEnhanced({
               repository,
               // Carries that instance's own decrypted token, so the release
               // listing and the asset downloads authenticate against it.
-              connection: sourceConnectionFromSource(repoSource, {
-                userId: config.userId,
-              }),
-              giteaOwner: repoOwner,
-              giteaRepoName: repoName,
-              releaseLimit: mirrorOptions.releaseLimit,
-              releaseAssetLimit: mirrorOptions.releaseAssetLimit,
-            });
+                connection: sourceConnectionFromSource(repoSource, {
+                  userId: config.userId,
+                }),
+                giteaOwner: repoOwner,
+                giteaRepoName: repoName,
+                releaseLimit: mirrorOptions.releaseLimit,
+                releaseAssetLimit: mirrorOptions.releaseAssetLimit,
+                releaseType: mirrorOptions.releaseType,
+                releaseIncludeTags: mirrorOptions.releaseIncludeTags,
+                releaseExcludeTags: mirrorOptions.releaseExcludeTags,
+              });
             mirrored = true;
           } else {
             console.warn(

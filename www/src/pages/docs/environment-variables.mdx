@@ -161,6 +161,9 @@ Only used when `DESTINATION_PROVIDER` is `github` or `gitlab`.
 | `MIRROR_MILESTONES` | `false` | Mirror milestones. |
 | `MIRROR_RELEASES` | `false` | Mirror GitHub releases along with their assets. |
 | `RELEASE_LIMIT` | `10` | Maximum releases mirrored per repository, newest first. |
+| `RELEASE_TYPE` | `all` | Which releases are candidates: `all` or `stable` (skip what the source marks as a pre-release). With a filter active the limit counts the releases that match, and releases of the other kind are removed from Gitea on the next sync. |
+| `RELEASE_INCLUDE_TAGS` | empty | Comma separated tag patterns; only releases whose tag matches are mirrored. A pattern is a glob over the whole tag (`v1.*`, `*-rc.*`) or a regular expression in slashes (`/^v\d+\.\d+\.\d+$/`), matched case-insensitively. |
+| `RELEASE_EXCLUDE_TAGS` | empty | Comma separated tag patterns in the same syntax; matching releases are skipped, and an excluded tag wins over `RELEASE_INCLUDE_TAGS`. |
 | `RELEASE_ASSET_LIMIT` | unset | Upload release assets only for the newest N mirrored releases; older releases still get their notes and tag. Unset means assets for every mirrored release, `0` means notes only. Never deletes assets already uploaded. |
 | `MIRROR_WIKI` | `false` | Clone wiki content. |
 | `MIRROR_ISSUE_CONCURRENCY` | `3` | Issues processed in parallel. |

@@ -32,6 +32,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Raised the dependency floors for the advisories published on 2026-09-08: Astro 7.2.8 (remote code execution through AVIF image optimization, and an authorization bypass when stripping the configured base), @xmldom/xmldom 0.8.15 (eight parser and serializer issues), sharp 0.35.4 (libheif), svgo 4.1.0 (removeScripts sanitization) and js-yaml 4.3.2 (merge-key CPU use). Applied to both the application and the documentation site.
 
 ### Added
+- Choose which releases count as candidates: every one, or stable releases only
+  - A **Pre-releases** switch sits under the two release numbers in the mirror settings, and the same choice is in the per organization and per repository **Mirror options** dialog, where **Inherit** means the global value
+  - The release controls in the global mirror settings are listed under each other instead of beside the switch, and in the **Mirror options** dialog the release limit, asset limit and tag rules sit directly under the **Releases** row instead of on a separate tab
+  - **Stable only** skips everything the source marks as a pre-release, and the default **All releases** keeps the previous behaviour
+  - The filter runs before the release limit and looks further back first, so "the newest 10" means the newest 10 matching releases rather than whatever survives of the newest 10
+  - The retention pass also removes destination releases the filter excludes; a release the destination reports no pre-release flag for is kept, so an unknown flag never deletes the wrong thing
+  - `RELEASE_TYPE=all|stable` seeds the global default, and no migration is needed because the value lives inside the existing JSON columns
+- Filter mirrored releases by tag name with **Include tags** and **Exclude tags**
+  - **Custom tag rules...** opens a dialog holding the two lists, both in the mirror settings and in the per organization and per repository **Mirror options** dialog, where leaving both empty means the level above
+	- A pattern is a glob over the whole tag (`v*`, `v1.*`, `*-rc.*`, `?` for one character) or a regular expression in slashes (`/^v\d+\.\d+\.\d+$/`), matched case-insensitively; exclude wins when both lists name the same tag, and a pattern that cannot compile is ignored instead of failing the run. Commas inside the slashes belong to the expression (`/^v\d{1,3}\.\d+$/`), in the dialog and in the environment variables alike
+  - This is the filter for projects that ship release candidates without marking them as pre-releases, which the type filter cannot separate
+  - A tag filter widens the release scan like the type filter does, so the limit counts the releases that match, and the retention pass removes destination releases whose tag no longer matches, including ones the destination reports no pre-release flag for
+  - When the filters delete every release the destination had, the activity log shows a highlighted **warning** entry "All releases removed" and the **Sync errors** switch sends the same alert, so an over-broad rule cannot empty the destination silently
+	- The dialog lists the releases the destination already holds and crosses out the ones the draft rules would delete on the next sync, so a pattern can be checked before saving. Opened from a repository it previews that one; from an organization or the global settings it adds a picker over the repositories the rules cover
+  - `RELEASE_INCLUDE_TAGS` and `RELEASE_EXCLUDE_TAGS` seed the global lists; the values live in the existing JSON columns, so no migration is needed
 - Notifications for newly discovered repositories
   - "New repositories discovered" on the Notifications page, with three sub-switches under it: new repositories in your own account, in one of your organizations, and starred repositories
   - The scheduled sync, the boot auto-start and Sync Organization send them once per group with the repositories that were imported; all stars share a single "Starred" alert because their owners are arbitrary, and a long list is cut to the first 10 names plus an "and N more" line

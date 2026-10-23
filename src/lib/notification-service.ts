@@ -370,3 +370,62 @@ export async function triggerNewRepositoriesNotification({
     console.error("[NotificationService] New repository notification failed:", error);
   }
 }
+
+/**
+ * The "every mirrored release was removed" event.
+ *
+ * A tag or type filter change makes the retention pass delete the destination
+ * releases that no longer match. When nothing survives, the sync itself
+ * succeeded but the destination lost every release it had, so nothing else
+ * would alert the user.
+ */
+export function buildAllReleasesRemovedNotificationEvent({
+  repositoryName,
+  destination,
+  removedCount,
+}: {
+  repositoryName: string;
+  destination: string;
+  removedCount: number;
+}): NotificationEvent {
+  const plural = removedCount === 1 ? "" : "s";
+  return {
+    title: `All Releases Removed: ${repositoryName}`,
+    message: [
+      `${removedCount} release${plural} deleted from ${destination} by the release filters; the destination now has none.`,
+      " Check the include/exclude tag patterns and the pre-release setting before the next sync.",
+    ].join(""),
+    type: "sync_error",
+  };
+}
+
+/**
+ * Warns that the release filters emptied a destination that previously had
+ * releases. The existing "Sync errors" switch gates the alert.
+ *
+ * Called fire-and-forget from the retention pass, so it NEVER throws.
+ */
+export async function triggerAllReleasesRemovedNotification(args: {
+  userId: string;
+  repositoryName: string;
+  destination: string;
+  removedCount: number;
+}): Promise<void> {
+  try {
+    if (args.removedCount <= 0) {
+      return;
+    }
+
+    const notificationConfig = await loadNotificationConfig(args.userId);
+
+    if (!notificationConfig?.enabled || !notificationConfig.notifyOnSyncError) {
+      return;
+    }
+
+    const event = buildAllReleasesRemovedNotificationEvent(args);
+
+    await sendNotification(decryptNotificationConfig(notificationConfig), event);
+  } catch (error) {
+    console.error("[NotificationService] All-releases-removed notification failed:", error);
+  }
+}

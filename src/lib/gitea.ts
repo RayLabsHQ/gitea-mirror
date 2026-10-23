@@ -7,7 +7,7 @@ import {
 import { membershipRoleEnum } from "@/types/organizations";
 import { Octokit } from "@octokit/rest";
 import type { Config } from "@/types/config";
-import type { Organization, Repository } from "./db/schema";
+import type { Organization, ReleaseType, Repository } from "./db/schema";
 import { httpPost, httpGet, httpDelete, httpPut, httpPatch } from "./http-client";
 import { createMirrorJob } from "./helpers";
 import { db, organizations, repositories } from "./db";
@@ -31,6 +31,7 @@ import {
   listSources,
   sourceAccessToken,
 } from "./sources";
+import { triggerAllReleasesRemovedNotification } from "./notification-service";
 import { isRateLimitError } from "./rate-limit-gate";
 import { assertMirrorCredentialUpdateSupported } from "./gitea-mirror-credentials";
 import { persistMetadataPassProgress } from "./metadata-progress-store";
@@ -45,9 +46,16 @@ import {
   type MetadataSyncCursor,
 } from "./metadata-state";
 import {
+  compileReleaseTagPattern,
+  compileReleaseTagPatterns,
   normalizeReleaseAssetLimit,
   normalizeReleaseLimit,
+  normalizeReleaseTagPatterns,
+  normalizeReleaseType,
   releaseGetsAssets,
+  releaseMatchesTagFilters,
+  releaseMatchesType,
+  releaseScanLimit,
   resolveMirrorOptionsForRepository,
   resolveOrganizationSkipForks,
   type ResolvedMirrorOptions,
@@ -79,6 +87,9 @@ export async function mirrorRepositoryReleases({
   giteaRepoName,
   releaseLimit,
   releaseAssetLimit,
+  releaseType,
+  releaseIncludeTags,
+  releaseExcludeTags,
 }: {
   config: Partial<Config>;
   repository: Repository;
@@ -91,6 +102,9 @@ export async function mirrorRepositoryReleases({
   giteaRepoName: string;
   releaseLimit?: number;
   releaseAssetLimit?: number | null;
+  releaseType?: ReleaseType;
+  releaseIncludeTags?: string[];
+  releaseExcludeTags?: string[];
 }): Promise<boolean> {
   if (sourceConnection.provider === "github") {
     if (!octokit) {
@@ -108,6 +122,9 @@ export async function mirrorRepositoryReleases({
       giteaRepoName,
       releaseLimit,
       releaseAssetLimit,
+      releaseType,
+      releaseIncludeTags,
+      releaseExcludeTags,
     });
     return true;
   }
@@ -121,6 +138,9 @@ export async function mirrorRepositoryReleases({
       giteaRepoName,
       releaseLimit,
       releaseAssetLimit,
+      releaseType,
+      releaseIncludeTags,
+      releaseExcludeTags,
     });
     return true;
   }
@@ -1168,6 +1188,9 @@ export const mirrorGithubRepoToGitea = async ({
           giteaRepoName: targetRepoName,
           releaseLimit: mirrorOptions.releaseLimit,
           releaseAssetLimit: mirrorOptions.releaseAssetLimit,
+          releaseType: mirrorOptions.releaseType,
+          releaseIncludeTags: mirrorOptions.releaseIncludeTags,
+          releaseExcludeTags: mirrorOptions.releaseExcludeTags,
         });
         if (mirrored) {
           metadataState.components.releases = true;
@@ -1990,6 +2013,9 @@ export async function mirrorGitHubRepoToGiteaOrg({
           giteaRepoName: targetRepoName,
           releaseLimit: mirrorOptions.releaseLimit,
           releaseAssetLimit: mirrorOptions.releaseAssetLimit,
+          releaseType: mirrorOptions.releaseType,
+          releaseIncludeTags: mirrorOptions.releaseIncludeTags,
+          releaseExcludeTags: mirrorOptions.releaseExcludeTags,
         });
         if (mirrored) {
           metadataState.components.releases = true;
@@ -3822,12 +3848,34 @@ type MirrorReleasesParams = {
    * none, `undefined` means resolve it here like the release limit.
    */
   releaseAssetLimit?: number | null;
+  /**
+   * Already-resolved release type: `all` mirrors every release, `stable` only
+   * the ones the source does not flag as a pre-release. `undefined` means
+   * resolve it here like the other two.
+   */
+  releaseType?: ReleaseType;
+  /**
+   * Already-resolved tag patterns narrowing the release type filter further:
+   * `releaseIncludeTags` keeps only tags matching one of them,
+   * `releaseExcludeTags` drops the ones that do. An empty list means no filter.
+   * `undefined` means resolve them here like the other three.
+   */
+  releaseIncludeTags?: string[];
+  releaseExcludeTags?: string[];
 };
 
 /** The same parameters with the source adapter in place of the GitHub client. */
 type MirrorSourceReleasesParams = Omit<MirrorReleasesParams, "octokit"> & {
   source: ReleaseSourceAdapter;
 };
+
+/**
+ * The stored tag patterns that can actually be compiled. Used only for the log
+ * line, so a broken pattern is never named as if it were in effect.
+ */
+function usableTagPatterns(patterns: readonly string[]): string[] {
+  return patterns.filter((pattern) => compileReleaseTagPattern(pattern) !== null);
+}
 
 /**
  * Lock key for one destination repository's releases: the destination base URL
@@ -3988,6 +4036,9 @@ async function mirrorSourceReleasesToGiteaLocked({
   giteaRepoName,
   releaseLimit: releaseLimitOverride,
   releaseAssetLimit: releaseAssetLimitOverride,
+  releaseType: releaseTypeOverride,
+  releaseIncludeTags: releaseIncludeTagsOverride,
+  releaseExcludeTags: releaseExcludeTagsOverride,
 }: MirrorSourceReleasesParams) {
   if (
     !config.giteaConfig?.defaultOwner ||
@@ -4046,14 +4097,66 @@ async function mirrorSourceReleasesToGiteaLocked({
       ? (normalizeReleaseAssetLimit(releaseAssetLimitOverride) ?? null)
       : (await resolveOptions()).releaseAssetLimit;
 
+  // Which releases are candidates at all: every one, or only the ones the source
+  // does not flag as a pre-release.
+  const releaseType =
+    normalizeReleaseType(releaseTypeOverride) ??
+    (await resolveOptions()).releaseType;
+
+  // Tag patterns narrow that further, for the projects that never set the
+  // pre-release flag but tag `v1.2.3-rc.1`. Include keeps only matching tags,
+  // exclude drops matching ones, and exclude wins when both name a tag.
+  const releaseIncludeTags =
+    normalizeReleaseTagPatterns(releaseIncludeTagsOverride) ??
+    (await resolveOptions()).releaseIncludeTags;
+  const releaseExcludeTags =
+    normalizeReleaseTagPatterns(releaseExcludeTagsOverride) ??
+    (await resolveOptions()).releaseExcludeTags;
+
+  const includeTagPatterns = compileReleaseTagPatterns(releaseIncludeTags);
+  const excludeTagPatterns = compileReleaseTagPatterns(releaseExcludeTags);
+  const hasTypeFilter = releaseType !== "all";
+  const hasTagFilter =
+    includeTagPatterns.length > 0 || excludeTagPatterns.length > 0;
+  const hasReleaseFilter = hasTypeFilter || hasTagFilter;
+
   // The source lists its own newest releases; everything below this point is
-  // the same reconciliation whichever host they came from.
-  const limitedReleases = (
-    await source.listReleases(sourceOwner, sourceRepo, releaseLimit)
-  ).slice(0, releaseLimit);
+  // the same reconciliation whichever host they came from. With a filter
+  // active the mirror looks further back first, so "the newest 10" means the
+  // newest 10 matching releases rather than whatever survives of the newest 10.
+  const scanLimit = releaseScanLimit(releaseLimit, releaseType, hasTagFilter);
+  const fetchedReleases = await source.listReleases(sourceOwner, sourceRepo, scanLimit);
+  const matchingReleases = fetchedReleases.filter(
+    (release) =>
+      releaseMatchesType(release, releaseType) &&
+      releaseMatchesTagFilters(
+        release.tag_name,
+        includeTagPatterns,
+        excludeTagPatterns
+      )
+  );
+  const limitedReleases = matchingReleases.slice(0, releaseLimit);
+  const filteredOutCount = fetchedReleases.length - matchingReleases.length;
+
+  // Only the patterns that actually compiled are named in the log, so a broken
+  // one cannot look like it is doing something.
+  const filterDescriptions: string[] = [];
+  if (hasTypeFilter) filterDescriptions.push(`only ${releaseType} releases`);
+  const usableIncludeTags = usableTagPatterns(releaseIncludeTags);
+  const usableExcludeTags = usableTagPatterns(releaseExcludeTags);
+  if (usableIncludeTags.length > 0) {
+    filterDescriptions.push(`only tags matching ${usableIncludeTags.join(", ")}`);
+  }
+  if (usableExcludeTags.length > 0) {
+    filterDescriptions.push(`skipping tags matching ${usableExcludeTags.join(", ")}`);
+  }
 
   console.log(
     `[Releases] Found ${limitedReleases.length} releases (limited to latest ${releaseLimit}; ${
+      filterDescriptions.length > 0
+        ? `${filterDescriptions.join(", ")}; ${filteredOutCount} filtered out`
+        : "any release type"
+    }; ${
       releaseAssetLimit === null
         ? "assets for every release"
         : `assets for the newest ${releaseAssetLimit}`
@@ -4062,7 +4165,10 @@ async function mirrorSourceReleasesToGiteaLocked({
 
   if (limitedReleases.length === 0) {
     console.log(`[Releases] No releases to mirror for ${repository.fullName}`);
-    return;
+    // With a filter active the destination may still hold releases the filter
+    // excludes, and the retention pass below is what removes them, so only the
+    // unfiltered case keeps its historical early exit.
+    if (!hasReleaseFilter) return;
   }
 
   let mirroredCount = 0;
@@ -4265,10 +4371,16 @@ async function mirrorSourceReleasesToGiteaLocked({
     );
   }
 
-  // Enforce release retention limit by removing the oldest excess releases from Gitea
+  // Enforce release retention: first drop the releases the type filter excludes,
+  // then the oldest releases past the limit.
   try {
     // Paginate to fetch ALL Gitea releases (API max is 100 per page)
-    const allGiteaReleases: Array<{ id: number; tag_name: string; created_at: string }> = [];
+    const allGiteaReleases: Array<{
+      id: number;
+      tag_name: string;
+      created_at: string;
+      prerelease?: boolean | null;
+    }> = [];
     let cleanupPage = 1;
     while (true) {
       const pageResponse = await httpGet(
@@ -4290,36 +4402,122 @@ async function mirrorSourceReleasesToGiteaLocked({
       cleanupPage++;
     }
 
-    if (allGiteaReleases.length > releaseLimit) {
-      const excessCount = allGiteaReleases.length - releaseLimit;
+    const giteaBaseUrl = config.giteaConfig.url;
+    const giteaToken = decryptedConfig.giteaConfig.token;
+
+    const deleteGiteaRelease = async (
+      release: { id: number; tag_name: string },
+      reason: string
+    ) => {
+      try {
+        await httpDelete(
+          `${giteaBaseUrl}/api/v1/repos/${repoOwner}/${repoName}/releases/${release.id}`,
+          {
+            Authorization: `token ${giteaToken}`,
+          }
+        );
+        console.log(`[Releases] Deleted ${reason} release: ${release.tag_name}`);
+      } catch (deleteError) {
+        console.error(
+          `[Releases] Failed to delete ${reason} release ${release.tag_name}: ${
+            deleteError instanceof Error ? deleteError.message : String(deleteError)
+          }`
+        );
+      }
+    };
+
+    // Releases the filters exclude are no longer mirror candidates, so they leave
+    // the destination the same way releases past the limit do. A release the
+    // destination did not report a pre-release flag for is kept: guessing which
+    // kind it was risks deleting the wrong one. Tag patterns need no such caveat -
+    // they are judged on the tag name, which every release has.
+    let retainedReleases = allGiteaReleases;
+    if (hasReleaseFilter) {
+      const excluded = allGiteaReleases.filter(
+        (rel) =>
+          !releaseMatchesTagFilters(
+            rel.tag_name ?? "",
+            includeTagPatterns,
+            excludeTagPatterns
+          ) ||
+          (hasTypeFilter &&
+            typeof rel.prerelease === "boolean" &&
+            !releaseMatchesType(rel, releaseType))
+      );
+
+      if (excluded.length > 0) {
+        console.log(
+          `[Releases] Enforcing release filters (${filterDescriptions.join(", ")}): removing ${excluded.length} release(s) in Gitea that do not match`
+        );
+        for (const rel of excluded) {
+          await deleteGiteaRelease(rel, "excluded");
+        }
+
+        const excludedIds = new Set(excluded.map((rel) => rel.id));
+        retainedReleases = allGiteaReleases.filter(
+          (rel) => !excludedIds.has(rel.id)
+        );
+      }
+    }
+
+    // The filters emptied a destination that had releases. The sync itself
+    // succeeded, so no job-failure notification would fire; without this the
+    // user would only notice the gone releases on the Gitea site. The activity
+    // log gets its own row (like the force-push alerts) and the push channels
+    // get the same warning through the "Sync errors" switch.
+    if (allGiteaReleases.length > 0 && retainedReleases.length === 0) {
+      const userId = config.userId ?? repository.userId;
+      const removedCount = allGiteaReleases.length;
+
+      void triggerAllReleasesRemovedNotification({
+        userId,
+        repositoryName: repository.name,
+        destination: `${repoOwner}/${repoName}`,
+        removedCount,
+      });
+
+      // skipNotification keeps the row out of the push notification system:
+      // triggerAllReleasesRemovedNotification covers that side with its own
+      // message. skipDuplicateEvent stops the row's `repo-<id>-warning` key
+      // from swallowing the sync's own completion event on the event stream;
+      // the terminal update already refreshes the activity view. The row uses
+      // the activity-only "warning" status so it stands out from plain syncs.
+      await createMirrorJob({
+        userId,
+        repositoryId: repository.id,
+        repositoryName: repository.name,
+        status: "warning",
+        skipNotification: true,
+        skipDuplicateEvent: true,
+        message: `All releases removed from ${repoOwner}/${repoName}`,
+        details:
+          `${removedCount} release${removedCount === 1 ? "" : "s"} deleted by the release filters; the destination now has none.` +
+          " Check the include/exclude tag patterns and the pre-release setting.",
+      }).catch((activityError) => {
+        console.error(
+          `[Releases] Failed to record the all-releases-removed activity for ${repository.fullName}: ${
+            activityError instanceof Error ? activityError.message : String(activityError)
+          }`
+        );
+      });
+    }
+
+    if (retainedReleases.length > releaseLimit) {
+      const excessCount = retainedReleases.length - releaseLimit;
 
       // Sort by created_at ascending (oldest first) so we delete the oldest excess
-      const sorted = [...allGiteaReleases].sort(
+      const sorted = [...retainedReleases].sort(
         (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
       );
 
       const toDelete = sorted.slice(0, excessCount);
 
       console.log(
-        `[Releases] Enforcing retention limit (${releaseLimit}): ${allGiteaReleases.length} releases found, removing ${toDelete.length} oldest excess release(s)`
+        `[Releases] Enforcing retention limit (${releaseLimit}): ${retainedReleases.length} releases found, removing ${toDelete.length} oldest excess release(s)`
       );
 
       for (const excess of toDelete) {
-        try {
-          await httpDelete(
-            `${config.giteaConfig.url}/api/v1/repos/${repoOwner}/${repoName}/releases/${excess.id}`,
-            {
-              Authorization: `token ${decryptedConfig.giteaConfig.token}`,
-            }
-          );
-          console.log(`[Releases] Deleted excess release: ${excess.tag_name}`);
-        } catch (deleteError) {
-          console.error(
-            `[Releases] Failed to delete excess release ${excess.tag_name}: ${
-              deleteError instanceof Error ? deleteError.message : String(deleteError)
-            }`
-          );
-        }
+        await deleteGiteaRelease(excess, "excess");
       }
     }
   } catch (cleanupError) {

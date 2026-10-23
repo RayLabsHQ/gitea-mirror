@@ -121,6 +121,10 @@ interface OptionRowProps {
   badge?: string;
   /** Control rendered on the right (switch, pill, input...). */
   right?: ReactNode;
+  /** Rendered under the description, e.g. a link that opens a sub-dialog. */
+  subContent?: ReactNode;
+  /** Rows whose control is a stack of fields (two inputs) sit top-aligned. */
+  align?: "center" | "start";
   className?: string;
 }
 
@@ -131,10 +135,18 @@ export function OptionRow({
   info,
   badge,
   right,
+  subContent,
+  align,
   className,
 }: OptionRowProps) {
   return (
-    <div className={cn("flex items-center gap-4", className)}>
+    <div
+      className={cn(
+        "flex gap-4",
+        align === "start" ? "items-start" : "items-center",
+        className
+      )}
+    >
       <div className="flex-1 min-w-0 space-y-1">
         <div className="flex items-center gap-2">
           {Icon && <Icon className="h-3.5 w-3.5 text-muted-foreground" />}
@@ -149,6 +161,7 @@ export function OptionRow({
         {description && (
           <p className="text-[13px] text-muted-foreground">{description}</p>
         )}
+        {subContent}
       </div>
       {right}
     </div>

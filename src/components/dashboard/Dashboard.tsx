@@ -78,11 +78,14 @@ export function Dashboard() {
 
   // Create a stable callback using useCallback
   const handleNewMessage = useCallback((data: MirrorJob) => {
+    // A "warning" entry is an activity alert, never a repository or organization status.
+    const status = data.status;
+    if (status === "warning") return;
     if (data.repositoryId) {
       setRepositories((prevRepos) =>
         prevRepos.map((repo) =>
           repo.id === data.repositoryId
-            ? { ...repo, status: data.status, details: data.details }
+            ? { ...repo, status, details: data.details }
             : repo
         )
       );
@@ -90,7 +93,7 @@ export function Dashboard() {
       setOrganizations((prevOrgs) =>
         prevOrgs.map((org) =>
           org.id === data.organizationId
-            ? { ...org, status: data.status, details: data.details }
+            ? { ...org, status, details: data.details }
             : org
         )
       );
