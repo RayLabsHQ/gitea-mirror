@@ -127,12 +127,15 @@ export const POST: APIRoute = async ({ request, locals }) => {
       )
       .limit(1);
 
+    // The 409 carries the stored record, so a client can go straight to
+    // mirroring it without listing every repository to find the id.
     if (existingRepo && !force) {
       return jsonResponse({
         data: {
           success: false,
           error:
             "Repository with this name and owner already exists for this user",
+          repository: existingRepo,
         },
         status: 409,
       });

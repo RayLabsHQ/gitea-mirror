@@ -574,3 +574,75 @@ describe.skipIf(!isChild)("POST /api/sync/organization public add-org", () => {
     expect(sourceRows).toHaveLength(0);
   });
 });
+
+describe.skipIf(!isChild)("POST /api/sync/organization for integrations", () => {
+  test("a request without role adds the organization as member", async () => {
+    const response = await postOrg({ org: "acme", provider: "gitlab" });
+
+    expect(response.status).toBe(200);
+    expect(insertedOrgRecords).toHaveLength(1);
+    expect(insertedOrgRecords[0].membershipRole).toBe("member");
+  });
+
+  test("an unknown role is rejected with 400 before anything is created", async () => {
+    const response = await postOrg({ org: "acme", role: "maintainer", provider: "gitlab" });
+
+    expect(response.status).toBe(400);
+    const data = await response.json();
+    expect(data.error).toBe("role must be one of member, admin, owner, billing_manager");
+    expect(sourceRows).toHaveLength(0);
+    expect(insertedOrgRecords).toHaveLength(0);
+  });
+
+  test("the 409 for a tracked organization carries its record", async () => {
+    orgRows = [
+      {
+        id: "org-1",
+        userId: "user-1",
+        name: "acme",
+        normalizedName: "acme",
+        membershipRole: "admin",
+        sourceId: null,
+      },
+    ];
+
+    const response = await postOrg({ org: "Acme" });
+
+    expect(response.status).toBe(409);
+    const data = await response.json();
+    expect(data.success).toBe(false);
+    expect(data.organization).toMatchObject({ id: "org-1", name: "acme" });
+  });
+
+  test("force:true keeps the stored role unless the request names one", async () => {
+    sourceRows = [makeSourceRow({ username: "octocat", token: "enc:gh-token" })];
+    orgRows = [
+      {
+        id: "org-1",
+        userId: "user-1",
+        name: "acme",
+        normalizedName: "acme",
+        membershipRole: "owner",
+        sourceId: null,
+      },
+    ];
+
+    const kept = await postOrg({ org: "acme", force: true });
+    expect(kept.status).toBe(200);
+    expect(orgRows[0].membershipRole).toBe("owner");
+
+    const changed = await postOrg({ org: "acme", role: "admin", force: true });
+    expect(changed.status).toBe(200);
+    expect(orgRows[0].membershipRole).toBe("admin");
+  });
+
+  test("an organization the source does not know points at user accounts", async () => {
+    orgMetadataResult = null;
+
+    const response = await postOrg({ org: "torvalds", provider: "github" });
+
+    expect(response.status).toBe(404);
+    const data = await response.json();
+    expect(data.error).toContain("A user account cannot be added as an organization");
+  });
+});

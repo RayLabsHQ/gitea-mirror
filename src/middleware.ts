@@ -11,6 +11,7 @@ import { mintSessionFromHeaders } from './lib/auth-header-bridge';
 import { initializeConfigFromEnv } from './lib/env-config-loader';
 import { db, users } from './lib/db';
 import { getBasePath } from './lib/base-path';
+import { apiNotFoundResponse, isApiNotFoundPage } from './lib/api-not-found';
 
 const ASTRO_INTERNAL_ASSET_PATH_PATTERN = /(["'])\/(_astro\/|_server-islands\/|_image\b)/g;
 
@@ -272,7 +273,11 @@ export const onRequest = defineMiddleware(async (context, next) => {
   }
 
   // Continue with the request
-  const response = await next();
+  let response = await next();
+
+  if (isApiNotFoundPage(context.url.pathname, response)) {
+    response = apiNotFoundResponse(context.request.method, context.url.pathname);
+  }
 
   // Forward any Set-Cookie headers minted by the header-auth bridge
   // onto the outbound response. Done before the early returns below so

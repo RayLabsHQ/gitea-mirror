@@ -33,6 +33,14 @@ A missing, malformed, expired or revoked key gets `401 Unauthorized`:
 { "success": false, "error": "Unauthorized" }
 ```
 
+Send `Content-Type: application/json` on every `POST`, `PUT`, `PATCH` and `DELETE`, also when the call has no body. Without it a script gets `403` with `Cross-site POST form submissions are forbidden`: the app's protection against cross-site form posts treats a write with no content type, or a form content type, as a form unless its `Origin` header matches the app. curl's `-d` sends a form content type unless you set the header.
+
+A path or method that has no endpoint answers `404` with a JSON body naming both, so it reads differently from a `404` for an id or name that was not found:
+
+```json
+{ "success": false, "error": "No API endpoint for GET /api/organizations. Check the path and the HTTP method." }
+```
+
 If the app is served under a path prefix (`BASE_URL=/mirror`), prefix every URL with it: `/mirror/api/...`.
 
 ## Endpoints
@@ -74,6 +82,8 @@ Despite the name it lists every repository the account tracks, whatever the conf
 
 `status` is one of `imported`, `mirroring`, `mirrored`, `failed`, `syncing`, `synced`, `skipped`, `deleted`, `archived`.
 
+`GET /api/repositories/{id}` returns one of them in the same shape as `{ "success": true, "repository": { ... } }`, or `404` when the id is not this account's. Use it to watch a single mirror without fetching the whole list.
+
 ### Add a repository
 
 `POST /api/sync/repository`
@@ -84,14 +94,16 @@ Despite the name it lists every repository the account tracks, whatever the conf
 
 Optional fields: `destinationOrg` to override the destination organization for this repository, and `force: true` to refresh the metadata of a repository that is already tracked.
 
+When the request comes from a pasted URL, also send its host as `host` and its path segments as `path`, for example `["octocat", "hello-world", "tree", "main"]`. The host picks the connected source with that host (`400` when none has it), and the source reads the repository from the segments: GitHub and Gitea take the first two, GitLab takes the nested groups up to `/-/`. `owner` and `repo` are still required.
+
 The repository is looked up on the configured source and added with status `imported`. It is not mirrored until you start a mirror (next call) or the scheduler picks it up.
 
 | Status | Meaning |
 | --- | --- |
 | `200` | Added. `repository.id` is what the mirror call needs. |
-| `400` | `owner` or `repo` missing. |
+| `400` | `owner` or `repo` missing, `host` matches no connected source, or no source is connected. |
 | `404` | No configuration for this account, or the repository does not exist on the source. |
-| `409` | Already tracked. Send `force: true` to refresh it instead. |
+| `409` | Already tracked. `repository` is the stored record, so `repository.id` works as on `200`. Send `force: true` to refresh its metadata instead. |
 
 ### Start a mirror
 
@@ -101,7 +113,7 @@ The repository is looked up on the configured source and added with status `impo
 { "repositoryIds": ["9b2f..."] }
 ```
 
-Starts mirroring in the background and returns straight away. Poll the list endpoint to watch `status` move from `mirroring` to `mirrored` or `failed`.
+Starts mirroring in the background and returns straight away. Poll `GET /api/repositories/{id}`, or the list, to watch `status` move from `mirroring` to `mirrored` or `failed`.
 
 | Status | Meaning |
 | --- | --- |
@@ -116,10 +128,21 @@ Starts mirroring in the background and returns straight away. Poll the list endp
 `POST /api/sync/organization` adds an organization or group the same way:
 
 ```json
-{ "org": "my-org", "role": "member" }
+{ "org": "my-org" }
 ```
 
-`role` is the account's role in that organization (`member`, `admin`, `owner` or `billing_manager`). `409` means it is already tracked; `force: true` refreshes it. Then `POST /api/job/mirror-org` with `{ "organizationIds": ["..."] }` mirrors its repositories.
+`role` is optional. It is the account's role in that organization (`member`, `admin`, `owner` or `billing_manager`) and only labels the organization on the Organizations page. Without it a new organization is added as `member`, and a forced re-add keeps the stored role.
+
+| Status | Meaning |
+| --- | --- |
+| `200` | Added, with every repository the source lists in it. `organization.id` is what the mirror call needs. |
+| `400` | `org` missing, an unknown `role` or `provider`, or no source is connected. |
+| `404` | No configuration for this account, or the source has no organization of that name. A user account is not an organization: add its repositories one at a time with `POST /api/sync/repository`. |
+| `409` | Already tracked. `organization` is the stored record. Send `force: true` to refresh it instead. |
+
+Then `POST /api/job/mirror-org` with `{ "organizationIds": ["..."] }` mirrors its repositories. It takes ids, not names, and answers `404` when none of them belong to this account.
+
+`GET /api/github/organizations` lists every tracked organization with its `id`, `name`, `status` and repository counts. `GET /api/organizations/{id}` returns one as `{ "success": true, "organization": { ... } }`, without the public, private and fork counts, or `404` when the id is not this account's. An organization's `status` turns `mirrored` once every repository in it has been processed; each repository keeps its own `status`.
 
 When several sources are connected, an optional `sourceId` picks which one the organization imports and mirrors from (the first connected source is the default):
 
@@ -143,7 +166,7 @@ Compares what the destination (Gitea or Forgejo) holds with the repositories thi
 { "dryRun": true, "adoptUntracked": false, "resetMissing": false }
 ```
 
-The body is optional and every field defaults to the value above, so an empty `POST` is a dry run. With `dryRun: false`:
+The body is optional and every field defaults to the value above, so an empty `POST` (with the JSON content type, see [Send the key](#send-the-key)) is a dry run. With `dryRun: false`:
 
 - `adoptUntracked: true` creates a row for each untracked mirror from its source URL, so scheduled sync and the cleanup service include it from then on. The row keeps the mirror where it is, even when the strategy would put it elsewhere.
 - `resetMissing: true` sets each missing row back to `imported` so the next mirror run recreates the mirror. Rows are never deleted.
@@ -200,6 +223,8 @@ curl -sS -X POST "$BASE/api/job/mirror-repo" \
   -H "Content-Type: application/json" \
   -d "{\"repositoryIds\":[\"$id\"]}"
 ```
+
+`.repository.id` is set on both `200` and `409`, so the script works the same for a repository that is already tracked.
 
 ## Managing keys from the API
 
