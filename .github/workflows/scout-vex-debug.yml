@@ -26,37 +26,38 @@ jobs:
           python3 - <<'EOF'
           import copy, json, os
           base = json.load(open(".vex/zlib-gz-vacate.vex.json"))
-          zlib_ver = "pkg:deb/debian/zlib@1:1.3.dfsg%2Breally1.3.1-1?os_distro=trixie&os_name=debian&os_version=13"
-          def variant(name, mutate):
+          index = "sha256:80f9cd44224934038a70383b3a14be436414180792397a040d7053cd14be120e"
+          amd64 = "sha256:650a1f68520e93c7ea5be2ea2599649285487abfae408ddc652ee30c46baa9de"
+          def variant(name, products):
               doc = copy.deepcopy(base)
               for st in doc["statements"]:
-                  mutate(st)
+                  st["products"] = [{"@id": p} for p in products]
               os.makedirs(f"vex-{name}", exist_ok=True)
               json.dump(doc, open(f"vex-{name}/zlib.vex.json", "w"), indent=2)
-          variant("a-control", lambda st: None)
-          variant("b-sub-noversion", lambda st: [p.__setitem__("subcomponents", [{"@id": "pkg:deb/debian/zlib"}]) for p in st["products"]])
-          variant("c-sub-version", lambda st: [p.__setitem__("subcomponents", [{"@id": zlib_ver}]) for p in st["products"]])
-          variant("d-tagged-product", lambda st: st.__setitem__("products", [{"@id": "pkg:docker/ghcr.io/raylabshq/gitea-mirror@v3.43.0"}, {"@id": "pkg:docker/raylabshq/gitea-mirror@v3.43.0"}]))
-          variant("e-base-image", lambda st: st.__setitem__("products", st["products"] + [{"@id": "pkg:docker/oven/bun"}, {"@id": "pkg:docker/debian"}, {"@id": "pkg:docker/library/debian"}]))
-          variant("f-new-timestamp", lambda st: st.__setitem__("timestamp", "2026-10-23T00:00:00Z"))
+          variant("g-repo-url", ["pkg:docker/raylabshq/gitea-mirror?repository_url=ghcr.io"])
+          variant("h-repo-url-tag", ["pkg:docker/raylabshq/gitea-mirror@v3.43.0?repository_url=ghcr.io"])
+          variant("i-repo-url-full", ["pkg:docker/raylabshq/gitea-mirror?repository_url=ghcr.io%2Fraylabshq%2Fgitea-mirror"])
+          variant("j-digest-index", [f"pkg:docker/raylabshq/gitea-mirror@{index}?repository_url=ghcr.io"])
+          variant("k-digest-amd64", [f"pkg:docker/raylabshq/gitea-mirror@{amd64}?repository_url=ghcr.io&platform=linux%2Famd64"])
           EOF
           ls -d vex-*
 
-      - name: a-control
+      - name: g-repo-url
         uses: docker/scout-action@bacf462e8d090c09660de30a6ccc718035f961e3 # v1.20.4
-        with: { command: cves, image: "ghcr.io/raylabshq/gitea-mirror:v3.43.0", only-severities: "critical,high", exit-code: false, summary: false, write-comment: false, vex-location: vex-a-control, vex-author: developer@arunavoray.dev, only-vex-affected: true }
-      - name: b-sub-noversion
+        with: { command: cves, image: "ghcr.io/raylabshq/gitea-mirror:v3.43.0", only-severities: "critical,high", exit-code: false, summary: false, write-comment: false, vex-location: vex-g-repo-url, vex-author: developer@arunavoray.dev, only-vex-affected: true, sarif-file: g.sarif }
+      - name: h-repo-url-tag
         uses: docker/scout-action@bacf462e8d090c09660de30a6ccc718035f961e3 # v1.20.4
-        with: { command: cves, image: "ghcr.io/raylabshq/gitea-mirror:v3.43.0", only-severities: "critical,high", exit-code: false, summary: false, write-comment: false, vex-location: vex-b-sub-noversion, vex-author: developer@arunavoray.dev, only-vex-affected: true }
-      - name: c-sub-version
+        with: { command: cves, image: "ghcr.io/raylabshq/gitea-mirror:v3.43.0", only-severities: "critical,high", exit-code: false, summary: false, write-comment: false, vex-location: vex-h-repo-url-tag, vex-author: developer@arunavoray.dev, only-vex-affected: true }
+      - name: i-repo-url-full
         uses: docker/scout-action@bacf462e8d090c09660de30a6ccc718035f961e3 # v1.20.4
-        with: { command: cves, image: "ghcr.io/raylabshq/gitea-mirror:v3.43.0", only-severities: "critical,high", exit-code: false, summary: false, write-comment: false, vex-location: vex-c-sub-version, vex-author: developer@arunavoray.dev, only-vex-affected: true }
-      - name: d-tagged-product
+        with: { command: cves, image: "ghcr.io/raylabshq/gitea-mirror:v3.43.0", only-severities: "critical,high", exit-code: false, summary: false, write-comment: false, vex-location: vex-i-repo-url-full, vex-author: developer@arunavoray.dev, only-vex-affected: true }
+      - name: j-digest-index
         uses: docker/scout-action@bacf462e8d090c09660de30a6ccc718035f961e3 # v1.20.4
-        with: { command: cves, image: "ghcr.io/raylabshq/gitea-mirror:v3.43.0", only-severities: "critical,high", exit-code: false, summary: false, write-comment: false, vex-location: vex-d-tagged-product, vex-author: developer@arunavoray.dev, only-vex-affected: true }
-      - name: e-base-image
+        with: { command: cves, image: "ghcr.io/raylabshq/gitea-mirror:v3.43.0", only-severities: "critical,high", exit-code: false, summary: false, write-comment: false, vex-location: vex-j-digest-index, vex-author: developer@arunavoray.dev, only-vex-affected: true }
+      - name: k-digest-amd64
         uses: docker/scout-action@bacf462e8d090c09660de30a6ccc718035f961e3 # v1.20.4
-        with: { command: cves, image: "ghcr.io/raylabshq/gitea-mirror:v3.43.0", only-severities: "critical,high", exit-code: false, summary: false, write-comment: false, vex-location: vex-e-base-image, vex-author: developer@arunavoray.dev, only-vex-affected: true }
-      - name: f-new-timestamp
-        uses: docker/scout-action@bacf462e8d090c09660de30a6ccc718035f961e3 # v1.20.4
-        with: { command: cves, image: "ghcr.io/raylabshq/gitea-mirror:v3.43.0", only-severities: "critical,high", exit-code: false, summary: false, write-comment: false, vex-location: vex-f-new-timestamp, vex-author: developer@arunavoray.dev, only-vex-affected: true }
+        with: { command: cves, image: "ghcr.io/raylabshq/gitea-mirror:v3.43.0", only-severities: "critical,high", exit-code: false, summary: false, write-comment: false, vex-location: vex-k-digest-amd64, vex-author: developer@arunavoray.dev, only-vex-affected: true }
+
+      - name: Image purls Scout reports
+        if: always()
+        run: grep -o '"pkg:docker/[^"]*"' g.sarif | sort -u | head -20 || true
