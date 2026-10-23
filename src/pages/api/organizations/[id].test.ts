@@ -35,6 +35,8 @@ let sourceRows: any[] = [];
 let orgRows: any[] = [];
 /** Leaf values of each delete's where() condition (drizzle conditions are cyclic). */
 let deleteWhereValues: unknown[][] = [];
+/** Leaf values of each select's where() condition. */
+let selectWhereValues: unknown[][] = [];
 
 function conditionLeafValues(node: any, depth = 0): unknown[] {
   if (node == null || depth > 8) return [];
@@ -62,9 +64,10 @@ if (isChild) {
     db: {
       select: () => ({
         from: () => ({
-          where: () => ({
-            limit: async () => orgRows.slice(0, 1),
-          }),
+          where: (cond: any) => {
+            selectWhereValues.push(conditionLeafValues(cond));
+            return { limit: async () => orgRows.slice(0, 1) };
+          },
         }),
       }),
       update: () => ({
@@ -102,9 +105,17 @@ if (isChild) {
   }));
 }
 
-const { PATCH, DELETE } = isChild
+const { GET, PATCH, DELETE } = isChild
   ? await import("./[id]")
-  : { PATCH: undefined as any, DELETE: undefined as any };
+  : { GET: undefined as any, PATCH: undefined as any, DELETE: undefined as any };
+
+function get() {
+  return GET({
+    params: { id: "org-1" },
+    request: new Request("http://localhost/api/organizations/org-1"),
+    locals: { session: { userId: "user-1" } },
+  } as any);
+}
 
 function patch(body: Record<string, unknown>) {
   return PATCH({
@@ -130,6 +141,7 @@ function remove() {
 
 beforeEach(() => {
   deleteWhereValues = [];
+  selectWhereValues = [];
   sourceRows = [
     {
       id: "source-1",
@@ -244,5 +256,32 @@ describe.skipIf(!isChild)("DELETE /api/organizations/:id with a source pin", () 
     expect(response.status).toBe(200);
     expect(repoDeleteLeaves()).toContain("acme");
     expect(repoDeleteLeaves()).not.toContain("source-gone");
+  });
+});
+
+describe.skipIf(!isChild)("GET /api/organizations/:id", () => {
+  test("returns the organization, looked up by id and owner", async () => {
+    orgRows[0].status = "mirrored";
+    orgRows[0].membershipRole = "member";
+    orgRows[0].lastMirrored = null;
+    orgRows[0].errorMessage = null;
+
+    const response = await get();
+
+    expect(response.status).toBe(200);
+    const data = await response.json();
+    expect(data.success).toBe(true);
+    expect(data.organization).toMatchObject({ id: "org-1", name: "acme", status: "mirrored" });
+    expect(data.organization).not.toHaveProperty("lastMirrored");
+    expect(selectWhereValues[0]).toEqual(expect.arrayContaining(["org-1", "user-1"]));
+  });
+
+  test("404s when the organization is not this user's", async () => {
+    orgRows = [];
+
+    const response = await get();
+
+    expect(response.status).toBe(404);
+    expect((await response.json()).error).toBe("Organization not found");
   });
 });

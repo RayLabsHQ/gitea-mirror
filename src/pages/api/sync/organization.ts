@@ -2,10 +2,12 @@ import type { APIRoute } from "astro";
 import { configs, db, organizations, repositories } from "@/lib/db";
 import { and, eq } from "drizzle-orm";
 import { jsonResponse, createSecureErrorResponse } from "@/lib/utils";
-import type {
-  AddOrganizationApiRequest,
-  AddOrganizationApiResponse,
-  GitOrg,
+import {
+  membershipRoleEnum,
+  type AddOrganizationApiRequest,
+  type AddOrganizationApiResponse,
+  type GitOrg,
+  type MembershipRole,
 } from "@/types/organizations";
 import { v4 as uuidv4 } from "uuid";
 import {
@@ -31,7 +33,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const userId = authResult.userId;
 
     const body: AddOrganizationApiRequest = await request.json();
-    const { role, org, force = false } = body;
+    const { org, force = false } = body;
     if (body.sourceId !== undefined && typeof body.sourceId !== "string") {
       return jsonResponse({
         data: { success: false, error: "sourceId must be a string" },
@@ -53,11 +55,29 @@ export const POST: APIRoute = async ({ request, locals }) => {
       });
     }
 
-    if (!org || !role) {
+    if (!org) {
       return jsonResponse({
-        data: { success: false, error: "Missing org or role" },
+        data: { success: false, error: "Missing org" },
         status: 400,
       });
+    }
+
+    // The role only labels the organization in the UI, and integrations
+    // rarely know it: a new organization without one is added as "member",
+    // and a forced re-add without one keeps the stored role.
+    let role: MembershipRole | undefined;
+    if (body.role !== undefined) {
+      const parsedRole = membershipRoleEnum.safeParse(body.role);
+      if (!parsedRole.success) {
+        return jsonResponse({
+          data: {
+            success: false,
+            error: `role must be one of ${membershipRoleEnum.options.join(", ")}`,
+          },
+          status: 400,
+        });
+      }
+      role = parsedRole.data;
     }
 
     const trimmedOrg = org.trim();
@@ -102,11 +122,14 @@ export const POST: APIRoute = async ({ request, locals }) => {
       )
       .limit(1);
 
+    // The 409 carries the stored record, so a client can go straight to
+    // mirroring it without listing every organization to find the id.
     if (existingOrg && !force) {
       return jsonResponse({
         data: {
           success: false,
           error: "Organization already exists for this user",
+          organization: existingOrg,
         },
         status: 409,
       });
@@ -164,7 +187,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       const [updatedOrg] = await db
         .update(organizations)
         .set({
-          membershipRole: role,
+          ...(role ? { membershipRole: role } : {}),
           normalizedName: normalizedOrg,
           // Only a request that named a source (an explicit pin, or public
           // mode's provider) re-pins; a bare force re-add must leave the
@@ -189,6 +212,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
         data: {
           success: false,
           error: "Organization already exists for this user",
+          organization: existingOrg,
         },
         status: 409,
       });
@@ -236,7 +260,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       return jsonResponse({
         data: {
           success: false,
-          error: `Organization ${trimmedOrg} was not found on the configured source`,
+          error: `Organization ${trimmedOrg} was not found on the configured source. A user account cannot be added as an organization; add its repositories one at a time instead.`,
         },
         status: 404,
       });
@@ -248,7 +272,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const orgData: GitOrg = orgMetadata ?? {
       name: trimmedOrg,
       avatarUrl: "",
-      membershipRole: role,
+      membershipRole: role ?? "member",
       isIncluded: false,
       status: "imported",
       repositoryCount: orgRepos.length,
@@ -314,7 +338,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       normalizedName: normalizedOrg,
       // Column is NOT NULL; the rate-limit fallback record carries "".
       avatarUrl: orgData.avatarUrl || "",
-      membershipRole: role,
+      membershipRole: role ?? "member",
       isIncluded: false,
       sourceId: source.id,
       status: "imported" as const,

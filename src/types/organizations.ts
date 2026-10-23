@@ -45,7 +45,8 @@ export interface GitOrg {
 export interface AddOrganizationApiRequest {
   userId: string;
   org: string;
-  role: MembershipRole;
+  /** The account's role in the organization; defaults to "member". */
+  role?: MembershipRole;
   force?: boolean;
   /** Which connected source to import from; defaults to the primary source. */
   sourceId?: string;

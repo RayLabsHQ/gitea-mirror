@@ -6,6 +6,8 @@ import { createSecureErrorResponse } from "@/lib/utils";
 import { requireAuth } from "@/lib/utils/auth-helpers";
 import { mirrorOverridesSchema } from "@/lib/db/schema";
 import { normalizeMirrorOverrides } from "@/lib/utils/mirror-overrides";
+import { membershipRoleEnum } from "@/types/organizations";
+import { repoStatusEnum } from "@/types/Repository";
 
 /**
  * Partial update. Each field is optional and only written when present in the
@@ -16,6 +18,56 @@ const patchBodySchema = z.object({
   mirrorOverrides: mirrorOverridesSchema.nullable().optional(),
   sourceId: z.string().nullable().optional(),
 });
+
+/**
+ * One tracked organization, so a client watching an organization mirror does
+ * not have to fetch every row. The public, private and fork breakdowns stay
+ * on GET /api/github/organizations, which computes them per request.
+ */
+export const GET: APIRoute = async (context) => {
+  try {
+    const { user, response } = await requireAuth(context);
+    if (response) return response;
+
+    const userId = user!.id;
+    const orgId = context.params.id;
+    if (!orgId) {
+      return new Response(JSON.stringify({ error: "Organization ID is required" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const [org] = await db
+      .select()
+      .from(organizations)
+      .where(and(eq(organizations.id, orgId), eq(organizations.userId, userId)))
+      .limit(1);
+
+    if (!org) {
+      return new Response(JSON.stringify({ error: "Organization not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        organization: {
+          ...org,
+          status: repoStatusEnum.parse(org.status),
+          membershipRole: membershipRoleEnum.parse(org.membershipRole),
+          lastMirrored: org.lastMirrored ?? undefined,
+          errorMessage: org.errorMessage ?? undefined,
+        },
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    );
+  } catch (error) {
+    return createSecureErrorResponse(error, "organization fetch", 500);
+  }
+};
 
 export const PATCH: APIRoute = async (context) => {
   try {

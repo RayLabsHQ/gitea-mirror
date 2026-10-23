@@ -6,6 +6,7 @@ import { createSecureErrorResponse } from "@/lib/utils";
 import { requireAuth } from "@/lib/utils/auth-helpers";
 import { mirrorOverridesSchema } from "@/lib/db/schema";
 import { normalizeMirrorOverrides } from "@/lib/utils/mirror-overrides";
+import { repositoryVisibilityEnum, repoStatusEnum } from "@/types/Repository";
 
 /**
  * Partial update. Each field is optional and only written when present in the
@@ -16,6 +17,57 @@ const patchBodySchema = z.object({
   destinationOrg: z.string().nullable().optional(),
   mirrorOverrides: mirrorOverridesSchema.nullable().optional(),
 });
+
+/**
+ * One tracked repository, in the shape GET /api/github/repositories lists it,
+ * so a client watching a single mirror does not have to fetch every row.
+ */
+export const GET: APIRoute = async (context) => {
+  try {
+    const { user, response } = await requireAuth(context);
+    if (response) return response;
+
+    const userId = user!.id;
+    const repoId = context.params.id;
+    if (!repoId) {
+      return new Response(JSON.stringify({ error: "Repository ID is required" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    const [repo] = await db
+      .select()
+      .from(repositories)
+      .where(and(eq(repositories.id, repoId), eq(repositories.userId, userId)))
+      .limit(1);
+
+    if (!repo) {
+      return new Response(JSON.stringify({ error: "Repository not found" }), {
+        status: 404,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    return new Response(
+      JSON.stringify({
+        success: true,
+        repository: {
+          ...repo,
+          organization: repo.organization ?? undefined,
+          lastMirrored: repo.lastMirrored ?? undefined,
+          errorMessage: repo.errorMessage ?? undefined,
+          forkedFrom: repo.forkedFrom ?? undefined,
+          status: repoStatusEnum.parse(repo.status),
+          visibility: repositoryVisibilityEnum.parse(repo.visibility),
+        },
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } }
+    );
+  } catch (error) {
+    return createSecureErrorResponse(error, "repository fetch", 500);
+  }
+};
 
 export const PATCH: APIRoute = async (context) => {
   try {
