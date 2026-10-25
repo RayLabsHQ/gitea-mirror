@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { ALL, toMcpSyncResult } from "./mcp";
+import { ALL, hasMcpToolScope, toMcpSyncResult } from "./mcp";
 
 describe("POST /api/mcp", () => {
+  test("accepts settings-only OAuth principals", () => {
+    expect(hasMcpToolScope(["mirror:settings"])).toBe(true);
+    expect(hasMcpToolScope(["openid"])).toBe(false);
+  });
   test("rejects missing OAuth bearer credentials before creating an MCP session", async () => {
     const response = await ALL({
       request: new Request("http://localhost/api/mcp", { method: "POST" }),

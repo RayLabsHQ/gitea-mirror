@@ -3,7 +3,7 @@ import { db, organizations, repositories } from "@/lib/db";
 import { eq, and } from "drizzle-orm";
 import { z } from "zod";
 import { createSecureErrorResponse } from "@/lib/utils";
-import { requireAuth } from "@/lib/utils/auth-helpers";
+import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 import { mirrorOverridesSchema } from "@/lib/db/schema";
 import { normalizeMirrorOverrides } from "@/lib/utils/mirror-overrides";
 import { membershipRoleEnum } from "@/types/organizations";
@@ -26,10 +26,9 @@ const patchBodySchema = z.object({
  */
 export const GET: APIRoute = async (context) => {
   try {
-    const { user, response } = await requireAuth(context);
-    if (response) return response;
-
-    const userId = user!.id;
+    const authResult = await requireAuthenticatedUserId(context);
+    if ("response" in authResult) return authResult.response;
+    const userId = authResult.userId;
     const orgId = context.params.id;
     if (!orgId) {
       return new Response(JSON.stringify({ error: "Organization ID is required" }), {
@@ -71,11 +70,9 @@ export const GET: APIRoute = async (context) => {
 
 export const PATCH: APIRoute = async (context) => {
   try {
-    // Check authentication
-    const { user, response } = await requireAuth(context);
-    if (response) return response;
-
-    const userId = user!.id;
+    const authResult = await requireAuthenticatedUserId(context);
+    if ("response" in authResult) return authResult.response;
+    const userId = authResult.userId;
 
     const orgId = context.params.id;
     if (!orgId) {
@@ -179,10 +176,9 @@ export const PATCH: APIRoute = async (context) => {
 
 export const DELETE: APIRoute = async (context) => {
   try {
-    const { user, response } = await requireAuth(context);
-    if (response) return response;
-
-    const userId = user!.id;
+    const authResult = await requireAuthenticatedUserId(context);
+    if ("response" in authResult) return authResult.response;
+    const userId = authResult.userId;
     const orgId = context.params.id;
 
     if (!orgId) {

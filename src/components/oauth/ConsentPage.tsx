@@ -161,6 +161,11 @@ export default function ConsentPage() {
         description: 'Queue synchronization or retry for repositories in your account',
         icon: Shield,
       },
+      'mirror:settings': {
+        name: 'Manage mirror settings',
+        description: 'Change repository and organization mirror settings, and delete tracked records',
+        icon: Shield,
+      },
     };
 
     return scopeDescriptions[scope] || {

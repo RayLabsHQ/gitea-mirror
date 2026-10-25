@@ -10,7 +10,7 @@ export const GET: APIRoute = () => {
   return new Response(JSON.stringify({
     resource,
     authorization_servers: [authorizationServer],
-    scopes_supported: ["mirror:read", "mirror:sync"],
+    scopes_supported: ["mirror:read", "mirror:sync", "mirror:settings"],
     bearer_methods_supported: ["header"],
   }), {
     status: 200,

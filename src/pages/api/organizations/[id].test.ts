@@ -4,7 +4,7 @@
  * null, and leaving it untouched when the field is absent. Plus the DELETE
  * repository-deletion scoping for pinned organizations.
  *
- * NOTE: these tests replace @/lib/db, @/lib/sources and
+ * NOTE: these tests replace @/lib/db, @/lib/sources, @/lib/auth-guards and
  * @/lib/utils/auth-helpers with mocks. bun's mock.module is process-wide and
  * leaks into other test files, so in the shared test process this file
  * registers NOTHING: it re-runs itself in an isolated child process (the
@@ -50,6 +50,13 @@ function conditionLeafValues(node: any, depth = 0): unknown[] {
 }
 
 if (isChild) {
+  mock.module("@/lib/auth-guards", () => ({
+    requireAuthenticatedUserId: mock(async (context: any) => {
+      const userId = context.locals?.session?.userId || context.locals?.user?.id;
+      return userId ? { userId } : { response: new Response("Unauthorized", { status: 401 }) };
+    }),
+  }));
+
   mock.module("@/lib/utils/auth-helpers", () => ({
     requireAuth: mock(async () => ({ user: { id: "user-1" }, response: null })),
   }));

@@ -2,15 +2,14 @@ import type { APIRoute } from "astro";
 import { db, repositories, mirrorJobs } from "@/lib/db";
 import { eq, and, inArray } from "drizzle-orm";
 import { createSecureErrorResponse } from "@/lib/utils";
-import { requireAuth } from "@/lib/utils/auth-helpers";
+import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 import { isPushDestinationKind } from "@/lib/destination-kinds";
 
 export const DELETE: APIRoute = async (context) => {
   try {
-    const { user, response } = await requireAuth(context);
-    if (response) return response;
-
-    const userId = user!.id;
+    const authResult = await requireAuthenticatedUserId(context);
+    if ("response" in authResult) return authResult.response;
+    const userId = authResult.userId;
     const body = await context.request.json();
     const { ids } = body;
 

@@ -5,6 +5,7 @@ import { db, oauthAccessTokens } from "@/lib/db";
 
 export const MCP_READ_SCOPE = "mirror:read";
 export const MCP_SYNC_SCOPE = "mirror:sync";
+export const MCP_SETTINGS_SCOPE = "mirror:settings";
 
 export function getMcpResourceUrl(): string {
   const origin = new URL(process.env.BETTER_AUTH_URL || "http://localhost:4321").origin;

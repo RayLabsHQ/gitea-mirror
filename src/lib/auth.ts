@@ -318,11 +318,11 @@ export const auth = betterAuth({
     oauthProvider({
       loginPage: withBase("/login"),
       consentPage: withBase("/oauth/consent"),
-      scopes: ["openid", "profile", "email", "offline_access", "mirror:read", "mirror:sync"],
+      scopes: ["openid", "profile", "email", "offline_access", "mirror:read", "mirror:sync", "mirror:settings"],
       resources: [{
         identifier: `${resolveOAuthResourceOrigin()}${withBase("/api/mcp")}`,
         name: "gitea-mirror MCP API",
-        allowedScopes: ["mirror:read", "mirror:sync"],
+        allowedScopes: ["mirror:read", "mirror:sync", "mirror:settings"],
       }],
       // Allow dynamic client registration for flexibility
       allowDynamicClientRegistration: true,

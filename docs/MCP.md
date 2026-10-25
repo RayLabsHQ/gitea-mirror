@@ -1,29 +1,56 @@
 # MCP
 
-Gitea Mirror provides an **HTTP Streamable MCP** endpoint at `/api/mcp` for MCP clients. The endpoint uses the application's Better Auth OAuth 2.1 integration and requires an authenticated user. Tool access is scoped to that user's repositories and activity; clients do not pass a `userId` parameter.
+Gitea Mirror exposes an OAuth-protected HTTP Streamable MCP endpoint at `/api/mcp`. All tools are bound to the OAuth user's account; callers cannot supply a `userId`. The service uses Better Auth OAuth 2.1 and the protected-resource metadata advertises supported scopes.
 
-## Connect a client
+## Authorization
 
-Configure your MCP client using the deployment's public origin and these conceptual steps:
+Use the deployment's public endpoint (including `BASE_URL`, if configured), OAuth authorization-code flow with PKCE, and the MCP endpoint as the resource/audience. Request only what is needed:
 
-1. Connect to the MCP endpoint at `https://mirror.example.com/api/mcp` (replace the origin with your deployment's). If the app is mounted under `BASE_URL`, include that prefix; for example, `BASE_URL=/mirror` makes the path `/mirror/api/mcp`.
-2. Register an OAuth client using dynamic client registration, if supported by the client and deployment.
-3. Authorize with the OAuth 2.1 authorization-code flow and PKCE.
-4. Use the MCP endpoint as the protected resource/audience, and request the scopes needed: `mirror:read` for read tools and `mirror:sync` for sync/retry tools.
-5. Complete authorization and let the client send its access token when connecting to the MCP endpoint.
+- `mirror:read`: read repositories, organizations, activities, mirror configuration and previews.
+- `mirror:sync`: queue repository sync/retry, imports, metadata refresh, bulk/organization jobs, mirror moves, alert resolution and destination reconciliation.
+- `mirror:settings`: update repository/organization mirror settings and allowlisted automation/global mirror options. Record deletion requires explicit confirmation.
 
-The exact OAuth discovery and registration URLs are not specified here; use the OAuth metadata exposed by the deployment/client integration rather than assuming particular well-known paths. OAuth is handled by the existing Better Auth setup.
+For production, configure `BETTER_AUTH_URL` to the externally reachable authentication origin and serve over TLS. Reverse proxies must forward the public HTTPS origin correctly.
 
-For production, configure `BETTER_AUTH_URL` to the externally reachable authentication origin (scheme and host, without a path), and serve the app over TLS. Ensure any reverse proxy forwards the public HTTPS origin correctly. Incorrect public auth URLs or missing TLS can break secure OAuth redirects and token flows. See [environment variables](./ENVIRONMENT_VARIABLES.md) for auth URL configuration.
+## Implemented tools
 
-## Available tools
+### `mirror:read`
 
-| Tool | Purpose | Scope |
-| --- | --- | --- |
-| `list_repositories` | List the authenticated user's repositories, optionally filtered by status (up to 100 results). | `mirror:read` |
-| `get_repository_status` | Get one repository's status and recent activity. | `mirror:read` |
-| `list_activities` | List recent mirror and sync activity for the authenticated user (up to 100 results). | `mirror:read` |
-| `sync_repository` | Queue a sync for one of the authenticated user's repositories. | `mirror:sync` |
-| `retry_repository_sync` | Queue a retry for one of the authenticated user's repositories. | `mirror:sync` |
+`list_repositories`, `get_repository_status`, `get_repository`, `preview_tracked_repositories`, `preview_repository_releases`, `list_organizations`, `get_organization`, `preview_organization_repositories`, `get_organization_mirror_overrides`, `export_repositories`, `export_organizations`, `get_dashboard_summary`, `list_activities`, `get_provider_rate_limit`, `list_starred_lists`, `preview_organization_mirror_move`, and `get_mirror_configuration`.
 
-Sync and retry tools enqueue work asynchronously; a successful response means the request was accepted, not that mirroring has finished. Use the read tools to check repository status and activity afterward. Repository IDs identify the target; ownership is resolved from the authenticated account, not a client-supplied user ID.
+Read tools return selected user-facing fields, not complete database rows; repository source URLs, clone URLs, destination endpoints, internal IDs on exports, and secrets are excluded. Configuration reads expose only an allowlist of non-secret mirror and schedule options. Activity filters verify ownership of any selected repository or organization before querying. `preview_tracked_repositories` and `preview_organization_repositories` list already-tracked candidates, with organization previews constrained to the organization's pinned source (or unpinned rows). There is currently no connected-source discovery endpoint, so MCP does not claim to preview untracked source repositories. `preview_repository_releases` reads destination releases but does not simulate configured release include/exclude rules. Organization move preview is an estimate, not a transfer guarantee.
+
+### `mirror:sync`
+
+- `sync_repository(repositoryId)`
+- `retry_repository_sync(repositoryId)`
+- `import_repository(owner, repo, host?, path?, destinationOrg?, confirm?)`; `confirm: true` uses the source route's force/refresh branch after a duplicate response.
+- `import_organization(org, sourceId?, provider?, sourceUrl?, confirm?)`; `confirm: true` uses the duplicate force branch while retaining provider/source rules.
+- `refresh_repository_metadata(repositoryId, confirm: true)`: derives source identity from the owned record.
+- `sync_repositories(repositoryIds)`, `mirror_repositories(repositoryIds)` (up to 25)
+- `sync_organization(organizationId)`, `mirror_organization(organizationId)`
+- `reset_repository_metadata(repositoryIds, confirm: true)`
+- `resolve_sync_alert(repositoryIds, action, confirm: true)`
+- `move_repository_mirror(repositoryId, destinationOwner, confirm: true)`
+- `move_organization_mirrors(organizationId, destinationOrg, dryRun, confirm?)`
+- `reconcile_destination(dryRun, adoptUntracked, resetMissing, relocateMoved, confirm?)`
+- `set_organization_status_with_cascade(organizationId, status, cascade)`
+
+Dispatch uses an explicit operation allowlist and invokes existing route handlers with the authenticated user session. Batch inputs are capped at 25; targets are checked before dispatch, and route ownership checks remain active. Destructive/applying actions require confirmation. Results intentionally omit route database rows and secrets. A successful response means accepted/enqueued where applicable, not completed; check status/activity afterward.
+
+### `mirror:settings`
+
+- `set_repository_status(repositoryId, status)`: `imported` or `ignored`.
+- `update_repository_settings(repositoryId, destinationOrg?)`: change the repository destination override; this does not move an existing mirror.
+- `update_repository_mirror_overrides(repositoryId, mirrorOverrides)`.
+- `delete_repositories(repositoryIds, confirm: true)`: invokes the application's repository cleanup route, including activity-row cleanup and pushed-clone cleanup where applicable.
+- `delete_organization(organizationId, confirm: true)`: invokes the application's ownership-checked route and repository cascade.
+- `update_organization_mirror_overrides(organizationId, mirrorOverrides)`.
+- `set_organization_destination(organizationId, destinationOrg)`.
+- `set_organization_source(organizationId, sourceId)`, where a non-null source must belong to the caller.
+- `update_mirror_configuration(mirrorOptions)`: strict allowlist covering mirror interval, LFS/wiki, visibility and organization creation, topic handling, preservation/fork strategy, issue/review concurrency, release switches/limits/type/tag patterns, and metadata switches. Visibility is `public|private|limited|default`, fork strategy `skip|reference|full-copy`, and release type `all|stable`. Release limits are integers 0–1000; concurrency is 1–100. URL/token, username, backup settings/paths and cleanup policies are not accepted.
+- `update_schedule_configuration(schedule)`: strict fields only (`enabled`, `interval`, `timezone`, `autoImport`, `autoMirror`). `interval` is a bounded non-empty string matching the stored schedule schema (cron expressions and legacy duration strings); numeric intervals and operational/cleanup controls are rejected.
+
+## Not exposed
+
+Cleanup policy writes remain excluded because they can automatically delete destination data. Credentials, source/destination URLs and tokens, notification endpoints/secrets, login/signup/password/email/SSO/OAuth administration, API-key and credential management/testing, SSE, activity cleanup, and broad operator cleanup remain excluded.
