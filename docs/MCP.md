@@ -12,6 +12,18 @@ Use the deployment's public endpoint (including `BASE_URL`, if configured), OAut
 
 For production, configure `BETTER_AUTH_URL` to the externally reachable authentication origin and serve over TLS. Reverse proxies must forward the public HTTPS origin correctly.
 
+### Standards-based client setup
+
+Clients should discover rather than hard-code OAuth endpoints:
+
+1. Fetch the protected-resource metadata at `/.well-known/oauth-protected-resource/api/mcp`. Follow its `authorization_servers` entry to the authorization-server metadata at `<authorization-server>/.well-known/oauth-authorization-server`.
+2. Prefer Client ID Metadata Documents (CIMD) when the authorization-server metadata advertises `client_id_metadata_document_supported: true`: host an HTTPS metadata document and use its exact URL as `client_id`. MCP clients must include a non-empty `client_name` and `redirect_uris`. This server validates the MCP 2026-07-28 profile and only fetches public HTTPS destinations using a pinned-DNS transport that rejects private/reserved addresses and redirects.
+3. If CIMD is unavailable, use the discovered `registration_endpoint` for Dynamic Client Registration (RFC 7591). Public/native clients use `token_endpoint_auth_method: "none"` and a loopback redirect URI. New clients are linked to the MCP resource by default.
+4. Start Authorization Code with PKCE (`S256`), requesting the desired `mirror:*` scopes and including the exact MCP resource URI in the authorization request. Exchange the code at the discovered token endpoint with the same `resource`, redirect URI, and PKCE verifier.
+5. Send the access token as `Authorization: Bearer …` to `/api/mcp`. The endpoint validates the token signature against the server JWKS and checks issuer, expiry, audience, OAuth client, and live user session.
+
+The protected-resource metadata uses RFC 9728 and the authorization server publishes RFC 8414 metadata, including CIMD, DCR, PKCE `S256`, JWKS, token, revocation, and introspection endpoints. CIMD metadata is revalidated and cached with bounded fetch concurrency/rates; its secure transport never follows redirects or permits private-network destinations. MCP uses Streamable HTTP with JSON-RPC; requests use `Content-Type: application/json` and negotiate `Accept: application/json, text/event-stream`. The server is stateless, so clients must not require a server-issued MCP session ID. The endpoint supports MCP protocol version `2025-11-25`.
+
 ## Implemented tools
 
 ### `mirror:read`

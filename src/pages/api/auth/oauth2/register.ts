@@ -6,109 +6,15 @@ import { auth } from "@/lib/auth";
 // POST /api/auth/oauth2/register - Register a new OAuth2 application
 export async function POST(context: APIContext) {
   try {
-    const { response: authResponse } = await requireAuth(context);
-    if (authResponse) return authResponse;
-
-    const body = await context.request.json();
-    
-    // Extract and validate required fields
-    const {
-      client_name,
-      redirect_uris,
-      token_endpoint_auth_method = "client_secret_basic",
-      grant_types = ["authorization_code"],
-      response_types = ["code"],
-      client_uri,
-      logo_uri,
-      scope = "openid profile email",
-      contacts,
-      tos_uri,
-      policy_uri,
-      jwks_uri,
-      jwks,
-      metadata,
-      software_id,
-      software_version,
-      software_statement,
-    } = body;
-
-    // Validate required fields
-    if (!client_name || !redirect_uris || !Array.isArray(redirect_uris) || redirect_uris.length === 0) {
-      return new Response(
-        JSON.stringify({ 
-          error: "invalid_request",
-          error_description: "client_name and redirect_uris are required" 
-        }),
-        {
-          status: 400,
-          headers: { "Content-Type": "application/json" },
-        }
-      );
+    // Delegate to Better Auth's RFC 7591 endpoint. MCP clients must register
+    // before authorization, so this endpoint intentionally permits public
+    // clients; consent and the provider's client metadata validation remain
+    // in force. Use the request handler to preserve the session, IP, and
+    // OAuth-provider request context.
+    if (context.clientAddress) {
+      context.request.headers.set("x-forwarded-for", context.clientAddress);
     }
-
-    try {
-      // Use Better Auth server API to register OAuth2 client (RFC 7591
-      // dynamic client registration via @better-auth/oauth-provider).
-      // Note: jwks / jwks_uri / metadata are not part of the new
-      // registration body and are intentionally omitted.
-      const response = await auth.api.registerOAuthClient({
-        body: {
-          client_name,
-          redirect_uris,
-          token_endpoint_auth_method,
-          grant_types,
-          response_types,
-          client_uri,
-          logo_uri,
-          scope,
-          contacts,
-          tos_uri,
-          policy_uri,
-          software_id,
-          software_version,
-          software_statement,
-        },
-      });
-
-      // Check if response is an error
-      if (!response || typeof response !== 'object') {
-        return new Response(
-          JSON.stringify({ 
-            error: "registration_error",
-            error_description: "Invalid response from server" 
-          }),
-          {
-            status: 500,
-            headers: { "Content-Type": "application/json" },
-          }
-        );
-      }
-
-      // The response follows OAuth2 RFC format with snake_case
-      return new Response(JSON.stringify(response), {
-        status: 201,
-        headers: { 
-          "Content-Type": "application/json",
-          "Cache-Control": "no-store",
-          "Pragma": "no-cache"
-        },
-      });
-    } catch (error: any) {
-      // Handle Better Auth errors
-      if (error.message?.includes('already exists')) {
-        return new Response(
-          JSON.stringify({ 
-            error: "invalid_client_metadata",
-            error_description: "Client with this configuration already exists" 
-          }),
-          {
-            status: 400,
-            headers: { "Content-Type": "application/json" },
-          }
-        );
-      }
-      throw error;
-    }
+    return await auth.handler(context.request);
   } catch (error) {
     return createSecureErrorResponse(error, "OAuth2 registration");
   }

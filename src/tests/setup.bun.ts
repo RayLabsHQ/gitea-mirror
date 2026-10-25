@@ -30,6 +30,7 @@ mock.module("@/lib/db", () => {
   const mockDb = {
     select: () => ({
       from: () => ({
+        limit: () => Promise.resolve([]),
         where: () => ({
           limit: () => Promise.resolve([]),
           // Sources queries order or group before awaiting; resolve to no
@@ -66,7 +67,9 @@ mock.module("@/lib/db", () => {
     verificationTokens: {},
     oauthApplications: {},
     oauthAccessTokens: {},
+    oauthClients: {},
     oauthConsent: {},
+    jwkss: {},
     ssoProviders: {}
   };
 });

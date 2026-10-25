@@ -2,6 +2,8 @@ import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { jwt } from "better-auth/plugins";
 import { oauthProvider } from "@better-auth/oauth-provider";
+import { cimd } from "@better-auth/cimd";
+import { fetchClientMetadataResource } from "@better-auth/cimd/node";
 import { sso } from "@better-auth/sso";
 import { apiKey } from "@better-auth/api-key";
 import { db, users, ssoProviders } from "./db";
@@ -179,6 +181,8 @@ function resolveOAuthResourceOrigin(): string {
   }
 }
 
+const MCP_RESOURCE_IDENTIFIER = `${resolveOAuthResourceOrigin()}${withBase("/api/mcp")}`;
+
 export const auth = betterAuth({
   // Database configuration
   database: drizzleAdapter(db, {
@@ -320,12 +324,18 @@ export const auth = betterAuth({
       consentPage: withBase("/oauth/consent"),
       scopes: ["openid", "profile", "email", "offline_access", "mirror:read", "mirror:sync", "mirror:settings"],
       resources: [{
-        identifier: `${resolveOAuthResourceOrigin()}${withBase("/api/mcp")}`,
+        identifier: MCP_RESOURCE_IDENTIFIER,
         name: "gitea-mirror MCP API",
         allowedScopes: ["mirror:read", "mirror:sync", "mirror:settings"],
       }],
+      // Link public MCP clients to this single protected resource at DCR
+      // time so OAuth authorization can validate its RFC 8707 audience.
+      clientRegistrationDefaultResources: [MCP_RESOURCE_IDENTIFIER],
       // Allow dynamic client registration for flexibility
       allowDynamicClientRegistration: true,
+      // MCP clients discover and register themselves before a user session
+      // exists, so RFC 7591 registration must accept public clients.
+      allowUnauthenticatedClientRegistration: true,
       // Mirror the old getAdditionalUserInfoClaim: expose our extra `username`
       // field on both the userinfo endpoint and the id_token when the
       // "profile" scope is granted.
@@ -339,6 +349,14 @@ export const auth = betterAuth({
         if (scopes.includes("profile")) claims.username = (user as any).username;
         return claims;
       },
+    }),
+
+    // MCP 2026-07-28 recommends Client ID Metadata Documents for client
+    // discovery. Use Better Auth's pinned-DNS HTTPS transport; never replace
+    // it with global fetch, which would permit DNS-rebinding SSRF.
+    cimd({
+      fetchClientMetadataResource,
+      metadataProfile: "mcp-2026-07-28",
     }),
 
     // SSO plugin - allows users to authenticate with external OIDC providers

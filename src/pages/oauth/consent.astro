@@ -4,10 +4,12 @@ import ConsentPage from '@/components/oauth/ConsentPage';
 import ThemeScript from '@/components/theme/ThemeScript.astro';
 import Providers from '@/components/layout/Providers';
 import { withBase } from '@/lib/base-path';
+import { auth } from '@/lib/auth';
 
-// Check if user is authenticated
-const sessionCookie = Astro.cookies.get('better-auth-session');
-if (!sessionCookie) {
+// Validate the actual Better Auth session instead of checking a stale cookie
+// name. This also ensures expired or invalid cookies cannot reach consent.
+const session = await auth.api.getSession({ headers: Astro.request.headers });
+if (!session) {
   return Astro.redirect(withBase('/login'));
 }
 ---

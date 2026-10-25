@@ -1,7 +1,7 @@
-import { createHash } from "node:crypto";
-import { and, eq, isNull } from "drizzle-orm";
+import { createLocalJWKSet, jwtVerify } from "jose";
+import { and, eq } from "drizzle-orm";
 import { withBase } from "@/lib/base-path";
-import { db, oauthAccessTokens } from "@/lib/db";
+import { db, jwkss, oauthClients, sessions } from "@/lib/db";
 
 export const MCP_READ_SCOPE = "mirror:read";
 export const MCP_SYNC_SCOPE = "mirror:sync";
@@ -12,40 +12,50 @@ export function getMcpResourceUrl(): string {
   return `${origin}${withBase("/api/mcp")}`;
 }
 
+export function getMcpIssuerUrl(): string {
+  const origin = new URL(process.env.BETTER_AUTH_URL || "http://localhost:4321").origin;
+  return new URL(withBase("/api/auth"), origin).toString();
+}
+
 export interface McpPrincipal {
   userId: string;
   scopes: string[];
 }
 
-export interface McpTokenRecord {
-  userId: string | null;
-  scopes: string;
-  resources: string | null;
-  expiresAt: Date | null;
+export interface McpTokenClaims {
+  sub?: unknown;
+  aud?: unknown;
+  scope?: unknown;
+  exp?: unknown;
+  sid?: unknown;
+  azp?: unknown;
 }
 
 export function resolveMcpPrincipal(
-  record: McpTokenRecord | undefined,
+  claims: McpTokenClaims | undefined,
   now = Date.now(),
 ): McpPrincipal | null {
-  if (!record?.userId || !record.expiresAt || record.expiresAt.getTime() <= now) return null;
-
-  let scopes: unknown;
-  let resources: unknown;
-  try {
-    scopes = JSON.parse(record.scopes);
-    resources = JSON.parse(record.resources ?? "[]");
-  } catch {
-    return null;
-  }
-
   if (
-    !Array.isArray(scopes) ||
-    !Array.isArray(resources) ||
-    !resources.includes(getMcpResourceUrl())
+    typeof claims?.sub !== "string" ||
+    typeof claims.sid !== "string" ||
+    typeof claims.azp !== "string" ||
+    typeof claims.exp !== "number" ||
+    claims.exp <= Math.floor(now / 1000)
   ) return null;
 
-  return { userId: record.userId, scopes: scopes.filter((scope): scope is string => typeof scope === "string") };
+  const audiences = typeof claims.aud === "string"
+    ? [claims.aud]
+    : Array.isArray(claims.aud) && claims.aud.every((audience) => typeof audience === "string")
+      ? claims.aud
+      : [];
+  if (!audiences.includes(getMcpResourceUrl()) || typeof claims.scope !== "string") return null;
+
+  const grantedScopes = claims.scope.split(/\s+/).filter((scope) =>
+    scope === MCP_READ_SCOPE || scope === MCP_SYNC_SCOPE || scope === MCP_SETTINGS_SCOPE
+  );
+  if (grantedScopes.length === 0) return null;
+
+  return { userId: claims.sub, scopes: grantedScopes };
 }
 
 function unauthorized(): Response {
@@ -64,19 +74,61 @@ export async function authenticateMcpRequest(request: Request): Promise<McpPrinc
   const authorization = request.headers.get("authorization") ?? "";
   const match = /^Bearer\s+([^\s]+)$/i.exec(authorization);
   if (!match) return unauthorized();
+  if (match[1].split(".").length !== 3) return unauthorized();
 
-  const tokenHash = createHash("sha256").update(match[1]).digest("base64url");
-  const [record] = await db.select({
-    userId: oauthAccessTokens.userId,
-    scopes: oauthAccessTokens.scopes,
-    resources: oauthAccessTokens.resources,
-    expiresAt: oauthAccessTokens.expiresAt,
-  }).from(oauthAccessTokens).where(and(
-    eq(oauthAccessTokens.token, tokenHash),
-    isNull(oauthAccessTokens.revoked),
+  const keyRows = await db.select({
+    id: jwkss.id,
+    publicKey: jwkss.publicKey,
+    alg: jwkss.alg,
+    expiresAt: jwkss.expiresAt,
+  }).from(jwkss).limit(100);
+  const keys = keyRows.flatMap((row) => {
+    if (row.expiresAt && row.expiresAt.getTime() <= Date.now()) return [];
+    try {
+      const key = JSON.parse(row.publicKey);
+      if (!key || typeof key !== "object" || Array.isArray(key)) return [];
+      return [{
+        ...key,
+        kid: row.id,
+        ...(row.alg ? { alg: row.alg } : {}),
+        use: "sig",
+      }];
+    } catch {
+      return [];
+    }
+  });
+  if (keys.length === 0) return unauthorized();
+
+  let claims: McpTokenClaims;
+  try {
+    const jwks = createLocalJWKSet({ keys });
+    ({ payload: claims } = await jwtVerify(match[1], jwks, {
+      issuer: getMcpIssuerUrl(),
+      audience: getMcpResourceUrl(),
+    }));
+  } catch {
+    return unauthorized();
+  }
+
+  const principal = resolveMcpPrincipal(claims);
+  if (!principal) return unauthorized();
+
+  const [client] = await db.select({ disabled: oauthClients.disabled })
+    .from(oauthClients)
+    .where(eq(oauthClients.clientId, claims.azp as string))
+    .limit(1);
+  if (!client || client.disabled) return unauthorized();
+
+  const [session] = await db.select({
+    userId: sessions.userId,
+    expiresAt: sessions.expiresAt,
+  }).from(sessions).where(and(
+    eq(sessions.id, claims.sid as string),
+    eq(sessions.userId, principal.userId),
   )).limit(1);
+  if (!session || session.expiresAt.getTime() <= Date.now()) return unauthorized();
 
-  return resolveMcpPrincipal(record) ?? unauthorized();
+  return principal;
 }
 
 export { unauthorized as mcpUnauthorizedResponse };

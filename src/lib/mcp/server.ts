@@ -228,8 +228,8 @@ export function createMcpServer(context: McpServerContext): McpServer {
       jobType: z.enum(["mirror", "cleanup", "import"]).optional(),
       repositoryId: mcpRepositoryIdSchema.optional(),
       organizationId: mcpRepositoryIdSchema.optional(),
-      since: z.coerce.date().optional(),
-      until: z.coerce.date().optional(),
+      since: z.iso.datetime({ offset: true }).optional(),
+      until: z.iso.datetime({ offset: true }).optional(),
     },
     async ({ limit, offset, status, jobType, repositoryId, organizationId, since, until }) => {
       if (repositoryId) { const [owned] = await ownedRepo(repositoryId); if (!owned) return result({ error: "Repository not found" }); }
@@ -239,8 +239,8 @@ export function createMcpServer(context: McpServerContext): McpServer {
       if (jobType) filters.push(eq(mirrorJobs.jobType, jobType));
       if (repositoryId) filters.push(eq(mirrorJobs.repositoryId, repositoryId));
       if (organizationId) filters.push(eq(mirrorJobs.organizationId, organizationId));
-      if (since) filters.push(sql`${mirrorJobs.timestamp} >= ${since}`);
-      if (until) filters.push(sql`${mirrorJobs.timestamp} <= ${until}`);
+      if (since) filters.push(sql`${mirrorJobs.timestamp} >= ${new Date(since)}`);
+      if (until) filters.push(sql`${mirrorJobs.timestamp} <= ${new Date(until)}`);
       const activities = await database.select({
         id: mirrorJobs.id,
         repositoryId: mirrorJobs.repositoryId,
@@ -334,6 +334,17 @@ export function createMcpServer(context: McpServerContext): McpServer {
       if (!context.dispatchOperation) return result({ error: "Operation dispatcher is unavailable" });
       return result(await context.dispatchOperation({ userId: context.userId, operation: "delete-organization", ids: [organizationId] }));
     });
+    server.tool("update_mirror_configuration", "Update selected allowlisted non-secret mirror settings for the caller.", { mirrorOptions: mcpMirrorOptionsSchema }, async ({ mirrorOptions }) => {
+      const [config] = await database.select().from(configs).where(and(eq(configs.userId, context.userId), eq(configs.isActive, true))).limit(1);
+      if (!config) return result({ error: "No active configuration found" });
+      const [updated] = await database.update(configs).set({ giteaConfig: { ...config.giteaConfig, ...mirrorOptions } }).where(and(eq(configs.id, config.id), eq(configs.userId, context.userId))).returning({ id: configs.id }); return result({ updated: !!updated });
+    });
+    server.tool("update_schedule_configuration", "Update safe automation schedule preferences; no credentials or endpoints are accepted.", { schedule: mcpScheduleSchema }, async ({ schedule }) => {
+      const [config] = await database.select().from(configs).where(and(eq(configs.userId, context.userId), eq(configs.isActive, true))).limit(1);
+      if (!config) return result({ error: "No active configuration found" });
+      const [updated] = await database.update(configs).set({ scheduleConfig: { ...config.scheduleConfig, ...schedule } }).where(and(eq(configs.id, config.id), eq(configs.userId, context.userId))).returning({ id: configs.id });
+      return result({ updated: !!updated });
+    });
   }
   if (scopes.has("mirror:sync")) {
     server.tool("import_repository", "Import a repository using the caller's connected source resolution. Set confirm true to refresh an existing record after its duplicate response.", {
@@ -368,18 +379,6 @@ export function createMcpServer(context: McpServerContext): McpServer {
       if (sourceId) { const [source] = await database.select({ id: sources.id }).from(sources).where(and(eq(sources.id, sourceId), eq(sources.userId, context.userId))).limit(1); if (!source) return result({ error: "Source not found" }); }
       if (!context.dispatchOperation) return result({ error: "Operation dispatcher is unavailable" });
       return result(await context.dispatchOperation({ userId: context.userId, operation: "set-organization-settings", ids: [organizationId], body: { sourceId } }));
-    });
-    // Organization deletion has application-specific repository cleanup semantics; do not bypass them with a direct DB delete.
-    server.tool("update_mirror_configuration", "Update selected allowlisted non-secret mirror settings for the caller.", { mirrorOptions: mcpMirrorOptionsSchema }, async ({ mirrorOptions }) => {
-      const [config] = await database.select().from(configs).where(and(eq(configs.userId, context.userId), eq(configs.isActive, true))).limit(1);
-      if (!config) return result({ error: "No active configuration found" });
-      const [updated] = await database.update(configs).set({ giteaConfig: { ...config.giteaConfig, ...mirrorOptions } }).where(and(eq(configs.id, config.id), eq(configs.userId, context.userId))).returning({ id: configs.id }); return result({ updated: !!updated });
-    });
-    server.tool("update_schedule_configuration", "Update safe automation schedule preferences; no credentials or endpoints are accepted.", { schedule: mcpScheduleSchema }, async ({ schedule }) => {
-      const [config] = await database.select().from(configs).where(and(eq(configs.userId, context.userId), eq(configs.isActive, true))).limit(1);
-      if (!config) return result({ error: "No active configuration found" });
-      const [updated] = await database.update(configs).set({ scheduleConfig: { ...config.scheduleConfig, ...schedule } }).where(and(eq(configs.id, config.id), eq(configs.userId, context.userId))).returning({ id: configs.id });
-      return result({ updated: !!updated });
     });
     server.tool("refresh_repository_metadata", "Force-refresh metadata for an already-owned repository through the source import route.", { repositoryId: mcpRepositoryIdSchema, confirm: z.literal(true) }, async ({ repositoryId }) => {
       const [owned] = await ownedRepo(repositoryId);

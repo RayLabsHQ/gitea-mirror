@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import { createMcpServer, mcpLimitSchema, mcpMirrorOptionsSchema, mcpMirrorOverrideSchema, mcpRepositoryIdSchema, mcpScheduleSchema } from "./server";
 
 describe("MCP server registry", () => {
@@ -119,6 +120,35 @@ describe("MCP server registry", () => {
     expect(registered).toHaveLength(42);
   });
 
+  test("serves tools/list with JSON-Schema-compatible input schemas", async () => {
+    const server = createMcpServer({ userId: "user-1", scopes: ["mirror:read"] });
+    const transport = new WebStandardStreamableHTTPServerTransport({
+      sessionIdGenerator: undefined,
+      enableJsonResponse: true,
+    });
+    await server.connect(transport);
+    try {
+      const response = await transport.handleRequest(new Request("http://localhost/api/mcp", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json, text/event-stream",
+        },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+      }));
+      const payload = await response.json() as {
+        error?: { message?: string };
+        result?: { tools?: Array<{ name: string }> };
+      };
+      expect(response.status).toBe(200);
+      expect(payload.error).toBeUndefined();
+      expect(payload.result?.tools?.map(({ name }) => name)).toContain("list_activities");
+    } finally {
+      await transport.close();
+      await server.close();
+    }
+  });
+
   test("refuses a context without an authenticated user", () => {
     expect(() => createMcpServer({ userId: "" })).toThrow("requires a userId");
   });
@@ -185,8 +215,15 @@ describe("MCP server registry", () => {
     const settingsOnly = createMcpServer({ userId: "user-1", scopes: ["mirror:settings"] });
     expect(Object.keys((readOnly as any)._registeredTools)).toContain("get_dashboard_summary");
     expect(Object.keys((readOnly as any)._registeredTools)).not.toContain("sync_repository");
-    expect(Object.keys((settingsOnly as any)._registeredTools)).toEqual(expect.arrayContaining(["set_repository_status", "delete_repositories"]));
+    expect(Object.keys((settingsOnly as any)._registeredTools)).toEqual(expect.arrayContaining([
+      "set_repository_status",
+      "delete_repositories",
+      "update_mirror_configuration",
+      "update_schedule_configuration",
+    ]));
     expect(Object.keys((settingsOnly as any)._registeredTools)).not.toContain("sync_repository");
+    expect(Object.keys((syncOnly as any)._registeredTools)).not.toContain("update_mirror_configuration");
+    expect(Object.keys((syncOnly as any)._registeredTools)).not.toContain("update_schedule_configuration");
     expect(Object.keys((readOnly as any)._registeredTools)).not.toContain("delete_organization");
     expect(Object.keys((syncOnly as any)._registeredTools)).toEqual(expect.arrayContaining([
       "sync_repository",
