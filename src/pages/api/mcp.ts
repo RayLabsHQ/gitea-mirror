@@ -36,7 +36,29 @@ async function dispatchRepositorySync(input: {
   if (!response.ok) {
     throw new Error(typeof payload.message === "string" ? payload.message : "Could not queue repository sync");
   }
-  return payload;
+  return toMcpSyncResult(payload);
+}
+
+export function toMcpSyncResult(payload: unknown): Record<string, unknown> {
+  const result = payload && typeof payload === "object"
+    ? payload as { message?: unknown; repositories?: unknown }
+    : {};
+  const repositories = Array.isArray(result.repositories)
+    ? result.repositories.map((repo) => {
+        if (!repo || typeof repo !== "object") return {};
+        const row = repo as { id?: unknown; name?: unknown; status?: unknown };
+        return {
+          ...(typeof row.id === "string" ? { id: row.id } : {}),
+          ...(typeof row.name === "string" ? { name: row.name } : {}),
+          ...(typeof row.status === "string" ? { status: row.status } : {}),
+        };
+      })
+    : [];
+  return {
+    accepted: true,
+    ...(typeof result.message === "string" ? { message: result.message } : {}),
+    repositories,
+  };
 }
 
 export const ALL: APIRoute = async ({ request }) => {

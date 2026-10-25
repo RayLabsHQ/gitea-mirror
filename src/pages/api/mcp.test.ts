@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ALL } from "./mcp";
+import { ALL, toMcpSyncResult } from "./mcp";
 
 describe("POST /api/mcp", () => {
   test("rejects missing OAuth bearer credentials before creating an MCP session", async () => {
@@ -8,5 +8,23 @@ describe("POST /api/mcp", () => {
     } as never);
     expect(response.status).toBe(401);
     expect(response.headers.get("www-authenticate")).toContain("Bearer");
+  });
+
+  test("does not expose internal repository fields in queued sync results", () => {
+    expect(toMcpSyncResult({
+      message: "Sync job started.",
+      repositories: [{
+        id: "repo-1",
+        name: "project",
+        status: "syncing",
+        userId: "private-user",
+        cloneUrl: "https://secret.example/clone",
+        mirrorOverrides: "{\"secret\":true}",
+      }],
+    })).toEqual({
+      accepted: true,
+      message: "Sync job started.",
+      repositories: [{ id: "repo-1", name: "project", status: "syncing" }],
+    });
   });
 });
