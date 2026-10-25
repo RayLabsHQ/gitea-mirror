@@ -151,6 +151,16 @@ export default function ConsentPage() {
         description: 'Your email address and verification status',
         icon: Mail,
       },
+      'mirror:read': {
+        name: 'Read mirror data',
+        description: 'List your mirrored repositories, statuses, and recent activity',
+        icon: Shield,
+      },
+      'mirror:sync': {
+        name: 'Start repository syncs',
+        description: 'Queue synchronization or retry for repositories in your account',
+        icon: Shield,
+      },
     };
 
     return scopeDescriptions[scope] || {

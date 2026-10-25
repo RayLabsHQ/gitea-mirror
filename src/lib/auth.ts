@@ -171,6 +171,14 @@ function resolveAuthLogLevel(): "debug" | "info" | "warn" | "error" | undefined 
   return undefined;
 }
 
+function resolveOAuthResourceOrigin(): string {
+  try {
+    return new URL(process.env.BETTER_AUTH_URL || "http://localhost:4321").origin;
+  } catch {
+    return "http://localhost:4321";
+  }
+}
+
 export const auth = betterAuth({
   // Database configuration
   database: drizzleAdapter(db, {
@@ -310,6 +318,12 @@ export const auth = betterAuth({
     oauthProvider({
       loginPage: withBase("/login"),
       consentPage: withBase("/oauth/consent"),
+      scopes: ["openid", "profile", "email", "offline_access", "mirror:read", "mirror:sync"],
+      resources: [{
+        identifier: `${resolveOAuthResourceOrigin()}${withBase("/api/mcp")}`,
+        name: "gitea-mirror MCP API",
+        allowedScopes: ["mirror:read", "mirror:sync"],
+      }],
       // Allow dynamic client registration for flexibility
       allowDynamicClientRegistration: true,
       // Mirror the old getAdditionalUserInfoClaim: expose our extra `username`
