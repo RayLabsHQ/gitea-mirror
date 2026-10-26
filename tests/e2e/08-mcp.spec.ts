@@ -58,6 +58,14 @@ class McpSession {
     child.stderr.on("data", (chunk: string) => {
       this.stderr += chunk;
     });
+    // A server that exits (bad config, crash) fails the waiting calls now
+    // instead of after their timeout.
+    child.on("exit", (code) => {
+      for (const settle of this.pending.values()) {
+        settle({ error: { message: `MCP server exited with ${code}. stderr: ${this.stderr}` } });
+      }
+      this.pending.clear();
+    });
   }
 
   static async start(apiKey: string): Promise<McpSession> {
@@ -71,6 +79,7 @@ class McpSession {
       capabilities: {},
       clientInfo: { name: "e2e", version: "0.0.0" },
     });
+    expect(init.error, JSON.stringify(init.error)).toBeUndefined();
     expect(init.result?.serverInfo?.name, session.stderr).toBe("gitea-mirror");
     child.stdin.write(`${JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" })}\n`);
     return session;
