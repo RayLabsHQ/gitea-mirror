@@ -1,5 +1,5 @@
 /**
- * Settings come from the environment the MCP client starts the server with,
+ * Settings come from the environment the MCP client starts the bridge with,
  * so the key never appears in a tool call or a prompt.
  */
 

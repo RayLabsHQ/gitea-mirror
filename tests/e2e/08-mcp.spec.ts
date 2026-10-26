@@ -1,10 +1,10 @@
 /**
- * 08 – Read only API keys and the MCP server.
+ * 08 – Read only API keys and the MCP endpoint.
  *
  * Creates a full access key and a read only key, checks that the read only
- * key can read but every change is refused, then starts the MCP server from
- * mcp/dist (the workflow builds it) over stdio with each key and calls its
- * tools against the repositories the earlier specs mirrored.
+ * key can read but every change is refused, then calls the tools at
+ * /api/mcp over HTTP and through the stdio bridge in mcp/dist (the workflow
+ * builds it) against the repositories the earlier specs mirrored.
  */
 
 import { test, expect, type APIRequestContext } from "@playwright/test";
@@ -33,7 +33,20 @@ async function createKey(
   return { id: body.id, key: body.key };
 }
 
-/** A line-delimited JSON-RPC session with the MCP server over stdio. */
+/** One JSON-RPC message to the MCP endpoint over HTTP. */
+async function postMcp(request: APIRequestContext, key: string | null, message: Record<string, unknown>) {
+  return request.post(`${APP_URL}/api/mcp`, {
+    headers: {
+      ...(key ? { [KEY_HEADER]: key } : {}),
+      "Content-Type": "application/json",
+      Accept: "application/json, text/event-stream",
+    },
+    data: { jsonrpc: "2.0", ...message },
+    failOnStatusCode: false,
+  });
+}
+
+/** A line-delimited JSON-RPC session with the stdio bridge. */
 class McpSession {
   private buffer = "";
   private nextId = 1;
@@ -165,7 +178,53 @@ test.describe("E2E: read only keys and the MCP server", () => {
     expect((await after.json()).repository.destinationOrg ?? null).not.toBe("should-not-stick");
   });
 
-  test("Step 3: the MCP server lists, finds and syncs with the full key", async () => {
+  test("Step 3: the MCP endpoint answers over HTTP and keeps the read only rule", async ({ request }) => {
+    const noKey = await postMcp(request, null, { id: 1, method: "ping" });
+    expect(noKey.status()).toBe(401);
+    expect((await noKey.json()).error.message).toContain("x-api-key");
+
+    const badKey = await postMcp(request, "gm_not-a-real-key-000000000000000000000000000000", { id: 1, method: "ping" });
+    expect(badKey.status()).toBe(401);
+
+    const get = await request.get(`${APP_URL}/api/mcp`, { headers: { [KEY_HEADER]: fullKey.key }, failOnStatusCode: false });
+    expect(get.status()).toBe(405);
+
+    const init = await postMcp(request, fullKey.key, {
+      id: 1,
+      method: "initialize",
+      params: { protocolVersion: "2025-11-25", capabilities: {}, clientInfo: { name: "e2e", version: "0" } },
+    });
+    expect(init.status()).toBe(200);
+    expect((await init.json()).result.serverInfo.name).toBe("gitea-mirror");
+
+    const initialized = await postMcp(request, fullKey.key, { method: "notifications/initialized" });
+    expect(initialized.status()).toBe(202);
+
+    const list = await postMcp(request, fullKey.key, { id: 2, method: "tools/list" });
+    expect((await list.json()).result.tools).toHaveLength(8);
+
+    // A read only key may post to the endpoint; its tools read through the
+    // REST API, and writes are refused there.
+    const read = await postMcp(request, readKey.key, {
+      id: 3,
+      method: "tools/call",
+      params: { name: "get_repository", arguments: { repository: mirrored!.id } },
+    });
+    const readResult = (await read.json()).result;
+    expect(readResult.isError, readResult.content[0].text).toBeUndefined();
+    expect(JSON.parse(readResult.content[0].text).repository.id).toBe(mirrored!.id);
+
+    const write = await postMcp(request, readKey.key, {
+      id: 4,
+      method: "tools/call",
+      params: { name: "sync_repositories", arguments: { repositoryIds: [mirrored!.id] } },
+    });
+    const writeResult = (await write.json()).result;
+    expect(writeResult.isError).toBe(true);
+    expect(writeResult.content[0].text).toContain("read only");
+  });
+
+  test("Step 4: the stdio bridge lists, finds and syncs with the full key", async () => {
     expect(existsSync(MCP_ENTRY), `build the MCP server first: ${MCP_ENTRY}`).toBe(true);
     const mcp = await McpSession.start(fullKey.key);
     try {
@@ -203,7 +262,7 @@ test.describe("E2E: read only keys and the MCP server", () => {
     }
   });
 
-  test("Step 4: through MCP the read only key reads and is refused on sync", async () => {
+  test("Step 5: through the bridge the read only key reads and is refused on sync", async () => {
     const mcp = await McpSession.start(readKey.key);
     try {
       const list = await mcp.callTool("list_repositories");
@@ -217,7 +276,7 @@ test.describe("E2E: read only keys and the MCP server", () => {
     }
   });
 
-  test("Step 5: revoke both keys", async ({ request }) => {
+  test("Step 6: revoke both keys", async ({ request }) => {
     for (const key of [fullKey, readKey]) {
       const resp = await request.post(`${APP_URL}/api/auth/api-key/delete`, {
         headers: { Cookie: cookies, Origin: APP_URL, "Content-Type": "application/json" },

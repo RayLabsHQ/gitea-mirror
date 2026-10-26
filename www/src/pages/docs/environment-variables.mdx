@@ -28,6 +28,7 @@ Variables fall into two groups.
 | `HOST` | `localhost` | Interface to bind. The container image sets `0.0.0.0`. |
 | `PORT` | `4321` | Port to listen on. |
 | `BASE_URL` | `/` | Path prefix for subpath deployments, for example `/mirror`. Applied at runtime, so one prebuilt image works under any prefix. |
+| `MCP_INTERNAL_URL` | `http://HOST:PORT` plus `BASE_URL` | Address the [MCP endpoint](/docs/mcp/) tools use to call the app's own API. Only needed when the app is not reachable from itself at `HOST` and `PORT`, for example when it terminates TLS itself. |
 | `DATABASE_URL` | `sqlite://data/gitea-mirror.db` | SQLite database location. The container image sets `file:data/gitea-mirror.db`. |
 
 > **Note:** `DATABASE_URL` accepts the `sqlite://` scheme, the legacy `file:` scheme, or a plain path. Relative paths resolve against the process working directory and the parent directory is created if it is missing. Point it at a mounted volume to relocate the database.

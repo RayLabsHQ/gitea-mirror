@@ -1,20 +1,19 @@
 name: MCP Server
 
-# Tests the MCP server in mcp/ and publishes it to npm as gitea-mirror-mcp
-# when an mcp-v* tag is pushed. Path filters do not apply to tag pushes.
+# Tests the stdio bridge in mcp/ and publishes it to npm as gitea-mirror-mcp
+# when an mcp-v* tag is pushed. Path filters do not apply to tag pushes. The
+# tools themselves live in the app (src/lib/mcp) and are tested with it.
 on:
   push:
     branches: ['**']
     tags: ['mcp-v*']
     paths:
       - 'mcp/**'
-      - 'src/lib/utils/github-url.ts'
       - '.github/workflows/mcp.yml'
   pull_request:
     branches: ['**']
     paths:
       - 'mcp/**'
-      - 'src/lib/utils/github-url.ts'
       - '.github/workflows/mcp.yml'
 
 permissions:
@@ -26,7 +25,7 @@ env:
 
 jobs:
   test:
-    name: Test MCP server
+    name: Test MCP bridge
     runs-on: ubuntu-latest
     timeout-minutes: 10
     defaults:
@@ -60,17 +59,17 @@ jobs:
         run: npm run build
 
       - name: Smoke test the build on Node
+        # No app runs here, so the bridge must answer the request itself
+        # with a clear error instead of hanging or crashing.
         run: |
           printf '%s\n' \
             '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"ci","version":"0"}}}' \
-            '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
-            '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
             | GITEA_MIRROR_URL=http://127.0.0.1:9 GITEA_MIRROR_API_KEY=gm_smoke timeout 20 node dist/index.js > smoke.jsonl
           node -e '
             const lines = require("fs").readFileSync("smoke.jsonl", "utf8").trim().split("\n").map(JSON.parse);
-            const tools = lines.find((m) => m.id === 2)?.result?.tools ?? [];
-            if (tools.length !== 8) { console.error(lines); process.exit(1); }
-            console.log("tools:", tools.map((t) => t.name).join(", "));
+            const answer = lines.find((m) => m.id === 1);
+            if (!answer?.error?.message?.includes("Could not reach Gitea Mirror")) { console.error(lines); process.exit(1); }
+            console.log(answer.error.message);
           '
 
       - name: Show package contents

@@ -15,10 +15,14 @@ const READ_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
  * True when a read only key is refused: any method that can change state,
  * and every Better Auth endpoint except the session lookup, since some of
  * those act on the account even on GET (the OAuth authorize endpoint).
+ * The MCP endpoint takes every message as a POST but changes nothing
+ * itself; its tools call the REST API with the same key, where this rule
+ * refuses the writes.
  */
 export function needsWriteAccess(method: string, pathname: string): boolean {
-  if (!READ_METHODS.has(method.toUpperCase())) return true;
   const path = stripBasePath(pathname);
+  if (path.replace(/\/+$/, "") === "/api/mcp") return false;
+  if (!READ_METHODS.has(method.toUpperCase())) return true;
   const isAuthEndpoint = path === "/api/auth" || path.startsWith("/api/auth/");
   return isAuthEndpoint && path !== "/api/auth/get-session";
 }

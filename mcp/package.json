@@ -1,7 +1,7 @@
 {
   "name": "gitea-mirror-mcp",
   "version": "0.1.0",
-  "description": "MCP server for Gitea Mirror: list, add, sync and retry mirrors from an AI assistant, using an API key",
+  "description": "Connect stdio MCP clients to Gitea Mirror: list, add, sync and retry mirrors from an AI assistant, using an API key",
   "license": "AGPL-3.0",
   "type": "module",
   "bin": {
@@ -27,14 +27,10 @@
     "mirror"
   ],
   "scripts": {
-    "build": "bun build src/index.ts --target=node --format=esm --packages=external --banner='#!/usr/bin/env node' --outfile=dist/index.js",
+    "build": "bun build src/index.ts --target=node --format=esm --banner='#!/usr/bin/env node' --outfile=dist/index.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "bun test",
     "prepublishOnly": "npm run typecheck && npm test && npm run build"
-  },
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "1.32.1",
-    "zod": "4.4.3"
   },
   "devDependencies": {
     "@types/bun": "1.3.14",

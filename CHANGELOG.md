@@ -36,11 +36,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Create key** in the **API Keys** card has an **Access** choice, and read only keys show a badge in the list
   - A read only key can call every `GET` endpoint; any `POST`, `PUT`, `PATCH` or `DELETE`, and every `/api/auth/*` call except `get-session`, gets `403` with the code `API_KEY_READ_ONLY`
   - Existing keys keep full access
-- An MCP server, `gitea-mirror-mcp`, in `mcp/`
-  - Runs next to the assistant (Claude Code, Claude Desktop, Cursor and other MCP clients) over stdio and calls the REST API with an API key, so nothing changes on the server
+- An MCP endpoint at `/api/mcp` for Claude, Cursor and other MCP clients
+  - Takes an API key in `x-api-key`; clients that send headers to a remote server (Claude Code) connect to it directly
   - Eight tools: `list_repositories`, `get_repository`, `list_failures`, `list_organizations`, `add_repository`, `add_organization`, `sync_repositories` and `retry_repositories`. None of them delete, archive or change settings
-  - With a read only key the assistant can look but every change is refused
-  - Published to npm from `mcp-v*` tags; setup is in `mcp/README.md` and on the documentation site
+  - The tools act through the REST API with the caller's key, so a read only key can look but every change is refused. `MCP_INTERNAL_URL` sets the address they use when the app is not reachable on its own `HOST` and `PORT`
+  - `gitea-mirror-mcp` in `mcp/` is a stdio bridge for clients that start a local command (Claude Desktop, Cursor). It has no dependencies and is published to npm from `mcp-v*` tags; setup is in `mcp/README.md` and on the documentation site
 - Choose which releases count as candidates: every one, or stable releases only
   - A **Pre-releases** switch sits under the two release numbers in the mirror settings, and the same choice is in the per organization and per repository **Mirror options** dialog, where **Inherit** means the global value
   - The release controls in the global mirror settings are listed under each other instead of beside the switch, and in the **Mirror options** dialog the release limit, asset limit and tag rules sit directly under the **Releases** row instead of on a separate tab

@@ -1,14 +1,17 @@
 /**
- * A small client for the Gitea Mirror REST API (docs/API.md). Every call
- * carries the API key in the x-api-key header, and writes always send a
- * JSON content type, which the app requires even when there is no body.
+ * The MCP tools act through the app's own REST API (docs/API.md), with the
+ * credential the MCP request came with, so every route's checks and the
+ * read only key rule apply exactly as they do for a script. Writes always
+ * send a JSON content type, which the app requires even without a body.
  */
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>;
 
-export interface ClientOptions {
+export interface RestClientOptions {
+  /** Where the app answers locally, plus any BASE_URL prefix. */
   baseUrl: string;
-  apiKey: string;
+  /** The caller's credential, sent on every request (the x-api-key header). */
+  credentialHeaders: Record<string, string>;
   fetch?: FetchLike;
   timeoutMs?: number;
 }
@@ -45,15 +48,15 @@ function errorCode(body: unknown): string | undefined {
   return typeof code === "string" ? code : undefined;
 }
 
-export class GiteaMirrorClient {
+export class RestClient {
   readonly baseUrl: string;
-  private readonly apiKey: string;
+  private readonly credentialHeaders: Record<string, string>;
   private readonly fetchImpl: FetchLike;
   private readonly timeoutMs: number;
 
-  constructor(options: ClientOptions) {
+  constructor(options: RestClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/+$/, "");
-    this.apiKey = options.apiKey;
+    this.credentialHeaders = options.credentialHeaders;
     this.fetchImpl = options.fetch ?? ((input, init) => fetch(input, init));
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   }
@@ -77,16 +80,12 @@ export class GiteaMirrorClient {
     body?: unknown,
     accept: number[] = []
   ): Promise<ApiResponse<T>> {
-    const url = `${this.baseUrl}${path}`;
-    const headers: Record<string, string> = {
-      "x-api-key": this.apiKey,
-      Accept: "application/json",
-    };
+    const headers: Record<string, string> = { ...this.credentialHeaders, Accept: "application/json" };
     if (method !== "GET") headers["Content-Type"] = "application/json";
 
     let response: Response;
     try {
-      response = await this.fetchImpl(url, {
+      response = await this.fetchImpl(`${this.baseUrl}${path}`, {
         method,
         headers,
         body: method === "GET" ? undefined : JSON.stringify(body ?? {}),
@@ -94,7 +93,10 @@ export class GiteaMirrorClient {
       });
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
-      throw new ApiError(`Could not reach Gitea Mirror at ${this.baseUrl}: ${reason}`, 0);
+      throw new ApiError(
+        `Gitea Mirror could not reach its own API at ${this.baseUrl}: ${reason}. If the app listens somewhere else, set MCP_INTERNAL_URL.`,
+        0
+      );
     }
 
     const text = await response.text();
@@ -102,10 +104,8 @@ export class GiteaMirrorClient {
     try {
       parsed = text ? JSON.parse(text) : {};
     } catch {
-      // An HTML page here usually means the URL is not the app itself, or
-      // misses the BASE_URL prefix the app is served under.
       throw new ApiError(
-        `${method} ${path} answered ${response.status} with something other than JSON. Check that GITEA_MIRROR_URL is the address of the app, including any path prefix.`,
+        `${method} ${path} answered ${response.status} with something other than JSON. If the app listens somewhere else, set MCP_INTERNAL_URL.`,
         response.status
       );
     }
@@ -114,15 +114,7 @@ export class GiteaMirrorClient {
       return { status: response.status, body: parsed as T };
     }
 
-    const code = errorCode(parsed);
-    if (response.status === 401) {
-      throw new ApiError(
-        "Gitea Mirror rejected the API key (401). Check GITEA_MIRROR_API_KEY; the key may be revoked or expired.",
-        401,
-        code
-      );
-    }
     const detail = errorText(parsed) ?? response.statusText ?? "request failed";
-    throw new ApiError(`${method} ${path} failed with ${response.status}: ${detail}`, response.status, code);
+    throw new ApiError(`${method} ${path} failed with ${response.status}: ${detail}`, response.status, errorCode(parsed));
   }
 }

@@ -48,6 +48,12 @@ describe("needsWriteAccess", () => {
     // A route that only starts with the same letters is an app route.
     expect(needsWriteAccess("GET", "/api/authors")).toBe(false);
   });
+
+  test("the MCP endpoint is open to read only keys; its tools are checked on the REST calls", () => {
+    expect(needsWriteAccess("POST", "/api/mcp")).toBe(false);
+    expect(needsWriteAccess("POST", "/api/mcp/")).toBe(false);
+    expect(needsWriteAccess("POST", "/api/mcpx")).toBe(true);
+  });
 });
 
 describe("refuseReadOnlyApiKey", () => {

@@ -35,6 +35,7 @@ Essential application settings required for running Gitea Mirror.
 | `HOST` | Server host binding | `0.0.0.0` | No |
 | `PORT` | Server port | `4321` | No |
 | `BASE_URL` | Application base path. Use `/` for root deployments, or a prefix such as `/mirror` when serving behind a reverse-proxy path prefix. | `/` | No |
+| `MCP_INTERNAL_URL` | Address the [MCP endpoint](../mcp/README.md) tools use to call the app's own API, including any `BASE_URL` prefix. Only needed when the app is not reachable from itself at `HOST` and `PORT`, for example when it terminates TLS itself (`https://127.0.0.1:4321`). | `http://HOST:PORT` plus `BASE_URL` | No |
 | `DATABASE_URL` | Database connection URL | `sqlite://data/gitea-mirror.db` | No |
 | `BETTER_AUTH_SECRET` | Secret key for session signing (generate with: `openssl rand -base64 32`) | - | Yes |
 | `BETTER_AUTH_URL` | Authentication origin (scheme + host only, e.g. `https://git.example.com`). Do **not** include a path — any path is automatically stripped, and `BASE_URL` is applied separately. | `http://localhost:4321` | No |

@@ -153,12 +153,12 @@ jobs:
           bun run build
           echo "✓ Build complete"
 
-      - name: Build MCP server
+      - name: Build MCP bridge
         working-directory: mcp
         run: |
           npm ci
           npm run build
-          echo "✓ MCP server built"
+          echo "✓ MCP bridge built"
 
       - name: Start fake GitHub API server
         run: |
