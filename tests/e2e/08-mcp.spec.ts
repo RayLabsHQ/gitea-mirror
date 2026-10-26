@@ -147,9 +147,24 @@ test.describe("E2E: read only keys and the MCP server", () => {
       headers: { [KEY_HEADER]: readKey.key },
     });
     expect(repos.status()).toBe(200);
-    const tracked = ((await repos.json()).repositories ?? []) as Array<{ id: string; fullName: string; status: string }>;
-    const found = tracked.find((repo) => repo.status === "mirrored" || repo.status === "synced");
-    expect(found, "spec 02 leaves at least one mirrored repository").toBeTruthy();
+    const tracked = ((await repos.json()).repositories ?? []) as Array<{
+      id: string;
+      fullName: string;
+      status: string;
+      sourceId?: string | null;
+    }>;
+    // Spec 07 re-adopts a mirror whose clone URL points at the git server,
+    // a host no connected source owns, so that row has no source. Adding it
+    // by owner/name would track a second copy under the primary source, so
+    // pick a repository the primary source owns.
+    const sources = await request.get(`${APP_URL}/api/sources`, { headers: { [KEY_HEADER]: readKey.key } });
+    expect(sources.status()).toBe(200);
+    const primarySourceId = ((await sources.json()).sources ?? [])[0]?.id as string | undefined;
+    expect(primarySourceId, "spec 02 connects a source").toBeTruthy();
+    const found = tracked.find(
+      (repo) => (repo.status === "mirrored" || repo.status === "synced") && repo.sourceId === primarySourceId
+    );
+    expect(found, "spec 02 leaves at least one mirrored repository from the primary source").toBeTruthy();
     mirrored = { id: found!.id, fullName: found!.fullName };
 
     const session = await request.get(`${APP_URL}/api/auth/get-session`, {
