@@ -95,14 +95,28 @@
             const color1 = [0.122, 0.502, 0.122]; // #1f801f
             const color2 = [0.059, 0.251, 0.059]; // #0f400f
 
+            if (color1Location !== null) {
+              gl.uniform3fv(color1Location, color1);
+            }
+            if (color2Location !== null) {
+              gl.uniform3fv(color2Location, color2);
+            }
+
+            // The pattern is soft enough that half resolution looks the same
+            // once the browser scales it up, at a quarter of the pixel work.
+            const resolutionScale = 0.5;
+            const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            let frame = 0;
+            let visible = false;
+
             function render(time: number): void {
               if (!gl || !program || !canvas) return;
-              
+
               time *= 0.001;
 
-              const displayWidth = canvas.clientWidth;
-              const displayHeight = canvas.clientHeight;
-              
+              const displayWidth = Math.max(1, Math.round(canvas.clientWidth * resolutionScale));
+              const displayHeight = Math.max(1, Math.round(canvas.clientHeight * resolutionScale));
+
               if (canvas.width !== displayWidth || canvas.height !== displayHeight) {
                 canvas.width = displayWidth;
                 canvas.height = displayHeight;
@@ -112,26 +126,32 @@
               gl.clearColor(0, 0, 0, 0);
               gl.clear(gl.COLOR_BUFFER_BIT);
 
-              gl.useProgram(program);
-              
               if (resolutionLocation !== null) {
                 gl.uniform2f(resolutionLocation, canvas.width, canvas.height);
               }
               if (timeLocation !== null) {
                 gl.uniform1f(timeLocation, time);
               }
-              if (color1Location !== null) {
-                gl.uniform3fv(color1Location, color1);
-              }
-              if (color2Location !== null) {
-                gl.uniform3fv(color2Location, color2);
-              }
 
               gl.drawArrays(gl.TRIANGLES, 0, 6);
-              requestAnimationFrame(render);
+              frame = visible && !reduceMotion ? requestAnimationFrame(render) : 0;
             }
-            
-            requestAnimationFrame(render);
+
+            const start = () => {
+              if (visible && !frame) frame = requestAnimationFrame(render);
+            };
+
+            // Only animate while the canvas is on screen. Below the lg
+            // breakpoint the canvas is display:none and never intersects,
+            // so phones and tablets skip the loop entirely.
+            new IntersectionObserver(([entry]) => {
+              visible = entry.isIntersecting;
+              start();
+            }).observe(canvas);
+
+            // Resizing clears the canvas, so draw again even when the loop is
+            // idle (reduced motion draws a single frame).
+            new ResizeObserver(start).observe(canvas);
           }
         }
       }

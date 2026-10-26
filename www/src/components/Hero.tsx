@@ -1,15 +1,106 @@
 import { Button } from "./ui/button";
 import { Shield, RefreshCw, HardDrive, GitBranch } from "lucide-react";
-import React, { Suspense } from 'react';
+import React, { Suspense, useEffect, useRef, useState } from 'react';
+import type { Application } from '@splinetool/runtime';
 
 const Spline = React.lazy(() => import('@splinetool/react-spline'));
 
+// The 3D scene is about 2 MB of script and keeps the GPU busy on every frame,
+// so only load it where it is shown (md and up), after the page has loaded,
+// and not at all when the visitor asks for reduced motion.
+function useSplineEnabled() {
+  const [enabled, setEnabled] = useState(false);
+
+  useEffect(() => {
+    const wide = window.matchMedia('(min-width: 768px)');
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+    let cancel = () => {};
+    const start = () => {
+      // Safari has no requestIdleCallback.
+      if ('requestIdleCallback' in window) {
+        const id = requestIdleCallback(() => setEnabled(true), { timeout: 2000 });
+        cancel = () => cancelIdleCallback(id);
+      } else {
+        const id = setTimeout(() => setEnabled(true), 200);
+        cancel = () => clearTimeout(id);
+      }
+    };
+    const schedule = () => {
+      if (!wide.matches) return;
+      wide.removeEventListener('change', schedule);
+      if (document.readyState === 'complete') start();
+      else window.addEventListener('load', start, { once: true });
+    };
+
+    schedule();
+    wide.addEventListener('change', schedule);
+    return () => {
+      wide.removeEventListener('change', schedule);
+      window.removeEventListener('load', start);
+      cancel();
+    };
+  }, []);
+
+  return enabled;
+}
+
 export function Hero() {
+  const splineEnabled = useSplineEnabled();
+  const splineContainer = useRef<HTMLDivElement>(null);
+  const splineApp = useRef<Application | null>(null);
+  const splineVisible = useRef(true);
+
+  // Pause the scene while the hero is scrolled out of view.
+  useEffect(() => {
+    const target = splineContainer.current;
+    if (!target) return;
+    const observer = new IntersectionObserver(([entry]) => {
+      splineVisible.current = entry.isIntersecting;
+      const app = splineApp.current;
+      if (!app) return;
+      if (entry.isIntersecting) app.play();
+      else app.stop();
+    });
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, []);
+
+  const handleSplineLoad = (app: Application) => {
+    splineApp.current = app;
+    if (!splineVisible.current) app.stop();
+
+    // The scene is published to render at the full device pixel ratio. 1.5
+    // looks the same on retina screens for a fifth less GPU time. These are
+    // not public API, so this does nothing if Spline renames them. The forced
+    // resize applies the new ratio now instead of on the next window resize.
+    const internals = app as unknown as {
+      _renderer?: { setPixelRatio?: (ratio: number) => void };
+      _resize?: (force: boolean) => void;
+    };
+    if (window.devicePixelRatio > 1.5 && internals._renderer?.setPixelRatio && internals._resize) {
+      internals._renderer.setPixelRatio(1.5);
+      internals._resize(true);
+    }
+  };
+
+  // Shown while the scene loads and instead of it for reduced motion. The 3D
+  // mascot is drawn at 35.6% of the container height and the artwork fills
+  // 92.3% of this image, so 38.5% keeps the two the same size and place.
+  const heroLogo = (
+    <div className="w-full h-full md:flex items-center justify-center hidden">
+      <img
+        src="/assets/hero_logo.webp"
+        alt="Gitea Mirror hero logo"
+        className="h-[38.5%] w-auto object-contain"
+      />
+    </div>
+  );
 
   return (
     <section className="relative min-h-[100vh] pt-20 pb-10 flex flex-col items-center justify-center px-4 sm:px-6 lg:px-8 overflow-hidden">
       {/* spline object */}
-      <div className="spline-object absolute inset-0 max-lg:-z-10 max-h-[40rem] -translate-y-16 md:max-h-[50rem] lg:max-h-[60%] xl:max-h-[70%] 2xl:max-h-[80%] md:-translate-y-24 lg:-translate-y-28 flex items-center justify-center">
+      <div ref={splineContainer} className="spline-object absolute inset-0 max-lg:-z-10 max-h-[40rem] -translate-y-16 md:max-h-[50rem] lg:max-h-[60%] xl:max-h-[70%] 2xl:max-h-[80%] md:-translate-y-24 lg:-translate-y-28 flex items-center justify-center">
 
         <div className="block md:hidden w-[80%]">
           <img
@@ -19,20 +110,17 @@ export function Hero() {
           />
           </div>
         <div className="absolute right-2 bottom-4 h-20 w-40 bg-background hidden md:block"/>
-        <Suspense fallback={
-          <div className="w-full h-full md:flex items-center justify-center hidden">
-            <img
-              src="/assets/hero_logo.webp"
-              alt="Gitea Mirror hero logo"
-              className="w-[200px] h-[160px] md:w-[280px] md:h-[240px] lg:w-[360px] lg:h-[320px] xl:w-[420px] xl:h-[380px] 2xl:w-[480px] 2xl:h-[420px] object-contain"
-            />
-          </div>
-        }>
-          <Spline
-            scene="https://prod.spline.design/jl0aKWbdH9vHQnYV/scene.splinecode"
-            className="hidden md:block"
-          />  
-        </Suspense>
+        {splineEnabled ? (
+          <Suspense fallback={heroLogo}>
+            <Spline
+              scene="https://prod.spline.design/jl0aKWbdH9vHQnYV/scene.splinecode"
+              className="hidden md:block"
+              onLoad={handleSplineLoad}
+            >
+              {heroLogo}
+            </Spline>
+          </Suspense>
+        ) : heroLogo}
       </div>
       {/* div to avoid clipping in lower screen heights */}
       <div className="clip-avoid w-full h-[16rem] md:h-[20rem] lg:h-[12rem] 2xl:h-[16rem]" aria-hidden="true"></div>
