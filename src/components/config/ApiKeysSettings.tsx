@@ -18,19 +18,24 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { Check, Copy, Info, Key, Loader2, Plus, Trash2 } from 'lucide-react';
 import { authClient } from '@/lib/auth-client';
 import { cn, formatDateShort, formatLastSyncTime } from '@/lib/utils';
 import {
+  API_KEY_ACCESS_OPTIONS,
   API_KEY_EXPIRY_OPTIONS,
   API_KEY_HEADER,
   API_KEY_NAME_MAX_LENGTH,
+  accessToKeyMetadata,
   describeKeyExpiry,
   expiryOptionToSeconds,
   isKeyExpired,
+  keyAccessFromMetadata,
   maskKeyStart,
   normalizeKeyName,
+  type ApiKeyAccess,
   type ApiKeyExpiryOption,
 } from '@/lib/api-keys';
 
@@ -45,6 +50,7 @@ interface ApiKeyRow {
   lastRequest: string | Date | null;
   expiresAt: string | Date | null;
   enabled: boolean;
+  metadata?: unknown;
 }
 
 function toRows(data: unknown): ApiKeyRow[] {
@@ -70,9 +76,9 @@ function errorMessage(error: unknown, fallback: string): string {
 
 /**
  * Personal API keys for scripts and CI (issue #314). Keys belong to the
- * signed-in user and carry the same rights as their session. The secret
- * is shown once, right after creation, and only its first characters are
- * stored afterwards.
+ * signed-in user and carry the same rights as their session, unless made
+ * read only. The secret is shown once, right after creation, and only its
+ * first characters are stored afterwards.
  */
 export function ApiKeysSettings() {
   const [keys, setKeys] = useState<ApiKeyRow[]>([]);
@@ -82,6 +88,7 @@ export function ApiKeysSettings() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [name, setName] = useState('');
   const [expiry, setExpiry] = useState<ApiKeyExpiryOption>('never');
+  const [access, setAccess] = useState<ApiKeyAccess>('full');
   const [nameError, setNameError] = useState<string | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [createdKey, setCreatedKey] = useState<{ name: string; secret: string } | null>(null);
@@ -113,6 +120,7 @@ export function ApiKeysSettings() {
   const resetDialog = () => {
     setName('');
     setExpiry('never');
+    setAccess('full');
     setNameError(null);
     setCreatedKey(null);
     setCopied(false);
@@ -135,9 +143,11 @@ export function ApiKeysSettings() {
     setIsCreating(true);
     try {
       const expiresIn = expiryOptionToSeconds(expiry);
+      const metadata = accessToKeyMetadata(access);
       const result = await authClient.apiKey.create({
         name: normalized.value,
         ...(expiresIn !== undefined ? { expiresIn } : {}),
+        ...(metadata ? { metadata } : {}),
       });
       if (result.error || !result.data?.key) {
         toast.error(errorMessage(result.error, 'Could not create the API key.'));
@@ -235,7 +245,8 @@ export function ApiKeysSettings() {
                 <DialogHeader>
                   <DialogTitle>Create API key</DialogTitle>
                   <DialogDescription>
-                    The key acts as you: anything your account can do through the app, a script holding this key can do too.
+                    A full access key acts as you: anything your account can do through the app, a script holding it can do
+                    too. A read only key can look but not change anything.
                   </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-2">
@@ -271,6 +282,24 @@ export function ApiKeysSettings() {
                       ))}
                     </SelectContent>
                   </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="api-key-access">Access</Label>
+                  <Select value={access} onValueChange={(value) => setAccess(value as ApiKeyAccess)}>
+                    <SelectTrigger id="api-key-access" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {API_KEY_ACCESS_OPTIONS.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    {API_KEY_ACCESS_OPTIONS.find((option) => option.value === access)?.description}
+                  </p>
                 </div>
                 <DialogFooter>
                   <Button type="button" variant="outline" onClick={() => handleDialogChange(false)} disabled={isCreating}>
@@ -323,6 +352,7 @@ export function ApiKeysSettings() {
               const inactive = expired || row.enabled === false;
               const isPending = pendingRevokeId === row.id;
               const isRevoking = revokingId === row.id;
+              const readOnly = keyAccessFromMetadata(row.metadata) === 'read';
               return (
                 <div
                   key={row.id}
@@ -330,9 +360,16 @@ export function ApiKeysSettings() {
                   className="flex flex-col gap-2 py-3 sm:grid sm:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_5.5rem] sm:items-center sm:gap-4"
                 >
                   <div className="min-w-0">
-                    <p className={cn('truncate text-sm font-medium', inactive && 'text-muted-foreground')}>
-                      {row.name || 'Unnamed key'}
-                    </p>
+                    <div className="flex min-w-0 items-center gap-2">
+                      <p className={cn('truncate text-sm font-medium', inactive && 'text-muted-foreground')}>
+                        {row.name || 'Unnamed key'}
+                      </p>
+                      {readOnly && (
+                        <Badge variant="outline" className="h-4 shrink-0 px-2 text-[10px]">
+                          Read only
+                        </Badge>
+                      )}
+                    </div>
                     <p className="truncate font-mono text-xs text-muted-foreground">{maskKeyStart(row.start)}</p>
                   </div>
                   <p className="text-xs text-muted-foreground sm:text-sm">

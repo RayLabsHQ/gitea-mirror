@@ -1,0 +1,87 @@
+---
+layout: '../../layouts/DocsLayout.astro'
+title: MCP Server
+description: Let Claude, Cursor or any other MCP client check on your mirrors, find failures and start mirrors, syncs and retries.
+---
+
+# MCP Server
+
+`gitea-mirror-mcp` is an [MCP](https://modelcontextprotocol.io) server for Gitea Mirror. It lets an assistant such as Claude, Cursor or any other MCP client check on your mirrors, find failures, add repositories and organizations, and start syncs and retries.
+
+It runs on your machine next to the assistant and talks to your Gitea Mirror over the [REST API](/docs/api/) with an API key. Nothing is added to the Gitea Mirror server, and the server needs no new settings.
+
+## Requirements
+
+- Gitea Mirror 3.46.0 or later (read only keys need it; full access keys work from 3.45.0).
+- Node.js 20 or later where the assistant runs.
+- An API key. Open the Configuration page, the **Authentication** tab, then **Create key** in the **API Keys** card.
+
+Pick the key's access with care. The assistant can do whatever the key allows:
+
+- **Read only**: the assistant can list and inspect, nothing else. Every tool that changes something gets a clear refusal.
+- **Full access**: the assistant can also add repositories and organizations and start mirrors, syncs and retries. None of the tools delete, archive or change settings, but the key itself can do anything your account can do through the API, so keep it out of shared config files.
+
+## Setup
+
+The server reads two environment variables:
+
+| Variable | Value |
+| --- | --- |
+| `GITEA_MIRROR_URL` | The address you open in the browser, for example `https://mirror.example.com`. Include the path prefix if the app runs under one (`https://example.com/mirror`). |
+| `GITEA_MIRROR_API_KEY` | The `gm_...` key. |
+
+### Claude Code
+
+```bash
+claude mcp add gitea-mirror \
+  -e GITEA_MIRROR_URL=https://mirror.example.com \
+  -e GITEA_MIRROR_API_KEY=gm_... \
+  -- npx -y gitea-mirror-mcp
+```
+
+### Claude Desktop, Cursor and other clients
+
+Add the server to the client's MCP config (`claude_desktop_config.json` for Claude Desktop, `~/.cursor/mcp.json` for Cursor):
+
+```json
+{
+  "mcpServers": {
+    "gitea-mirror": {
+      "command": "npx",
+      "args": ["-y", "gitea-mirror-mcp"],
+      "env": {
+        "GITEA_MIRROR_URL": "https://mirror.example.com",
+        "GITEA_MIRROR_API_KEY": "gm_..."
+      }
+    }
+  }
+}
+```
+
+## Tools
+
+| Tool | What it does |
+| --- | --- |
+| `list_repositories` | Tracked repositories with their status, newest first. Filter by `status` or `search` on owner/name; `limit` up to 200. |
+| `get_repository` | One repository by id or owner/name: status, where it is mirrored to, the last error and its recent activity. |
+| `list_failures` | Repositories whose last mirror or sync failed, with the error. |
+| `list_organizations` | Tracked organizations with their status and repository count. |
+| `add_repository` | Track a repository from a browser, clone or SSH URL (or `owner/name` for the default source) and start mirroring it. Optional `destinationOrg`; `mirror: false` only tracks it. Adding one that is already tracked returns it. |
+| `add_organization` | Track an organization and its repositories and start mirroring them. `mirror: false` only tracks it. |
+| `sync_repositories` | Pull the latest changes into repositories that are already mirrored (up to 50 ids). |
+| `retry_repositories` | Retry failed repositories, or start ones that were added but never mirrored (up to 50 ids). |
+
+The first four only read. Mirrors, syncs and retries run in the background; the tool returns once the job has started, so ask the assistant to check `get_repository` or `list_failures` afterwards.
+
+Things you might ask:
+
+- "Which of my mirrors are failing, and why?"
+- "Mirror https://github.com/octocat/hello-world into the archive org."
+- "Retry everything that failed with a timeout."
+- "When did octocat/hello-world last sync?"
+
+## Notes
+
+- Repository names, error messages and activity text come from your source and destination hosts. The server tells the assistant to treat them as data, but review what an assistant proposes before it acts on a full access key.
+- The server logs to stderr only and never prints the key.
+- Anything the tools do not cover is available through the [REST API](/docs/api/) with the same key.

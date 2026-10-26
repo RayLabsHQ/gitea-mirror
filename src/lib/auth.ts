@@ -383,6 +383,11 @@ export const auth = betterAuth({
       defaultPrefix: API_KEY_PREFIX,
       defaultKeyLength: API_KEY_LENGTH,
       requireName: true,
+      // Read only keys keep their access level in the metadata (see
+      // ApiKeyAccess in api-keys.ts); the plugin refuses metadata without
+      // this. Key management needs a real sign-in, so a key cannot change
+      // its own level.
+      enableMetadata: true,
       // The plugin's default is 10 requests per day per key, far too low
       // for CI or workflow tools. Keys are not rate limited; revoke a key
       // to stop it.
