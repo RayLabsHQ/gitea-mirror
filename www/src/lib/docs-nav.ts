@@ -38,6 +38,7 @@ export const docsNav: DocsNavSection[] = [
     title: 'Reference',
     items: [
       { title: 'API & API Keys', href: '/docs/api/' },
+      { title: 'MCP Server', href: '/docs/mcp/' },
       { title: 'Architecture', href: '/docs/architecture/' },
       { title: 'Advanced', href: '/docs/advanced/' },
       { title: 'Custom CA Certificates', href: '/docs/ca-certificates/' },

@@ -385,6 +385,28 @@ export class GiteaAPI {
 // ─── App auth helpers ────────────────────────────────────────────────────────
 
 /**
+ * POST to a Better Auth endpoint, waiting out its rate limit. Sign-in and
+ * sign-up allow 3 requests per 10 seconds in production, which specs that
+ * run back to back can exceed; a 429 names the wait in X-Retry-After.
+ */
+async function postAuth(
+  request: APIRequestContext,
+  path: string,
+  data: Record<string, unknown>,
+): Promise<Awaited<ReturnType<APIRequestContext["post"]>>> {
+  for (let attempt = 1; ; attempt++) {
+    const resp = await request.post(`${APP_URL}/api/auth${path}`, {
+      data,
+      failOnStatusCode: false,
+    });
+    if (resp.status() !== 429 || attempt === 3) return resp;
+    const waitSeconds = Number(resp.headers()["x-retry-after"]) || 10;
+    console.log(`[App] ${path} rate limited, retrying in ${waitSeconds}s`);
+    await new Promise((r) => setTimeout(r, (Math.min(waitSeconds, 15) + 0.5) * 1000));
+  }
+}
+
+/**
  * Sign up + sign in to the gitea-mirror app using the Better Auth REST API
  * and return the session cookie string.
  */
@@ -392,9 +414,9 @@ export async function getAppSessionCookies(
   request: APIRequestContext,
 ): Promise<string> {
   // 1. Try sign-in first (user may already exist from a previous test / run)
-  const signInResp = await request.post(`${APP_URL}/api/auth/sign-in/email`, {
-    data: { email: APP_USER_EMAIL, password: APP_USER_PASS },
-    failOnStatusCode: false,
+  const signInResp = await postAuth(request, "/sign-in/email", {
+    email: APP_USER_EMAIL,
+    password: APP_USER_PASS,
   });
 
   if (signInResp.ok()) {
@@ -406,13 +428,10 @@ export async function getAppSessionCookies(
   }
 
   // 2. Register
-  const signUpResp = await request.post(`${APP_URL}/api/auth/sign-up/email`, {
-    data: {
-      name: APP_USER_NAME,
-      email: APP_USER_EMAIL,
-      password: APP_USER_PASS,
-    },
-    failOnStatusCode: false,
+  const signUpResp = await postAuth(request, "/sign-up/email", {
+    name: APP_USER_NAME,
+    email: APP_USER_EMAIL,
+    password: APP_USER_PASS,
   });
   const signUpStatus = signUpResp.status();
   console.log(`[App] Sign-up response: ${signUpStatus}`);
@@ -425,13 +444,10 @@ export async function getAppSessionCookies(
   }
 
   // 3. Sign in after registration
-  const postRegSignIn = await request.post(
-    `${APP_URL}/api/auth/sign-in/email`,
-    {
-      data: { email: APP_USER_EMAIL, password: APP_USER_PASS },
-      failOnStatusCode: false,
-    },
-  );
+  const postRegSignIn = await postAuth(request, "/sign-in/email", {
+    email: APP_USER_EMAIL,
+    password: APP_USER_PASS,
+  });
   if (!postRegSignIn.ok()) {
     const body = await postRegSignIn.text();
     throw new Error(
@@ -470,35 +486,23 @@ export function extractSetCookies(
  * Sign in via the browser UI so the browser context gets session cookies.
  */
 export async function signInViaBrowser(page: Page): Promise<string> {
-  const signInResp = await page.request.post(
-    `${APP_URL}/api/auth/sign-in/email`,
-    {
-      data: { email: APP_USER_EMAIL, password: APP_USER_PASS },
-      failOnStatusCode: false,
-    },
-  );
+  const signInResp = await postAuth(page.request, "/sign-in/email", {
+    email: APP_USER_EMAIL,
+    password: APP_USER_PASS,
+  });
 
   if (!signInResp.ok()) {
-    const signUpResp = await page.request.post(
-      `${APP_URL}/api/auth/sign-up/email`,
-      {
-        data: {
-          name: APP_USER_NAME,
-          email: APP_USER_EMAIL,
-          password: APP_USER_PASS,
-        },
-        failOnStatusCode: false,
-      },
-    );
+    const signUpResp = await postAuth(page.request, "/sign-up/email", {
+      name: APP_USER_NAME,
+      email: APP_USER_EMAIL,
+      password: APP_USER_PASS,
+    });
     console.log(`[Browser] Sign-up status: ${signUpResp.status()}`);
 
-    const retryResp = await page.request.post(
-      `${APP_URL}/api/auth/sign-in/email`,
-      {
-        data: { email: APP_USER_EMAIL, password: APP_USER_PASS },
-        failOnStatusCode: false,
-      },
-    );
+    const retryResp = await postAuth(page.request, "/sign-in/email", {
+      email: APP_USER_EMAIL,
+      password: APP_USER_PASS,
+    });
     if (!retryResp.ok()) {
       console.log(`[Browser] Sign-in retry failed: ${retryResp.status()}`);
     }

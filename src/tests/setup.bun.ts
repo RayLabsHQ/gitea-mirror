@@ -67,7 +67,8 @@ mock.module("@/lib/db", () => {
     oauthApplications: {},
     oauthAccessTokens: {},
     oauthConsent: {},
-    ssoProviders: {}
+    ssoProviders: {},
+    apikeys: {}
   };
 });
 

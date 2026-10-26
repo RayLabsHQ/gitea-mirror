@@ -77,6 +77,47 @@ export function maskKeyStart(start: string | null | undefined): string {
   return `${shown}${"•".repeat(8)}`;
 }
 
+/**
+ * What a key may do. A read only key may call GET endpoints and nothing
+ * else, so it can be handed to a dashboard or an AI assistant that should
+ * look but not change anything. The level lives in the key's metadata as
+ * `access`; keys without it, including every key made before this option,
+ * have full access.
+ */
+export type ApiKeyAccess = "full" | "read";
+
+export const API_KEY_ACCESS_OPTIONS: ReadonlyArray<{
+  value: ApiKeyAccess;
+  label: string;
+  description: string;
+}> = [
+  { value: "full", label: "Full access", description: "Anything your account can do in the app." },
+  { value: "read", label: "Read only", description: "GET endpoints only. Any change is refused with 403." },
+];
+
+/** Metadata for the create call, or undefined for a full access key. */
+export function accessToKeyMetadata(access: ApiKeyAccess): { access: "read" } | undefined {
+  return access === "read" ? { access: "read" } : undefined;
+}
+
+/**
+ * Access level from a key's stored metadata. The plugin returns it parsed,
+ * the database holds JSON text, and old rows may be stringified twice.
+ */
+export function keyAccessFromMetadata(metadata: unknown): ApiKeyAccess {
+  let value = metadata;
+  for (let depth = 0; depth < 2 && typeof value === "string"; depth++) {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return "full";
+    }
+  }
+  return value && typeof value === "object" && (value as { access?: unknown }).access === "read"
+    ? "read"
+    : "full";
+}
+
 /** Trim a proposed key name and report whether the plugin will accept it. */
 export function normalizeKeyName(name: string): { value: string; error: string | null } {
   const value = name.trim();

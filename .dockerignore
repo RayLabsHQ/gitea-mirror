@@ -16,6 +16,7 @@ build
 .next
 out
 www
+mcp
 
 # Environment variables
 .env
