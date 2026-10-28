@@ -5,10 +5,18 @@ Gitea Mirror's web UI talks to a set of JSON endpoints under `/api`. With an API
 ## Create a key
 
 1. Sign in and open **Settings → Authentication**.
-2. In the **API Keys** section click **Create key**, give it a name and pick an expiry (never, 30 days, 90 days or a year).
+2. In the **API Keys** section click **Create key**, give it a name and pick an expiry (never, 30 days, 90 days or a year) and an access level (full access or read only).
 3. Copy the key. It is shown once; afterwards only its first characters are visible in the list.
 
-Keys start with `gm_`, belong to the user who created them and carry the same rights as that user's session. Revoke a key from the same list at any time. Keys are stored hashed. They are not rate limited, so a runaway script is stopped by revoking its key.
+Keys start with `gm_` and belong to the user who created them. A full access key carries the same rights as that user's session. Revoke a key from the same list at any time. Keys are stored hashed. They are not rate limited, so a runaway script is stopped by revoking its key.
+
+Pick **Read only** under **Access** for a key that only needs to look: it can call every `GET` endpoint and nothing else. Any `POST`, `PUT`, `PATCH` or `DELETE` with a read only key gets `403`:
+
+```json
+{ "success": false, "error": "This API key is read only. Use a key with full access to make changes.", "code": "API_KEY_READ_ONLY" }
+```
+
+Use a read only key for dashboards, monitoring and the [MCP server](../mcp/README.md) when you only want an assistant to answer questions. A key's access level cannot be changed after it is created; create a new key instead.
 
 ## Send the key
 
@@ -294,8 +302,8 @@ Manage keys through the settings UI or with a browser session. The key endpoints
 
 | Call | Body | Result |
 | --- | --- | --- |
-| `POST /api/auth/api-key/create` | `{ "name": "ci", "expiresIn": 2592000 }` (`expiresIn` in seconds, omit for no expiry) | The new key, including `key`, shown only here. |
-| `GET /api/auth/api-key/list` | | `{ "apiKeys": [...], "total": n }`. Each entry has `id`, `name`, `start`, `createdAt`, `lastRequest` and `expiresAt`, never the secret. |
+| `POST /api/auth/api-key/create` | `{ "name": "ci", "expiresIn": 2592000 }` (`expiresIn` in seconds, omit for no expiry). Add `"metadata": { "access": "read" }` for a read only key. | The new key, including `key`, shown only here. |
+| `GET /api/auth/api-key/list` | | `{ "apiKeys": [...], "total": n }`. Each entry has `id`, `name`, `start`, `createdAt`, `lastRequest`, `expiresAt` and `metadata` (`{ "access": "read" }` on read only keys), never the secret. |
 | `POST /api/auth/api-key/delete` | `{ "keyId": "..." }` | Revokes the key. |
 
 ## Notes

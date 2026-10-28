@@ -7,7 +7,7 @@ export function CTA() {
   return (
     <section className="py-16 sm:py-24 px-4 sm:px-6 lg:px-8">
       <div className="max-w-4xl mx-auto">
-        <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl bg-card/80 backdrop-blur-sm border border-primary/10 p-6 sm:p-8 md:p-12 text-center shadow-xl">
+        <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl bg-card/80 border border-primary/10 p-6 sm:p-8 md:p-12 text-center shadow-xl">
           {/* Subtle gradient accent */}
           <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-accent/5 pointer-events-none" />
           <div className="absolute -top-24 -right-24 w-48 h-48 bg-primary/20 rounded-full blur-3xl pointer-events-none" />
@@ -33,7 +33,7 @@ export function CTA() {
                   <ArrowRight className="ml-2 h-4 w-4 transition-transform group-hover:translate-x-1" />
                 </a>
               </Button>
-              <Button size="lg" variant="outline" className="w-full sm:w-auto min-h-[48px] bg-background/80 backdrop-blur-sm hover:bg-primary/10 hover:border-primary/30 hover:text-foreground transition-all duration-300" asChild>
+              <Button size="lg" variant="outline" className="w-full sm:w-auto min-h-[48px] bg-background/80 hover:bg-primary/10 hover:border-primary/30 hover:text-foreground transition-all duration-300" asChild>
                 <a href="https://github.com/RayLabsHQ/gitea-mirror/discussions" target="_blank" rel="noopener noreferrer">
                   Join Community
                 </a>

@@ -12,6 +12,7 @@ import { initializeConfigFromEnv } from './lib/env-config-loader';
 import { db, users } from './lib/db';
 import { getBasePath } from './lib/base-path';
 import { apiNotFoundResponse, isApiNotFoundPage } from './lib/api-not-found';
+import { refuseReadOnlyApiKey } from './lib/api-key-access';
 
 const ASTRO_INTERNAL_ASSET_PATH_PATTERN = /(["'])\/(_astro\/|_server-islands\/|_image\b)/g;
 
@@ -271,6 +272,14 @@ export const onRequest = defineMiddleware(async (context, next) => {
       // Don't fail the request if repository cleanup service fails to start
     }
   }
+
+  // A read only API key may look but not change anything.
+  const readOnlyRefusal = await refuseReadOnlyApiKey({
+    request: context.request,
+    pathname: context.url.pathname,
+    sessionId: context.locals.session?.id,
+  });
+  if (readOnlyRefusal) return readOnlyRefusal;
 
   // Continue with the request
   let response = await next();

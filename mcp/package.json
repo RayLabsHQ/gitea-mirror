@@ -1,0 +1,40 @@
+{
+  "name": "gitea-mirror-mcp",
+  "version": "0.1.0",
+  "description": "Connect stdio MCP clients to Gitea Mirror: list, add, sync and retry mirrors from an AI assistant, using an API key",
+  "license": "AGPL-3.0",
+  "type": "module",
+  "bin": {
+    "gitea-mirror-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/RayLabsHQ/gitea-mirror.git",
+    "directory": "mcp"
+  },
+  "homepage": "https://github.com/RayLabsHQ/gitea-mirror/tree/main/mcp#readme",
+  "keywords": [
+    "mcp",
+    "gitea",
+    "forgejo",
+    "mirror"
+  ],
+  "scripts": {
+    "build": "bun build src/index.ts --target=node --format=esm --banner='#!/usr/bin/env node' --outfile=dist/index.js",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "bun test",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build"
+  },
+  "devDependencies": {
+    "@types/bun": "1.3.14",
+    "@types/node": "26.1.1",
+    "typescript": "7.0.2"
+  }
+}

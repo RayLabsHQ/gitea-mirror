@@ -4,9 +4,11 @@ import {
   API_KEY_LENGTH,
   API_KEY_NAME_MAX_LENGTH,
   API_KEY_PREFIX,
+  accessToKeyMetadata,
   describeKeyExpiry,
   expiryOptionToSeconds,
   isKeyExpired,
+  keyAccessFromMetadata,
   maskKeyStart,
   normalizeKeyName,
 } from "./api-keys";
@@ -64,5 +66,24 @@ describe("api-keys helpers", () => {
     const long = "x".repeat(API_KEY_NAME_MAX_LENGTH + 1);
     expect(normalizeKeyName(long).error).toContain(String(API_KEY_NAME_MAX_LENGTH));
     expect(normalizeKeyName("x".repeat(API_KEY_NAME_MAX_LENGTH)).error).toBeNull();
+  });
+
+  test("only a read only key carries access metadata", () => {
+    expect(accessToKeyMetadata("read")).toEqual({ access: "read" });
+    expect(accessToKeyMetadata("full")).toBeUndefined();
+  });
+
+  test("keyAccessFromMetadata reads parsed, JSON and double encoded metadata", () => {
+    expect(keyAccessFromMetadata({ access: "read" })).toBe("read");
+    expect(keyAccessFromMetadata('{"access":"read"}')).toBe("read");
+    expect(keyAccessFromMetadata(JSON.stringify('{"access":"read"}'))).toBe("read");
+  });
+
+  test("keys without a read level have full access", () => {
+    expect(keyAccessFromMetadata(null)).toBe("full");
+    expect(keyAccessFromMetadata(undefined)).toBe("full");
+    expect(keyAccessFromMetadata({})).toBe("full");
+    expect(keyAccessFromMetadata({ access: "READ" })).toBe("full");
+    expect(keyAccessFromMetadata("not json")).toBe("full");
   });
 });
