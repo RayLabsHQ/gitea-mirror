@@ -1,0 +1,20 @@
+# Dependabot reads this for security updates as well as version updates.
+# Without it, security updates for the root ran the npm ecosystem, which
+# cannot update bun.lock, and every security update job failed.
+#
+# open-pull-requests-limit: 0 turns off version update pull requests and
+# leaves security updates on, which is how the repository ran before.
+version: 2
+updates:
+  - package-ecosystem: "bun"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 0
+
+  # The documentation site, locked with pnpm.
+  - package-ecosystem: "npm"
+    directory: "/www"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 0
