@@ -1,5 +1,10 @@
 import type { Config } from "@/types/config";
-import type { MirrorOverrides, ReleaseType, Repository } from "@/lib/db/schema";
+import type {
+  IssueStateFilter,
+  MirrorOverrides,
+  ReleaseType,
+  Repository,
+} from "@/lib/db/schema";
 import { mirrorOverridesSchema } from "@/lib/db/schema";
 import {
   normalizeSourceProviderKind,
@@ -18,6 +23,8 @@ export const MIRROR_OVERRIDE_KEYS = [
   "mirrorReleases",
   "mirrorMetadata",
   "mirrorIssues",
+  "mirrorIssueComments",
+  "mirrorIssueMedia",
   "mirrorPullRequests",
   "mirrorLabels",
   "mirrorMilestones",
@@ -44,9 +51,13 @@ export type MirrorOverrideLimitKey = (typeof MIRROR_OVERRIDE_LIMIT_KEYS)[number]
  * tri-state toggles and the numeric rows in the dialog assume those shapes.
  *
  * `releaseType` decides which releases are candidates at all; `releaseLimit`
- * then decides how many of the matching ones are kept.
+ * then decides how many of the matching ones are kept. `mirrorIssueState`
+ * selects which source issues the issue pass lists.
  */
-export const MIRROR_OVERRIDE_CHOICE_KEYS = ["releaseType"] as const;
+export const MIRROR_OVERRIDE_CHOICE_KEYS = [
+  "releaseType",
+  "mirrorIssueState",
+] as const;
 
 export type MirrorOverrideChoiceKey =
   (typeof MIRROR_OVERRIDE_CHOICE_KEYS)[number];
@@ -86,6 +97,19 @@ export const DEFAULT_RELEASE_LIMIT = 10;
 /** Matches `giteaConfigSchema.releaseType`'s default. */
 export const DEFAULT_RELEASE_TYPE: ReleaseType = "all";
 
+/** Matches `giteaConfigSchema.mirrorIssueState`'s default. */
+export const DEFAULT_ISSUE_STATE: IssueStateFilter = "all";
+
+/**
+ * Flags whose absent global value means "on". The schema defaults cover saved
+ * configs, but the resolver also runs against partial configs (tests, older
+ * callers), where an absent key must not silently turn issue content off.
+ */
+const FLAG_DEFAULTS: Partial<Record<MirrorOverrideKey, boolean>> = {
+  mirrorIssueComments: true,
+  mirrorIssueMedia: true,
+};
+
 /**
  * How many releases the mirror looks at when any release filter is active.
  *
@@ -115,6 +139,7 @@ export type ResolvedMirrorOptions = Record<MirrorOverrideKey, boolean> & {
   releaseType: ReleaseType;
   releaseIncludeTags: string[];
   releaseExcludeTags: string[];
+  mirrorIssueState: IssueStateFilter;
 };
 
 /**
@@ -128,6 +153,7 @@ export type InheritedMirrorOptions = Partial<Record<MirrorOverrideKey, boolean>>
   releaseType?: ReleaseType;
   releaseIncludeTags?: string[];
   releaseExcludeTags?: string[];
+  mirrorIssueState?: IssueStateFilter;
   skipForks?: boolean;
 };
 
@@ -154,6 +180,20 @@ export function normalizeReleaseAssetLimit(value: unknown): number | undefined {
   if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
   const limit = Math.floor(value);
   return limit >= 0 ? limit : undefined;
+}
+
+const ISSUE_STATES: readonly IssueStateFilter[] = ["all", "open", "closed"];
+
+/**
+ * Sanitize an issue-state filter from any tier into one of the known values,
+ * or `undefined` when it is absent or unusable so the next tier out is
+ * consulted. Case is folded so an env var or a hand-edited row behaves like
+ * the value the UI writes.
+ */
+export function normalizeIssueState(value: unknown): IssueStateFilter | undefined {
+  if (typeof value !== "string") return undefined;
+  const state = value.trim().toLowerCase();
+  return ISSUE_STATES.find((candidate) => candidate === state);
 }
 
 const RELEASE_TYPES: readonly ReleaseType[] = ["all", "stable"];
@@ -407,9 +447,10 @@ const LIMIT_NORMALIZERS: Record<
 /** Per-key sanitizers for the choice overrides. */
 const CHOICE_NORMALIZERS: Record<
   MirrorOverrideChoiceKey,
-  (value: unknown) => ReleaseType | undefined
+  (value: unknown) => ReleaseType | IssueStateFilter | undefined
 > = {
   releaseType: normalizeReleaseType,
+  mirrorIssueState: normalizeIssueState,
 };
 
 /** Per-key sanitizers for the tag-pattern overrides. */
@@ -447,6 +488,8 @@ export const STARRED_CLAMPED_KEYS = [
   "mirrorReleases",
   "mirrorMetadata",
   "mirrorIssues",
+  "mirrorIssueComments",
+  "mirrorIssueMedia",
   "mirrorPullRequests",
   "mirrorLabels",
   "mirrorMilestones",
@@ -467,6 +510,8 @@ export const STARRED_CLAMPED_KEYS = [
 export const GITHUB_ONLY_METADATA_KEYS = [
   "mirrorMetadata",
   "mirrorIssues",
+  "mirrorIssueComments",
+  "mirrorIssueMedia",
   "mirrorPullRequests",
   "mirrorLabels",
   "mirrorMilestones",
@@ -485,6 +530,8 @@ export const PUSH_TARGET_CLAMPED_KEYS = [
   "mirrorReleases",
   "mirrorMetadata",
   "mirrorIssues",
+  "mirrorIssueComments",
+  "mirrorIssueMedia",
   "mirrorPullRequests",
   "mirrorLabels",
   "mirrorMilestones",
@@ -509,6 +556,8 @@ export const UI_MIRROR_OVERRIDE_KEYS: MirrorOverrideKey[] = [
   "lfs",
   "wiki",
   "mirrorIssues",
+  "mirrorIssueComments",
+  "mirrorIssueMedia",
   "mirrorPullRequests",
   "mirrorReleases",
   "mirrorLabels",
@@ -551,6 +600,9 @@ export function mirrorOptionsToFlags(
         releaseIncludeTags?: string[];
         releaseExcludeTags?: string[];
         mirrorMetadata?: boolean;
+        issueState?: IssueStateFilter;
+        issueComments?: boolean;
+        issueMedia?: boolean;
         metadataComponents?: {
           issues?: boolean;
           pullRequests?: boolean;
@@ -570,6 +622,10 @@ export function mirrorOptionsToFlags(
     mirrorReleases: !!mirrorOptions?.mirrorReleases,
     wiki: !!components?.wiki,
     mirrorIssues: !!components?.issues,
+    mirrorIssueComments: mirrorOptions?.issueComments ?? true,
+    mirrorIssueMedia: mirrorOptions?.issueMedia ?? true,
+    mirrorIssueState:
+      normalizeIssueState(mirrorOptions?.issueState) ?? DEFAULT_ISSUE_STATE,
     mirrorPullRequests: !!components?.pullRequests,
     mirrorLabels: !!components?.labels,
     mirrorMilestones: !!components?.milestones,
@@ -590,6 +646,7 @@ export const MIRROR_GATING_REASONS = {
   starredCodeOnly:
     "Starred repos mirror code only (Advanced Options > starred code only)",
   labelsFollowIssues: "Issues mirroring already syncs labels",
+  issuesOff: "Issues are not being mirrored",
   releasesOff: "Releases are not being mirrored",
   pushTarget: "Not available for GitHub and GitLab destinations: only branches and tags are pushed",
 } as const;
@@ -645,6 +702,7 @@ export function getMirrorOverrideGating({
     gating.releaseLimit = MIRROR_GATING_REASONS.pushTarget;
     gating.releaseAssetLimit = MIRROR_GATING_REASONS.pushTarget;
     gating.releaseType = MIRROR_GATING_REASONS.pushTarget;
+    gating.mirrorIssueState = MIRROR_GATING_REASONS.pushTarget;
     gating.releaseIncludeTags = MIRROR_GATING_REASONS.pushTarget;
     gating.releaseExcludeTags = MIRROR_GATING_REASONS.pushTarget;
     return gating;
@@ -664,6 +722,18 @@ export function getMirrorOverrideGating({
   // starred clamp has not already disabled the toggle.
   if (!gating.mirrorLabels && effective.mirrorIssues) {
     gating.mirrorLabels = MIRROR_GATING_REASONS.labelsFollowIssues;
+  }
+
+  // Issue content filters only mean something while issues are mirrored.
+  // Inherit the starred/push reason when that is what disabled issues.
+  if (gating.mirrorIssues) {
+    gating.mirrorIssueComments = gating.mirrorIssues;
+    gating.mirrorIssueMedia = gating.mirrorIssues;
+    gating.mirrorIssueState = gating.mirrorIssues;
+  } else if (effective.mirrorIssues === false) {
+    gating.mirrorIssueComments = MIRROR_GATING_REASONS.issuesOff;
+    gating.mirrorIssueMedia = MIRROR_GATING_REASONS.issuesOff;
+    gating.mirrorIssueState = MIRROR_GATING_REASONS.issuesOff;
   }
 
   // The release limit and the release filters ride along with releases:
@@ -698,6 +768,9 @@ export const MIRROR_OVERRIDE_LABELS: Record<
   mirrorReleases: "Releases",
   mirrorMetadata: "Metadata",
   mirrorIssues: "Issues",
+  mirrorIssueComments: "Issue comments",
+  mirrorIssueMedia: "Issue images and attachments",
+  mirrorIssueState: "Issue state",
   mirrorPullRequests: "Pull requests",
   mirrorLabels: "Labels",
   mirrorMilestones: "Milestones",
@@ -848,7 +921,7 @@ export function resolveMirrorOptions({
     } else if (typeof orgValue === "boolean") {
       resolved[key] = orgValue;
     } else {
-      resolved[key] = !!globalConfig?.[key];
+      resolved[key] = globalConfig?.[key] ?? FLAG_DEFAULTS[key] ?? false;
     }
   }
 
@@ -878,6 +951,15 @@ export function resolveMirrorOptions({
     normalizeReleaseType(org?.releaseType) ??
     normalizeReleaseType(globalConfig?.releaseType) ??
     DEFAULT_RELEASE_TYPE;
+
+  // Issue state follows the same precedence and the same "an unusable value
+  // falls through to the next tier" rule. Nothing pinned means mirror every
+  // issue, like every configuration from before this option existed.
+  resolved.mirrorIssueState =
+    normalizeIssueState(repo?.mirrorIssueState) ??
+    normalizeIssueState(org?.mirrorIssueState) ??
+    normalizeIssueState(globalConfig?.mirrorIssueState) ??
+    DEFAULT_ISSUE_STATE;
 
   // And the same for the tag lists. No tier pins one means no filter, which is
   // what every configuration predating the option does. A tier that pins an

@@ -479,7 +479,7 @@ export function GitHubMirrorSettings({
           <ChevronDown className="ml-2 h-3 w-3 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-64">
+      <PopoverContent align="end" className="w-72">
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <div className="text-sm font-medium">Metadata to mirror</div>
@@ -527,6 +527,63 @@ export function GitHubMirrorSettings({
                 Issues
               </Label>
             </div>
+
+            {isGithubSource && mirrorOptions.metadataComponents.issues && (
+              <div className="ml-8 space-y-2 border-l pl-3">
+                <div className="flex items-center justify-between gap-2">
+                  <Label htmlFor="issue-state-popup" className="text-xs font-normal">
+                    State
+                  </Label>
+                  <Select
+                    value={mirrorOptions.issueState ?? "all"}
+                    onValueChange={(value) =>
+                      handleMirrorChange("issueState", value)
+                    }
+                  >
+                    <SelectTrigger id="issue-state-popup" className="h-8 w-28 text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent align="end">
+                      <SelectItem value="all" className="text-xs">All issues</SelectItem>
+                      <SelectItem value="open" className="text-xs">Open only</SelectItem>
+                      <SelectItem value="closed" className="text-xs">Closed only</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="issue-comments-popup"
+                    checked={mirrorOptions.issueComments ?? true}
+                    onCheckedChange={(checked) =>
+                      handleMirrorChange("issueComments", !!checked)
+                    }
+                  />
+                  <Label
+                    htmlFor="issue-comments-popup"
+                    className="text-xs font-normal cursor-pointer"
+                  >
+                    Copy comments
+                  </Label>
+                </div>
+
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="issue-media-popup"
+                    checked={mirrorOptions.issueMedia ?? true}
+                    onCheckedChange={(checked) =>
+                      handleMirrorChange("issueMedia", !!checked)
+                    }
+                  />
+                  <Label
+                    htmlFor="issue-media-popup"
+                    className="text-xs font-normal cursor-pointer"
+                  >
+                    Copy images and attachments
+                  </Label>
+                </div>
+              </div>
+            )}
 
             <div className="flex items-center space-x-3 py-1 px-1 rounded hover:bg-accent">
               <Checkbox

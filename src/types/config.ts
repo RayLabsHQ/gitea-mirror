@@ -1,4 +1,8 @@
-import { type Config as ConfigType, type ReleaseType } from "@/lib/db/schema";
+import {
+  type Config as ConfigType,
+  type IssueStateFilter,
+  type ReleaseType,
+} from "@/lib/db/schema";
 
 export type GiteaOrgVisibility = "public" | "private" | "limited";
 export type MirrorStrategy = "preserve" | "single-org" | "flat-user" | "mixed";
@@ -98,6 +102,12 @@ export interface MirrorOptions {
     milestones: boolean;
     wiki: boolean;
   };
+  /** Which source issues are listed: all, open only, or closed only. */
+  issueState: IssueStateFilter;
+  /** Copy comments along with each issue. */
+  issueComments: boolean;
+  /** Keep images, videos and attachment links in issue bodies and comments. */
+  issueMedia: boolean;
 }
 
 export interface AdvancedOptions {

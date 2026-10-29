@@ -983,3 +983,56 @@ describe.skipIf(!isChild)("milestone assignment (#460)", () => {
     expect(cursor).toBeDefined();
   });
 });
+
+describe.skipIf(!isChild)("mirrorGitRepoIssuesToGitea content options", () => {
+  const baseArgs = (octokit: any, extra: Record<string, unknown> = {}) => ({
+    config,
+    octokit,
+    repository,
+    giteaOwner: DEST_OWNER,
+    giteaRepoName: DEST_REPO,
+    ...extra,
+  });
+
+  it("passes the issue state filter to the GitHub listing", async () => {
+    fakeGitea([]);
+    const github = fakeOctokit({ issueListing: [] });
+
+    await mirrorGitRepoIssuesToGitea(baseArgs(github.octokit, { issueState: "closed" }));
+
+    expect(github.callsTo("issues.listForRepo")[0]?.params.state).toBe("closed");
+  });
+
+  it("skips comments when the comments option is off", async () => {
+    fakeGitea([]);
+    const github = fakeOctokit({ issueListing: [ghIssue(1)] });
+
+    await mirrorGitRepoIssuesToGitea(baseArgs(github.octokit, { includeComments: false }));
+
+    expect(github.callsTo("issues.listComments")).toHaveLength(0);
+  });
+
+  it("keeps media by default and strips it when the media option is off", async () => {
+    const issue = ghIssue(1, {
+      body: "Before ![shot](https://user-images.githubusercontent.com/1/a.png) after",
+    });
+
+    const giteaWithMedia = fakeGitea([]);
+    const withMedia = fakeOctokit({ issueListing: [issue] });
+    await mirrorGitRepoIssuesToGitea(baseArgs(withMedia.octokit));
+
+    const giteaWithoutMedia = fakeGitea([]);
+    const withoutMedia = fakeOctokit({ issueListing: [issue] });
+    await mirrorGitRepoIssuesToGitea(
+      baseArgs(withoutMedia.octokit, { includeMedia: false })
+    );
+
+    expect(giteaWithMedia.createdBodies()[0]).toContain(
+      "user-images.githubusercontent.com"
+    );
+    expect(giteaWithoutMedia.createdBodies()[0]).toContain("[media omitted]");
+    expect(giteaWithoutMedia.createdBodies()[0]).not.toContain(
+      "user-images.githubusercontent.com"
+    );
+  });
+});

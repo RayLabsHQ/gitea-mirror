@@ -96,6 +96,9 @@ export function ConfigTabs() {
         milestones: false,
         wiki: false,
       },
+      issueState: "all",
+      issueComments: true,
+      issueMedia: true,
     },
     advancedOptions: {
       skipForks: false,

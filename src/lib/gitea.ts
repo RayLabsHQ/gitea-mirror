@@ -7,9 +7,10 @@ import {
 import { membershipRoleEnum } from "@/types/organizations";
 import { Octokit } from "@octokit/rest";
 import type { Config } from "@/types/config";
-import type { Organization, ReleaseType, Repository } from "./db/schema";
+import type { IssueStateFilter, Organization, ReleaseType, Repository } from "./db/schema";
 import { httpPost, httpGet, httpDelete, httpPut, httpPatch } from "./http-client";
 import { createMirrorJob } from "./helpers";
+import { applyIssueMediaOption, stripIssueMedia } from "./utils/issue-media";
 import { db, organizations, repositories } from "./db";
 import { eq, and, ne } from "drizzle-orm";
 import { decryptConfigTokens } from "./utils/config-encryption";
@@ -1272,6 +1273,9 @@ export const mirrorGithubRepoToGitea = async ({
           repository,
           giteaOwner: repoOwner,
           giteaRepoName: targetRepoName,
+          issueState: mirrorOptions.mirrorIssueState,
+          includeComments: mirrorOptions.mirrorIssueComments,
+          includeMedia: mirrorOptions.mirrorIssueMedia,
           syncCursor: metadataState.syncCursors.issues,
           passProgress: metadataState.passProgress.issues,
           onPassProgress: async (progress) => {
@@ -2095,6 +2099,9 @@ export async function mirrorGitHubRepoToGiteaOrg({
           repository,
           giteaOwner: orgName,
           giteaRepoName: targetRepoName,
+          issueState: mirrorOptions.mirrorIssueState,
+          includeComments: mirrorOptions.mirrorIssueComments,
+          includeMedia: mirrorOptions.mirrorIssueMedia,
           syncCursor: metadataState.syncCursors.issues,
           passProgress: metadataState.passProgress.issues,
           onPassProgress: async (progress) => {
@@ -2809,12 +2816,25 @@ export const mirrorGitRepoIssuesToGitea = async ({
   passProgress,
   onPassProgress,
   milestoneIds,
+  issueState = "all",
+  includeComments = true,
+  includeMedia = true,
 }: {
   config: Partial<Config>;
   octokit: Octokit;
   repository: Repository;
   giteaOwner: string;
   giteaRepoName?: string;
+  /**
+   * Which source issues to list. "all" keeps the historical behavior; "open"
+   * and "closed" narrow the pass. Already-mirrored issues outside the filter
+   * are left alone rather than deleted.
+   */
+  issueState?: IssueStateFilter;
+  /** Copy issue comments. Off skips the per-issue comment listing entirely. */
+  includeComments?: boolean;
+  /** Keep images/videos/attachment links in issue bodies and comments. */
+  includeMedia?: boolean;
   /**
    * Gitea milestone ids by title from the milestones pass that ran just
    * before (#460). Without it the issues' milestones are left untouched.
@@ -2903,7 +2923,7 @@ export const mirrorGitRepoIssuesToGitea = async ({
         ? {
             owner,
             repo,
-            state: "all",
+            state: issueState,
             per_page: 100,
             sort: "updated",
             direction: "asc",
@@ -2912,7 +2932,7 @@ export const mirrorGitRepoIssuesToGitea = async ({
         : {
             owner,
             repo,
-            state: "all",
+            state: issueState,
             per_page: 100,
             sort: "created",
             direction: "asc",
@@ -3133,7 +3153,7 @@ export const mirrorGitRepoIssuesToGitea = async ({
       }.`;
       const issueMarker = `[GH-ISSUE #${issue.number}]`;
       const mirroredTitle = `${issueMarker} ${issue.title}`;
-      const issueBody = `${issueOriginHeader}\nOriginal GitHub issue: ${issue.html_url}${originalAssignees}\n\n${issue.body ?? ""}`;
+      const issueBody = `${issueOriginHeader}\nOriginal GitHub issue: ${issue.html_url}${originalAssignees}\n\n${applyIssueMediaOption(issue.body, includeMedia)}`;
 
       const wantedMilestoneId = resolveGiteaMilestoneId(milestoneIds, issue.milestone);
       const issuePayload: any = {
@@ -3331,106 +3351,119 @@ export const mirrorGitRepoIssuesToGitea = async ({
         });
       }
 
-      // Clone comments
-      const comments = await octokit.paginate(
-        octokit.rest.issues.listComments,
-        {
-          owner,
-          repo,
-          issue_number: issue.number,
-          per_page: 100,
-        },
-        (res) => res.data
-      );
-
-      // Ensure comments are applied in chronological order to preserve discussion flow
-      const sortedComments = comments
-        .slice()
-        .sort(
-          (a, b) =>
-            new Date(a.created_at || 0).getTime() -
-            new Date(b.created_at || 0).getTime()
+      if (includeComments) {
+        // Clone comments
+        const comments = await octokit.paginate(
+          octokit.rest.issues.listComments,
+          {
+            owner,
+            repo,
+            issue_number: issue.number,
+            per_page: 100,
+          },
+          (res) => res.data
         );
 
-      // Process comments sequentially to preserve historical ordering
-      if (sortedComments.length > 0) {
-        const existingComments: any[] = [];
-        let commentsPage = 1;
-        const commentsPerPage = 100;
-        while (true) {
-          const existingCommentsRes = await httpGet(
-            `${config.giteaConfig!.url}/api/v1/repos/${giteaOwner}/${repoName}/issues/${targetIssueNumber}/comments?page=${commentsPage}&limit=${commentsPerPage}`,
-            {
-              Authorization: `token ${decryptedConfig.giteaConfig!.token}`,
-            }
+        // Ensure comments are applied in chronological order to preserve discussion flow
+        const sortedComments = comments
+          .slice()
+          .sort(
+            (a, b) =>
+              new Date(a.created_at || 0).getTime() -
+              new Date(b.created_at || 0).getTime()
           );
-          const pageComments = Array.isArray(existingCommentsRes.data)
-            ? existingCommentsRes.data
-            : [];
-          if (!pageComments.length) break;
-          existingComments.push(...pageComments);
-          // Use the Link header to decide whether more pages exist.
-          // See note on the existing-issues pagination above; the
-          // same Gitea behaviors (MAX_RESPONSE_ITEMS cap and
-          // repeated-data on out-of-bound pages) apply here.
-          const commentsLinkHeader =
-            existingCommentsRes.headers.get("link") || "";
-          if (!/\brel="next"/.test(commentsLinkHeader)) break;
-          commentsPage += 1;
-        }
-        const mirroredCommentIds = new Set<number>();
-        const existingCommentBodies = new Set<string>();
-        for (const existingComment of existingComments) {
-          const body = String(existingComment.body || "");
-          if (body) existingCommentBodies.add(body);
-          const marker = String(existingComment.body || "").match(
-            /<!--\s*gh-comment-id:(\d+)\s*-->/i
-          );
-          if (marker?.[1]) {
-            const parsed = Number.parseInt(marker[1], 10);
-            if (Number.isFinite(parsed)) mirroredCommentIds.add(parsed);
-          }
-        }
 
-        await processWithRetry(
-          sortedComments,
-          async (comment) => {
-            if (mirroredCommentIds.has(comment.id)) {
-              return comment;
-            }
-            const commenter = comment.user?.login ?? "unknown";
-            const commentDate = formatDateShort(comment.created_at);
-            const commentHeader = `@${commenter} commented on GitHub${
-              commentDate ? ` (${commentDate})` : ""
-            }:`;
-            const legacyBody = `${commentHeader}\n\n${comment.body ?? ""}`;
-            const markedBody = `<!-- gh-comment-id:${comment.id} -->\n${legacyBody}`;
-            if (existingCommentBodies.has(legacyBody) || existingCommentBodies.has(markedBody)) {
-              return comment;
-            }
-
-            await httpPost(
-              `${config.giteaConfig!.url}/api/v1/repos/${giteaOwner}/${repoName}/issues/${targetIssueNumber}/comments`,
-              {
-                body: markedBody,
-              },
+        // Process comments sequentially to preserve historical ordering
+        if (sortedComments.length > 0) {
+          const existingComments: any[] = [];
+          let commentsPage = 1;
+          const commentsPerPage = 100;
+          while (true) {
+            const existingCommentsRes = await httpGet(
+              `${config.giteaConfig!.url}/api/v1/repos/${giteaOwner}/${repoName}/issues/${targetIssueNumber}/comments?page=${commentsPage}&limit=${commentsPerPage}`,
               {
                 Authorization: `token ${decryptedConfig.giteaConfig!.token}`,
               }
             );
-            return comment;
-          },
-          {
-            concurrencyLimit: 1,
-            maxRetries: 2,
-            retryDelay: 1000,
-            onRetry: (_comment, error, attempt) => {
-              console.log(
-                `Retrying comment (attempt ${attempt}): ${error.message}`
-              );
-            },
+            const pageComments = Array.isArray(existingCommentsRes.data)
+              ? existingCommentsRes.data
+              : [];
+            if (!pageComments.length) break;
+            existingComments.push(...pageComments);
+            // Use the Link header to decide whether more pages exist.
+            // See note on the existing-issues pagination above; the
+            // same Gitea behaviors (MAX_RESPONSE_ITEMS cap and
+            // repeated-data on out-of-bound pages) apply here.
+            const commentsLinkHeader =
+              existingCommentsRes.headers.get("link") || "";
+            if (!/\brel="next"/.test(commentsLinkHeader)) break;
+            commentsPage += 1;
           }
-        );
+          const mirroredCommentIds = new Set<number>();
+          const existingCommentBodies = new Set<string>();
+          for (const existingComment of existingComments) {
+            const body = String(existingComment.body || "");
+            if (body) {
+              existingCommentBodies.add(body);
+              // When media is off, compare against the stripped form too so a
+              // comment mirrored before the option existed is not re-created
+              // as a duplicate with the same text and no media.
+              if (!includeMedia) {
+                existingCommentBodies.add(stripIssueMedia(body));
+              }
+            }
+            const marker = String(existingComment.body || "").match(
+              /<!--\s*gh-comment-id:(\d+)\s*-->/i
+            );
+            if (marker?.[1]) {
+              const parsed = Number.parseInt(marker[1], 10);
+              if (Number.isFinite(parsed)) mirroredCommentIds.add(parsed);
+            }
+          }
+
+          await processWithRetry(
+            sortedComments,
+            async (comment) => {
+              if (mirroredCommentIds.has(comment.id)) {
+                return comment;
+              }
+              const commenter = comment.user?.login ?? "unknown";
+              const commentDate = formatDateShort(comment.created_at);
+              const commentHeader = `@${commenter} commented on GitHub${
+                commentDate ? ` (${commentDate})` : ""
+              }:`;
+              const legacyBody = `${commentHeader}\n\n${applyIssueMediaOption(comment.body, includeMedia)}`;
+              const markedBody = `<!-- gh-comment-id:${comment.id} -->\n${legacyBody}`;
+              if (
+                existingCommentBodies.has(legacyBody) ||
+                existingCommentBodies.has(markedBody)
+              ) {
+                return comment;
+              }
+
+              await httpPost(
+                `${config.giteaConfig!.url}/api/v1/repos/${giteaOwner}/${repoName}/issues/${targetIssueNumber}/comments`,
+                {
+                  body: markedBody,
+                },
+                {
+                  Authorization: `token ${decryptedConfig.giteaConfig!.token}`,
+                }
+              );
+              return comment;
+            },
+            {
+              concurrencyLimit: 1,
+              maxRetries: 2,
+              retryDelay: 1000,
+              onRetry: (_comment, error, attempt) => {
+                console.log(
+                  `Retrying comment (attempt ${attempt}): ${error.message}`
+                );
+              },
+            }
+          );
+        }
       }
 
       completedNumbers.add(issue.number);
