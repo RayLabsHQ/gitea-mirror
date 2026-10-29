@@ -178,6 +178,9 @@ export function mapUiToDbConfig(
     // null is a real value here ("assets for every mirrored release"), so
     // it is stored as such rather than dropped.
     releaseAssetLimit: normalizeReleaseAssetLimit(mirrorOptions.releaseAssetLimit) ?? null,
+    // Opt-in pruning: only ever a plain boolean, so an absent switch stores the
+    // safe default (never delete what the destination already has).
+    pruneOldReleaseAssets: mirrorOptions.pruneOldReleaseAssets === true,
     // An unusable value falls back to "all" rather than storing a filter that
     // would hide releases from the user.
     releaseType: normalizeReleaseType(mirrorOptions.releaseType) ?? DEFAULT_RELEASE_TYPE,
@@ -261,6 +264,7 @@ export function mapDbToUiConfig(dbConfig: any): {
     mirrorReleases: dbConfig.giteaConfig?.mirrorReleases || false,
     releaseLimit: dbConfig.giteaConfig?.releaseLimit || 10,
     releaseAssetLimit: normalizeReleaseAssetLimit(dbConfig.giteaConfig?.releaseAssetLimit) ?? null,
+    pruneOldReleaseAssets: dbConfig.giteaConfig?.pruneOldReleaseAssets === true,
     releaseType: normalizeReleaseType(dbConfig.giteaConfig?.releaseType) ?? DEFAULT_RELEASE_TYPE,
     releaseIncludeTags: normalizeReleaseTagPatterns(dbConfig.giteaConfig?.releaseIncludeTags) ?? [],
     releaseExcludeTags: normalizeReleaseTagPatterns(dbConfig.giteaConfig?.releaseExcludeTags) ?? [],

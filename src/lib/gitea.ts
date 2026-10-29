@@ -3841,6 +3841,90 @@ export async function reconcileReleaseAssets({
 }
 
 /**
+ * Delete every attachment one release currently has on the destination.
+ *
+ * Used by the opt-in pruning in the retention pass, which removes what the
+ * asset limit left behind: the uploads a release got before the limit was set
+ * or lowered. Like `reconcileReleaseAssets` this reads before it writes, and a
+ * listing that cannot be read deletes nothing, so a transient API error never
+ * wipes a release that still had its assets.
+ *
+ * Returns what was removed so the caller can log it and keep the storage
+ * totals honest. A release whose deletes all succeeded reports `failed: 0`.
+ */
+export async function pruneReleaseAttachments({
+  baseUrl,
+  token,
+  repoOwner,
+  repoName,
+  giteaReleaseId,
+  tagName,
+  fetchImpl,
+}: {
+  baseUrl: string;
+  token: string;
+  repoOwner: string;
+  repoName: string;
+  giteaReleaseId: number;
+  tagName: string;
+  /** Injected in tests; production uses the global fetch. */
+  fetchImpl?: typeof fetch;
+}): Promise<{ removed: number; failed: number }> {
+  const doFetch: typeof fetch = fetchImpl ?? fetch;
+  const giteaAuth = { Authorization: `token ${token}` };
+  const assetsUrl = `${baseUrl}/api/v1/repos/${repoOwner}/${repoName}/releases/${giteaReleaseId}/assets`;
+
+  let existingAssets: Array<{ id: number; name: string }>;
+  try {
+    const listResponse = await doFetch(assetsUrl, { headers: giteaAuth });
+    if (!listResponse.ok) {
+      throw new Error(`HTTP ${listResponse.status} ${listResponse.statusText}`);
+    }
+    const body = await listResponse.json();
+    if (!Array.isArray(body)) {
+      throw new Error("the assets endpoint did not return a list");
+    }
+    existingAssets = body;
+  } catch (listError) {
+    console.error(
+      `[Releases] Could not list the attachments of ${tagName} to prune them: ${
+        listError instanceof Error ? listError.message : String(listError)
+      }. Deleted nothing; the next sync retries.`
+    );
+    return { removed: 0, failed: 0 };
+  }
+
+  let removed = 0;
+  let failed = 0;
+
+  for (const asset of existingAssets) {
+    try {
+      const deleteResponse = await doFetch(`${assetsUrl}/${asset.id}`, {
+        method: "DELETE",
+        headers: giteaAuth,
+      });
+      // 404 means it is already gone, which is the state we wanted.
+      if (!deleteResponse.ok && deleteResponse.status !== 404) {
+        throw new Error(`HTTP ${deleteResponse.status} ${deleteResponse.statusText}`);
+      }
+      removed++;
+      console.log(
+        `[Releases] Pruned attachment ${asset.name} (id ${asset.id}) from ${tagName} (past the release asset limit)`
+      );
+    } catch (deleteError) {
+      failed++;
+      console.error(
+        `[Releases] Failed to prune attachment ${asset.name} (id ${asset.id}) from ${tagName}: ${
+          deleteError instanceof Error ? deleteError.message : String(deleteError)
+        }`
+      );
+    }
+  }
+
+  return { removed, failed };
+}
+
+/**
  * Where one release mirror pass gets its releases and its download credentials.
  *
  * The list-and-reconcile logic below is identical for every source; only the
@@ -4126,12 +4210,18 @@ async function mirrorSourceReleasesToGiteaLocked({
 
   // Which of those releases also get their assets (#311). Older releases
   // past this point are still created with notes and tag, just without the
-  // uploads. Assets already in Gitea are never removed by this limit; it only
-  // decides what a sync uploads.
+  // uploads. The limit alone only decides what a sync uploads - attachments
+  // that already reached Gitea stay put, unless the opt-in pruning below is
+  // enabled and takes them away again.
   const releaseAssetLimit =
     releaseAssetLimitOverride !== undefined
       ? (normalizeReleaseAssetLimit(releaseAssetLimitOverride) ?? null)
       : (await resolveOptions()).releaseAssetLimit;
+
+  // Opt-in retroactive pruning (see `pruneOldReleaseAssets` on the config).
+  // Global only; it prunes by the ranks this repository's own asset limit
+  // produces, so a per-repo asset limit of 3 prunes that repo's 4th release.
+  const pruneOldReleaseAssets = (await resolveOptions()).pruneOldReleaseAssets;
 
   // Which releases are candidates at all: every one, or only the ones the source
   // does not flag as a pre-release.
@@ -4313,7 +4403,11 @@ async function mirrorSourceReleasesToGiteaLocked({
           totalAssetsFailed += assetResult.failed;
         } else if (release.assets && release.assets.length > 0) {
           console.log(
-            `[Releases] Skipping ${release.assets.length} asset(s) for ${release.tag_name}: outside the newest ${releaseAssetLimit} release(s) that get assets (anything already uploaded is kept)`
+            `[Releases] Skipping ${release.assets.length} asset(s) for ${release.tag_name}: outside the newest ${releaseAssetLimit} release(s) that get assets${
+              pruneOldReleaseAssets
+                ? " (their existing attachments are pruned by the retention pass)"
+                : " (anything already uploaded is kept)"
+            }`
           );
           releasesPastAssetLimit++;
         }
@@ -4547,6 +4641,55 @@ async function mirrorSourceReleasesToGiteaLocked({
       }
     }
 
+    // Opt-in cleanup of what the asset limit left behind. The limit gates
+    // uploads, so releases that got their attachments before the limit was set
+    // or lowered still carry them. Ranked by the same newest-first order the
+    // uploads were gated on, so a destination release the source does not list
+    // keeps its attachments - retention removes the release itself if it is
+    // past the release limit.
+    const prunedReleaseIds = new Set<number>();
+    if (pruneOldReleaseAssets && releaseAssetLimit !== null) {
+      const rankByTag = new Map(
+        limitedReleases.map((rel, index) => [rel.tag_name, index])
+      );
+      const prunable = retainedReleases.filter((rel) => {
+        if (deletedReleaseIds.has(rel.id)) return false;
+        // The listing carries each release's attachments, so a release that
+        // has none (one already pruned on an earlier sync) costs no request.
+        if (Array.isArray(rel.assets) && rel.assets.length === 0) return false;
+        const rank = rankByTag.get(rel.tag_name);
+        return rank !== undefined && !releaseGetsAssets(rank, releaseAssetLimit);
+      });
+
+      if (prunable.length > 0) {
+        console.log(
+          `[Releases] Pruning release assets: ${prunable.length} kept release(s) sit past the newest ${releaseAssetLimit} release(s) that get assets`
+        );
+        let prunedAssets = 0;
+        for (const rel of prunable) {
+          const pruneResult = await pruneReleaseAttachments({
+            baseUrl: giteaBaseUrl,
+            token: giteaToken,
+            repoOwner,
+            repoName,
+            giteaReleaseId: rel.id,
+            tagName: rel.tag_name,
+          });
+          prunedAssets += pruneResult.removed;
+          // Only a release whose attachments actually went is worth zeroing out
+          // in the storage summary below. A failed listing removed nothing, and
+          // a partial failure left some behind; both keep the old totals, which
+          // are closer to the truth than assuming they are gone.
+          if (pruneResult.removed > 0 && pruneResult.failed === 0) {
+            prunedReleaseIds.add(rel.id);
+          }
+        }
+        console.log(
+          `[Releases] Removed ${prunedAssets} attachment(s) from releases past the asset limit for ${repository.fullName}`
+        );
+      }
+    }
+
     // The listing already carries every asset's size, so the storage page
     // gets its release numbers without another request (#479). Releases whose
     // delete failed are still on the destination and still count.
@@ -4554,7 +4697,11 @@ async function mirrorSourceReleasesToGiteaLocked({
       await recordReleaseAssetStorage(
         repository.id,
         summarizeReleaseAssets(
-          allGiteaReleases.filter((rel) => !deletedReleaseIds.has(rel.id))
+          allGiteaReleases
+            .filter((rel) => !deletedReleaseIds.has(rel.id))
+            .map((rel) =>
+              prunedReleaseIds.has(rel.id) ? { ...rel, assets: [] } : rel
+            )
         )
       );
     }

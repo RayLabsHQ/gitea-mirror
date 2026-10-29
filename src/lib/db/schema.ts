@@ -167,6 +167,13 @@ export const giteaConfigSchema = z.object({
   // Upload assets only for the newest N mirrored releases. null/absent means
   // every mirrored release gets its assets; 0 means release notes only.
   releaseAssetLimit: z.number().nullable().optional(),
+  // Opt-in cleanup for what that limit left behind. Off by default, because
+  // the limit alone only gates uploads: attachments a release already has are
+  // never removed. Turning this on deletes the attachments of every mirrored
+  // release ranked past `releaseAssetLimit`. Global only - there is no
+  // per-repository tier for it, the ranks still come from that repository's
+  // own effective asset limit.
+  pruneOldReleaseAssets: z.boolean().default(false),
   // Which releases are candidates: every one, or only the ones not flagged as a
   // pre-release. The limit is applied after filtering.
   releaseType: releaseTypeEnum.default("all"),

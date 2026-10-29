@@ -45,9 +45,11 @@ Patterns are comma separated, and each one is either a glob over the whole tag o
 
 Matching ignores case, and a pattern that cannot compile is ignored rather than failing the run. A tag filter widens the search exactly like the type filter does, so **Latest 1** with `v*` still finds the newest real release behind a wall of nightlies. Releases whose tag no longer matches are removed from Gitea on the next sync, and unlike the type filter a tag pattern can clean up releases the destination has no pre-release flag for, because it only needs the tag name.
 
-## Nothing already uploaded is deleted
+## Nothing already uploaded is deleted, unless you ask
 
 The asset limit only decides whether a sync uploads. Lowering it later never removes assets that already reached Gitea. If you mirrored everything for a year and then set the limit to 2, the old files stay until you delete them in Gitea yourself. That is the safe direction for a backup tool, and it means the setting is cheap to experiment with.
+
+The **Remove old release assets** switch under the release settings changes that on purpose. With it on, a sync also prunes: the attachments of every mirrored release ranked past **Assets for latest** are deleted from Gitea, so lowering the limit actually shrinks what is on disk. It is a global switch, it stays off until you turn it on, and it only touches the files - the release and its notes stay. A release whose attachment listing cannot be read keeps its files and is retried on the next sync.
 
 ## Step-by-step
 
@@ -71,6 +73,7 @@ For deployments configured from the environment:
 MIRROR_RELEASES=true
 RELEASE_LIMIT=25
 RELEASE_ASSET_LIMIT=3     # unset for all, 0 for notes only
+PRUNE_OLD_RELEASE_ASSETS=true   # also delete attachments past that count
 RELEASE_TYPE=stable       # all or stable
 RELEASE_INCLUDE_TAGS=v*   # comma separated globs or /regex/
 RELEASE_EXCLUDE_TAGS=*-rc.*
@@ -81,6 +84,8 @@ RELEASE_EXCLUDE_TAGS=*-rc.*
 ## Doing the disk math
 
 Take a project that publishes a release every two weeks with five platform builds of 40 MB each. That is 200 MB per release and about 5 GB per year of assets, for one repository. With the release limit at 25 and no asset limit, the first mirror pulls about 5 GB and every sync afterwards adds the newest release's 200 MB. With **Assets for latest** at 3, the first mirror pulls 600 MB. Each later release still adds 200 MB, because a new release is inside the limit and gets its files, and the files of the release that dropped out of the top three stay on disk until you remove them. The ongoing growth is the same; what you save is the backfill of every historical build.
+
+With **Remove old release assets** on, the picture changes: when a release drops out of the top three, its 200 MB go with it, so the destination hovers around 600 MB instead of growing without bound.
 
 Multiply by the number of repositories that ship binaries and compare with the free space on the Gitea host. Gitea stores release attachments in its own attachment storage, separate from the git objects and from LFS, so check that path when you plan capacity.
 

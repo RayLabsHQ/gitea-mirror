@@ -3,7 +3,7 @@ import { db, mirrorJobs } from "@/lib/db";
 import { eq, sql } from "drizzle-orm";
 import { createSecureErrorResponse } from "@/lib/utils";
 import type { MirrorJob } from "@/lib/db/schema";
-import { repoStatusEnum } from "@/types/Repository";
+import { activityStatusEnum } from "@/types/Repository";
 import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 
 export const GET: APIRoute = async ({ request, locals }) => {
@@ -28,7 +28,10 @@ export const GET: APIRoute = async ({ request, locals }) => {
       repositoryName: job.repositoryName ?? undefined,
       organizationId: job.organizationId ?? undefined,
       organizationName: job.organizationName ?? undefined,
-      status: repoStatusEnum.parse(job.status),
+      // Job/activity statuses include the activity-only "warning" (see mirrorJobSchema).
+      // repoStatusEnum only covers repository statuses, so parsing "warning" with
+      // it threw a ZodError and turned the whole feed into a 500.
+      status: activityStatusEnum.parse(job.status),
       details: job.details ?? undefined,
       message: job.message,
       timestamp: job.timestamp,

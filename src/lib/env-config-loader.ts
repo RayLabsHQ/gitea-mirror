@@ -66,6 +66,7 @@ interface EnvConfig {
     mirrorMetadata?: boolean;
     releaseLimit?: number;
     releaseAssetLimit?: number;
+    pruneOldReleaseAssets?: boolean;
     releaseType?: string;
     releaseIncludeTags?: string[];
     releaseExcludeTags?: string[];
@@ -197,6 +198,10 @@ function parseEnvConfig(): EnvConfig {
       mirrorMetadata: process.env.MIRROR_METADATA === 'true',
       releaseLimit: process.env.RELEASE_LIMIT ? parseInt(process.env.RELEASE_LIMIT, 10) : undefined,
       releaseAssetLimit: process.env.RELEASE_ASSET_LIMIT ? parseInt(process.env.RELEASE_ASSET_LIMIT, 10) : undefined,
+      pruneOldReleaseAssets:
+        process.env.PRUNE_OLD_RELEASE_ASSETS === undefined
+          ? undefined
+          : process.env.PRUNE_OLD_RELEASE_ASSETS === 'true',
       releaseType: process.env.RELEASE_TYPE,
       releaseIncludeTags,
       releaseExcludeTags,
@@ -397,6 +402,12 @@ export async function initializeConfigFromEnv(): Promise<void> {
         normalizeReleaseAssetLimit(envConfig.mirror.releaseAssetLimit) ??
         existingConfig?.[0]?.giteaConfig?.releaseAssetLimit ??
         null,
+      // Unset env var keeps what the UI stored; anything but "true" is false,
+      // matching how the other boolean mirror switches here are read.
+      pruneOldReleaseAssets:
+        envConfig.mirror.pruneOldReleaseAssets ??
+        existingConfig?.[0]?.giteaConfig?.pruneOldReleaseAssets ??
+        false,
       // all | stable. An unusable value (a typo in the env var)
       // falls through to the stored value rather than storing a filter.
       releaseType:
