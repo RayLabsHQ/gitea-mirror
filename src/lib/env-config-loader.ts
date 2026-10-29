@@ -66,6 +66,7 @@ interface EnvConfig {
     mirrorMetadata?: boolean;
     releaseLimit?: number;
     releaseAssetLimit?: number;
+    pruneOldReleaseAssets?: boolean;
     releaseType?: string;
     releaseIncludeTags?: string[];
     releaseExcludeTags?: string[];

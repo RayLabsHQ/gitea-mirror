@@ -4621,6 +4621,9 @@ async function mirrorSourceReleasesToGiteaLocked({
       );
       const prunable = retainedReleases.filter((rel) => {
         if (deletedReleaseIds.has(rel.id)) return false;
+        // The listing carries each release's attachments, so a release that
+        // has none (one already pruned on an earlier sync) costs no request.
+        if (Array.isArray(rel.assets) && rel.assets.length === 0) return false;
         const rank = rankByTag.get(rel.tag_name);
         return rank !== undefined && !releaseGetsAssets(rank, releaseAssetLimit);
       });

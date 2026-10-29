@@ -73,7 +73,7 @@ For deployments configured from the environment:
 MIRROR_RELEASES=true
 RELEASE_LIMIT=25
 RELEASE_ASSET_LIMIT=3     # unset for all, 0 for notes only
-PRUNE_OLD_RELEASE_ASSETS=false  # delete attachments past that count
+PRUNE_OLD_RELEASE_ASSETS=true   # also delete attachments past that count
 RELEASE_TYPE=stable       # all or stable
 RELEASE_INCLUDE_TAGS=v*   # comma separated globs or /regex/
 RELEASE_EXCLUDE_TAGS=*-rc.*

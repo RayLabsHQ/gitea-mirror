@@ -993,37 +993,39 @@ describe.skipIf(!isChild)("pruning release assets past the asset limit", () => {
     } as unknown as Partial<Config>;
   }
 
+  const destinationReleases = [
+    {
+      id: 1,
+      tag_name: "v3.0.0",
+      created_at: "2026-03-01T00:00:00Z",
+      prerelease: false,
+      assets: [{ id: 11, name: "new.bin", size: 7 }],
+    },
+    {
+      id: 2,
+      tag_name: "v2.0.0",
+      created_at: "2026-02-01T00:00:00Z",
+      prerelease: false,
+      assets: [{ id: 21, name: "old.bin", size: 5 }],
+    },
+    {
+      id: 3,
+      tag_name: "v1.0.0",
+      created_at: "2026-01-01T00:00:00Z",
+      prerelease: false,
+      assets: [{ id: 31, name: "older.bin", size: 3 }],
+    },
+  ];
+
   /** Three releases on both sides; an asset limit of 1 covers only v3.0.0. */
-  function run(prune: boolean, extra: DestinationOptions = {}) {
+  function run(prune: boolean, extra: Partial<DestinationOptions> = {}) {
     const world = fakeWorld({
       sourceReleases: [
         giteaRelease("v3.0.0"),
         giteaRelease("v2.0.0"),
         giteaRelease("v1.0.0"),
       ],
-      destinationReleases: [
-        {
-          id: 1,
-          tag_name: "v3.0.0",
-          created_at: "2026-03-01T00:00:00Z",
-          prerelease: false,
-          assets: [{ id: 11, name: "new.bin", size: 7 }],
-        },
-        {
-          id: 2,
-          tag_name: "v2.0.0",
-          created_at: "2026-02-01T00:00:00Z",
-          prerelease: false,
-          assets: [{ id: 21, name: "old.bin", size: 5 }],
-        },
-        {
-          id: 3,
-          tag_name: "v1.0.0",
-          created_at: "2026-01-01T00:00:00Z",
-          prerelease: false,
-          assets: [{ id: 31, name: "older.bin", size: 3 }],
-        },
-      ],
+      destinationReleases,
       destinationAssets: {
         "1": [{ id: 11, name: "new.bin", size: 7 }],
         "2": [{ id: 21, name: "old.bin", size: 5 }],
@@ -1064,6 +1066,28 @@ describe.skipIf(!isChild)("pruning release assets past the asset limit", () => {
       `${DEST_API}/releases/3/assets`,
     ]);
     // The storage summary follows the deletions instead of reporting the old total.
+    expect(storageRecords.at(-1)?.summary).toEqual({ count: 1, bytes: 7 });
+  });
+
+  it("skips releases the listing shows without attachments", async () => {
+    // v1.0.0 was pruned on an earlier sync: it is not listed or deleted again.
+    const world = await run(true, {
+      destinationReleases: destinationReleases.map((release) =>
+        release.id === 3 ? { ...release, assets: [] } : release
+      ),
+      destinationAssets: {
+        "1": [{ id: 11, name: "new.bin", size: 7 }],
+        "2": [{ id: 21, name: "old.bin", size: 5 }],
+        "3": [],
+      },
+    });
+
+    expect(world.assetListings().map((r) => r.url)).toEqual([
+      `${DEST_API}/releases/2/assets`,
+    ]);
+    expect(world.assetDeletes().map((r) => r.url)).toEqual([
+      `${DEST_API}/releases/2/assets/21`,
+    ]);
     expect(storageRecords.at(-1)?.summary).toEqual({ count: 1, bytes: 7 });
   });
 
