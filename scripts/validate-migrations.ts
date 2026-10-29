@@ -1007,7 +1007,54 @@ const latestUpgradeFixtures: Record<string, UpgradeFixture> = {
     seed: seedPre0020Database,
     verify: verify0020Migration,
   },
+  "0021_repository_storage": {
+    seed: seedPre0021Database,
+    verify: verify0021Migration,
+  },
 };
+
+function seedPre0021Database(db: any) {
+  // Migrations 0000-0020 have run: repositories have no storage columns yet.
+  db.run("INSERT INTO users (id, email, username, name) VALUES ('u-st21', 'st21@example.com', 'st21', 'Storage Twenty-One')");
+  db.run(
+    "INSERT INTO configs (id, user_id, name, is_active, github_config, gitea_config, schedule_config, cleanup_config) " +
+      "VALUES ('cfg-st21', 'u-st21', 'Default', 1, '{\"provider\":\"github\",\"owner\":\"octocat\",\"token\":\"gh-token\",\"type\":\"personal\"}', '{}', '{}', '{}')",
+  );
+  db.run(
+    "INSERT INTO repositories (id, user_id, config_id, name, full_name, normalized_full_name, url, clone_url, owner, default_branch, status, mirrored_location) " +
+      "VALUES ('repo-st21', 'u-st21', 'cfg-st21', 'app', 'octocat/app', 'octocat/app', 'https://github.com/octocat/app', 'https://github.com/octocat/app.git', 'octocat', 'main', 'synced', 'mirror/app')",
+  );
+}
+
+function verify0021Migration(db: any) {
+  const columns = db.query("PRAGMA table_info(repositories)").all() as TableInfoRow[];
+  for (const name of ["destination_size", "release_assets_size", "release_assets_count", "storage_checked_at"]) {
+    const column = columns.find((c) => c.name === name);
+    assert(column, `Expected repositories.${name} to exist after migration`);
+    assert(column.notnull === 0, `Expected repositories.${name} to be nullable`);
+    assert(column.dflt_value === null, `Expected repositories.${name} to have no default, got ${column.dflt_value}`);
+  }
+
+  const existing = db
+    .query("SELECT destination_size, release_assets_size, release_assets_count, storage_checked_at FROM repositories WHERE id = 'repo-st21'")
+    .get() as Record<string, unknown> | null;
+  assert(existing, "Expected the existing repository to survive the migration");
+  assert(
+    Object.values(existing).every((value) => value === null),
+    `Expected an existing repository to start unmeasured, got ${JSON.stringify(existing)}`,
+  );
+
+  db.run(
+    "UPDATE repositories SET destination_size = 1048576, release_assets_size = 2048, release_assets_count = 3, storage_checked_at = 1793000000 WHERE id = 'repo-st21'",
+  );
+  const measured = db
+    .query("SELECT destination_size, release_assets_size, release_assets_count FROM repositories WHERE id = 'repo-st21'")
+    .get() as { destination_size: number; release_assets_size: number; release_assets_count: number } | null;
+  assert(
+    measured?.destination_size === 1048576 && measured.release_assets_size === 2048 && measured.release_assets_count === 3,
+    `Expected the storage columns to round-trip, got ${JSON.stringify(measured)}`,
+  );
+}
 
 function seedPre0020Database(db: any) {
   // Migrations 0000-0019 have run: repositories carry source_id,

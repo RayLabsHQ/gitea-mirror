@@ -998,6 +998,67 @@ describe("Enhanced Gitea Operations", () => {
       expect(String(mirrorSyncCalls[0][0])).not.toContain("/api/v1/repos/ceph/test-repo/mirror-sync");
     });
 
+    describe("destination size (#479)", () => {
+      const sizeConfig = {
+        userId: "user123",
+        githubConfig: { username: "testuser", token: "github-token", privateRepositories: false, mirrorStarred: true },
+        giteaConfig: { url: "https://gitea.example.com", token: "encrypted-token", defaultOwner: "testuser", mirrorReleases: false },
+      } as unknown as Partial<Config>;
+      const sizeRepository = (): Repository => ({
+        id: "repo-size", name: "test-repo", fullName: "ceph/test-repo", owner: "ceph",
+        cloneUrl: "https://github.com/ceph/test-repo.git", isPrivate: false, isStarred: true,
+        status: repoStatusEnum.parse("mirrored"), visibility: "public", userId: "user123",
+        mirroredLocation: "starred/test-repo", createdAt: new Date(), updatedAt: new Date(),
+      } as Repository);
+      const sizeDependencies = {
+        getGiteaRepoOwnerAsync: mockGetGiteaRepoOwnerAsync,
+        mirrorGitHubReleasesToGitea: mockMirrorGitHubReleasesToGitea,
+        mirrorGitRepoIssuesToGitea: mockMirrorGitRepoIssuesToGitea,
+        mirrorGitRepoPullRequestsToGitea: mockMirrorGitRepoPullRequestsToGitea,
+        mirrorGitRepoLabelsToGitea: mockMirrorGitRepoLabelsToGitea,
+        mirrorGitRepoMilestonesToGitea: mockMirrorGitRepoMilestonesToGitea,
+        syncRepositoryMetadataToGitea: mockSyncRepositoryMetadataToGitea,
+      };
+      const repoUrl = "https://gitea.example.com/api/v1/repos/starred/test-repo";
+
+      test("records the size from the lookup the sync already makes", async () => {
+        const defaultGet = mockHttpGet.getMockImplementation()!;
+        mockHttpGet.mockImplementation(async (url: string, headers?: any) => {
+          const response: any = await defaultGet(url, headers);
+          return url === repoUrl ? { ...response, data: { ...response.data, size: 2048 } } : response;
+        });
+
+        try {
+          const result = await syncGiteaRepoEnhanced(
+            { config: sizeConfig, repository: sizeRepository() },
+            sizeDependencies
+          );
+          expect(result).toEqual({ success: true });
+
+          const successUpdate = dbUpdateSetCalls.find((data) => "lastMirrored" in data);
+          expect(successUpdate.destinationSize).toBe(2048 * 1024);
+          expect(successUpdate.storageCheckedAt).toBeInstanceOf(Date);
+          // Read from the target lookup, not fetched again.
+          expect(mockHttpGet.mock.calls.filter((call) => call[0] === repoUrl)).toHaveLength(1);
+        } finally {
+          mockHttpGet.mockImplementation(defaultGet);
+        }
+      });
+
+      test("leaves the stored size alone when the destination reports none", async () => {
+        const result = await syncGiteaRepoEnhanced(
+          { config: sizeConfig, repository: sizeRepository() },
+          sizeDependencies
+        );
+        expect(result).toEqual({ success: true });
+
+        const successUpdate = dbUpdateSetCalls.find((data) => "lastMirrored" in data);
+        expect(successUpdate).toBeDefined();
+        expect("destinationSize" in successUpdate).toBe(false);
+        expect("storageCheckedAt" in successUpdate).toBe(false);
+      });
+    });
+
     describe("GitHub App sources", () => {
       const appConfig = {
         userId: "user123",

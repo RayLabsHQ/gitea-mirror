@@ -35,6 +35,8 @@ import { triggerAllReleasesRemovedNotification } from "./notification-service";
 import { isRateLimitError } from "./rate-limit-gate";
 import { assertMirrorCredentialUpdateSupported } from "./gitea-mirror-credentials";
 import { persistMetadataPassProgress } from "./metadata-progress-store";
+import { summarizeReleaseAssets } from "./repository-storage";
+import { recordReleaseAssetStorage } from "./repository-storage-store";
 import {
   advanceMetadataSyncCursor,
   buildPassProgress,
@@ -4380,7 +4382,12 @@ async function mirrorSourceReleasesToGiteaLocked({
       tag_name: string;
       created_at: string;
       prerelease?: boolean | null;
+      assets?: Array<{ size?: number }> | null;
     }> = [];
+    // A page that fails ends the listing early. Retention still runs on what
+    // was listed, as before, but the storage totals are only recorded from a
+    // complete listing.
+    let listingComplete = true;
     let cleanupPage = 1;
     while (true) {
       const pageResponse = await httpGet(
@@ -4390,7 +4397,11 @@ async function mirrorSourceReleasesToGiteaLocked({
         }
       ).catch(() => null);
 
-      if (!pageResponse?.data || !Array.isArray(pageResponse.data) || pageResponse.data.length === 0) {
+      if (!pageResponse?.data || !Array.isArray(pageResponse.data)) {
+        listingComplete = false;
+        break;
+      }
+      if (pageResponse.data.length === 0) {
         break;
       }
 
@@ -4404,6 +4415,7 @@ async function mirrorSourceReleasesToGiteaLocked({
 
     const giteaBaseUrl = config.giteaConfig.url;
     const giteaToken = decryptedConfig.giteaConfig.token;
+    const deletedReleaseIds = new Set<number>();
 
     const deleteGiteaRelease = async (
       release: { id: number; tag_name: string },
@@ -4416,6 +4428,7 @@ async function mirrorSourceReleasesToGiteaLocked({
             Authorization: `token ${giteaToken}`,
           }
         );
+        deletedReleaseIds.add(release.id);
         console.log(`[Releases] Deleted ${reason} release: ${release.tag_name}`);
       } catch (deleteError) {
         console.error(
@@ -4519,6 +4532,18 @@ async function mirrorSourceReleasesToGiteaLocked({
       for (const excess of toDelete) {
         await deleteGiteaRelease(excess, "excess");
       }
+    }
+
+    // The listing already carries every asset's size, so the storage page
+    // gets its release numbers without another request (#479). Releases whose
+    // delete failed are still on the destination and still count.
+    if (listingComplete) {
+      await recordReleaseAssetStorage(
+        repository.id,
+        summarizeReleaseAssets(
+          allGiteaReleases.filter((rel) => !deletedReleaseIds.has(rel.id))
+        )
+      );
     }
   } catch (cleanupError) {
     console.warn(

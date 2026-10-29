@@ -7,6 +7,7 @@ import Providers from "./Providers";
 import { ConfigTabs } from "../config/ConfigTabs";
 import { ActivityLog } from "../activity/ActivityLog";
 import { Organization } from "../organizations/Organization";
+import { Storage } from "../storage/Storage";
 import { Toaster } from "@/components/ui/sonner";
 import { useAuth } from "@/hooks/useAuth";
 import { useRepoSync } from "@/hooks/useSyncRepo";
@@ -23,6 +24,7 @@ interface AppProps {
     | "dashboard"
     | "repositories"
     | "organizations"
+    | "storage"
     | "configuration"
     | "activity-log";
   "client:load"?: boolean;
@@ -77,6 +79,7 @@ function AppWithProviders({ page: initialPage }: AppProps) {
         '/': 'dashboard',
         '/repositories': 'repositories',
         '/organizations': 'organizations',
+        '/storage': 'storage',
         '/config': 'configuration',
         '/activity': 'activity-log'
       };
@@ -156,6 +159,7 @@ function AppWithProviders({ page: initialPage }: AppProps) {
             {currentPage === "dashboard" && <Dashboard />}
             {currentPage === "repositories" && <Repository />}
             {currentPage === "organizations" && <Organization />}
+            {currentPage === "storage" && <Storage />}
             {currentPage === "configuration" && <ConfigTabs />}
             {currentPage === "activity-log" && <ActivityLog />}
           </section>
