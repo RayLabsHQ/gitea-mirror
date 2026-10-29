@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Search, RefreshCw, FlipHorizontal, Filter, LoaderCircle, Trash2, Download, LayoutGrid, List } from "lucide-react";
 import type { MirrorJob, Organization } from "@/lib/db/schema";
@@ -6,6 +6,7 @@ import { OrganizationList } from "./OrganizationsList";
 import AddOrganizationDialog from "./AddOrganizationDialog";
 import { useAuth } from "@/hooks/useAuth";
 import { apiRequest, showErrorToast } from "@/lib/utils";
+import { readPageCache, writePageCache } from "@/lib/page-cache";
 import {
   membershipRoleEnum,
   type AddOrganizationApiRequest,
@@ -53,12 +54,16 @@ import {
 } from "@/components/ui/dialog";
 
 export function Organization() {
-  const [organizations, setOrganizations] = useState<Organization[]>([]);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const { user } = useAuth();
+  // What this page showed last time in this tab, shown again while it refreshes.
+  const [cached] = useState(() => readPageCache<Organization[]>(user?.id, "organizations"));
+  const [organizations, setOrganizations] = useState<Organization[]>(cached ?? []);
+  const [isLoading, setIsLoading] = useState<boolean>(!cached);
+  // True once there are organizations to show, from the cache or a fetch.
+  const hasLoadedRef = useRef(!!cached);
   const [isDialogOpen, setIsDialogOpen] = useState<boolean>(false);
   // Cards or the compact list (#428); remembered per browser.
   const { view, setView } = useOrganizationsView();
-  const { user } = useAuth();
   const { sourceProvider, sourceUrl, sources } = useConfigStatus();
   const { navigationKey } = useNavigation();
   const { registerRefreshCallback } = useLiveRefresh();
@@ -118,6 +123,7 @@ export function Organization() {
       );
 
       if (response.success) {
+        hasLoadedRef.current = true;
         setOrganizations(response.organizations);
         return true;
       } else {
@@ -141,10 +147,16 @@ export function Organization() {
   }, [user?.id]); // Only depend on user.id, not entire user object
 
   useEffect(() => {
-    // Reset loading state when component becomes active
-    setIsLoading(true);
-    fetchOrganizations(false); // Manual refresh, not live
+    // With organizations from the last visit on screen, refresh them in the
+    // background instead of going back to the skeleton.
+    const showingRows = hasLoadedRef.current;
+    if (!showingRows) setIsLoading(true);
+    fetchOrganizations(showingRows);
   }, [fetchOrganizations, navigationKey]); // Include navigationKey to trigger on navigation
+
+  useEffect(() => {
+    if (hasLoadedRef.current) writePageCache(user?.id, "organizations", organizations);
+  }, [user?.id, organizations]);
 
   // Register with global live refresh system
   useEffect(() => {
@@ -985,7 +997,7 @@ export function Organization() {
 
       <OrganizationList
         organizations={organizations}
-        isLoading={isLoading || !connected}
+        isLoading={isLoading || (!connected && !hasLoadedRef.current)}
         filter={filter}
         setFilter={setFilter}
         loadingOrgIds={loadingOrgIds}

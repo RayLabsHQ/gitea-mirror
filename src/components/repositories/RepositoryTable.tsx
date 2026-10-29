@@ -21,6 +21,8 @@ import { buildGiteaWebUrl } from "@/lib/gitea-url";
 import type { FilterParams } from "@/types/filter";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useGiteaConfig } from "@/hooks/useGiteaConfig";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { usePageVirtualizer } from "@/hooks/usePageVirtualizer";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Tooltip,
@@ -400,6 +402,15 @@ export default function RepositoryTable({
     overscan: 5,
   });
 
+  // Only the layout on screen is rendered: a hidden list still built every
+  // card. The cards are virtualized against the page scroll like the rows.
+  const isDesktop = useMediaQuery("(min-width: 1024px)");
+  const { listRef: cardListRef, virtualizer: cardVirtualizer } = usePageVirtualizer({
+    count: isDesktop ? 0 : visibleRepositories.length,
+    estimateSize: () => 280,
+    getItemKey: (index) => visibleRepositories[index]?.id ?? index,
+  });
+
   // Selection handlers
   const handleSelectAll = (checked: boolean) => {
     lastSelectedIndexRef.current = null;
@@ -456,14 +467,15 @@ export default function RepositoryTable({
     visibleRepositories.every((repo) => repo.id && selectedRepoIds.has(repo.id));
   const isPartiallySelected = selectedRepoIds.size > 0 && !isAllSelected;
 
-  // Mobile card layout for repository
-  const RepositoryCard = ({ repo, index }: { repo: Repository; index: number }) => {
+  // Mobile card layout for repository. A render function rather than a
+  // component declared in here, which React would remount on every render.
+  const renderRepositoryCard = (repo: Repository, index: number) => {
     const isLoading = repo.id ? loadingRepoIds.has(repo.id) : false;
     const isSelected = repo.id ? selectedRepoIds.has(repo.id) : false;
     const giteaUrl = getGiteaRepoUrl(repo);
 
     return (
-      <Card className="mb-3">
+      <Card>
         <CardContent className="p-4">
           <div className="flex flex-col gap-3">
             {/* Header: checkbox, name, Custom badge and menu share one
@@ -931,6 +943,7 @@ export default function RepositoryTable({
       ) : (
         <div className="flex min-h-0 flex-1 flex-col">
           {/* Mobile card view: flows in the page scroll rather than its own. */}
+          {!isDesktop && (
           <div className="lg:hidden pb-20">
             {/* Select all checkbox */}
             <div className="flex items-center gap-3 mb-3 p-3 bg-muted/50 rounded-md">
@@ -945,13 +958,29 @@ export default function RepositoryTable({
               </span>
             </div>
 
-            {/* Repository cards */}
-            {visibleRepositories.map((repo, index) => (
-              <RepositoryCard key={repo.id} repo={repo} index={index} />
-            ))}
+            {/* Repository cards, only the ones near the viewport */}
+            <div ref={cardListRef} className="relative" style={{ height: cardVirtualizer.getTotalSize() }}>
+              {cardVirtualizer.getVirtualItems().map((item) => {
+                const repo = visibleRepositories[item.index];
+                if (!repo) return null;
+                return (
+                  <div
+                    key={item.key}
+                    data-index={item.index}
+                    ref={cardVirtualizer.measureElement}
+                    className="absolute left-0 top-0 w-full pb-3"
+                    style={{ transform: `translateY(${item.start - cardVirtualizer.options.scrollMargin}px)` }}
+                  >
+                    {renderRepositoryCard(repo, item.index)}
+                  </div>
+                );
+              })}
+            </div>
           </div>
+          )}
 
           {/* Desktop table view */}
+          {isDesktop && (
           <div className="hidden lg:flex min-h-0 flex-1 flex-col border rounded-md">
             {/* Table header */}
             <div className="h-[45px] flex items-center justify-between border-b bg-muted/50">
@@ -1199,6 +1228,7 @@ export default function RepositoryTable({
               </div>
             </div>
           </div>
+          )}
         </div>
       )}
 
