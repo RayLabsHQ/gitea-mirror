@@ -343,11 +343,16 @@ export function Storage() {
     return rows;
   }, [overview, search, ownerFilter, sort]);
 
-  // Only the rows near the viewport are in the DOM.
+  // Only the rows near the viewport are in the DOM. A new getItemKey makes the
+  // virtualizer re-measure every row, so it only changes with the list.
+  const getRowKey = useCallback(
+    (index: number) => visibleRepositories[index]?.id ?? index,
+    [visibleRepositories]
+  );
   const { listRef: rowListRef, virtualizer: rowVirtualizer } = usePageVirtualizer({
     count: visibleRepositories.length,
     estimateSize: () => 53,
-    getItemKey: (index) => visibleRepositories[index]?.id ?? index,
+    getItemKey: getRowKey,
   });
 
   if (isLoading || !overview) return <StorageSkeleton />;

@@ -77,6 +77,10 @@ export function MarqueeText({ children, className, speed = 60 }: MarqueeTextProp
     }
 
     setScrolling(false);
+    // Still resting (first render, or the text fits): nothing to undo. Reading
+    // the computed transform forces a style recalc, and a virtualized list
+    // mounts rows on every scroll.
+    if (resting) return;
     // If the text never actually moved (left before the start delay ended),
     // no transition runs and no transitionend will fire — rest immediately
     const content = contentRef.current;
