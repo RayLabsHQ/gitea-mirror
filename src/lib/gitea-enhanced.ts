@@ -44,6 +44,7 @@ import {
   strategyNeedsDetection,
 } from "./repo-backup";
 import { detectForcePush } from "./utils/force-push-detection";
+import { destinationSizeColumns } from "./repository-storage";
 import { sanitizeRepoNameAlphaDashDot, type GiteaMilestoneIds } from "./gitea";
 import {
   parseRepositoryMetadataState,
@@ -86,6 +87,8 @@ export interface GiteaRepoInfo {
   // skip writes that would not change anything.
   description?: string;
   topics?: string[];
+  // KiB, Git plus LFS, recorded for the storage page (#479).
+  size?: number;
   // Set while a transfer waits for the new owner to accept it (issue #400).
   repo_transfer?: { recipient?: { login?: string; username?: string } | null } | null;
 }
@@ -529,8 +532,8 @@ export async function syncGiteaRepoEnhanced({
     //    archiveGiteaRepo applies to mirror repos (see #331 follow-up).
     //    Repos archived before mirroredLocation was backfilled on rename, or
     //    any lingering false-positive orphan hit, would otherwise be
-    //    unreachable from "Manual Sync" — the UI's documented way to refresh
-    //    an archived mirror — because the recorded/expected name no longer
+    //    unreachable from a manual Sync (the UI's documented way to refresh
+    //    an archived mirror) because the recorded/expected name no longer
     //    exists and Gitea returns HTTP 405 for it.
     const dependencies = deps ?? (await import("./gitea"));
     const expectedOwner = await dependencies.getGiteaRepoOwnerAsync({ config, repository });
@@ -915,8 +918,8 @@ export async function syncGiteaRepoEnhanced({
     //
     // Skipped for archived repos: archiveGiteaRepo deliberately disabled
     // Gitea's own periodic pulling, and the documented contract
-    // (AutomationSettings.tsx: "Archive ... disables automatic syncs—use
-    // Manual Sync when you want to refresh") says a Manual Sync refreshes
+    // (AutomationSettings.tsx: "Archive ... disables automatic syncs ... use
+    // Sync on the Repositories page to refresh") says a manual Sync refreshes
     // once without re-enabling any automatic syncing.
     if (config.giteaConfig?.mirrorInterval && !isArchivedRepo && !repoUsesGitHubApp) {
       try {
@@ -1274,7 +1277,7 @@ export async function syncGiteaRepoEnhanced({
 
       // Mark repo as "synced" in DB — unless it's archived. The documented
       // contract (AutomationSettings.tsx: "Archive ... disables automatic
-      // syncs—use Manual Sync when you want to refresh") means a Manual Sync
+      // syncs ... use Sync on the Repositories page to refresh") means a manual Sync
       // of an archived repo must NOT re-enroll it into the scheduler's
       // auto-sync pool (which selects mirrored/synced/failed/pending) nor
       // clear the archived errorMessage annotation shown in the UI; it still
@@ -1292,6 +1295,9 @@ export async function syncGiteaRepoEnhanced({
           metadata: metadataUpdated
             ? serializeRepositoryMetadataState(metadataState)
             : repository.metadata ?? null,
+          // From the GET that resolved the target, so before this sync's
+          // fetch: the size lags one sync and costs no request.
+          ...destinationSizeColumns(repoInfo),
         })
         .where(eq(repositories.id, repository.id!));
 

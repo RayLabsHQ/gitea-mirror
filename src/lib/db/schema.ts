@@ -322,6 +322,10 @@ export const repositorySchema = z.object({
   size: z.number().default(0),
   hasLFS: z.boolean().default(false),
   hasSubmodules: z.boolean().default(false),
+  destinationSize: z.number().optional().nullable(),
+  releaseAssetsSize: z.number().optional().nullable(),
+  releaseAssetsCount: z.number().optional().nullable(),
+  storageCheckedAt: z.coerce.date().optional().nullable(),
   language: z.string().optional().nullable(),
   description: z.string().optional().nullable(),
   defaultBranch: z.string(),
@@ -622,6 +626,15 @@ export const repositories = sqliteTable("repositories", {
   hasSubmodules: integer("has_submodules", { mode: "boolean" })
     .notNull()
     .default(false),
+
+  // What the mirror takes up on the destination, in bytes, recorded from
+  // responses a sync already fetches (#479). NULL until a sync has seen it.
+  // destinationSize is Git plus LFS as the destination reports it; the release
+  // asset totals come from the listing the release retention pass reads.
+  destinationSize: integer("destination_size"),
+  releaseAssetsSize: integer("release_assets_size"),
+  releaseAssetsCount: integer("release_assets_count"),
+  storageCheckedAt: integer("storage_checked_at", { mode: "timestamp" }),
 
   language: text("language"),
   description: text("description"),

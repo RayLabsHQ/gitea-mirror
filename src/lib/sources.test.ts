@@ -12,6 +12,32 @@ import {
 } from "./sources";
 import { encrypt } from "./utils/encryption";
 
+// ---------------------------------------------------------------------------
+// These tests need the real module, but gitea-enhanced.test.ts and several
+// route tests replace @/lib/sources process-wide (decryptSourceToken becomes
+// `token ?? ""`), and bun's mock.module leaks into every file that runs after
+// them. Which file runs first depends on the runner, so this file re-runs
+// itself in an isolated child process where nothing else has been loaded.
+// ---------------------------------------------------------------------------
+const CHILD_FLAG = "SOURCES_TEST_ISOLATED";
+const isChild = !!process.env[CHILD_FLAG];
+
+if (!isChild) {
+  test("sources - isolated child suite", () => {
+    const res = Bun.spawnSync({
+      cmd: [process.execPath, "test", import.meta.path],
+      env: { ...process.env, [CHILD_FLAG]: "1" },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    if (res.exitCode !== 0) {
+      console.error(res.stdout.toString());
+      console.error(res.stderr.toString());
+    }
+    expect(res.exitCode).toBe(0);
+  }, 60_000);
+}
+
 function source(overrides: Partial<SourceRecord> = {}): SourceRecord {
   return {
     id: "src-1",
@@ -28,7 +54,7 @@ function source(overrides: Partial<SourceRecord> = {}): SourceRecord {
   };
 }
 
-describe("deriveSourceName", () => {
+describe.skipIf(!isChild)("deriveSourceName", () => {
   test("appends the username when present", () => {
     expect(deriveSourceName("github", "octocat")).toBe("GitHub (octocat)");
     expect(deriveSourceName("gitea", "me")).toBe("Gitea / Forgejo (me)");
@@ -39,7 +65,7 @@ describe("deriveSourceName", () => {
   });
 });
 
-describe("primarySource", () => {
+describe.skipIf(!isChild)("primarySource", () => {
   test("returns the first entry", () => {
     const list = [source({ id: "a" }), source({ id: "b" })];
     expect(primarySource(list)?.id).toBe("a");
@@ -50,7 +76,7 @@ describe("primarySource", () => {
   });
 });
 
-describe("findSourceForRepository", () => {
+describe.skipIf(!isChild)("findSourceForRepository", () => {
   const github = source();
   const gitlab = source({
     id: "src-2",
@@ -95,7 +121,7 @@ describe("findSourceForRepository", () => {
   });
 });
 
-describe("findSourceForOrganization", () => {
+describe.skipIf(!isChild)("findSourceForOrganization", () => {
   const github = source();
   const gitlab = source({
     id: "src-2",
@@ -122,7 +148,7 @@ describe("findSourceForOrganization", () => {
   });
 });
 
-describe("selectSameRunPinsToClear", () => {
+describe.skipIf(!isChild)("selectSameRunPinsToClear", () => {
   const discovered = [{ normalizedName: "acme" }, { normalizedName: "tools" }];
 
   test("clears a pin an earlier source in the same run created", () => {
@@ -148,7 +174,7 @@ describe("selectSameRunPinsToClear", () => {
   });
 });
 
-describe("selectRepositoriesToRelink", () => {
+describe.skipIf(!isChild)("selectRepositoriesToRelink", () => {
   const connected = new Set(["src-1"]);
   const base = {
     sourceProvider: "github" as const,
@@ -191,7 +217,7 @@ describe("selectRepositoriesToRelink", () => {
   });
 });
 
-describe("decryptSourceToken", () => {
+describe.skipIf(!isChild)("decryptSourceToken", () => {
   beforeAll(() => {
     // encrypt() needs a secret; do not depend on the environment or on test order.
     process.env.ENCRYPTION_SECRET ??= "sources-test-encryption-secret";
@@ -208,7 +234,7 @@ describe("decryptSourceToken", () => {
   });
 });
 
-describe("resolveGitHubApiBaseUrl", () => {
+describe.skipIf(!isChild)("resolveGitHubApiBaseUrl", () => {
   test("github.com and empty keep the environment default", () => {
     expect(resolveGitHubApiBaseUrl("https://github.com")).toBeUndefined();
     expect(resolveGitHubApiBaseUrl("")).toBeUndefined();

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { SourceIcon, repositorySourceInfo } from "@/components/source/SourceIcon";
 import { DestinationIcon, destinationInfo } from "@/components/destination/DestinationIcon";
 import {
@@ -21,6 +21,8 @@ import { buildGiteaWebUrl } from "@/lib/gitea-url";
 import type { FilterParams } from "@/types/filter";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useGiteaConfig } from "@/hooks/useGiteaConfig";
+import { useMediaQuery } from "@/hooks/useMediaQuery";
+import { usePageVirtualizer } from "@/hooks/usePageVirtualizer";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Tooltip,
@@ -130,7 +132,6 @@ export default function RepositoryTable({
   onApproveSync,
   onDismissSync,
 }: RepositoryTableProps) {
-  const tableParentRef = useRef<HTMLDivElement>(null);
   const lastSelectedIndexRef = useRef<number | null>(null);
   const { giteaConfig, advancedOptions, mirrorOptions } = useGiteaConfig();
   const [overridesTarget, setOverridesTarget] = useState<Repository | null>(null);
@@ -389,15 +390,26 @@ export default function RepositoryTable({
     getSortedRowModel: getSortedRowModel(),
   });
 
-  const visibleRepositories = table
-    .getRowModel()
-    .rows.map((row) => row.original);
+  // The row model only changes with the data, filters or sort, so the list
+  // keeps its identity across other renders.
+  const rowModel = table.getRowModel();
+  const visibleRepositories = useMemo(
+    () => rowModel.rows.map((row) => row.original),
+    [rowModel]
+  );
 
-  const rowVirtualizer = useVirtualizer({
-    count: visibleRepositories.length,
-    getScrollElement: () => tableParentRef.current,
-    estimateSize: () => 65,
-    overscan: 5,
+  // Only the layout on screen is rendered: a hidden list still built every
+  // card. The cards are virtualized against the page scroll like the rows.
+  const isDesktop = useMediaQuery("(min-width: 1024px)");
+  // A new getItemKey makes the virtualizer re-measure every card.
+  const getCardKey = useCallback(
+    (index: number) => visibleRepositories[index]?.id ?? index,
+    [visibleRepositories]
+  );
+  const { listRef: cardListRef, virtualizer: cardVirtualizer } = usePageVirtualizer({
+    count: isDesktop ? 0 : visibleRepositories.length,
+    estimateSize: () => 280,
+    getItemKey: getCardKey,
   });
 
   // Selection handlers
@@ -456,14 +468,34 @@ export default function RepositoryTable({
     visibleRepositories.every((repo) => repo.id && selectedRepoIds.has(repo.id));
   const isPartiallySelected = selectedRepoIds.size > 0 && !isAllSelected;
 
-  // Mobile card layout for repository
-  const RepositoryCard = ({ repo, index }: { repo: Repository; index: number }) => {
+  // What every desktop row shares. Rows re-render when the table does, but a
+  // scroll only renders the rows coming into view.
+  const rowContext: RepositoryRowContext = {
+    giteaConfig,
+    destination,
+    getGiteaRepoUrl,
+    onSelect: handleSelectRepo,
+    onShiftSelect: handleShiftRangeSelect,
+    onUpdateDestination: handleUpdateDestination,
+    onEditMirrorOptions: setOverridesTarget,
+    onMirror,
+    onSync,
+    onRetry,
+    onSkip,
+    onDelete,
+    onApproveSync,
+    onDismissSync,
+  };
+
+  // Mobile card layout for repository. A render function rather than a
+  // component declared in here, which React would remount on every render.
+  const renderRepositoryCard = (repo: Repository, index: number) => {
     const isLoading = repo.id ? loadingRepoIds.has(repo.id) : false;
     const isSelected = repo.id ? selectedRepoIds.has(repo.id) : false;
     const giteaUrl = getGiteaRepoUrl(repo);
 
     return (
-      <Card className="mb-3">
+      <Card>
         <CardContent className="p-4">
           <div className="flex flex-col gap-3">
             {/* Header: checkbox, name, Custom badge and menu share one
@@ -931,6 +963,7 @@ export default function RepositoryTable({
       ) : (
         <div className="flex min-h-0 flex-1 flex-col">
           {/* Mobile card view: flows in the page scroll rather than its own. */}
+          {!isDesktop && (
           <div className="lg:hidden pb-20">
             {/* Select all checkbox */}
             <div className="flex items-center gap-3 mb-3 p-3 bg-muted/50 rounded-md">
@@ -945,13 +978,29 @@ export default function RepositoryTable({
               </span>
             </div>
 
-            {/* Repository cards */}
-            {visibleRepositories.map((repo, index) => (
-              <RepositoryCard key={repo.id} repo={repo} index={index} />
-            ))}
+            {/* Repository cards, only the ones near the viewport */}
+            <div ref={cardListRef} className="relative" style={{ height: cardVirtualizer.getTotalSize() }}>
+              {cardVirtualizer.getVirtualItems().map((item) => {
+                const repo = visibleRepositories[item.index];
+                if (!repo) return null;
+                return (
+                  <div
+                    key={item.key}
+                    data-index={item.index}
+                    ref={cardVirtualizer.measureElement}
+                    className="absolute left-0 top-0 w-full pb-3"
+                    style={{ transform: `translateY(${item.start - cardVirtualizer.options.scrollMargin}px)` }}
+                  >
+                    {renderRepositoryCard(repo, item.index)}
+                  </div>
+                );
+              })}
+            </div>
           </div>
+          )}
 
           {/* Desktop table view */}
+          {isDesktop && (
           <div className="hidden lg:flex min-h-0 flex-1 flex-col border rounded-md">
             {/* Table header */}
             <div className="h-[45px] flex items-center justify-between border-b bg-muted/50">
@@ -981,224 +1030,15 @@ export default function RepositoryTable({
               </div>
             </div>
 
-            {/* Table body wrapper (for a parent in virtualization) */}
-            <div
-              ref={tableParentRef}
-              className="flex min-h-0 flex-1 flex-col overflow-y-auto"
-            >
-              <div
-                style={{
-                  height: `${rowVirtualizer.getTotalSize()}px`,
-                  position: "relative",
-                }}
-              >
-                {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-                  const repo = visibleRepositories[virtualRow.index];
-                  if (!repo) return null;
-                  const isLoading = loadingRepoIds.has(repo.id ?? "");
-
-                  return (
-                    <div
-                      key={virtualRow.key}
-                      ref={rowVirtualizer.measureElement}
-                      style={{
-                        position: "absolute",
-                        top: 0,
-                        left: 0,
-                        transform: `translateY(${virtualRow.start}px)`,
-                        width: "100%",
-                      }}
-                      data-index={virtualRow.index}
-                      className="h-[65px] flex items-center justify-between bg-transparent border-b hover:bg-muted/50"
-                    >
-                      {/* Checkbox */}
-                      <div
-                        className="h-full p-3 flex items-center justify-center flex-[0.3]"
-                        onClickCapture={(e) => {
-                          if (e.shiftKey && repo.id) {
-                            e.stopPropagation();
-                            handleShiftRangeSelect(virtualRow.index);
-                          }
-                        }}
-                      >
-                        <Checkbox
-                          checked={repo.id ? selectedRepoIds.has(repo.id) : false}
-                          onCheckedChange={(checked) => repo.id && handleSelectRepo(repo.id, !!checked, virtualRow.index)}
-                          aria-label={`Select ${repo.name}`}
-                        />
-                      </div>
-
-                      {/* Repository */}
-                      <MarqueeTrigger className="h-full py-3 flex items-center gap-2 flex-[2.3] min-w-0">
-                        <div className="flex-1 min-w-0">
-                          <div className="font-medium flex items-center gap-1 min-w-0">
-                            <MarqueeText>{repo.name}</MarqueeText>
-                            {repo.isStarred && (
-                              <Star className="h-3 w-3 shrink-0 fill-yellow-500 text-yellow-500" />
-                            )}
-                          </div>
-                          <MarqueeText className="text-xs text-muted-foreground">
-                            {repo.fullName}
-                          </MarqueeText>
-                        </div>
-                        {repo.isPrivate && (
-                          <span className="ml-2 shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs">
-                            Private
-                          </span>
-                        )}
-                        {repo.isForked && (
-                          <span className="ml-2 shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs">
-                            Fork
-                          </span>
-                        )}
-                        {hasMirrorOverrides(repo.mirrorOverrides) && (
-                          <TooltipProvider>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <span className="ml-2 shrink-0 rounded-full bg-amber-500/10 px-2 py-0.5 text-xs text-amber-600 dark:text-amber-400">
-                                  Custom
-                                </span>
-                              </TooltipTrigger>
-                              <TooltipContent>
-                                This repository overrides the global mirror
-                                options
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
-                        )}
-                      </MarqueeTrigger>
-                      {/* Owner */}
-                      <div className="h-full p-3 flex items-center flex-[1]">
-                        <p className="text-sm">{repo.owner}</p>
-                      </div>
-
-                      {/* Organization */}
-                      <div className="h-full p-3 flex items-center flex-[1]">
-                        <InlineDestinationEditor
-                          repository={repo}
-                          giteaConfig={giteaConfig}
-                          organizationDestination={
-                            repo.organization
-                              ? organizationDestinations?.[repo.organization]
-                              : undefined
-                          }
-                          onUpdate={handleUpdateDestination}
-                          isUpdating={loadingRepoIds.has(repo.id ?? "")}
-                        />
-                      </div>
-
-                      {/* Last Mirrored */}
-                      <div className="h-full p-3 flex items-center flex-[1]">
-                        <p className="text-sm">
-                          {formatLastSyncTime(repo.lastMirrored ?? null)}
-                        </p>
-                      </div>
-
-                      {/* Status */}
-                      <div className="h-full p-3 flex items-center flex-[1]">
-                        {repo.status === "failed" && repo.errorMessage ? (
-                          <TooltipProvider>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Badge
-                                  variant="destructive"
-                                  className="cursor-help capitalize"
-                                >
-                                  {repo.status}
-                                </Badge>
-                              </TooltipTrigger>
-                              <TooltipContent className="max-w-xs">
-                                <p className="text-sm">{repo.errorMessage}</p>
-                              </TooltipContent>
-                            </Tooltip>
-                          </TooltipProvider>
-                        ) : (
-                          <Badge
-                            className={`capitalize
-                              ${repo.status === 'imported' ? 'bg-yellow-500/10 text-yellow-600 hover:bg-yellow-500/20 dark:text-yellow-400' :
-                                repo.status === 'mirrored' || repo.status === 'synced' ? 'bg-green-500/10 text-green-600 hover:bg-green-500/20 dark:text-green-400' :
-                                repo.status === 'mirroring' || repo.status === 'syncing' ? 'bg-blue-500/10 text-blue-600 hover:bg-blue-500/20 dark:text-blue-400' :
-                                repo.status === 'failed' ? 'bg-red-500/10 text-red-600 hover:bg-red-500/20 dark:text-red-400' :
-                                repo.status === 'ignored' ? 'bg-gray-500/10 text-gray-600 hover:bg-gray-500/20 dark:text-gray-400' :
-                                repo.status === 'skipped' ? 'bg-orange-500/10 text-orange-600 hover:bg-orange-500/20 dark:text-orange-400' :
-                                repo.status === 'pending-approval' ? 'bg-amber-500/10 text-amber-600 hover:bg-amber-500/20 dark:text-amber-400' :
-                                'bg-muted hover:bg-muted/80'}`}
-                            variant="secondary"
-                          >
-                            {repo.status}
-                          </Badge>
-                        )}
-                      </div>
-                      {/* Actions */}
-                      <div className="h-full p-3 flex items-center justify-start flex-[1]">
-                        <RepoActionButton
-                          repo={{ id: repo.id ?? "", status: repo.status }}
-                          isLoading={isLoading}
-                          onMirror={() => onMirror({ repoId: repo.id ?? "" })}
-                          onSync={() => onSync({ repoId: repo.id ?? "" })}
-                          onRetry={() => onRetry({ repoId: repo.id ?? "" })}
-                          onSkip={(skip) => onSkip({ repoId: repo.id ?? "", skip })}
-                          onDelete={onDelete && repo.id ? () => onDelete(repo.id as string) : undefined}
-                          onApproveSync={onApproveSync ? () => onApproveSync({ repoId: repo.id ?? "" }) : undefined}
-                          onDismissSync={onDismissSync ? () => onDismissSync({ repoId: repo.id ?? "" }) : undefined}
-                          onEditMirrorOptions={repo.id ? () => setOverridesTarget(repo) : undefined}
-                        />
-                      </div>
-                      {/* Links */}
-                      <div className="h-full p-3 flex items-center justify-center gap-x-2 flex-[0.8]">
-                        {(() => {
-                          const giteaUrl = getGiteaRepoUrl(repo);
-
-                          // Determine tooltip based on status and configuration
-                          let tooltip: string;
-                          if (!giteaConfig?.url) {
-                            tooltip = `${destination.label} not configured`;
-                          } else if (repo.status === 'imported') {
-                            tooltip = `Repository not yet mirrored to ${destination.label}`;
-                          } else if (repo.status === 'failed') {
-                            tooltip = "Repository mirroring failed";
-                          } else if (repo.status === 'mirroring') {
-                            tooltip = `Repository is being mirrored to ${destination.label}`;
-                          } else if (giteaUrl) {
-                            tooltip = `View on ${destination.label}`;
-                          } else {
-                            tooltip = `${destination.label} repository not available`;
-                          }
-
-                          return giteaUrl ? (
-                            <Button variant="ghost" size="icon" asChild>
-                              <a
-                                href={giteaUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                title={tooltip}
-                              >
-                                <DestinationIcon provider={destination.provider} className="h-4 w-4" />
-                              </a>
-                            </Button>
-                          ) : (
-                            <Button variant="ghost" size="icon" disabled title={tooltip}>
-                              <DestinationIcon provider={destination.provider} className="h-4 w-4" />
-                            </Button>
-                          );
-                        })()}
-                        <Button variant="ghost" size="icon" asChild>
-                          <a
-                            href={repo.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            title={`View on ${repositorySourceInfo(repo).label}`}
-                          >
-                            <SourceIcon provider={repositorySourceInfo(repo).provider} className="h-4 w-4" />
-                          </a>
-                        </Button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
+            <RepositoryTableRows
+              repositories={visibleRepositories}
+              selectedRepoIds={selectedRepoIds}
+              loadingRepoIds={loadingRepoIds}
+              organizationDestinations={organizationDestinations}
+              context={rowContext}
+            />
           </div>
+          )}
         </div>
       )}
 
@@ -1230,6 +1070,302 @@ export default function RepositoryTable({
     </div>
   );
 }
+
+type RepositoryRowContext = {
+  giteaConfig: ReturnType<typeof useGiteaConfig>["giteaConfig"];
+  destination: ReturnType<typeof destinationInfo>;
+  getGiteaRepoUrl: (repository: Repository) => string | null;
+  onSelect: (repoId: string, checked: boolean, index: number) => void;
+  onShiftSelect: (index: number) => void;
+  onUpdateDestination: (
+    repoId: string,
+    newDestination: string | null,
+    options?: DestinationUpdateOptions
+  ) => Promise<void>;
+  onEditMirrorOptions: (repository: Repository) => void;
+} & Pick<
+  RepositoryTableProps,
+  "onMirror" | "onSync" | "onRetry" | "onSkip" | "onDelete" | "onApproveSync" | "onDismissSync"
+>;
+
+/**
+ * The desktop table body. It owns the virtualizer so a scroll renders only
+ * this list, not the filters and header above it, and the rows are memoized so
+ * only the ones scrolling into view render.
+ */
+function RepositoryTableRows({
+  repositories,
+  selectedRepoIds,
+  loadingRepoIds,
+  organizationDestinations,
+  context,
+}: {
+  repositories: Repository[];
+  selectedRepoIds: Set<string>;
+  loadingRepoIds: Set<string>;
+  organizationDestinations?: Record<string, string>;
+  context: RepositoryRowContext;
+}) {
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // A new getItemKey makes the virtualizer re-measure every row, so it only
+  // changes with the list.
+  const getItemKey = useCallback(
+    (index: number) => repositories[index]?.id ?? index,
+    [repositories]
+  );
+  const virtualizer = useVirtualizer({
+    count: repositories.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 65,
+    overscan: 5,
+    getItemKey,
+  });
+
+  return (
+    <div ref={scrollRef} className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+      <div
+        style={{
+          height: `${virtualizer.getTotalSize()}px`,
+          position: "relative",
+        }}
+      >
+        {virtualizer.getVirtualItems().map((virtualRow) => {
+          const repo = repositories[virtualRow.index];
+          if (!repo) return null;
+          return (
+            <RepositoryTableRow
+              key={virtualRow.key}
+              repo={repo}
+              index={virtualRow.index}
+              start={virtualRow.start}
+              measureRef={virtualizer.measureElement}
+              selected={repo.id ? selectedRepoIds.has(repo.id) : false}
+              loading={loadingRepoIds.has(repo.id ?? "")}
+              organizationDestination={
+                repo.organization ? organizationDestinations?.[repo.organization] : undefined
+              }
+              context={context}
+            />
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+const RepositoryTableRow = memo(function RepositoryTableRow({
+  repo,
+  index,
+  start,
+  measureRef,
+  selected,
+  loading,
+  organizationDestination,
+  context,
+}: {
+  repo: Repository;
+  index: number;
+  start: number;
+  measureRef: (element: HTMLDivElement | null) => void;
+  selected: boolean;
+  loading: boolean;
+  organizationDestination?: string;
+  context: RepositoryRowContext;
+}) {
+  return (
+      <div
+              ref={measureRef}
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          transform: `translateY(${start}px)`,
+          width: "100%",
+        }}
+        data-index={index}
+        className="h-[65px] flex items-center justify-between bg-transparent border-b hover:bg-muted/50"
+      >
+        {/* Checkbox */}
+        <div
+          className="h-full p-3 flex items-center justify-center flex-[0.3]"
+          onClickCapture={(e) => {
+            if (e.shiftKey && repo.id) {
+              e.stopPropagation();
+              context.onShiftSelect(index);
+            }
+          }}
+        >
+          <Checkbox
+            checked={selected}
+            onCheckedChange={(checked) => repo.id && context.onSelect(repo.id, !!checked, index)}
+            aria-label={`Select ${repo.name}`}
+          />
+        </div>
+
+        {/* Repository */}
+        <MarqueeTrigger className="h-full py-3 flex items-center gap-2 flex-[2.3] min-w-0">
+          <div className="flex-1 min-w-0">
+            <div className="font-medium flex items-center gap-1 min-w-0">
+              <MarqueeText>{repo.name}</MarqueeText>
+              {repo.isStarred && (
+                <Star className="h-3 w-3 shrink-0 fill-yellow-500 text-yellow-500" />
+              )}
+            </div>
+            <MarqueeText className="text-xs text-muted-foreground">
+              {repo.fullName}
+            </MarqueeText>
+          </div>
+          {repo.isPrivate && (
+            <span className="ml-2 shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs">
+              Private
+            </span>
+          )}
+          {repo.isForked && (
+            <span className="ml-2 shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs">
+              Fork
+            </span>
+          )}
+          {hasMirrorOverrides(repo.mirrorOverrides) && (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span className="ml-2 shrink-0 rounded-full bg-amber-500/10 px-2 py-0.5 text-xs text-amber-600 dark:text-amber-400">
+                    Custom
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  This repository overrides the global mirror
+                  options
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          )}
+        </MarqueeTrigger>
+        {/* Owner */}
+        <div className="h-full p-3 flex items-center flex-[1]">
+          <p className="text-sm">{repo.owner}</p>
+        </div>
+
+        {/* Organization */}
+        <div className="h-full p-3 flex items-center flex-[1]">
+          <InlineDestinationEditor
+            repository={repo}
+            giteaConfig={context.giteaConfig}
+            organizationDestination={organizationDestination}
+            onUpdate={context.onUpdateDestination}
+            isUpdating={loading}
+          />
+        </div>
+
+        {/* Last Mirrored */}
+        <div className="h-full p-3 flex items-center flex-[1]">
+          <p className="text-sm">
+            {formatLastSyncTime(repo.lastMirrored ?? null)}
+          </p>
+        </div>
+
+        {/* Status */}
+        <div className="h-full p-3 flex items-center flex-[1]">
+          {repo.status === "failed" && repo.errorMessage ? (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Badge
+                    variant="destructive"
+                    className="cursor-help capitalize"
+                  >
+                    {repo.status}
+                  </Badge>
+                </TooltipTrigger>
+                <TooltipContent className="max-w-xs">
+                  <p className="text-sm">{repo.errorMessage}</p>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          ) : (
+            <Badge
+              className={`capitalize
+                ${repo.status === 'imported' ? 'bg-yellow-500/10 text-yellow-600 hover:bg-yellow-500/20 dark:text-yellow-400' :
+                  repo.status === 'mirrored' || repo.status === 'synced' ? 'bg-green-500/10 text-green-600 hover:bg-green-500/20 dark:text-green-400' :
+                  repo.status === 'mirroring' || repo.status === 'syncing' ? 'bg-blue-500/10 text-blue-600 hover:bg-blue-500/20 dark:text-blue-400' :
+                  repo.status === 'failed' ? 'bg-red-500/10 text-red-600 hover:bg-red-500/20 dark:text-red-400' :
+                  repo.status === 'ignored' ? 'bg-gray-500/10 text-gray-600 hover:bg-gray-500/20 dark:text-gray-400' :
+                  repo.status === 'skipped' ? 'bg-orange-500/10 text-orange-600 hover:bg-orange-500/20 dark:text-orange-400' :
+                  repo.status === 'pending-approval' ? 'bg-amber-500/10 text-amber-600 hover:bg-amber-500/20 dark:text-amber-400' :
+                  'bg-muted hover:bg-muted/80'}`}
+              variant="secondary"
+            >
+              {repo.status}
+            </Badge>
+          )}
+        </div>
+        {/* Actions */}
+        <div className="h-full p-3 flex items-center justify-start flex-[1]">
+          <RepoActionButton
+            repo={{ id: repo.id ?? "", status: repo.status }}
+            isLoading={loading}
+            onMirror={() => context.onMirror({ repoId: repo.id ?? "" })}
+            onSync={() => context.onSync({ repoId: repo.id ?? "" })}
+            onRetry={() => context.onRetry({ repoId: repo.id ?? "" })}
+            onSkip={(skip) => context.onSkip({ repoId: repo.id ?? "", skip })}
+            onDelete={context.onDelete && repo.id ? () => context.onDelete?.(repo.id as string) : undefined}
+            onApproveSync={context.onApproveSync ? () => context.onApproveSync?.({ repoId: repo.id ?? "" }) : undefined}
+            onDismissSync={context.onDismissSync ? () => context.onDismissSync?.({ repoId: repo.id ?? "" }) : undefined}
+            onEditMirrorOptions={repo.id ? () => context.onEditMirrorOptions(repo) : undefined}
+          />
+        </div>
+        {/* Links */}
+        <div className="h-full p-3 flex items-center justify-center gap-x-2 flex-[0.8]">
+          {(() => {
+            const giteaUrl = context.getGiteaRepoUrl(repo);
+
+            // Determine tooltip based on status and configuration
+            let tooltip: string;
+            if (!context.giteaConfig?.url) {
+              tooltip = `${context.destination.label} not configured`;
+            } else if (repo.status === 'imported') {
+              tooltip = `Repository not yet mirrored to ${context.destination.label}`;
+            } else if (repo.status === 'failed') {
+              tooltip = "Repository mirroring failed";
+            } else if (repo.status === 'mirroring') {
+              tooltip = `Repository is being mirrored to ${context.destination.label}`;
+            } else if (giteaUrl) {
+              tooltip = `View on ${context.destination.label}`;
+            } else {
+              tooltip = `${context.destination.label} repository not available`;
+            }
+
+            return giteaUrl ? (
+              <Button variant="ghost" size="icon" asChild>
+                <a
+                  href={giteaUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title={tooltip}
+                >
+                  <DestinationIcon provider={context.destination.provider} className="h-4 w-4" />
+                </a>
+              </Button>
+            ) : (
+              <Button variant="ghost" size="icon" disabled title={tooltip}>
+                <DestinationIcon provider={context.destination.provider} className="h-4 w-4" />
+              </Button>
+            );
+          })()}
+          <Button variant="ghost" size="icon" asChild>
+            <a
+              href={repo.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={`View on ${repositorySourceInfo(repo).label}`}
+            >
+              <SourceIcon provider={repositorySourceInfo(repo).provider} className="h-4 w-4" />
+            </a>
+          </Button>
+        </div>
+      </div>
+  );
+});
 
 function RepoActionButton({
   repo,
@@ -1301,6 +1437,7 @@ function RepoActionButton({
   let primaryIcon = <></>;
   let primaryOnClick = () => {};
   let primaryDisabled = isLoading;
+  let primaryTooltip: string | undefined;
   let showPrimaryAction = true;
 
   if (repo.status === "failed") {
@@ -1308,10 +1445,16 @@ function RepoActionButton({
     primaryIcon = <RotateCcw className="h-4 w-4" />;
     primaryOnClick = onRetry;
   } else if (["mirrored", "synced", "syncing", "archived"].includes(repo.status)) {
-    primaryLabel = repo.status === "archived" ? "Manual Sync" : "Sync";
+    primaryLabel = "Sync";
     primaryIcon = <RefreshCw className="h-4 w-4" />;
     primaryOnClick = onSync;
     primaryDisabled ||= repo.status === "syncing";
+    // Archived mirrors are left out of automatic syncs, so this button is the
+    // way to refresh one. The Archived badge already marks the row; the label
+    // stays "Sync" so the column lines up with the other rows.
+    if (repo.status === "archived") {
+      primaryTooltip = "Automatic syncs are off for archived mirrors. This syncs it now.";
+    }
   } else if (["imported", "mirroring"].includes(repo.status)) {
     primaryLabel = "Mirror";
     primaryIcon = <FlipHorizontal className="h-4 w-4" />;
@@ -1336,28 +1479,41 @@ function RepoActionButton({
     );
   }
 
+  const primaryButton = (
+    <Button
+      variant="ghost"
+      disabled={primaryDisabled}
+      onClick={primaryOnClick}
+      className="min-w-[80px] justify-start rounded-r-none"
+    >
+      {isLoading ? (
+        <>
+          <RefreshCw className="h-4 w-4 animate-spin mr-1" />
+          {primaryLabel}
+        </>
+      ) : (
+        <>
+          {primaryIcon}
+          <span className="ml-1">{primaryLabel}</span>
+        </>
+      )}
+    </Button>
+  );
+
   // Show primary action with dropdown for additional actions
   return (
     <DropdownMenu>
       <div className="flex">
-        <Button
-          variant="ghost"
-          disabled={primaryDisabled}
-          onClick={primaryOnClick}
-          className="min-w-[80px] justify-start rounded-r-none"
-        >
-          {isLoading ? (
-            <>
-              <RefreshCw className="h-4 w-4 animate-spin mr-1" />
-              {primaryLabel}
-            </>
-          ) : (
-            <>
-              {primaryIcon}
-              <span className="ml-1">{primaryLabel}</span>
-            </>
-          )}
-        </Button>
+        {primaryTooltip ? (
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>{primaryButton}</TooltipTrigger>
+              <TooltipContent>{primaryTooltip}</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        ) : (
+          primaryButton
+        )}
         <DropdownMenuTrigger asChild>
           <Button
             variant="ghost"

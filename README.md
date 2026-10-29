@@ -309,7 +309,7 @@ CLEANUP_DRY_RUN=false                 # Set to true to test without changes
   - Regular repositories: Made read-only using Gitea/Forgejo's archive feature
   - Mirror repositories: Renamed with `archived-` prefix (Gitea/Forgejo API limitation prevents archiving mirrors)
   - Failed operations: Repository remains fully accessible even if marking as archived fails
-- **Manual Sync on Demand**: Archived mirrors stay in Gitea/Forgejo with automatic syncs disabled; trigger `Manual Sync` from the Repositories page whenever you need fresh data.
+- **Sync on Demand**: Archived mirrors stay in Gitea/Forgejo with automatic syncs disabled; use `Sync` on the Repositories page whenever you need fresh data.
 - **The Whole Point of Backups**: Your Gitea/Forgejo mirrors are preserved even when GitHub sources disappear - that's why you have backups!
 - **Strongly Recommended**: Always use `CLEANUP_ORPHANED_REPO_ACTION=archive` (default) instead of `delete`
 

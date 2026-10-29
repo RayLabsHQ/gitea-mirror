@@ -7,7 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Refresh sizes** on the Storage page measures every mirror now instead of waiting for its next sync, so the page fills in on a fresh install. It only reads the destination: one repository listing per destination owner, the single repository GET for a mirror the listing does not have, and the release listing of repositories that mirror releases. It runs in the background with its progress on the button (`POST /api/storage/refresh`)
+
+### Changed
+- Pages keep what they last showed in this browser tab. Going back to the Dashboard, Repositories, Organizations, Storage or Activity Log shows that data at once and refreshes it in the background, instead of starting from a skeleton and waiting for the whole list again. Nothing is written to browser storage; a reload or a new tab starts fresh
+
 ### Fixed
+- Long lists no longer put every row in the page. The Repositories page built a card for every repository even on desktop, where the cards are hidden, and the Storage table rendered every row; with 3,000 repositories the Repositories page held over 120,000 elements. Only the layout on screen is rendered now, and the mobile cards and Storage rows are virtualized like the desktop table, so a few hundred elements are on the page whatever the count
+- Scrolling the Repositories table on desktop dropped frames on slower machines. Each scroll step rendered the filters and every visible row again, and each row coming into view forced a style recalculation for its name. Only the rows coming into view render now; with the CPU slowed 4x, a scroll frame went from about 31 ms to about 13 ms
+- Destination release listings stopped after 30 releases. Gitea and Forgejo ignore `per_page` and answer 30 a page, and the listing stopped on any page shorter than the 100 it asked for. The release limit only trimmed within the newest 30 on each sync, the Storage page counted at most 30 releases per repository, and the release filter preview showed only the newest 30 tags. Listings now page with `limit` until the total the destination reports
+- The sync button on an archived repository says **Sync** like every other row instead of **Manual Sync**, so the wider label no longer pushes the row's status badge out of line. Hovering it explains that automatic syncs are off for archived mirrors
 - The Activity Log summary no longer shows a repository as syncing after a quick sync finished (#454). Events are stored to the second, and a sync that starts and finishes in the same second could come back in the wrong order, so the start event was counted as the current state. Activities now come back newest first within the same second too, and the summary counts a finish over a start from the same second
 - Issue and pull request passes over large repositories finish across rate limit resets (#449 follow-up)
   - A pass stopped by the rate limit keeps the numbers it finished, and the next run repeats the same pass and skips them unless they changed since it started; before, every run started over from the first item, so a repository too large for one hour of budget never completed a pass
@@ -28,10 +38,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - SSO providers are scoped to the user who created them for listing, updating and deleting, and the OIDC client secret is no longer returned by the API (the form keeps the stored secret when the field is left blank)
   - HTTP errors from Gitea and other hosts no longer carry the upstream response body in the message, so an error can no longer echo the content of a host the caller chose
   - Requests to user supplied URLs (connection tests, OIDC discovery, ntfy, Gotify, Apprise and webhook notifications) refuse link local and cloud metadata addresses and no longer follow redirects; private networks stay allowed because mirroring to a LAN Gitea is the normal deployment
+- Raised the zod floor to 4.6.7 in the application (GHSA-mrhx-c7xc-m3w5, memory exhaustion while validating an oversized array that has a length limit). Before 4.6.6 zod still checked every element of a list longer than its `.max()`; the MCP tools' repository id list is the one capped array that takes outside input, behind an API key. Astro's own nested zod 4.5.4 now resolves to the same 4.6.7
 - Raised the devalue floor to 5.9.2 in the application and the documentation site (GHSA-9rgm-9g3h-6x36, denial of service through malformed input); both lockfiles resolve 5.9.4
 - Raised the dependency floors for the advisories published on 2026-09-08: Astro 7.2.8 (remote code execution through AVIF image optimization, and an authorization bypass when stripping the configured base), @xmldom/xmldom 0.8.15 (eight parser and serializer issues), sharp 0.35.4 (libheif), svgo 4.1.0 (removeScripts sanitization) and js-yaml 4.3.2 (merge-key CPU use). Applied to both the application and the documentation site.
 
 ### Added
+- A Storage page that shows how much space the mirrors take on the destination (#479)
+  - Cards for the total, Git + LFS, release assets and how many mirrors are measured, bars by destination owner and for the largest repositories, and a sortable table with search and an owner filter
+  - Sizes come from responses a sync already fetches: the destination repository lookup before `mirror-sync` (Git plus LFS) and the release listing the retention pass reads (release assets). No extra requests to the source or the destination
+  - A repository whose release assets are most of its size gets a hint that a lower release limit removes the oldest releases
+  - The same numbers are available from `GET /api/storage`
 - Read only API keys
   - **Create key** in the **API Keys** card has an **Access** choice, and read only keys show a badge in the list
   - A read only key can call every `GET` endpoint; any `POST`, `PUT`, `PATCH` or `DELETE`, and every `/api/auth/*` call except `get-session`, gets `403` with the code `API_KEY_READ_ONLY`

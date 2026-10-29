@@ -7,14 +7,19 @@ import Providers from "./Providers";
 import { ConfigTabs } from "../config/ConfigTabs";
 import { ActivityLog } from "../activity/ActivityLog";
 import { Organization } from "../organizations/Organization";
+import { Storage } from "../storage/Storage";
 import { Toaster } from "@/components/ui/sonner";
 import { useAuth } from "@/hooks/useAuth";
 import { useRepoSync } from "@/hooks/useSyncRepo";
 import { useConfigStatus } from "@/hooks/useConfigStatus";
 import { stripBasePath, withBase } from "@/lib/base-path";
 
-// Navigation context to signal when navigation happens
-const NavigationContext = createContext<{ navigationKey: number }>({ navigationKey: 0 });
+// Navigation context to signal when navigation happens. It also carries the
+// section the pages scroll in, for lists virtualized against the page scroll.
+const NavigationContext = createContext<{ navigationKey: number; pageScrollElement: HTMLElement | null }>({
+  navigationKey: 0,
+  pageScrollElement: null,
+});
 
 export const useNavigation = () => useContext(NavigationContext);
 
@@ -23,6 +28,7 @@ interface AppProps {
     | "dashboard"
     | "repositories"
     | "organizations"
+    | "storage"
     | "configuration"
     | "activity-log";
   "client:load"?: boolean;
@@ -45,6 +51,7 @@ function AppWithProviders({ page: initialPage }: AppProps) {
   const { isLoading: configLoading } = useConfigStatus();
   const [currentPage, setCurrentPage] = useState<AppProps['page']>(initialPage);
   const [navigationKey, setNavigationKey] = useState(0);
+  const [pageScrollElement, setPageScrollElement] = useState<HTMLElement | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     // Check if we're on medium screens (768px - 1280px)
@@ -77,6 +84,7 @@ function AppWithProviders({ page: initialPage }: AppProps) {
         '/': 'dashboard',
         '/repositories': 'repositories',
         '/organizations': 'organizations',
+        '/storage': 'storage',
         '/config': 'configuration',
         '/activity': 'activity-log'
       };
@@ -132,7 +140,7 @@ function AppWithProviders({ page: initialPage }: AppProps) {
   }
 
   return (
-    <NavigationContext.Provider value={{ navigationKey }}>
+    <NavigationContext.Provider value={{ navigationKey, pageScrollElement }}>
       <main className="flex h-dvh flex-col overflow-hidden">
         <Header 
           currentPage={currentPage} 
@@ -150,12 +158,13 @@ function AppWithProviders({ page: initialPage }: AppProps) {
             onClose={() => setSidebarOpen(false)}
             onToggleCollapse={() => setSidebarCollapsed(!sidebarCollapsed)}
           />
-          <section className={`flex-1 min-h-0 p-4 sm:p-6 overflow-y-auto w-full transition-all duration-200 ${
+          <section ref={setPageScrollElement} className={`flex-1 min-h-0 p-4 sm:p-6 overflow-y-auto w-full transition-all duration-200 ${
             sidebarCollapsed ? 'md:w-[calc(100%-5rem)] xl:w-[calc(100%-16rem)]' : 'md:w-[calc(100%-16rem)]'
           }`}>
             {currentPage === "dashboard" && <Dashboard />}
             {currentPage === "repositories" && <Repository />}
             {currentPage === "organizations" && <Organization />}
+            {currentPage === "storage" && <Storage />}
             {currentPage === "configuration" && <ConfigTabs />}
             {currentPage === "activity-log" && <ActivityLog />}
           </section>
