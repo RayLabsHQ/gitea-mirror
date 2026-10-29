@@ -1,7 +1,8 @@
 /**
- * Route tests for GET /api/storage (#479).
+ * Route tests for GET /api/storage (#479) and POST /api/storage/refresh.
  *
- * NOTE: these tests replace @/lib/db and @/lib/utils/auth-helpers with mocks.
+ * NOTE: these tests replace @/lib/db, @/lib/utils/auth-helpers and
+ * @/lib/storage-refresh with mocks.
  * bun's mock.module is process-wide and leaks into other test files, so in
  * the shared test process this file registers NOTHING: it re-runs itself in
  * an isolated child process (the same harness as repositories/[id].test.ts).
@@ -32,6 +33,9 @@ let authResult: { user: { id: string } | null; response: Response | null } = {
   user: { id: "user-1" },
   response: null,
 };
+let refreshProgress: unknown = null;
+let startResult: unknown = null;
+let startedFor: string[] = [];
 /** Leaf values of each select's where() condition (drizzle conditions are cyclic). */
 let selectWhereValues: unknown[][] = [];
 
@@ -49,6 +53,14 @@ function conditionLeafValues(node: any, depth = 0): unknown[] {
 if (isChild) {
   mock.module("@/lib/utils/auth-helpers", () => ({
     requireAuth: mock(async () => authResult),
+  }));
+
+  mock.module("@/lib/storage-refresh", () => ({
+    getStorageRefreshProgress: () => refreshProgress,
+    startStorageRefresh: async (userId: string) => {
+      startedFor.push(userId);
+      return startResult;
+    },
   }));
 
   mock.module("@/lib/db", () => ({
@@ -85,6 +97,7 @@ if (isChild) {
 }
 
 const { GET } = isChild ? await import("./index") : { GET: undefined as any };
+const { POST } = isChild ? await import("./refresh") : { POST: undefined as any };
 
 function get() {
   return GET({
@@ -94,7 +107,29 @@ function get() {
   } as any);
 }
 
+function post() {
+  return POST({
+    params: {},
+    request: new Request("http://localhost/api/storage/refresh", { method: "POST" }),
+    locals: { session: { userId: "user-1" } },
+  } as any);
+}
+
+const RUNNING = {
+  running: true,
+  total: 4,
+  done: 1,
+  measured: 1,
+  missing: 0,
+  failed: 0,
+  startedAt: "2026-10-29T08:00:00.000Z",
+  finishedAt: null,
+};
+
 beforeEach(() => {
+  refreshProgress = null;
+  startResult = { ok: true, progress: RUNNING };
+  startedFor = [];
   selectWhereValues = [];
   authResult = { user: { id: "user-1" }, response: null };
   repoRows = [
@@ -142,5 +177,48 @@ describe.skipIf(!isChild)("GET /api/storage", () => {
 
     expect(response.status).toBe(401);
     expect(selectWhereValues).toEqual([]);
+  });
+});
+
+describe.skipIf(!isChild)("Refresh sizes progress", () => {
+  test("GET reports no run as null and a run's progress as is", async () => {
+    expect((await (await get()).json()).refresh).toBeNull();
+
+    refreshProgress = RUNNING;
+    expect((await (await get()).json()).refresh).toEqual(RUNNING);
+  });
+});
+
+describe.skipIf(!isChild)("POST /api/storage/refresh", () => {
+  test("starts a run for the signed in user and answers 202 with its progress", async () => {
+    const response = await post();
+
+    expect(response.status).toBe(202);
+    expect(await response.json()).toEqual({ success: true, refresh: RUNNING });
+    expect(startedFor).toEqual(["user-1"]);
+  });
+
+  test("passes a refusal through with its status", async () => {
+    startResult = { ok: false, status: 400, error: "Configure the destination URL and token first" };
+
+    const response = await post();
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({
+      success: false,
+      error: "Configure the destination URL and token first",
+    });
+  });
+
+  test("answers the auth helper's response when signed out", async () => {
+    authResult = {
+      user: null,
+      response: new Response(JSON.stringify({ error: "Unauthorized" }), { status: 401 }),
+    };
+
+    const response = await post();
+
+    expect(response.status).toBe(401);
+    expect(startedFor).toEqual([]);
   });
 });

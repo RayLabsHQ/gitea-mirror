@@ -1,8 +1,9 @@
 /**
- * Storage a mirror takes up on its destination (#479). Measured only from
- * responses a sync already fetches: the repository GET before `mirror-sync`
+ * Storage a mirror takes up on its destination (#479). A sync measures it from
+ * responses it already fetches: the repository GET before `mirror-sync`
  * carries `size`, and the release listing the retention pass reads carries
- * every asset's size. Nothing here makes a request.
+ * every asset's size. Refresh sizes (storage-refresh.ts) reads the same fields
+ * on request. Nothing here makes a request.
  */
 
 import { isPushDestinationKind } from "./destination-kinds";
@@ -99,8 +100,19 @@ export interface StorageOverview {
 // failed first mirror, so it only counts once it has been measured.
 const MIRROR_EXISTS_STATUSES = new Set(["mirrored", "synced", "syncing", "archived", "pending-approval"]);
 
-function isMeasured(row: StorageSourceRow): boolean {
+function isMeasured(row: Pick<StorageSourceRow, "destinationSize" | "releaseAssetsSize">): boolean {
   return row.destinationSize !== null || row.releaseAssetsSize !== null;
+}
+
+/**
+ * True for a row with a mirror on a Gitea or Forgejo destination: the rows
+ * the overview counts as mirrored and Refresh sizes measures.
+ */
+export function countsAsStorageMirror(
+  row: Pick<StorageSourceRow, "status" | "destinationProvider" | "destinationSize" | "releaseAssetsSize">
+): boolean {
+  if (isPushDestinationKind(row.destinationProvider)) return false;
+  return isMeasured(row) || MIRROR_EXISTS_STATUSES.has(row.status);
 }
 
 /** The storage page's numbers: totals, per destination owner, and per repository, largest first. */
@@ -110,10 +122,9 @@ export function buildStorageOverview(rows: ReadonlyArray<StorageSourceRow>): Sto
   let mirrored = 0;
 
   for (const row of rows) {
-    if (isPushDestinationKind(row.destinationProvider)) continue;
-    const measured = isMeasured(row);
-    if (measured || MIRROR_EXISTS_STATUSES.has(row.status)) mirrored += 1;
-    if (!measured) continue;
+    if (!countsAsStorageMirror(row)) continue;
+    mirrored += 1;
+    if (!isMeasured(row)) continue;
 
     const location = (row.mirroredLocation ?? "").trim();
     const owner = location.includes("/") ? location.split("/")[0] : "";

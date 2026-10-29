@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -6,11 +6,13 @@ import {
   HardDrive,
   Info,
   Package,
+  RefreshCw,
   ScanSearch,
   Search,
 } from "lucide-react";
 import { toast } from "sonner";
 import { StatusCard } from "@/components/dashboard/StatusCard";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -30,12 +32,20 @@ import { useAuth } from "@/hooks/useAuth";
 import { useGiteaConfig } from "@/hooks/useGiteaConfig";
 import { useLiveRefresh } from "@/hooks/useLiveRefresh";
 import { useNavigation } from "@/components/layout/MainLayout";
-import { apiRequest, cn, formatLastSyncTime } from "@/lib/utils";
+import { apiRequest, cn, formatLastSyncTime, showErrorToast } from "@/lib/utils";
 import { buildGiteaWebUrl } from "@/lib/gitea-url";
 import { formatBytes } from "@/lib/utils/format-bytes";
 import type { StorageOverview, StorageRepository } from "@/lib/repository-storage";
+import type { StorageRefreshProgress } from "@/lib/storage-refresh";
 
-type StorageApiResponse = ({ success: true } & StorageOverview) | { success: false; error?: string };
+type StorageApiResponse =
+  | ({ success: true; refresh: StorageRefreshProgress | null } & StorageOverview)
+  | { success: false; error?: string };
+
+type RefreshApiResponse = { success: true; refresh: StorageRefreshProgress } | { success: false; error?: string };
+
+// While Refresh sizes runs, the page polls the overview for its progress.
+const REFRESH_POLL_MS = 2000;
 
 type SortKey = "fullName" | "owner" | "destinationSize" | "releaseAssetsSize" | "releaseAssetsCount" | "total" | "checkedAt";
 
@@ -160,6 +170,45 @@ function compareRepositories(a: StorageRepository, b: StorageRepository, key: So
   }
 }
 
+function RefreshSizesButton({
+  refresh,
+  starting,
+  onClick,
+  className,
+}: {
+  refresh: StorageRefreshProgress | null;
+  starting: boolean;
+  onClick: () => void;
+  className?: string;
+}) {
+  const running = !!refresh?.running;
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button variant="outline" className={cn("h-10", className)} onClick={onClick} disabled={running || starting}>
+            <RefreshCw className={cn("h-4 w-4", (running || starting) && "animate-spin")} />
+            {running ? `Measuring ${refresh.done} of ${refresh.total}` : "Refresh sizes"}
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-xs">
+          Reads every mirror's size from the destination now instead of waiting for its next sync. Nothing is
+          asked of the source.
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
+function announceRefresh(progress: StorageRefreshProgress) {
+  const parts = [`Measured ${progress.measured} ${progress.measured === 1 ? "repository" : "repositories"}`];
+  if (progress.missing > 0) parts.push(`${progress.missing} not found on the destination`);
+  if (progress.failed > 0) parts.push(`${progress.failed} could not be read and kept their sizes`);
+  const message = parts.join(", ");
+  if (progress.missing > 0 || progress.failed > 0) toast.warning(message);
+  else toast.success(message);
+}
+
 function StorageSkeleton() {
   return (
     <div className="flex flex-col gap-y-6">
@@ -189,6 +238,10 @@ export function Storage() {
   const { giteaConfig } = useGiteaConfig();
 
   const [overview, setOverview] = useState<StorageOverview | null>(null);
+  const [refresh, setRefresh] = useState<StorageRefreshProgress | null>(null);
+  const [startingRefresh, setStartingRefresh] = useState(false);
+  // Set once this page has seen a run going, so its end is announced once.
+  const watchingRefreshRef = useRef(false);
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [ownerFilter, setOwnerFilter] = useState("all");
@@ -201,6 +254,13 @@ export function Storage() {
         const response = await apiRequest<StorageApiResponse>("/storage", { method: "GET" });
         if (response.success) {
           setOverview(response);
+          setRefresh(response.refresh);
+          if (response.refresh?.running) {
+            watchingRefreshRef.current = true;
+          } else if (watchingRefreshRef.current && response.refresh) {
+            watchingRefreshRef.current = false;
+            announceRefresh(response.refresh);
+          }
         } else if (!isLiveRefresh) {
           toast.error(response.error || "Error fetching storage");
         }
@@ -221,6 +281,29 @@ export function Storage() {
   }, [fetchOverview, navigationKey]);
 
   useEffect(() => registerRefreshCallback(() => fetchOverview(true)), [registerRefreshCallback, fetchOverview]);
+
+  useEffect(() => {
+    if (!refresh?.running) return;
+    const timer = setInterval(() => fetchOverview(true), REFRESH_POLL_MS);
+    return () => clearInterval(timer);
+  }, [refresh?.running, fetchOverview]);
+
+  const startRefresh = async () => {
+    setStartingRefresh(true);
+    try {
+      const response = await apiRequest<RefreshApiResponse>("/storage/refresh", { method: "POST" });
+      if (response.success) {
+        watchingRefreshRef.current = true;
+        setRefresh(response.refresh);
+      } else {
+        toast.error(response.error || "Could not start Refresh sizes");
+      }
+    } catch (error) {
+      showErrorToast(error, toast);
+    } finally {
+      setStartingRefresh(false);
+    }
+  };
 
   const handleSort = (key: SortKey) =>
     setSort((prev) =>
@@ -256,8 +339,10 @@ export function Storage() {
           <h3 className="text-lg font-medium">No sizes recorded yet</h3>
           <p className="text-sm text-muted-foreground mt-1 max-w-md">
             Each sync records how much space the mirror takes on the destination, from data the sync
-            already fetches. Sizes show up here after the next sync.
+            already fetches. Sizes show up here after the next sync, or now with Refresh sizes, which only
+            reads the destination.
           </p>
+          <RefreshSizesButton refresh={refresh} starting={startingRefresh} onClick={startRefresh} className="mt-6" />
         </CardContent>
       </Card>
     );
@@ -346,6 +431,12 @@ export function Storage() {
                   ))}
               </SelectContent>
             </Select>
+            <RefreshSizesButton
+              refresh={refresh}
+              starting={startingRefresh}
+              onClick={startRefresh}
+              className="w-full sm:w-auto shrink-0"
+            />
           </div>
 
           <div className="overflow-x-auto" data-testid="storage-table">
@@ -446,8 +537,8 @@ export function Storage() {
           </div>
           <p className="text-xs text-muted-foreground">
             Sizes are what the destination reports: Git and LFS together, plus the release assets it stores. Each sync
-            records them from data it already fetches. The Git size is read before the sync pulls, so it trails by one
-            sync.
+            records them from data it already fetches, and Refresh sizes reads them from the destination on demand. The
+            Git size a sync records is read before it pulls, so it trails by one sync.
           </p>
         </div>
       </div>

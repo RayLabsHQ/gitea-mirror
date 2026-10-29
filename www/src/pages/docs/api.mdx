@@ -169,11 +169,23 @@ When several sources are connected, an optional `sourceId` picks which one the o
   "success": true,
   "totals": { "total": 3554304, "destinationSize": 3030016, "releaseAssetsSize": 524288, "releaseAssetsCount": 1, "measured": 1, "mirrored": 1 },
   "owners": [{ "owner": "archive", "destinationSize": 3030016, "releaseAssetsSize": 524288, "total": 3554304, "repositories": 1 }],
-  "repositories": [{ "id": "…", "fullName": "upstream/app", "location": "archive/app", "owner": "archive", "destinationSize": 3030016, "releaseAssetsSize": 524288, "releaseAssetsCount": 1, "total": 3554304, "checkedAt": "2026-10-29T03:32:01.000Z" }]
+  "repositories": [{ "id": "…", "fullName": "upstream/app", "location": "archive/app", "owner": "archive", "destinationSize": 3030016, "releaseAssetsSize": 524288, "releaseAssetsCount": 1, "total": 3554304, "checkedAt": "2026-10-29T03:32:01.000Z" }],
+  "refresh": null
 }
 ```
 
-Sizes are bytes. `destinationSize` is Git and LFS together as Gitea or Forgejo reports it, and the release fields cover the assets on the destination's releases. Each sync records them from responses it already fetches, so this endpoint never contacts the destination. A repository is listed once a sync has measured it, and a field not measured yet is `null`. `mirrored` counts the repositories with a mirror on a Gitea or Forgejo destination and `measured` the ones with a size so far; push destinations (GitHub, GitLab) are not measured.
+Sizes are bytes. `destinationSize` is Git and LFS together as Gitea or Forgejo reports it, and the release fields cover the assets on the destination's releases. Each sync records them from responses it already fetches, so this endpoint never contacts the destination. A repository is listed once a sync or Refresh sizes has measured it, and a field not measured yet is `null`. `mirrored` counts the repositories with a mirror on a Gitea or Forgejo destination and `measured` the ones with a size so far; push destinations (GitHub, GitLab) are not measured. `refresh` is `null` until Refresh sizes runs, then carries the latest run's progress.
+
+`POST /api/storage/refresh` starts Refresh sizes, which reads every mirror's size from the destination now instead of at its next sync. It lists each destination owner's repositories once, uses the single repository GET for a mirror the listing does not have, and reads the release listing of repositories that mirror releases. The source is never contacted. It answers `202` and runs in the background, one run per user; a call while a run is going answers with that run.
+
+```json
+{
+  "success": true,
+  "refresh": { "running": true, "total": 7, "done": 0, "measured": 0, "missing": 0, "failed": 0, "startedAt": "2026-10-29T06:20:28.807Z", "finishedAt": null }
+}
+```
+
+`missing` counts mirrors not found on the destination and `failed` the ones a request failed for; both keep their stored numbers. A read only API key cannot start a run.
 
 ### Run cleanup
 

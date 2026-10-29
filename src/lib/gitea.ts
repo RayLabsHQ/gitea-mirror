@@ -37,6 +37,7 @@ import { assertMirrorCredentialUpdateSupported } from "./gitea-mirror-credential
 import { persistMetadataPassProgress } from "./metadata-progress-store";
 import { summarizeReleaseAssets } from "./repository-storage";
 import { recordReleaseAssetStorage } from "./repository-storage-store";
+import { listDestinationReleases } from "./destination-listing";
 import {
   advanceMetadataSyncCursor,
   buildPassProgress,
@@ -4376,42 +4377,21 @@ async function mirrorSourceReleasesToGiteaLocked({
   // Enforce release retention: first drop the releases the type filter excludes,
   // then the oldest releases past the limit.
   try {
-    // Paginate to fetch ALL Gitea releases (API max is 100 per page)
-    const allGiteaReleases: Array<{
+    // A page that fails ends the listing early. Retention still runs on what
+    // was listed, as before, but the storage totals are only recorded from a
+    // complete listing.
+    const { items: allGiteaReleases, complete: listingComplete } = await listDestinationReleases<{
       id: number;
       tag_name: string;
       created_at: string;
       prerelease?: boolean | null;
       assets?: Array<{ size?: number }> | null;
-    }> = [];
-    // A page that fails ends the listing early. Retention still runs on what
-    // was listed, as before, but the storage totals are only recorded from a
-    // complete listing.
-    let listingComplete = true;
-    let cleanupPage = 1;
-    while (true) {
-      const pageResponse = await httpGet(
-        `${config.giteaConfig.url}/api/v1/repos/${repoOwner}/${repoName}/releases?per_page=100&page=${cleanupPage}`,
-        {
-          Authorization: `token ${decryptedConfig.giteaConfig.token}`,
-        }
-      ).catch(() => null);
-
-      if (!pageResponse?.data || !Array.isArray(pageResponse.data)) {
-        listingComplete = false;
-        break;
-      }
-      if (pageResponse.data.length === 0) {
-        break;
-      }
-
-      allGiteaReleases.push(...pageResponse.data);
-
-      if (pageResponse.data.length < 100) {
-        break;
-      }
-      cleanupPage++;
-    }
+    }>({
+      baseUrl: config.giteaConfig.url,
+      token: decryptedConfig.giteaConfig.token,
+      owner: repoOwner,
+      repo: repoName,
+    });
 
     const giteaBaseUrl = config.giteaConfig.url;
     const giteaToken = decryptedConfig.giteaConfig.token;

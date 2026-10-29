@@ -150,6 +150,11 @@ interface DestinationOptions {
   destinationReleases?: Array<Record<string, unknown>>;
   /** The destination answers the retention listing with an error. */
   destinationListingFails?: boolean;
+  /**
+   * Serve the listing this many releases per page at most, with
+   * X-Total-Count, as Gitea does (30 when asked with `per_page`).
+   */
+  destinationPageCap?: number;
   /** Destination release ids whose DELETE fails. */
   failDeleteIds?: number[];
 }
@@ -233,9 +238,15 @@ function fakeWorld(options: DestinationOptions) {
 
     // The retention pass lists everything the destination has.
     if (method === "GET" && url.startsWith(`${DEST_API}/releases?`)) {
-      return options.destinationListingFails
-        ? new Response("boom", { status: 500 })
-        : json(options.destinationReleases ?? []);
+      if (options.destinationListingFails) return new Response("boom", { status: 500 });
+      const listed = options.destinationReleases ?? [];
+      if (!options.destinationPageCap) return json(listed);
+      const params = new URL(url).searchParams;
+      const size = Math.min(Number(params.get("limit") ?? "30"), options.destinationPageCap);
+      const page = Number(params.get("page") ?? "1");
+      return new Response(JSON.stringify(listed.slice((page - 1) * size, page * size)), {
+        headers: { "content-type": "application/json", "x-total-count": String(listed.length) },
+      });
     }
 
     throw new Error(`unexpected request: ${method} ${url}`);
@@ -565,6 +576,39 @@ describe.skipIf(!isChild)("release asset storage (#479)", () => {
     await mirrorFromGitea(giteaConnection("source-token"), { releaseType: "stable" });
 
     expect(storageRecords).toEqual([{ repositoryId: "repo-1", summary: { count: 3, bytes: 1150 } }]);
+  });
+
+  it("lists past the first page when the destination pages below what was asked", async () => {
+    // 35 releases, served 30 a page: the old per_page=100 loop stopped at 30.
+    const listed = Array.from({ length: 35 }, (_, i) =>
+      withAssets(destinationRelease(`v1.${i}.0`, 100 + i, false), [10])
+    );
+    const world = fakeWorld({
+      sourceReleases: [giteaRelease("v2.0.0")],
+      destinationReleases: listed,
+      destinationPageCap: 30,
+    });
+
+    await mirrorFromGitea(giteaConnection("source-token"), { releaseLimit: 50 });
+
+    expect(storageRecords).toEqual([{ repositoryId: "repo-1", summary: { count: 35, bytes: 350 } }]);
+    expect(world.requests.filter((r) => r.url.startsWith(`${DEST_API}/releases?`))).toHaveLength(2);
+  });
+
+  it("enforces the release limit across every page", async () => {
+    const listed = Array.from({ length: 35 }, (_, i) =>
+      withAssets(destinationRelease(`v1.${i}.0`, 100 + i, false), [10])
+    );
+    const world = fakeWorld({
+      sourceReleases: [giteaRelease("v2.0.0")],
+      destinationReleases: listed,
+      destinationPageCap: 30,
+    });
+
+    await mirrorFromGitea(giteaConnection("source-token"), { releaseLimit: 10 });
+
+    // The old loop saw 30 of the 35 and deleted 20, leaving 15.
+    expect(world.requests.filter((r) => r.method === "DELETE")).toHaveLength(25);
   });
 
   it("records nothing when the listing fails", async () => {

@@ -7,10 +7,9 @@ import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 import { jsonResponse, createSecureErrorResponse } from "@/lib/utils";
 import { getGiteaRepoOwnerAsync } from "@/lib/gitea";
 import { decryptConfigTokens } from "@/lib/utils/config-encryption";
-import { httpGet } from "@/lib/http-client";
+import { listDestinationReleases } from "@/lib/destination-listing";
 
-/** Gitea's per-page maximum; the cap below is how far the preview looks. */
-const PAGE_SIZE = 100;
+/** How far the preview looks. */
 const MAX_RELEASES = 300;
 
 type DestinationRelease = {
@@ -76,45 +75,35 @@ export const GET: APIRoute = async ({ params, request, locals }) => {
       );
     }
 
-    const token = decryptConfigTokens(config as Config).giteaConfig.token;
-    const base = `${config.giteaConfig.url.replace(/\/+$/, "")}/api/v1/repos/${encodeURIComponent(
-      owner
-    )}/${encodeURIComponent(repoName)}/releases`;
+    const listing = await listDestinationReleases<DestinationReleaseGitea>({
+      baseUrl: config.giteaConfig.url,
+      token: decryptConfigTokens(config as Config).giteaConfig.token,
+      owner,
+      repo: repoName,
+      max: MAX_RELEASES,
+    });
+    // Nothing listed and a failed page means the first page failed. A later
+    // failure keeps what was listed, as before.
+    if (!listing.complete && listing.items.length === 0) {
+      return jsonResponse({
+        data: {
+          success: false,
+          error: `No releases could be read for ${owner}/${repoName} in the destination`,
+        },
+        status: 404,
+      });
+    }
 
     const releases: DestinationRelease[] = [];
-    let truncated = false;
-    for (let page = 1; ; page++) {
-      const response = await httpGet<DestinationReleaseGitea[]>(
-        `${base}?per_page=${PAGE_SIZE}&page=${page}`,
-        { Authorization: `token ${token}` }
-      ).catch(() => null);
-      const batch = response?.data;
-      if (!Array.isArray(batch)) {
-        if (page === 1) {
-          return jsonResponse({
-            data: {
-              success: false,
-              error: `No releases could be read for ${owner}/${repoName} in the destination`,
-            },
-            status: 404,
-          });
-        }
-        break;
-      }
-      for (const release of batch) {
-        const tag = typeof release.tag_name === "string" ? release.tag_name : "";
-        if (!tag) continue;
-        releases.push({
-          tag,
-          prerelease: typeof release.prerelease === "boolean" ? release.prerelease : null,
-        });
-      }
-      if (batch.length < PAGE_SIZE) break;
-      if (releases.length >= MAX_RELEASES) {
-        truncated = true;
-        break;
-      }
+    for (const release of listing.items) {
+      const tag = typeof release.tag_name === "string" ? release.tag_name : "";
+      if (!tag) continue;
+      releases.push({
+        tag,
+        prerelease: typeof release.prerelease === "boolean" ? release.prerelease : null,
+      });
     }
+    const truncated = listing.truncated;
 
     return jsonResponse({
       data: {
