@@ -157,6 +157,12 @@ interface DestinationOptions {
   destinationPageCap?: number;
   /** Destination release ids whose DELETE fails. */
   failDeleteIds?: number[];
+  /** Attachments a destination release has, keyed by release id. */
+  destinationAssets?: Record<string, Array<{ id: number; name: string; size: number }>>;
+  /** Attachment ids whose DELETE fails. */
+  failAssetDeleteIds?: number[];
+  /** Release ids whose attachment listing answers with an error. */
+  failAssetListingFor?: number[];
 }
 
 function fakeWorld(options: DestinationOptions) {
@@ -210,7 +216,19 @@ function fakeWorld(options: DestinationOptions) {
 
     // Existing attachments of a release.
     if (method === "GET" && /\/releases\/\d+\/assets$/.test(url)) {
-      return json([]);
+      const releaseId = Number(url.match(/\/releases\/(\d+)\/assets$/)?.[1]);
+      if (options.failAssetListingFor?.includes(releaseId)) {
+        return new Response("boom", { status: 500 });
+      }
+      return json(options.destinationAssets?.[String(releaseId)] ?? []);
+    }
+
+    // Pruning the attachments of a release that is past the asset limit.
+    if (method === "DELETE" && /\/releases\/\d+\/assets\/\d+$/.test(url)) {
+      const assetId = Number(url.slice(url.lastIndexOf("/") + 1));
+      return options.failAssetDeleteIds?.includes(assetId)
+        ? new Response("boom", { status: 500 })
+        : new Response(null, { status: 204 });
     }
 
     // Uploading an attachment.
@@ -267,6 +285,10 @@ function fakeWorld(options: DestinationOptions) {
       requests.filter(
         (r) => r.url.startsWith(`${SOURCE_URL}/attachments/`) || r.url.startsWith("https://github.com/")
       ),
+    assetListings: () =>
+      requests.filter((r) => r.method === "GET" && /\/releases\/\d+\/assets$/.test(r.url)),
+    assetDeletes: () =>
+      requests.filter((r) => r.method === "DELETE" && /\/releases\/\d+\/assets\/\d+$/.test(r.url)),
   };
 }
 
@@ -957,5 +979,98 @@ describe.skipIf(!isChild)("mirrorGitHubReleasesToGitea keeps its own header and 
 
     const [download] = world.downloads();
     expect(download.authorization).toBe("token ghes-token");
+  });
+});
+
+describe.skipIf(!isChild)("pruning release assets past the asset limit", () => {
+  function configWithPruning(prune: boolean) {
+    return {
+      ...config,
+      giteaConfig: {
+        ...(config as any).giteaConfig,
+        pruneOldReleaseAssets: prune,
+      },
+    } as unknown as Partial<Config>;
+  }
+
+  /** Three releases on both sides; an asset limit of 1 covers only v3.0.0. */
+  function run(prune: boolean, extra: DestinationOptions = {}) {
+    const world = fakeWorld({
+      sourceReleases: [
+        giteaRelease("v3.0.0"),
+        giteaRelease("v2.0.0"),
+        giteaRelease("v1.0.0"),
+      ],
+      destinationReleases: [
+        {
+          id: 1,
+          tag_name: "v3.0.0",
+          created_at: "2026-03-01T00:00:00Z",
+          prerelease: false,
+          assets: [{ id: 11, name: "new.bin", size: 7 }],
+        },
+        {
+          id: 2,
+          tag_name: "v2.0.0",
+          created_at: "2026-02-01T00:00:00Z",
+          prerelease: false,
+          assets: [{ id: 21, name: "old.bin", size: 5 }],
+        },
+        {
+          id: 3,
+          tag_name: "v1.0.0",
+          created_at: "2026-01-01T00:00:00Z",
+          prerelease: false,
+          assets: [{ id: 31, name: "older.bin", size: 3 }],
+        },
+      ],
+      destinationAssets: {
+        "1": [{ id: 11, name: "new.bin", size: 7 }],
+        "2": [{ id: 21, name: "old.bin", size: 5 }],
+        "3": [{ id: 31, name: "older.bin", size: 3 }],
+      },
+      ...extra,
+    });
+
+    return mirrorGiteaSourceReleasesToGitea({
+      config: configWithPruning(prune),
+      repository,
+      connection: giteaConnection("source-token"),
+      giteaOwner: DEST_OWNER,
+      giteaRepoName: DEST_REPO,
+      releaseLimit: 3,
+      releaseAssetLimit: 1,
+    }).then(() => world);
+  }
+
+  it("keeps attachments a looser limit uploaded before", async () => {
+    const world = await run(false);
+
+    expect(world.assetListings()).toHaveLength(0);
+    expect(world.assetDeletes()).toHaveLength(0);
+    expect(storageRecords.at(-1)?.summary).toEqual({ count: 3, bytes: 15 });
+  });
+
+  it("deletes the attachments of releases past the asset limit when enabled", async () => {
+    const world = await run(true);
+
+    expect(world.assetDeletes().map((r) => r.url)).toEqual([
+      `${DEST_API}/releases/2/assets/21`,
+      `${DEST_API}/releases/3/assets/31`,
+    ]);
+    // The newest release stays inside the limit and keeps its file.
+    expect(world.assetListings().map((r) => r.url)).toEqual([
+      `${DEST_API}/releases/2/assets`,
+      `${DEST_API}/releases/3/assets`,
+    ]);
+    // The storage summary follows the deletions instead of reporting the old total.
+    expect(storageRecords.at(-1)?.summary).toEqual({ count: 1, bytes: 7 });
+  });
+
+  it("deletes nothing when a release's attachments cannot be listed", async () => {
+    const world = await run(true, { failAssetListingFor: [2, 3] });
+
+    expect(world.assetDeletes()).toHaveLength(0);
+    expect(storageRecords.at(-1)?.summary).toEqual({ count: 3, bytes: 15 });
   });
 });

@@ -242,7 +242,7 @@ Transfer complete repository metadata from GitHub to Gitea/Forgejo:
 
 Releases have two limits and two filters. The release limit keeps only the newest N releases in Gitea/Forgejo. The release asset limit uploads assets only for the newest N of those, so a repository with years of releases can keep every release note and tag while only the recent binaries take up space. Leave the asset limit empty to upload assets for every mirrored release, or set it to 0 for release notes only. The **Pre-releases** switch skips everything the source marks as a pre-release, and **Custom tag rules** narrows releases by tag name (`v1.*`, `*-rc.*`, or a regular expression in slashes) for projects that ship candidates without marking them.
 
-All of it can be overridden per organization and per repository in the **Mirror options** dialog, and lowering the asset limit never deletes assets that were already uploaded.
+All of it can be overridden per organization and per repository in the **Mirror options** dialog, and lowering the asset limit never deletes assets that were already uploaded. Enable **Remove old release assets** if you want each sync to delete the attachments of releases past that count instead.
 
 Enable in Settings → Mirror Options → Mirror metadata
 

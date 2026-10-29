@@ -157,7 +157,7 @@ export const useCases: UseCase[] = [
     title: 'Control Release Asset Storage',
     summary: 'Keep release notes for every mirrored release but upload binaries only for the newest few, globally or per organization and repository.',
     painPoint: 'A project that ships builds for five platforms every fortnight turns a release mirror into gigabytes of installers nobody will run.',
-    outcome: 'Two independent limits decide how many releases exist on Gitea and how many of those carry assets, and nothing already uploaded is removed.',
+    outcome: 'Two independent limits decide how many releases exist on Gitea and how many of those carry assets, and an opt-in switch also deletes the attachments of the older ones.',
     tags: ['Releases', 'Storage', 'Overrides'],
   },
 ];
