@@ -333,7 +333,7 @@ Configure automatic cleanup of old events and data.
   - Description updated with preservation notice and timestamp
   - Mirror interval set to 8760h (1 year) to minimize sync attempts
   - Repository remains fully accessible and cloneable
-- **Manual Sync Option**: Archived mirrors are still available on the Repositories page with automatic syncs disabled—use the `Manual Sync` action to refresh them on demand.
+- **Sync on Demand**: Archived mirrors are still available on the Repositories page with automatic syncs disabled; use the `Sync` action to refresh them on demand.
 
 ### Execution Settings
 

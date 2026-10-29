@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- The sync button on an archived repository says **Sync** like every other row instead of **Manual Sync**, so the wider label no longer pushes the row's status badge out of line. Hovering it explains that automatic syncs are off for archived mirrors
 - The Activity Log summary no longer shows a repository as syncing after a quick sync finished (#454). Events are stored to the second, and a sync that starts and finishes in the same second could come back in the wrong order, so the start event was counted as the current state. Activities now come back newest first within the same second too, and the summary counts a finish over a start from the same second
 - Issue and pull request passes over large repositories finish across rate limit resets (#449 follow-up)
   - A pass stopped by the rate limit keeps the numbers it finished, and the next run repeats the same pass and skips them unless they changed since it started; before, every run started over from the first item, so a repository too large for one hour of budget never completed a pass
