@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/popover";
 import { selectTriggerClassName } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { compareNames } from "@/lib/utils/compare-names";
 
 type ActivityNameComboboxProps = {
   activities: any[];
@@ -39,7 +40,7 @@ export function ActivityNameCombobox({
       if (a.repositoryName) set.add(a.repositoryName);
       if (a.organizationName) set.add(a.organizationName);
     });
-    return Array.from(set).sort();
+    return Array.from(set).sort(compareNames);
   }, [activities]);
 
   const [open, setOpen] = React.useState(false);

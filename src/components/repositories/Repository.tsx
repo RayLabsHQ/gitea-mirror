@@ -53,6 +53,7 @@ import { useConfigStatus } from "@/hooks/useConfigStatus";
 import { useNavigation } from "@/components/layout/MainLayout";
 import { withBase } from "@/lib/base-path";
 import { getRepositorySource, normalizeSourceUrl } from "@/lib/source-providers/kinds";
+import { compareNames } from "@/lib/utils/compare-names";
 
 type RepositoriesPageCache = {
   repositories: Repository[];
@@ -912,25 +913,19 @@ export default function Repository() {
     }
   };
 
-  // Get unique owners and organizations for comboboxes.
-  // Plain `.sort()` orders by code unit, so "Zebra" lands before "apple" and
-  // umlauts sort wrong; compare case-insensitively like the repo name sort.
-  const collator = new Intl.Collator(undefined, {
-    sensitivity: "base",
-    numeric: true,
-  });
+  // Get unique owners and organizations for comboboxes
   const ownerOptions = Array.from(
     new Set(
       repositories.map((repo) => repo.owner).filter((v): v is string => !!v)
     )
-  ).sort(collator.compare);
+  ).sort(compareNames);
   const orgOptions = Array.from(
     new Set(
       repositories
         .map((repo) => repo.organization)
         .filter((v): v is string => !!v)
     )
-  ).sort(collator.compare);
+  ).sort(compareNames);
 
   const handleConfirmDuplicateRepository = async () => {
     if (!duplicateRepoCandidate) {
