@@ -74,6 +74,8 @@ interface RepositoryTableProps {
   repositories: Repository[];
   /** Organization name -> its destination override (#416). */
   organizationDestinations?: Record<string, string>;
+  /** Repository id -> the destination owner/org the mirror will use. */
+  destinationOwners?: Record<string, string>;
   isLoading: boolean;
   filter: FilterParams;
   setFilter: (filter: FilterParams) => void;
@@ -117,6 +119,7 @@ function getTableSorting(sortOrder: string | undefined): SortingState {
 export default function RepositoryTable({
   repositories,
   organizationDestinations,
+  destinationOwners,
   isLoading,
   filter,
   setFilter,
@@ -304,6 +307,7 @@ export default function RepositoryTable({
     filter.status,
     filter.owner,
     filter.organization,
+    filter.destinationOrganization,
     filter.hasOverrides,
     // val?.toString() is undefined for an unset filter, and undefined !== ""
     // is true, so this used to report a filter on a completely clean view.
@@ -324,12 +328,25 @@ export default function RepositoryTable({
       next.push({ id: "organization", value: filter.organization });
     }
 
+    if (filter.destinationOrganization) {
+      next.push({
+        id: "destinationOrganization",
+        value: filter.destinationOrganization,
+      });
+    }
+
     if (filter.hasOverrides) {
       next.push({ id: "hasOverrides", value: filter.hasOverrides });
     }
 
     return next;
-  }, [filter.status, filter.owner, filter.organization, filter.hasOverrides]);
+  }, [
+    filter.status,
+    filter.owner,
+    filter.organization,
+    filter.destinationOrganization,
+    filter.hasOverrides,
+  ]);
 
   const sorting = useMemo(() => getTableSorting(filter.sort), [filter.sort]);
 
@@ -348,6 +365,13 @@ export default function RepositoryTable({
         id: "organization",
         accessorFn: (row) => row.organization ?? "",
         filterFn: "equalsString",
+      },
+      {
+        id: "destinationOrganization",
+        accessorFn: (row) =>
+          row.id ? destinationOwners?.[row.id] ?? "" : "",
+        filterFn: "equalsString",
+        enableGlobalFilter: false,
       },
       {
         id: "status",
@@ -374,7 +398,7 @@ export default function RepositoryTable({
         enableColumnFilter: false,
       },
     ],
-    []
+    [destinationOwners]
   );
 
   const table = useReactTable({
@@ -783,7 +807,9 @@ export default function RepositoryTable({
                 searchTerm: "",
                 status: "",
                 organization: "",
+                destinationOrganization: "",
                 owner: "",
+                hasOverrides: "",
                 sort: filter.sort || "imported-desc",
               })
             }

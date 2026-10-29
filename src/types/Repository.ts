@@ -44,6 +44,12 @@ export interface RepositoryApiSuccessResponse {
    * list needs it to name a repository's real default (#416).
    */
   organizationDestinations?: Record<string, string>;
+  /**
+   * Repository id -> the destination owner/org the mirror will actually use.
+   * Resolved with the same precedence as the mirror path, so the repositories
+   * page can filter by destination rather than by source organization.
+   */
+  destinationOwners?: Record<string, string>;
 }
 
 export interface RepositoryApiErrorResponse {

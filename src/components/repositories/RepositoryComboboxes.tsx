@@ -129,3 +129,14 @@ export function OrganizationCombobox(props: ComboboxProps) {
     />
   );
 }
+
+export function DestinationCombobox(props: ComboboxProps) {
+  return (
+    <FilterCombobox
+      {...props}
+      emptyLabel="All destinations"
+      searchPlaceholder="Search destinations..."
+      emptyMessage="No destinations found."
+    />
+  );
+}
