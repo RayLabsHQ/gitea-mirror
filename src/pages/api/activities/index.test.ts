@@ -31,36 +31,53 @@ if (!isChild) {
 }
 
 if (isChild) {
-  const rows = [
+  // Shaped like what the sync writes when the release filters empty a
+  // destination (gitea.ts), typed as table rows so they track the schema.
+  const rows: Array<typeof mirrorJobs.$inferSelect> = [
     {
       id: "job-warning",
       userId: "user-1",
       repositoryId: "repo-1",
       repositoryName: "ollama",
+      organizationId: null,
+      organizationName: null,
+      details:
+        "12 releases deleted by the release filters; the destination now has none. Check the include/exclude tag patterns and the pre-release setting.",
       status: "warning",
-      triggerType: "automatic",
-      mirrorType: "github-to-gitea",
-      giteaRepoName: "ollama",
-      startTime: "2026-10-29T12:00:00.000Z",
-      endTime: "2026-10-29T12:00:05.000Z",
-      duration: 5000,
-      error: "All releases removed from ollama",
-      log: null,
+      message: "All releases removed from mirrors/ollama",
+      timestamp: new Date("2026-10-29T12:00:05.000Z"),
+      jobType: "mirror",
+      batchId: null,
+      totalItems: null,
+      completedItems: 0,
+      itemIds: null,
+      completedItemIds: [],
+      inProgress: false,
+      startedAt: null,
+      completedAt: null,
+      lastCheckpoint: null,
     },
     {
       id: "job-mirrored",
       userId: "user-1",
       repositoryId: "repo-2",
       repositoryName: "other",
+      organizationId: null,
+      organizationName: null,
+      details: null,
       status: "mirrored",
-      triggerType: "manual",
-      mirrorType: "github-to-gitea",
-      giteaRepoName: "other",
-      startTime: "2026-10-29T11:00:00.000Z",
-      endTime: "2026-10-29T11:00:02.000Z",
-      duration: 2000,
-      error: null,
-      log: null,
+      message: "Successfully mirrored repository: other",
+      timestamp: new Date("2026-10-29T11:00:02.000Z"),
+      jobType: "mirror",
+      batchId: null,
+      totalItems: null,
+      completedItems: 0,
+      itemIds: null,
+      completedItemIds: [],
+      inProgress: false,
+      startedAt: null,
+      completedAt: null,
+      lastCheckpoint: null,
     },
   ];
 
@@ -96,5 +113,6 @@ if (isChild) {
     expect(body.success).toBe(true);
     expect(body.activities.map((entry: any) => entry.status)).toEqual(["warning", "mirrored"]);
     expect(body.activities[0].repositoryName).toBe("ollama");
+    expect(body.activities[0].message).toBe("All releases removed from mirrors/ollama");
   });
 }
