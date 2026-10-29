@@ -39,6 +39,7 @@ import {
   UserX,
   X,
   FlaskConical,
+  Trash2,
 } from "lucide-react";
 import type { GitHubConfig, MirrorOptions, AdvancedOptions, DuplicateNameStrategy, DestinationProvider } from "@/types/config";
 import { DESTINATION_PROVIDER_LABELS, isPushDestinationKind } from "@/lib/destination-kinds";
@@ -1052,6 +1053,24 @@ export function GitHubMirrorSettings({
                   )}
                 </div>
               }
+            />
+          )}
+
+          {/* Deleting what a lowered limit already uploaded is destructive, so it
+              stays off until the user asks for it. */}
+          {mirrorOptions.mirrorReleases && (
+            <SwitchRow
+              icon={Trash2}
+              className="pl-6"
+              label="Remove old release assets"
+              description={
+                isPushTarget
+                  ? pushTargetReason
+                  : "Off by default: attachments stay on the destination even when a release falls outside \u201cAssets for latest\u201d. Turning this on deletes the attachments of every mirrored release past that count"
+              }
+              disabled={!isReleaseCapableSource}
+              checked={mirrorOptions.pruneOldReleaseAssets === true}
+              onCheckedChange={(checked) => handleMirrorChange('pruneOldReleaseAssets', checked)}
             />
           )}
 

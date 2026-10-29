@@ -57,6 +57,7 @@ import { useConfigStatus } from "@/hooks/useConfigStatus";
 import { useNavigation } from "@/components/layout/MainLayout";
 import { withBase } from "@/lib/base-path";
 import { getRepositorySource, normalizeSourceUrl } from "@/lib/source-providers/kinds";
+import { compareNames } from "@/lib/utils/compare-names";
 
 type RepositoriesPageCache = {
   repositories: Repository[];
@@ -932,14 +933,14 @@ export default function Repository() {
     new Set(
       repositories.map((repo) => repo.owner).filter((v): v is string => !!v)
     )
-  ).sort();
+  ).sort(compareNames);
   const orgOptions = Array.from(
     new Set(
       repositories
         .map((repo) => repo.organization)
         .filter((v): v is string => !!v)
     )
-  ).sort();
+  ).sort(compareNames);
   // The destination owner each row resolves to, not the source organization.
   const destinationOptions = Array.from(
     new Set(
@@ -947,7 +948,7 @@ export default function Repository() {
         .map((repo) => (repo.id ? destinationOwners[repo.id] : undefined))
         .filter((v): v is string => !!v)
     )
-  ).sort();
+  ).sort(compareNames);
 
   const handleConfirmDuplicateRepository = async () => {
     if (!duplicateRepoCandidate) {
