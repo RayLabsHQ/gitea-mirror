@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Refresh sizes** on the Storage page measures every mirror now instead of waiting for its next sync, so the page fills in on a fresh install. It only reads the destination: one repository listing per destination owner, the single repository GET for a mirror the listing does not have, and the release listing of repositories that mirror releases. It runs in the background with its progress on the button (`POST /api/storage/refresh`)
+- **Remove old release assets** brings the attachments of older releases under a release asset limit. Turning the limit on, or lowering it, used to leave every file uploaded earlier in place, so the limit only held for the future. With the switch on, a kept release past the newest N releases that get assets loses its attachments on the next sync; the release, its notes and its tag stay, and a release whose attachments cannot be listed is left alone. It is a global setting (`PRUNE_OLD_RELEASE_ASSETS`, off by default) because it deletes files from the destination, while the limit it works with stays configurable per organization and repository
 
 ### Changed
 - Pages keep what they last showed in this browser tab. Going back to the Dashboard, Repositories, Organizations, Storage or Activity Log shows that data at once and refreshes it in the background, instead of starting from a skeleton and waiting for the whole list again. Nothing is written to browser storage; a reload or a new tab starts fresh

@@ -112,6 +112,10 @@ export const MAX_RELEASE_TAG_PATTERN_LENGTH = 200;
 export type ResolvedMirrorOptions = Record<MirrorOverrideKey, boolean> & {
   releaseLimit: number;
   releaseAssetLimit: number | null;
+  // Global only: a cleanup policy for the destination rather than something a
+  // single repository argues about. The ranks it prunes by still come from that
+  // repository's own effective `releaseAssetLimit`.
+  pruneOldReleaseAssets: boolean;
   releaseType: ReleaseType;
   releaseIncludeTags: string[];
   releaseExcludeTags: string[];
@@ -424,8 +428,10 @@ const PATTERN_NORMALIZERS: Record<
 /**
  * Whether the release at `index` in the newest-first list gets its assets
  * uploaded. `null` means no limit. A release past the limit still gets its
- * notes and tag, and assets that already reached Gitea are never removed
- * because of this rule; it only decides whether a sync uploads.
+ * notes and tag, and assets that already reached Gitea are not removed by this
+ * rule on its own; it only decides whether a sync uploads. The opt-in
+ * `pruneOldReleaseAssets` config switch is what applies the same rank rule in
+ * reverse and deletes what an earlier, looser limit had uploaded.
  */
 export function releaseGetsAssets(
   index: number,
@@ -894,6 +900,10 @@ export function resolveMirrorOptions({
     normalizeReleaseTagPatterns(org?.releaseExcludeTags) ??
     normalizeReleaseTagPatterns(globalConfig?.releaseExcludeTags) ??
     [];
+
+  // No per-repo or per-org tier for the pruning switch, and no stored value
+  // means the safe default: never delete what the destination already holds.
+  resolved.pruneOldReleaseAssets = globalConfig?.pruneOldReleaseAssets === true;
 
   // Starred repos with starredCodeOnly mirror code and nothing else. This
   // clamp intentionally outranks explicit per-repo overrides: the setting
