@@ -1301,6 +1301,7 @@ function RepoActionButton({
   let primaryIcon = <></>;
   let primaryOnClick = () => {};
   let primaryDisabled = isLoading;
+  let primaryTooltip: string | undefined;
   let showPrimaryAction = true;
 
   if (repo.status === "failed") {
@@ -1308,10 +1309,16 @@ function RepoActionButton({
     primaryIcon = <RotateCcw className="h-4 w-4" />;
     primaryOnClick = onRetry;
   } else if (["mirrored", "synced", "syncing", "archived"].includes(repo.status)) {
-    primaryLabel = repo.status === "archived" ? "Manual Sync" : "Sync";
+    primaryLabel = "Sync";
     primaryIcon = <RefreshCw className="h-4 w-4" />;
     primaryOnClick = onSync;
     primaryDisabled ||= repo.status === "syncing";
+    // Archived mirrors are left out of automatic syncs, so this button is the
+    // way to refresh one. The Archived badge already marks the row; the label
+    // stays "Sync" so the column lines up with the other rows.
+    if (repo.status === "archived") {
+      primaryTooltip = "Automatic syncs are off for archived mirrors. This syncs it now.";
+    }
   } else if (["imported", "mirroring"].includes(repo.status)) {
     primaryLabel = "Mirror";
     primaryIcon = <FlipHorizontal className="h-4 w-4" />;
@@ -1336,28 +1343,41 @@ function RepoActionButton({
     );
   }
 
+  const primaryButton = (
+    <Button
+      variant="ghost"
+      disabled={primaryDisabled}
+      onClick={primaryOnClick}
+      className="min-w-[80px] justify-start rounded-r-none"
+    >
+      {isLoading ? (
+        <>
+          <RefreshCw className="h-4 w-4 animate-spin mr-1" />
+          {primaryLabel}
+        </>
+      ) : (
+        <>
+          {primaryIcon}
+          <span className="ml-1">{primaryLabel}</span>
+        </>
+      )}
+    </Button>
+  );
+
   // Show primary action with dropdown for additional actions
   return (
     <DropdownMenu>
       <div className="flex">
-        <Button
-          variant="ghost"
-          disabled={primaryDisabled}
-          onClick={primaryOnClick}
-          className="min-w-[80px] justify-start rounded-r-none"
-        >
-          {isLoading ? (
-            <>
-              <RefreshCw className="h-4 w-4 animate-spin mr-1" />
-              {primaryLabel}
-            </>
-          ) : (
-            <>
-              {primaryIcon}
-              <span className="ml-1">{primaryLabel}</span>
-            </>
-          )}
-        </Button>
+        {primaryTooltip ? (
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>{primaryButton}</TooltipTrigger>
+              <TooltipContent>{primaryTooltip}</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        ) : (
+          primaryButton
+        )}
         <DropdownMenuTrigger asChild>
           <Button
             variant="ghost"

@@ -425,7 +425,7 @@ async function handleOrphanedRepository(
         const { archivedName } = await archiveGiteaRepo(giteaClient, giteaOwner, giteaRepoName);
 
         // If the archive call renamed the repo in Gitea (mirror path), persist
-        // the new location so a subsequent "Manual Sync" (the UI's documented
+        // the new location so a later manual Sync (the UI's documented
         // path for refreshing an archived mirror) can find it by its actual
         // current name instead of the stale pre-rename one — otherwise
         // syncGiteaRepoEnhanced looks up a name that no longer exists and

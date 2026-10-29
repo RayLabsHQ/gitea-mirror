@@ -117,7 +117,7 @@ const orphanActions = [
     label: "Archive",
     description: "Kept read-only with an archived prefix",
     icon: Archive,
-    info: "Renames the mirror with an archived- prefix and disables automatic syncs. Nothing is lost; use Manual Sync to refresh.",
+    info: "Renames the mirror with an archived- prefix and disables automatic syncs. Nothing is lost; use Sync on the Repositories page to refresh.",
   },
   {
     value: "delete" as const,
