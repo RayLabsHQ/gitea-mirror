@@ -7,7 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Refresh sizes** on the Storage page measures every mirror now instead of waiting for its next sync, so the page fills in on a fresh install. It only reads the destination: one repository listing per destination owner, the single repository GET for a mirror the listing does not have, and the release listing of repositories that mirror releases. It runs in the background with its progress on the button (`POST /api/storage/refresh`)
+
 ### Fixed
+- Destination release listings stopped after 30 releases. Gitea and Forgejo ignore `per_page` and answer 30 a page, and the listing stopped on any page shorter than the 100 it asked for. The release limit only trimmed within the newest 30 on each sync, the Storage page counted at most 30 releases per repository, and the release filter preview showed only the newest 30 tags. Listings now page with `limit` until the total the destination reports
 - The sync button on an archived repository says **Sync** like every other row instead of **Manual Sync**, so the wider label no longer pushes the row's status badge out of line. Hovering it explains that automatic syncs are off for archived mirrors
 - The Activity Log summary no longer shows a repository as syncing after a quick sync finished (#454). Events are stored to the second, and a sync that starts and finishes in the same second could come back in the wrong order, so the start event was counted as the current state. Activities now come back newest first within the same second too, and the summary counts a finish over a start from the same second
 - Issue and pull request passes over large repositories finish across rate limit resets (#449 follow-up)

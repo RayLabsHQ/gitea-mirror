@@ -172,7 +172,7 @@ describe.skipIf(!isChild)("GET /api/repositories/:id/releases", () => {
       { tag: "v2.0-rc1", prerelease: true },
     ]);
     expect(requestedUrls[0]).toContain("/api/v1/repos/mirrors/hello/releases");
-    expect(requestedUrls[0]).toContain("per_page=100");
+    expect(requestedUrls[0]).toContain("limit=50&page=1");
     expect(mockGetOwner).not.toHaveBeenCalled();
   });
 
@@ -231,6 +231,21 @@ describe.skipIf(!isChild)("GET /api/repositories/:id/releases", () => {
     expect(data.truncated).toBe(false);
     expect(requestedUrls).toHaveLength(2);
     expect(requestedUrls[1]).toContain("page=2");
+  });
+
+  test("keeps paging while the destination's total says more remain", async () => {
+    // Gitea caps pages below what was asked for and reports the total.
+    const page = (count: number, offset: number) =>
+      new Response(JSON.stringify(batch(count, offset)), {
+        headers: { "content-type": "application/json", "x-total-count": "35" },
+      });
+    servePages([page(30, 0), page(5, 30)]);
+
+    const response = await call();
+    const data = await response.json();
+    expect(data.releases).toHaveLength(35);
+    expect(data.truncated).toBe(false);
+    expect(requestedUrls).toHaveLength(2);
   });
 
   test("stops at the cap and marks the list as shortened", async () => {
