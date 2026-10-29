@@ -32,6 +32,8 @@ import { useAuth } from "@/hooks/useAuth";
 import { useGiteaConfig } from "@/hooks/useGiteaConfig";
 import { useLiveRefresh } from "@/hooks/useLiveRefresh";
 import { useNavigation } from "@/components/layout/MainLayout";
+import { usePageVirtualizer } from "@/hooks/usePageVirtualizer";
+import { readPageCache, writePageCache } from "@/lib/page-cache";
 import { apiRequest, cn, formatLastSyncTime, showErrorToast } from "@/lib/utils";
 import { buildGiteaWebUrl } from "@/lib/gitea-url";
 import { formatBytes } from "@/lib/utils/format-bytes";
@@ -43,6 +45,8 @@ type StorageApiResponse =
   | { success: false; error?: string };
 
 type RefreshApiResponse = { success: true; refresh: StorageRefreshProgress } | { success: false; error?: string };
+
+type StoragePageCache = { overview: StorageOverview; refresh: StorageRefreshProgress | null };
 
 // While Refresh sizes runs, the page polls the overview for its progress.
 const REFRESH_POLL_MS = 2000;
@@ -237,12 +241,16 @@ export function Storage() {
   const { navigationKey } = useNavigation();
   const { giteaConfig } = useGiteaConfig();
 
-  const [overview, setOverview] = useState<StorageOverview | null>(null);
-  const [refresh, setRefresh] = useState<StorageRefreshProgress | null>(null);
+  // What this page showed last time in this tab, shown again while it refreshes.
+  const [cached] = useState(() => readPageCache<StoragePageCache>(user?.id, "storage"));
+  const [overview, setOverview] = useState<StorageOverview | null>(cached?.overview ?? null);
+  const [refresh, setRefresh] = useState<StorageRefreshProgress | null>(cached?.refresh ?? null);
+  // True once there are numbers to show, from the cache or a fetch.
+  const hasLoadedRef = useRef(!!cached);
   const [startingRefresh, setStartingRefresh] = useState(false);
   // Set once this page has seen a run going, so its end is announced once.
   const watchingRefreshRef = useRef(false);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(!cached);
   const [search, setSearch] = useState("");
   const [ownerFilter, setOwnerFilter] = useState("all");
   const [sort, setSort] = useState<{ key: SortKey; descending: boolean }>({ key: "total", descending: true });
@@ -253,6 +261,7 @@ export function Storage() {
       try {
         const response = await apiRequest<StorageApiResponse>("/storage", { method: "GET" });
         if (response.success) {
+          hasLoadedRef.current = true;
           setOverview(response);
           setRefresh(response.refresh);
           if (response.refresh?.running) {
@@ -276,9 +285,16 @@ export function Storage() {
   );
 
   useEffect(() => {
-    setIsLoading(true);
-    fetchOverview(false);
+    // With numbers from the last visit on screen, refresh them in the
+    // background instead of going back to the skeleton.
+    const showingOverview = hasLoadedRef.current;
+    if (!showingOverview) setIsLoading(true);
+    fetchOverview(showingOverview);
   }, [fetchOverview, navigationKey]);
+
+  useEffect(() => {
+    if (overview) writePageCache<StoragePageCache>(user?.id, "storage", { overview, refresh });
+  }, [user?.id, overview, refresh]);
 
   useEffect(() => registerRefreshCallback(() => fetchOverview(true)), [registerRefreshCallback, fetchOverview]);
 
@@ -326,6 +342,18 @@ export function Storage() {
     });
     return rows;
   }, [overview, search, ownerFilter, sort]);
+
+  // Only the rows near the viewport are in the DOM. A new getItemKey makes the
+  // virtualizer re-measure every row, so it only changes with the list.
+  const getRowKey = useCallback(
+    (index: number) => visibleRepositories[index]?.id ?? index,
+    [visibleRepositories]
+  );
+  const { listRef: rowListRef, virtualizer: rowVirtualizer } = usePageVirtualizer({
+    count: visibleRepositories.length,
+    estimateSize: () => 53,
+    getItemKey: getRowKey,
+  });
 
   if (isLoading || !overview) return <StorageSkeleton />;
 
@@ -469,14 +497,23 @@ export function Storage() {
                 <div className="p-6 text-center text-sm text-muted-foreground">No repositories match.</div>
               )}
 
-              {visibleRepositories.map((repo) => {
+              <div ref={rowListRef} className="relative" style={{ height: rowVirtualizer.getTotalSize() }}>
+              {rowVirtualizer.getVirtualItems().map((item) => {
+                const repo = visibleRepositories[item.index];
+                if (!repo) return null;
                 const destinationUrl = repo.location ? buildGiteaWebUrl(giteaConfig, repo.location) : null;
                 const heavy = isReleaseHeavy(repo);
                 return (
                   <div
-                    key={repo.id}
+                    key={item.key}
+                    data-index={item.index}
+                    ref={rowVirtualizer.measureElement}
                     data-testid="storage-row"
-                    className="group min-h-[48px] flex items-center border-b last:border-b-0 hover:bg-muted/50 text-sm"
+                    className={cn(
+                      "group absolute left-0 top-0 w-full min-h-[48px] flex items-center hover:bg-muted/50 text-sm",
+                      item.index < visibleRepositories.length - 1 && "border-b"
+                    )}
+                    style={{ transform: `translateY(${item.start - rowVirtualizer.options.scrollMargin}px)` }}
                   >
                     <div className="h-full px-3 py-2 flex items-center flex-[2.4] min-w-0 sticky left-0 z-10 bg-background before:absolute before:inset-0 before:-z-10 group-hover:before:bg-muted/50">
                       <div className="min-w-0">
@@ -533,6 +570,7 @@ export function Storage() {
                   </div>
                 );
               })}
+              </div>
             </div>
           </div>
           <p className="text-xs text-muted-foreground">

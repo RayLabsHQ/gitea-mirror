@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import RepositoryTable, { REPOSITORY_SORT_OPTIONS } from "./RepositoryTable";
 import type { MirrorJob, Repository } from "@/lib/db/schema";
 import { useAuth } from "@/hooks/useAuth";
@@ -10,6 +10,7 @@ import {
   type RepoStatus,
 } from "@/types/Repository";
 import { apiRequest, showErrorToast, getStatusColor } from "@/lib/utils";
+import { readPageCache, writePageCache } from "@/lib/page-cache";
 import {
   Select,
   SelectContent,
@@ -53,16 +54,25 @@ import { useNavigation } from "@/components/layout/MainLayout";
 import { withBase } from "@/lib/base-path";
 import { getRepositorySource, normalizeSourceUrl } from "@/lib/source-providers/kinds";
 
+type RepositoriesPageCache = {
+  repositories: Repository[];
+  organizationDestinations: Record<string, string>;
+};
+
 export default function Repository() {
-  const [repositories, setRepositories] = useState<Repository[]>([]);
+  const { user } = useAuth();
+  // What this page showed last time in this tab, shown again while it refreshes.
+  const [cached] = useState(() => readPageCache<RepositoriesPageCache>(user?.id, "repositories"));
+  const [repositories, setRepositories] = useState<Repository[]>(cached?.repositories ?? []);
   // Organization name -> its destination override, from the list response.
   // Kept beside the rows rather than on them: the action endpoints return the
   // repositories row alone, and replacing a row would drop the field (#416).
   const [organizationDestinations, setOrganizationDestinations] = useState<
     Record<string, string>
-  >({});
-  const [isInitialLoading, setIsInitialLoading] = useState(true);
-  const { user } = useAuth();
+  >(cached?.organizationDestinations ?? {});
+  const [isInitialLoading, setIsInitialLoading] = useState(!cached);
+  // True once there are rows to show, from the cache or a fetch.
+  const hasLoadedRef = useRef(!!cached);
   const { registerRefreshCallback, isLiveEnabled } = useLiveRefresh();
   const { isGitHubConfigured, isFullyConfigured, hasAnySource, autoMirrorStarred, githubOwner, sources } = useConfigStatus();
   const { navigationKey } = useNavigation();
@@ -145,6 +155,7 @@ export default function Repository() {
       );
 
       if (response.success) {
+        hasLoadedRef.current = true;
         setRepositories(response.repositories);
         setOrganizationDestinations(response.organizationDestinations ?? {});
         return true;
@@ -169,10 +180,17 @@ export default function Repository() {
   }, [user?.id, isGitHubConfigured, hasAnySource]); // Only depend on user.id, not entire user object
 
   useEffect(() => {
-    // Reset loading state when component becomes active
-    setIsInitialLoading(true);
-    fetchRepositories(false); // Manual refresh, not live
+    // With rows from the last visit on screen, refresh them in the background
+    // instead of going back to the skeleton.
+    const showingRows = hasLoadedRef.current;
+    if (!showingRows) setIsInitialLoading(true);
+    fetchRepositories(showingRows);
   }, [fetchRepositories, navigationKey]); // Include navigationKey to trigger on navigation
+
+  useEffect(() => {
+    if (!hasLoadedRef.current) return;
+    writePageCache<RepositoriesPageCache>(user?.id, "repositories", { repositories, organizationDestinations });
+  }, [user?.id, repositories, organizationDestinations]);
 
   // Register with global live refresh system
   useEffect(() => {
@@ -1616,7 +1634,7 @@ export default function Repository() {
         <RepositoryTable
           repositories={repositories}
           organizationDestinations={organizationDestinations}
-          isLoading={isInitialLoading || !connected}
+          isLoading={isInitialLoading || (!connected && !hasLoadedRef.current)}
           filter={filter}
           setFilter={setFilter}
           onMirror={handleMirrorRepo}
