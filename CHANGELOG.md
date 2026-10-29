@@ -32,6 +32,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Raised the dependency floors for the advisories published on 2026-09-08: Astro 7.2.8 (remote code execution through AVIF image optimization, and an authorization bypass when stripping the configured base), @xmldom/xmldom 0.8.15 (eight parser and serializer issues), sharp 0.35.4 (libheif), svgo 4.1.0 (removeScripts sanitization) and js-yaml 4.3.2 (merge-key CPU use). Applied to both the application and the documentation site.
 
 ### Added
+- A Storage page that shows how much space the mirrors take on the destination (#479)
+  - Cards for the total, Git + LFS, release assets and how many mirrors are measured, bars by destination owner and for the largest repositories, and a sortable table with search and an owner filter
+  - Sizes come from responses a sync already fetches: the destination repository lookup before `mirror-sync` (Git plus LFS) and the release listing the retention pass reads (release assets). No extra requests to the source or the destination
+  - A repository whose release assets are most of its size gets a hint that a lower release limit removes the oldest releases
+  - The same numbers are available from `GET /api/storage`
 - Read only API keys
   - **Create key** in the **API Keys** card has an **Access** choice, and read only keys show a badge in the list
   - A read only key can call every `GET` endpoint; any `POST`, `PUT`, `PATCH` or `DELETE`, and every `/api/auth/*` call except `get-session`, gets `403` with the code `API_KEY_READ_ONLY`

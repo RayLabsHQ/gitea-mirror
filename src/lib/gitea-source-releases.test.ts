@@ -64,7 +64,22 @@ interface ActivityJob {
 }
 let activityJobs: ActivityJob[] = [];
 
+// The release asset totals the retention pass records for the storage page.
+interface StorageRecord {
+  repositoryId: string | null | undefined;
+  summary: { count: number; bytes: number };
+}
+let storageRecords: StorageRecord[] = [];
+
 if (isChild) {
+  mock.module("@/lib/repository-storage-store", () => ({
+    recordReleaseAssetStorage: async (
+      repositoryId: string | null | undefined,
+      summary: { count: number; bytes: number }
+    ) => {
+      storageRecords.push({ repositoryId, summary });
+    },
+  }));
   mock.module("@/lib/notification-service", () => ({
     triggerAllReleasesRemovedNotification: async (notice: RemovalNotice) => {
       removalNotices.push(notice);
@@ -94,6 +109,7 @@ afterEach(() => {
   globalThis.fetch = realFetch;
   removalNotices = [];
   activityJobs = [];
+  storageRecords = [];
 });
 
 const config = {
@@ -132,6 +148,10 @@ interface DestinationOptions {
   destinationTags?: string[];
   /** Releases already on the destination, as the retention pass lists them. */
   destinationReleases?: Array<Record<string, unknown>>;
+  /** The destination answers the retention listing with an error. */
+  destinationListingFails?: boolean;
+  /** Destination release ids whose DELETE fails. */
+  failDeleteIds?: number[];
 }
 
 function fakeWorld(options: DestinationOptions) {
@@ -205,12 +225,17 @@ function fakeWorld(options: DestinationOptions) {
 
     // The retention pass removing a release.
     if (method === "DELETE" && /\/releases\/\d+$/.test(url)) {
-      return new Response(null, { status: 204 });
+      const id = Number(url.slice(url.lastIndexOf("/") + 1));
+      return options.failDeleteIds?.includes(id)
+        ? new Response("boom", { status: 500 })
+        : new Response(null, { status: 204 });
     }
 
     // The retention pass lists everything the destination has.
     if (method === "GET" && url.startsWith(`${DEST_API}/releases?`)) {
-      return json(options.destinationReleases ?? []);
+      return options.destinationListingFails
+        ? new Response("boom", { status: 500 })
+        : json(options.destinationReleases ?? []);
     }
 
     throw new Error(`unexpected request: ${method} ${url}`);
@@ -504,6 +529,66 @@ describe.skipIf(!isChild)("release type filter", () => {
     await mirrorFromGitea(giteaConnection("source-token"));
 
     expect(world.deletes()).toHaveLength(0);
+  });
+});
+
+describe.skipIf(!isChild)("release asset storage (#479)", () => {
+  const withAssets = (release: Record<string, unknown>, sizes: number[]) => ({
+    ...release,
+    assets: sizes.map((size, index) => ({ id: index + 1, name: `file-${index}`, size })),
+  });
+
+  it("records the assets left on the destination after retention", async () => {
+    fakeWorld({
+      sourceReleases: [giteaRelease("v2.0.0")],
+      destinationReleases: [
+        withAssets(destinationRelease("v1.9.0-beta", 11, true), [100, 50]),
+        withAssets(destinationRelease("v1.8.0", 12, false), [1000]),
+      ],
+    });
+
+    await mirrorFromGitea(giteaConnection("source-token"), { releaseType: "stable" });
+
+    expect(storageRecords).toEqual([{ repositoryId: "repo-1", summary: { count: 1, bytes: 1000 } }]);
+  });
+
+  it("keeps counting a release whose delete failed", async () => {
+    fakeWorld({
+      sourceReleases: [giteaRelease("v2.0.0")],
+      destinationReleases: [
+        withAssets(destinationRelease("v1.9.0-beta", 11, true), [100, 50]),
+        withAssets(destinationRelease("v1.8.0", 12, false), [1000]),
+      ],
+      failDeleteIds: [11],
+    });
+
+    await mirrorFromGitea(giteaConnection("source-token"), { releaseType: "stable" });
+
+    expect(storageRecords).toEqual([{ repositoryId: "repo-1", summary: { count: 3, bytes: 1150 } }]);
+  });
+
+  it("records nothing when the listing fails", async () => {
+    fakeWorld({
+      sourceReleases: [giteaRelease("v2.0.0")],
+      destinationListingFails: true,
+    });
+
+    await mirrorFromGitea(giteaConnection("source-token"));
+
+    expect(storageRecords).toEqual([]);
+  });
+
+  it("makes no request of its own", async () => {
+    const world = fakeWorld({
+      sourceReleases: [giteaRelease("v2.0.0")],
+      destinationReleases: [withAssets(destinationRelease("v2.0.0", 12, false), [10])],
+    });
+
+    await mirrorFromGitea(giteaConnection("source-token"));
+
+    const listings = world.requests.filter((r) => r.url.startsWith(`${DEST_API}/releases?`));
+    expect(listings).toHaveLength(1);
+    expect(storageRecords).toEqual([{ repositoryId: "repo-1", summary: { count: 1, bytes: 10 } }]);
   });
 });
 

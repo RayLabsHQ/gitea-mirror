@@ -44,6 +44,7 @@ import {
   strategyNeedsDetection,
 } from "./repo-backup";
 import { detectForcePush } from "./utils/force-push-detection";
+import { destinationSizeColumns } from "./repository-storage";
 import { sanitizeRepoNameAlphaDashDot, type GiteaMilestoneIds } from "./gitea";
 import {
   parseRepositoryMetadataState,
@@ -86,6 +87,8 @@ export interface GiteaRepoInfo {
   // skip writes that would not change anything.
   description?: string;
   topics?: string[];
+  // KiB, Git plus LFS, recorded for the storage page (#479).
+  size?: number;
   // Set while a transfer waits for the new owner to accept it (issue #400).
   repo_transfer?: { recipient?: { login?: string; username?: string } | null } | null;
 }
@@ -1292,6 +1295,9 @@ export async function syncGiteaRepoEnhanced({
           metadata: metadataUpdated
             ? serializeRepositoryMetadataState(metadataState)
             : repository.metadata ?? null,
+          // From the GET that resolved the target, so before this sync's
+          // fetch: the size lags one sync and costs no request.
+          ...destinationSizeColumns(repoInfo),
         })
         .where(eq(repositories.id, repository.id!));
 

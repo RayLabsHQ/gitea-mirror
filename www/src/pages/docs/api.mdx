@@ -160,6 +160,21 @@ When several sources are connected, an optional `sourceId` picks which one the o
 
 `PATCH /api/organizations/:id` with `{ "sourceId": "…" }` re-pins an existing organization to another source, and `{ "sourceId": null }` clears the pin so the organization follows every source's repositories of the same name again. A pin whose source was removed falls back the same way.
 
+### Storage
+
+`GET /api/storage` returns what the Storage page shows: how much space the account's mirrors take on the destination (issue #479).
+
+```json
+{
+  "success": true,
+  "totals": { "total": 3554304, "destinationSize": 3030016, "releaseAssetsSize": 524288, "releaseAssetsCount": 1, "measured": 1, "mirrored": 1 },
+  "owners": [{ "owner": "archive", "destinationSize": 3030016, "releaseAssetsSize": 524288, "total": 3554304, "repositories": 1 }],
+  "repositories": [{ "id": "…", "fullName": "upstream/app", "location": "archive/app", "owner": "archive", "destinationSize": 3030016, "releaseAssetsSize": 524288, "releaseAssetsCount": 1, "total": 3554304, "checkedAt": "2026-10-29T03:32:01.000Z" }]
+}
+```
+
+Sizes are bytes. `destinationSize` is Git and LFS together as Gitea or Forgejo reports it, and the release fields cover the assets on the destination's releases. Each sync records them from responses it already fetches, so this endpoint never contacts the destination. A repository is listed once a sync has measured it, and a field not measured yet is `null`. `mirrored` counts the repositories with a mirror on a Gitea or Forgejo destination and `measured` the ones with a size so far; push destinations (GitHub, GitLab) are not measured.
+
 ### Run cleanup
 
 `POST /api/cleanup/trigger` runs the [repository cleanup](./cleanup-and-reconcile.md) now, with the account's saved cleanup settings, and returns how many orphaned repositories were found and processed and any errors. `GET /api/cleanup/trigger` returns the cleanup configuration and the last and next run times.
