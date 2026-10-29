@@ -912,19 +912,25 @@ export default function Repository() {
     }
   };
 
-  // Get unique owners and organizations for comboboxes
+  // Get unique owners and organizations for comboboxes.
+  // Plain `.sort()` orders by code unit, so "Zebra" lands before "apple" and
+  // umlauts sort wrong; compare case-insensitively like the repo name sort.
+  const collator = new Intl.Collator(undefined, {
+    sensitivity: "base",
+    numeric: true,
+  });
   const ownerOptions = Array.from(
     new Set(
       repositories.map((repo) => repo.owner).filter((v): v is string => !!v)
     )
-  ).sort();
+  ).sort(collator.compare);
   const orgOptions = Array.from(
     new Set(
       repositories
         .map((repo) => repo.organization)
         .filter((v): v is string => !!v)
     )
-  ).sort();
+  ).sort(collator.compare);
 
   const handleConfirmDuplicateRepository = async () => {
     if (!duplicateRepoCandidate) {
