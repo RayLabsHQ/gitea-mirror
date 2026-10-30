@@ -2826,9 +2826,10 @@ export const mirrorGitRepoIssuesToGitea = async ({
   giteaOwner: string;
   giteaRepoName?: string;
   /**
-   * Which source issues to list. "all" keeps the historical behavior; "open"
-   * and "closed" narrow the pass. Already-mirrored issues outside the filter
-   * are left alone rather than deleted.
+   * Which source issues get created. "all" keeps the historical behavior.
+   * The listing still asks for every state, so an issue that is already
+   * mirrored keeps following GitHub when it leaves the filter: closing it
+   * there closes the copy. Nothing is deleted.
    */
   issueState?: IssueStateFilter;
   /** Copy issue comments. Off skips the per-issue comment listing entirely. */
@@ -2908,9 +2909,19 @@ export const mirrorGitRepoIssuesToGitea = async ({
   }
   // GitHub numbers this pass has finished, kept if it does not complete.
   const completedNumbers = new Set<number>();
+  // Issues an earlier state filter left out have not changed since, so an
+  // incremental listing would never return them. A pass under a different
+  // filter lists everything once.
+  if (plan.mode === "incremental" && (syncCursor?.issueState ?? "all") !== issueState) {
+    console.log(
+      `[Issues] The issue state filter for ${repository.fullName} changed; running a full pass`
+    );
+    plan = { mode: "full", reason: "the issue state filter changed" };
+  }
   const finishPass = async () => {
     if (resume) await onPassProgress?.(undefined);
-    return advanceMetadataSyncCursor(syncCursor, plan.mode, passStartedAt);
+    const cursor = advanceMetadataSyncCursor(syncCursor, plan.mode, passStartedAt);
+    return issueState === "all" ? cursor : { ...cursor, issueState };
   };
   const keepPassProgress = async () => {
     await onPassProgress?.(buildPassProgress(plan, passStartedAt, completedNumbers, resume));
@@ -2923,7 +2934,7 @@ export const mirrorGitRepoIssuesToGitea = async ({
         ? {
             owner,
             repo,
-            state: issueState,
+            state: "all",
             per_page: 100,
             sort: "updated",
             direction: "asc",
@@ -2932,7 +2943,7 @@ export const mirrorGitRepoIssuesToGitea = async ({
         : {
             owner,
             repo,
-            state: issueState,
+            state: "all",
             per_page: 100,
             sort: "created",
             direction: "asc",
@@ -3088,6 +3099,7 @@ export const mirrorGitRepoIssuesToGitea = async ({
   }
 
   let unchangedIssueCount = 0;
+  let filteredOutIssueCount = 0;
 
   // Process issues in parallel with concurrency control
   let mirroredIssues: unknown[];
@@ -3105,6 +3117,17 @@ export const mirrorGitRepoIssuesToGitea = async ({
       });
       if (itemClass === "skip") {
         completedNumbers.add(issue.number);
+        return issue;
+      }
+
+      // The state filter only decides what gets created. Not counted as done,
+      // so a resumed pass under another filter looks at the issue again.
+      if (
+        issueState !== "all" &&
+        issue.state !== issueState &&
+        !giteaIssueByGitHubNumber.has(issue.number)
+      ) {
+        filteredOutIssueCount++;
         return issue;
       }
 
@@ -3504,6 +3527,9 @@ export const mirrorGitRepoIssuesToGitea = async ({
     `Completed mirroring ${filteredIssues.length} issues for ${repository.fullName}` +
       (unchangedIssueCount > 0
         ? ` (${unchangedIssueCount} unchanged since the last pass, no GitHub calls)`
+        : "") +
+      (filteredOutIssueCount > 0
+        ? ` (${filteredOutIssueCount} not ${issueState}, skipped)`
         : "")
   );
 

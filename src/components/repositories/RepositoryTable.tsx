@@ -37,6 +37,7 @@ import { MirrorOverridesDialog } from "@/components/config/MirrorOverridesDialog
 import {
   hasMirrorOverrides,
   mirrorOptionsToFlags,
+  normalizeIssueState,
   normalizeReleaseAssetLimit,
   normalizeReleaseLimit,
   normalizeReleaseTagPatterns,
@@ -198,6 +199,8 @@ export default function RepositoryTable({
     if (orgIncludeTags !== undefined) globals.releaseIncludeTags = orgIncludeTags;
     const orgExcludeTags = normalizeReleaseTagPatterns(orgOverrides.releaseExcludeTags);
     if (orgExcludeTags !== undefined) globals.releaseExcludeTags = orgExcludeTags;
+    const orgIssueState = normalizeIssueState(orgOverrides.mirrorIssueState);
+    if (orgIssueState !== undefined) globals.mirrorIssueState = orgIssueState;
     return globals;
   }, [mirrorOptions, orgOverrides]);
 

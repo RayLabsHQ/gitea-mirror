@@ -1,19 +1,25 @@
 const MEDIA_PLACEHOLDER = "[media omitted]";
 
 /**
- * Image and attachment hosts GitHub uses in issue bodies and comments. They are
- * the expensive ones to load and the reason a mirror may want to drop media.
+ * Where GitHub keeps what people upload to issues and comments: images,
+ * videos and attached files, on the current hosts and the older per-repository
+ * paths. Other GitHub hosts such as raw.githubusercontent.com serve repository
+ * content, not uploads, and are left alone.
  */
-const GITHUB_MEDIA_URL =
-  /https?:\/\/(?:[^\s/]+\.)?githubusercontent\.com\/[^\s)>\]]+|https?:\/\/github\.com\/user-attachments\/assets\/[^\s)>\]]+/gi;
+const GITHUB_UPLOAD_URL =
+  String.raw`https?:\/\/(?:(?:private-)?user-images\.githubusercontent\.com\/|github\.com\/user-attachments\/(?:assets|files)\/|github\.com\/[\w.-]+\/[\w.-]+\/(?:assets|files)\/\d+\/)`;
+
+const GITHUB_MEDIA_URL = new RegExp(String.raw`${GITHUB_UPLOAD_URL}[^\s)>\]]+`, "gi");
 
 /**
- * Markdown links whose target is one of those media hosts. This runs before
- * the bare URL pass so `[screenshot](https://user-images...)` becomes one
- * placeholder instead of a broken empty link.
+ * Markdown links to an upload. This runs before the bare URL pass so
+ * `[screenshot](https://user-images...)` becomes one placeholder instead of a
+ * broken empty link.
  */
-const MARKDOWN_MEDIA_LINK =
-  /\[([^\]]*)\]\((https?:\/\/(?:[^\s/]+\.)?githubusercontent\.com\/[^\s)]+|https?:\/\/github\.com\/user-attachments\/assets\/[^\s)]+)(?:\s+"[^"]*")?\)/gi;
+const MARKDOWN_MEDIA_LINK = new RegExp(
+  String.raw`\[([^\]]*)\]\(${GITHUB_UPLOAD_URL}[^\s)]+(?:\s+"[^"]*")?\)`,
+  "gi"
+);
 
 /** Inline Markdown images, with optional title. */
 const MARKDOWN_IMAGE = /!\[[^\]]*\]\([^)]*\)/g;
@@ -41,7 +47,7 @@ export function stripIssueMedia(value: string | null | undefined): string {
   // Code blocks may document Markdown/HTML media syntax. Protect them so the
   // cleanup only touches content the author actually rendered as media.
   const codeBlocks: string[] = [];
-  let result = value.replace(/```[\s\S]*?```|`[^`\n]*`/g, (block) => {
+  let result = value.replace(/(```|~~~)[\s\S]*?\1|`[^`\n]*`/g, (block) => {
     const index = codeBlocks.push(block) - 1;
     return `\u0000${index}\u0000`;
   });

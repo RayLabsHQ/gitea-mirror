@@ -195,7 +195,11 @@ function fakeOctokit(data: GitHubData) {
   const issues = {
     listForRepo: async (params: any) => {
       calls.push({ endpoint: "issues.listForRepo", params });
-      return { data: data.issueListing };
+      // GitHub answers a state filter with only the issues in that state.
+      const state = params.state ?? "open";
+      return {
+        data: data.issueListing.filter((issue) => state === "all" || issue.state === state),
+      };
     },
     listComments: async (params: any) => {
       calls.push({ endpoint: "issues.listComments", params });
@@ -994,13 +998,49 @@ describe.skipIf(!isChild)("mirrorGitRepoIssuesToGitea content options", () => {
     ...extra,
   });
 
-  it("passes the issue state filter to the GitHub listing", async () => {
-    fakeGitea([]);
-    const github = fakeOctokit({ issueListing: [] });
+  it("lists every state and creates only the issues the filter keeps", async () => {
+    const gitea = fakeGitea([]);
+    const github = fakeOctokit({
+      issueListing: [ghIssue(1), ghIssue(2, { state: "closed" })],
+    });
 
-    await mirrorGitRepoIssuesToGitea(baseArgs(github.octokit, { issueState: "closed" }));
+    const cursor = await mirrorGitRepoIssuesToGitea(
+      baseArgs(github.octokit, { issueState: "open" })
+    );
 
-    expect(github.callsTo("issues.listForRepo")[0]?.params.state).toBe("closed");
+    expect(github.callsTo("issues.listForRepo")[0]?.params.state).toBe("all");
+    expect(gitea.createdTitles()).toEqual(["[GH-ISSUE #1] Issue 1"]);
+    expect(github.callsTo("issues.listComments").map((c) => c.params.issue_number)).toEqual([1]);
+    expect(cursor?.issueState).toBe("open");
+  });
+
+  it("closes the copy of a mirrored issue that was closed on GitHub", async () => {
+    const gitea = fakeGitea([{ number: 21, title: "[GH-ISSUE #1] Issue 1" }]);
+    const github = fakeOctokit({ issueListing: [ghIssue(1, { state: "closed" })] });
+
+    await mirrorGitRepoIssuesToGitea(baseArgs(github.octokit, { issueState: "open" }));
+
+    const edit = gitea.requests.find(
+      (r) => r.method === "PATCH" && r.url === `${DEST_API}/issues/21`
+    );
+    expect(JSON.parse(edit!.body!).state).toBe("closed");
+  });
+
+  it("runs a full pass when the filter differs from the last pass", async () => {
+    fakeGitea([{ number: 21, title: "[GH-ISSUE #1] Issue 1" }]);
+    const changed = fakeOctokit({ issueListing: [] });
+    await mirrorGitRepoIssuesToGitea(
+      baseArgs(changed.octokit, { issueState: "all", syncCursor: { ...recentCursor(), issueState: "open" } })
+    );
+    expect(changed.callsTo("issues.listForRepo")[0]?.params.since).toBeUndefined();
+
+    fakeGitea([{ number: 21, title: "[GH-ISSUE #1] Issue 1" }]);
+    const same = fakeOctokit({ issueListing: [] });
+    const cursor = recentCursor();
+    await mirrorGitRepoIssuesToGitea(
+      baseArgs(same.octokit, { issueState: "open", syncCursor: { ...cursor, issueState: "open" } })
+    );
+    expect(same.callsTo("issues.listForRepo")[0]?.params.since).toBe(expectedSince(cursor));
   });
 
   it("skips comments when the comments option is off", async () => {

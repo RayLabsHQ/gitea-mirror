@@ -927,7 +927,9 @@ export function resolveMirrorOptions({
     } else if (typeof orgValue === "boolean") {
       resolved[key] = orgValue;
     } else {
-      resolved[key] = globalConfig?.[key] ?? FLAG_DEFAULTS[key] ?? false;
+      const globalValue = globalConfig?.[key];
+      resolved[key] =
+        typeof globalValue === "boolean" ? globalValue : FLAG_DEFAULTS[key] ?? !!globalValue;
     }
   }
 

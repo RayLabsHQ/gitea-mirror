@@ -41,6 +41,9 @@ function buildMinimalUiConfigs(overrides: { includeCollaboratorRepos?: boolean }
       milestones: false,
       wiki: false,
     },
+    issueState: "all",
+    issueComments: true,
+    issueMedia: true,
   };
   const advancedOptions: AdvancedOptions = {
     skipForks: false,

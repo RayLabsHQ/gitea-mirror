@@ -500,6 +500,52 @@ export function MirrorOverridesDialog({
   const showIssueStateHint =
     !inheritedLoading && !issueStateDisabled && issueStateDraft === "inherit";
 
+  // Rendered under the Issues row, with the other issue options.
+  const issueStateRow = (
+    <div key="mirrorIssueState" className="space-y-1">
+      <div className="flex items-center justify-between gap-4">
+        <Label
+          htmlFor="override-mirrorIssueState"
+          className={
+            issueStateDisabled ? "flex-1 text-muted-foreground" : "flex-1"
+          }
+        >
+          {MIRROR_OVERRIDE_LABELS.mirrorIssueState}
+          {showIssueStateHint && (
+            <span className="ml-2 text-xs font-normal text-muted-foreground">
+              currently {ISSUE_STATE_LABELS[effectiveIssueState]}
+            </span>
+          )}
+        </Label>
+        <Select
+          value={issueStateDraft}
+          disabled={issueStateDisabled}
+          onValueChange={(next) =>
+            setIssueStateDraft(next as IssueStateChoice)
+          }
+        >
+          <SelectTrigger
+            id="override-mirrorIssueState"
+            className="w-32"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="inherit">Inherit</SelectItem>
+            <SelectItem value="all">All issues</SelectItem>
+            <SelectItem value="open">Open only</SelectItem>
+            <SelectItem value="closed">Closed only</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      {issueStateReason && (
+        <p className="text-xs text-muted-foreground">
+          {issueStateReason}
+        </p>
+      )}
+    </div>
+  );
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
@@ -699,7 +745,7 @@ export function MirrorOverridesDialog({
                 draft[key] === "inherit" &&
                 inherited !== undefined;
 
-              return (
+              const row = (
                 <div key={key} className="space-y-1">
                   <div className="flex items-center justify-between gap-4">
                     <Label
@@ -737,50 +783,8 @@ export function MirrorOverridesDialog({
                   )}
                 </div>
               );
+              return key === "mirrorIssues" ? [row, issueStateRow] : row;
             })}
-
-            <div className="space-y-1">
-              <div className="flex items-center justify-between gap-4">
-                <Label
-                  htmlFor="override-mirrorIssueState"
-                  className={
-                    issueStateDisabled ? "flex-1 text-muted-foreground" : "flex-1"
-                  }
-                >
-                  {MIRROR_OVERRIDE_LABELS.mirrorIssueState}
-                  {showIssueStateHint && (
-                    <span className="ml-2 text-xs font-normal text-muted-foreground">
-                      currently {ISSUE_STATE_LABELS[effectiveIssueState]}
-                    </span>
-                  )}
-                </Label>
-                <Select
-                  value={issueStateDraft}
-                  disabled={issueStateDisabled}
-                  onValueChange={(next) =>
-                    setIssueStateDraft(next as IssueStateChoice)
-                  }
-                >
-                  <SelectTrigger
-                    id="override-mirrorIssueState"
-                    className="w-32"
-                  >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="inherit">Inherit</SelectItem>
-                    <SelectItem value="all">All issues</SelectItem>
-                    <SelectItem value="open">Open only</SelectItem>
-                    <SelectItem value="closed">Closed only</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              {issueStateReason && (
-                <p className="text-xs text-muted-foreground">
-                  {issueStateReason}
-                </p>
-              )}
-            </div>
 
             <p className="text-xs text-muted-foreground">
               Inherit uses the {inheritedLabel}.

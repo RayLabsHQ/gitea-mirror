@@ -29,6 +29,11 @@ export interface MetadataSyncCursor {
   lastPassStartedAt: string;
   /** Start of the last full pass that completed cleanly. */
   lastFullPassStartedAt: string;
+  /**
+   * Issue state filter the last completed issues pass ran with, when it was
+   * not "all". Issues a filter left out are only found again by a full pass.
+   */
+  issueState?: string;
 }
 
 export interface MetadataSyncCursors {
@@ -115,14 +120,17 @@ function isValidTimestamp(value: unknown): value is string {
 
 function parseSyncCursor(raw: unknown): MetadataSyncCursor | undefined {
   if (!raw || typeof raw !== "object") return undefined;
-  const { lastPassStartedAt, lastFullPassStartedAt } = raw as {
+  const { lastPassStartedAt, lastFullPassStartedAt, issueState } = raw as {
     lastPassStartedAt?: unknown;
     lastFullPassStartedAt?: unknown;
+    issueState?: unknown;
   };
   if (!isValidTimestamp(lastPassStartedAt) || !isValidTimestamp(lastFullPassStartedAt)) {
     return undefined;
   }
-  return { lastPassStartedAt, lastFullPassStartedAt };
+  return typeof issueState === "string"
+    ? { lastPassStartedAt, lastFullPassStartedAt, issueState }
+    : { lastPassStartedAt, lastFullPassStartedAt };
 }
 
 /**

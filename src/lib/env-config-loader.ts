@@ -432,6 +432,10 @@ export async function initializeConfigFromEnv(): Promise<void> {
         : existingConfig?.[0]?.giteaConfig?.pullRequestConcurrency ?? 5,
       mirrorMetadata: envConfig.mirror.mirrorMetadata ?? (envConfig.mirror.mirrorIssues || envConfig.mirror.mirrorPullRequests || envConfig.mirror.mirrorLabels || envConfig.mirror.mirrorMilestones) ?? existingConfig?.[0]?.giteaConfig?.mirrorMetadata ?? false,
       mirrorIssues: envConfig.mirror.mirrorIssues ?? existingConfig?.[0]?.giteaConfig?.mirrorIssues ?? false,
+      // No env vars for these; keep what the UI stored across restarts.
+      mirrorIssueState: existingConfig?.[0]?.giteaConfig?.mirrorIssueState ?? 'all',
+      mirrorIssueComments: existingConfig?.[0]?.giteaConfig?.mirrorIssueComments ?? true,
+      mirrorIssueMedia: existingConfig?.[0]?.giteaConfig?.mirrorIssueMedia ?? true,
       mirrorPullRequests: envConfig.mirror.mirrorPullRequests ?? existingConfig?.[0]?.giteaConfig?.mirrorPullRequests ?? false,
       mirrorLabels: envConfig.mirror.mirrorLabels ?? existingConfig?.[0]?.giteaConfig?.mirrorLabels ?? false,
       mirrorMilestones: envConfig.mirror.mirrorMilestones ?? existingConfig?.[0]?.giteaConfig?.mirrorMilestones ?? false,
