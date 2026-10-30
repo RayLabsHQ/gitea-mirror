@@ -31,6 +31,12 @@ interface InlineDestinationEditorProps {
    * row would otherwise name the strategy's owner instead (#416).
    */
   organizationDestination?: string | null;
+  /**
+   * Where the server resolved the mirror to go, with the same precedence and
+   * strategy rules the mirror itself uses. The local guess below gets some
+   * strategies wrong, such as personal repositories under "mixed".
+   */
+  resolvedDestination?: string;
   onUpdate: (
     repoId: string,
     newDestination: string | null,
@@ -48,6 +54,7 @@ export function InlineDestinationEditor({
   repository,
   giteaConfig,
   organizationDestination,
+  resolvedDestination,
   onUpdate,
   isUpdating = false,
   className,
@@ -105,7 +112,10 @@ export function InlineDestinationEditor({
     }
   };
 
-  const defaultDestination = getDefaultDestination();
+  // A repository pinned to its own destination resolves to that pin, so its
+  // default still comes from the local guess.
+  const defaultDestination =
+    (!repository.destinationOrg && resolvedDestination) || getDefaultDestination();
   const currentDestination = repository.destinationOrg || defaultDestination;
   // A stored destination is a pin even when it spells out the default, so the
   // badge follows the stored value rather than comparing against it (#416).

@@ -218,12 +218,13 @@ export const getGiteaRepoOwnerAsync = async ({
     throw new Error("User ID is required for organization overrides.");
   }
 
-  // The organization override is the only tier that needs a database read.
-  // Everything else is shared with `resolveDestinationOwner` below, which the
-  // repositories list uses to filter by the real destination without one query
-  // per row.
+  // The organization override is the only tier that needs a database read,
+  // and only when the starred mode or a repository override has not already
+  // decided. Everything else is shared with `resolveDestinationOwner` below,
+  // which the repositories list uses to filter by the real destination
+  // without one query per row.
   let organizationDestination: string | undefined;
-  if (repository.organization) {
+  if (!repository.isStarred && !repository.destinationOrg && repository.organization) {
     const orgConfig = await getOrganizationConfig({
       orgName: repository.organization,
       userId: config.userId,
@@ -231,12 +232,22 @@ export const getGiteaRepoOwnerAsync = async ({
     organizationDestination = orgConfig?.destinationOrg ?? undefined;
   }
 
-  return resolveDestinationOwner({
+  const owner = resolveDestinationOwner({
     config,
     repository,
     organizationDestination,
     sourceUsername,
   });
+
+  // Logged here rather than in the resolver, which the repositories list
+  // runs for every row on every load.
+  if (!repository.isStarred && repository.destinationOrg) {
+    console.log(`Using repository override: ${repository.fullName} -> ${repository.destinationOrg}`);
+  } else if (organizationDestination) {
+    console.log(`Using organization override: ${repository.organization} -> ${organizationDestination}`);
+  }
+
+  return owner;
 };
 
 export const getGiteaRepoOwner = ({
@@ -371,16 +382,10 @@ export const resolveDestinationOwner = ({
   }
 
   if (repository.destinationOrg) {
-    console.log(
-      `Using repository override: ${repository.fullName} -> ${repository.destinationOrg}`
-    );
     return repository.destinationOrg;
   }
 
   if (repository.organization && organizationDestination) {
-    console.log(
-      `Using organization override: ${repository.organization} -> ${organizationDestination}`
-    );
     return organizationDestination;
   }
 

@@ -1426,15 +1426,6 @@ export default function Repository() {
             }
           />
 
-          {/* Destination Combobox */}
-          <DestinationCombobox
-            options={destinationOptions}
-            value={filter.destinationOrganization || ""}
-            onChange={(destinationOrganization: string) =>
-              setFilter((prev) => ({ ...prev, destinationOrganization }))
-            }
-          />
-
           <Button
             variant="outline"
             size="icon"
@@ -1699,6 +1690,7 @@ export default function Repository() {
           repositories={repositories}
           organizationDestinations={organizationDestinations}
           destinationOwners={destinationOwners}
+          destinationOptions={destinationOptions}
           isLoading={isInitialLoading || (!connected && !hasLoadedRef.current)}
           filter={filter}
           setFilter={setFilter}

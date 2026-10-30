@@ -59,7 +59,6 @@ export const GET: APIRoute = async ({ request, locals }) => {
     const orgDestinationRows = await db
       .select({
         name: organizations.name,
-        normalizedName: organizations.normalizedName,
         destinationOrg: organizations.destinationOrg,
       })
       .from(organizations)
@@ -71,7 +70,6 @@ export const GET: APIRoute = async ({ request, locals }) => {
       if (!row.destinationOrg) continue;
       organizationDestinations[row.name] = row.destinationOrg;
       organizationDestinationByName.set(row.name, row.destinationOrg);
-      organizationDestinationByName.set(row.normalizedName, row.destinationOrg);
     }
 
     // The repository's own source username is part of the strategy fallback for
@@ -87,9 +85,9 @@ export const GET: APIRoute = async ({ request, locals }) => {
     // destination column's existing per-organization fallback (#416).
     const destinationOwners: Record<string, string> = {};
     const repositoriesWithDestination = rawRepositories.map((repo) => {
+      // Matched by exact name, like getOrganizationConfig on the mirror path.
       const organizationDestination = repo.organization
-        ? organizationDestinationByName.get(repo.organization) ??
-          organizationDestinationByName.get(repo.organization.toLowerCase())
+        ? organizationDestinationByName.get(repo.organization)
         : undefined;
 
       try {
