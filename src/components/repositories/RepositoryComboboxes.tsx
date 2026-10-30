@@ -22,6 +22,7 @@ type ComboboxProps = {
   onChange: (value: string) => void;
   placeholder?: string;
   label?: string;
+  className?: string;
 };
 
 /** These stay comboboxes rather than Selects because the owner and
@@ -35,6 +36,7 @@ function FilterCombobox({
   emptyLabel,
   searchPlaceholder,
   emptyMessage,
+  className,
 }: ComboboxProps & {
   emptyLabel: string;
   searchPlaceholder: string;
@@ -52,7 +54,7 @@ function FilterCombobox({
           type="button"
           role="combobox"
           aria-expanded={open}
-          className={cn(selectTriggerClassName, "h-10 w-full lg:w-50")}
+          className={cn(selectTriggerClassName, "h-10 w-full lg:w-50", className)}
         >
           <span className={cn("truncate", !value && "text-muted-foreground")}>
             {value || emptyLabel}
@@ -126,6 +128,17 @@ export function OrganizationCombobox(props: ComboboxProps) {
       emptyLabel="All organizations"
       searchPlaceholder="Search organizations..."
       emptyMessage="No organizations found."
+    />
+  );
+}
+
+export function DestinationCombobox(props: ComboboxProps) {
+  return (
+    <FilterCombobox
+      {...props}
+      emptyLabel="All destinations"
+      searchPlaceholder="Search destinations..."
+      emptyMessage="No destinations found."
     />
   );
 }

@@ -43,7 +43,11 @@ import { useSSE } from "@/hooks/useSEE";
 import { useFilterParams } from "@/hooks/useFilterParams";
 import { toast } from "sonner";
 import type { SyncRepoRequest, SyncRepoResponse } from "@/types/sync";
-import { OwnerCombobox, OrganizationCombobox } from "./RepositoryComboboxes";
+import {
+  OwnerCombobox,
+  OrganizationCombobox,
+  DestinationCombobox,
+} from "./RepositoryComboboxes";
 import type { RetryRepoRequest, RetryRepoResponse } from "@/types/retry";
 import type { ResetMetadataRequest, ResetMetadataResponse } from "@/types/reset-metadata";
 import AddRepositoryDialog from "./AddRepositoryDialog";
@@ -58,6 +62,7 @@ import { compareNames } from "@/lib/utils/compare-names";
 type RepositoriesPageCache = {
   repositories: Repository[];
   organizationDestinations: Record<string, string>;
+  destinationOwners: Record<string, string>;
 };
 
 export default function Repository() {
@@ -71,6 +76,10 @@ export default function Repository() {
   const [organizationDestinations, setOrganizationDestinations] = useState<
     Record<string, string>
   >(cached?.organizationDestinations ?? {});
+  // Repository id -> the destination owner/org the mirror will really use.
+  const [destinationOwners, setDestinationOwners] = useState<
+    Record<string, string>
+  >(cached?.destinationOwners ?? {});
   const [isInitialLoading, setIsInitialLoading] = useState(!cached);
   // True once there are rows to show, from the cache or a fetch.
   const hasLoadedRef = useRef(!!cached);
@@ -81,6 +90,7 @@ export default function Repository() {
     searchTerm: "",
     status: "",
     organization: "",
+    destinationOrganization: "",
     owner: "",
     sort: "imported-desc",
   });
@@ -159,6 +169,7 @@ export default function Repository() {
         hasLoadedRef.current = true;
         setRepositories(response.repositories);
         setOrganizationDestinations(response.organizationDestinations ?? {});
+        setDestinationOwners(response.destinationOwners ?? {});
         return true;
       } else {
         // Only show error toast for manual refreshes to avoid spam during live updates
@@ -190,8 +201,12 @@ export default function Repository() {
 
   useEffect(() => {
     if (!hasLoadedRef.current) return;
-    writePageCache<RepositoriesPageCache>(user?.id, "repositories", { repositories, organizationDestinations });
-  }, [user?.id, repositories, organizationDestinations]);
+    writePageCache<RepositoriesPageCache>(user?.id, "repositories", {
+      repositories,
+      organizationDestinations,
+      destinationOwners,
+    });
+  }, [user?.id, repositories, organizationDestinations, destinationOwners]);
 
   // Register with global live refresh system
   useEffect(() => {
@@ -926,6 +941,14 @@ export default function Repository() {
         .filter((v): v is string => !!v)
     )
   ).sort(compareNames);
+  // The destination owner each row resolves to, not the source organization.
+  const destinationOptions = Array.from(
+    new Set(
+      repositories
+        .map((repo) => (repo.id ? destinationOwners[repo.id] : undefined))
+        .filter((v): v is string => !!v)
+    )
+  ).sort(compareNames);
 
   const handleConfirmDuplicateRepository = async () => {
     if (!duplicateRepoCandidate) {
@@ -1076,8 +1099,19 @@ export default function Repository() {
   const actionCounts = getActionCounts();
 
   // Check if any filters are active
-  const hasActiveFilters = !!(filter.owner || filter.organization || filter.status);
-  const activeFilterCount = [filter.owner, filter.organization, filter.status, filter.hasOverrides].filter(Boolean).length;
+  const hasActiveFilters = !!(
+    filter.owner ||
+    filter.organization ||
+    filter.destinationOrganization ||
+    filter.status
+  );
+  const activeFilterCount = [
+    filter.owner,
+    filter.organization,
+    filter.destinationOrganization,
+    filter.status,
+    filter.hasOverrides,
+  ].filter(Boolean).length;
 
   // Clear all filters
   const clearFilters = () => {
@@ -1085,6 +1119,7 @@ export default function Repository() {
       searchTerm: filter.searchTerm,
       status: "",
       organization: "",
+      destinationOrganization: "",
       owner: "",
       hasOverrides: "",
       sort: filter.sort || "imported-desc",
@@ -1186,6 +1221,25 @@ export default function Repository() {
                     value={filter.organization || ""}
                     onChange={(organization: string) =>
                       setFilter((prev) => ({ ...prev, organization }))
+                    }
+                  />
+                </div>
+
+                {/* Destination Filter */}
+                <div className="space-y-2">
+                  <label className="text-sm font-medium flex items-center gap-2">
+                    <span className="text-muted-foreground">By</span> Destination
+                    {filter.destinationOrganization && (
+                      <span className="ml-auto text-xs text-muted-foreground">
+                        Selected
+                      </span>
+                    )}
+                  </label>
+                  <DestinationCombobox
+                    options={destinationOptions}
+                    value={filter.destinationOrganization || ""}
+                    onChange={(destinationOrganization: string) =>
+                      setFilter((prev) => ({ ...prev, destinationOrganization }))
                     }
                   />
                 </div>
@@ -1635,6 +1689,8 @@ export default function Repository() {
         <RepositoryTable
           repositories={repositories}
           organizationDestinations={organizationDestinations}
+          destinationOwners={destinationOwners}
+          destinationOptions={destinationOptions}
           isLoading={isInitialLoading || (!connected && !hasLoadedRef.current)}
           filter={filter}
           setFilter={setFilter}

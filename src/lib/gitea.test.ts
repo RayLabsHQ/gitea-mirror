@@ -1,7 +1,12 @@
 import { describe, test, expect, mock, beforeEach, afterEach } from "bun:test";
 import { Octokit } from "@octokit/rest";
 import { repoStatusEnum } from "@/types/Repository";
-import { getOrCreateGiteaOrg, getGiteaRepoOwner, getGiteaRepoOwnerAsync } from "./gitea";
+import {
+  getOrCreateGiteaOrg,
+  getGiteaRepoOwner,
+  getGiteaRepoOwnerAsync,
+  resolveDestinationOwner,
+} from "./gitea";
 import type { Config, Repository, Organization } from "./db/schema";
 import { createMockResponse, mockFetch } from "@/tests/mock-fetch";
 
@@ -749,5 +754,99 @@ describe("getGiteaRepoOwner - Organization Override Tests", () => {
     });
 
     expect(result).toBe("nice-user");
+  });
+});
+
+describe("resolveDestinationOwner", () => {
+  const config = {
+    githubConfig: {
+      owner: "testuser",
+      username: "testuser",
+      token: "token",
+      starredReposOrg: "starred",
+      starredReposMode: "dedicated-org",
+      mirrorStrategy: "preserve",
+    },
+    giteaConfig: {
+      defaultOwner: "giteauser",
+      url: "https://gitea.example.com",
+      token: "gitea-token",
+      organization: "github-mirrors",
+      visibility: "public",
+      preserveVisibility: false,
+    },
+  } as unknown as Partial<Config>;
+
+  const repo = (overrides: Partial<Repository> = {}) =>
+    ({
+      fullName: "acme/demo",
+      owner: "acme",
+      organization: "acme",
+      destinationOrg: null,
+      isStarred: false,
+      ...overrides,
+    }) as Repository;
+
+  test("uses the starred organization in dedicated mode", () => {
+    expect(
+      resolveDestinationOwner({
+        config,
+        repository: repo({ isStarred: true }),
+      })
+    ).toBe("starred");
+  });
+
+  test("preserves the owner namespace for starred repos in preserve-owner mode", () => {
+    expect(
+      resolveDestinationOwner({
+        config: {
+          ...config,
+          githubConfig: {
+            ...config.githubConfig!,
+            starredReposMode: "preserve-owner",
+          },
+        },
+        repository: repo({ isStarred: true, owner: "other", organization: undefined }),
+      })
+    ).toBe("other");
+  });
+
+  test("a repository override wins over the organization override", () => {
+    expect(
+      resolveDestinationOwner({
+        config,
+        repository: repo({ destinationOrg: "repo-target" }),
+        organizationDestination: "org-target",
+      })
+    ).toBe("repo-target");
+  });
+
+  test("the organization override wins over the strategy", () => {
+    expect(
+      resolveDestinationOwner({
+        config,
+        repository: repo(),
+        organizationDestination: "org-target",
+      })
+    ).toBe("org-target");
+  });
+
+  test("preserve keeps the source organization when no override exists", () => {
+    expect(
+      resolveDestinationOwner({
+        config,
+        repository: repo(),
+      })
+    ).toBe("acme");
+  });
+
+  test("personal repos of the configured source user go to defaultOwner", () => {
+    expect(
+      resolveDestinationOwner({
+        config,
+        repository: repo({ owner: "testuser", organization: undefined }),
+        sourceUsername: "testuser",
+      })
+    ).toBe("giteauser");
   });
 });

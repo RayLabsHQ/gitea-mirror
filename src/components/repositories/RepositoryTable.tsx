@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/tooltip";
 import { toast } from "sonner";
 import { InlineDestinationEditor, type DestinationUpdateOptions } from "./InlineDestinationEditor";
+import { DestinationCombobox } from "./RepositoryComboboxes";
 import { MarqueeText, MarqueeTrigger } from "@/components/ui/marquee-text";
 import { MirrorOverridesDialog } from "@/components/config/MirrorOverridesDialog";
 import {
@@ -75,6 +76,10 @@ interface RepositoryTableProps {
   repositories: Repository[];
   /** Organization name -> its destination override (#416). */
   organizationDestinations?: Record<string, string>;
+  /** Repository id -> the destination owner/org the mirror will use. */
+  destinationOwners?: Record<string, string>;
+  /** The values of `destinationOwners`, sorted, for the destination filter. */
+  destinationOptions?: string[];
   isLoading: boolean;
   filter: FilterParams;
   setFilter: (filter: FilterParams) => void;
@@ -118,6 +123,8 @@ function getTableSorting(sortOrder: string | undefined): SortingState {
 export default function RepositoryTable({
   repositories,
   organizationDestinations,
+  destinationOwners,
+  destinationOptions = [],
   isLoading,
   filter,
   setFilter,
@@ -307,6 +314,7 @@ export default function RepositoryTable({
     filter.status,
     filter.owner,
     filter.organization,
+    filter.destinationOrganization,
     filter.hasOverrides,
     // val?.toString() is undefined for an unset filter, and undefined !== ""
     // is true, so this used to report a filter on a completely clean view.
@@ -327,12 +335,25 @@ export default function RepositoryTable({
       next.push({ id: "organization", value: filter.organization });
     }
 
+    if (filter.destinationOrganization) {
+      next.push({
+        id: "destinationOrganization",
+        value: filter.destinationOrganization,
+      });
+    }
+
     if (filter.hasOverrides) {
       next.push({ id: "hasOverrides", value: filter.hasOverrides });
     }
 
     return next;
-  }, [filter.status, filter.owner, filter.organization, filter.hasOverrides]);
+  }, [
+    filter.status,
+    filter.owner,
+    filter.organization,
+    filter.destinationOrganization,
+    filter.hasOverrides,
+  ]);
 
   const sorting = useMemo(() => getTableSorting(filter.sort), [filter.sort]);
 
@@ -351,6 +372,13 @@ export default function RepositoryTable({
         id: "organization",
         accessorFn: (row) => row.organization ?? "",
         filterFn: "equalsString",
+      },
+      {
+        id: "destinationOrganization",
+        accessorFn: (row) =>
+          row.id ? destinationOwners?.[row.id] ?? "" : "",
+        filterFn: "equalsString",
+        enableGlobalFilter: false,
       },
       {
         id: "status",
@@ -377,7 +405,7 @@ export default function RepositoryTable({
         enableColumnFilter: false,
       },
     ],
-    []
+    [destinationOwners]
   );
 
   const table = useReactTable({
@@ -786,7 +814,9 @@ export default function RepositoryTable({
                 searchTerm: "",
                 status: "",
                 organization: "",
+                destinationOrganization: "",
                 owner: "",
+                hasOverrides: "",
                 sort: filter.sort || "imported-desc",
               })
             }
@@ -797,6 +827,17 @@ export default function RepositoryTable({
       </div>
 
       <div className="hidden flex-wrap items-center gap-2 lg:flex">
+        {/* Here rather than beside the owner and organization filters, which
+            leave no room for it at 1280px and below. */}
+        <DestinationCombobox
+          className="h-9"
+          options={destinationOptions}
+          value={filter.destinationOrganization || ""}
+          onChange={(destinationOrganization: string) =>
+            setFilter({ ...filter, destinationOrganization })
+          }
+        />
+
         <Select
           value={filter.status || "all"}
           onValueChange={(value) =>
@@ -1038,6 +1079,7 @@ export default function RepositoryTable({
               selectedRepoIds={selectedRepoIds}
               loadingRepoIds={loadingRepoIds}
               organizationDestinations={organizationDestinations}
+              destinationOwners={destinationOwners}
               context={rowContext}
             />
           </div>
@@ -1101,12 +1143,14 @@ function RepositoryTableRows({
   selectedRepoIds,
   loadingRepoIds,
   organizationDestinations,
+  destinationOwners,
   context,
 }: {
   repositories: Repository[];
   selectedRepoIds: Set<string>;
   loadingRepoIds: Set<string>;
   organizationDestinations?: Record<string, string>;
+  destinationOwners?: Record<string, string>;
   context: RepositoryRowContext;
 }) {
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -1147,6 +1191,7 @@ function RepositoryTableRows({
               organizationDestination={
                 repo.organization ? organizationDestinations?.[repo.organization] : undefined
               }
+              resolvedDestination={repo.id ? destinationOwners?.[repo.id] : undefined}
               context={context}
             />
           );
@@ -1164,6 +1209,7 @@ const RepositoryTableRow = memo(function RepositoryTableRow({
   selected,
   loading,
   organizationDestination,
+  resolvedDestination,
   context,
 }: {
   repo: Repository;
@@ -1173,6 +1219,7 @@ const RepositoryTableRow = memo(function RepositoryTableRow({
   selected: boolean;
   loading: boolean;
   organizationDestination?: string;
+  resolvedDestination?: string;
   context: RepositoryRowContext;
 }) {
   return (
@@ -1255,6 +1302,7 @@ const RepositoryTableRow = memo(function RepositoryTableRow({
             repository={repo}
             giteaConfig={context.giteaConfig}
             organizationDestination={organizationDestination}
+            resolvedDestination={resolvedDestination}
             onUpdate={context.onUpdateDestination}
             isUpdating={loading}
           />

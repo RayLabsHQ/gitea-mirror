@@ -219,38 +219,36 @@ export const getGiteaRepoOwnerAsync = async ({
     throw new Error("User ID is required for organization overrides.");
   }
 
-  // Check if repository is starred
-  if (repository.isStarred) {
-    const starredReposMode = config.githubConfig.starredReposMode || "dedicated-org";
-    if (starredReposMode === "preserve-owner") {
-      return repository.organization || repository.owner;
-    }
-    return config.githubConfig.starredReposOrg || "starred";
-  }
-
-  // Check for repository-specific override (second highest priority)
-  if (repository.destinationOrg) {
-    console.log(`Using repository override: ${repository.fullName} -> ${repository.destinationOrg}`);
-    return repository.destinationOrg;
-  }
-
-  // Check for organization-specific override
-  if (repository.organization) {
+  // The organization override is the only tier that needs a database read,
+  // and only when the starred mode or a repository override has not already
+  // decided. Everything else is shared with `resolveDestinationOwner` below,
+  // which the repositories list uses to filter by the real destination
+  // without one query per row.
+  let organizationDestination: string | undefined;
+  if (!repository.isStarred && !repository.destinationOrg && repository.organization) {
     const orgConfig = await getOrganizationConfig({
       orgName: repository.organization,
       userId: config.userId,
     });
-
-    if (orgConfig?.destinationOrg) {
-      console.log(`Using organization override: ${repository.organization} -> ${orgConfig.destinationOrg}`);
-      return orgConfig.destinationOrg;
-    }
+    organizationDestination = orgConfig?.destinationOrg ?? undefined;
   }
 
-  // For personal repos (not organization repos), fall back to the default strategy
+  const owner = resolveDestinationOwner({
+    config,
+    repository,
+    organizationDestination,
+    sourceUsername,
+  });
 
-  // Fall back to existing strategy logic
-  return getGiteaRepoOwner({ config, repository, sourceUsername });
+  // Logged here rather than in the resolver, which the repositories list
+  // runs for every row on every load.
+  if (!repository.isStarred && repository.destinationOrg) {
+    console.log(`Using repository override: ${repository.fullName} -> ${repository.destinationOrg}`);
+  } else if (organizationDestination) {
+    console.log(`Using organization override: ${repository.organization} -> ${organizationDestination}`);
+  }
+
+  return owner;
 };
 
 export const getGiteaRepoOwner = ({
@@ -346,6 +344,53 @@ export const getGiteaRepoOwner = ({
       // Default fallback
       return config.giteaConfig.defaultOwner;
   }
+};
+
+/**
+ * Resolve the destination owner with the same precedence the mirror uses:
+ * starred mode > repository override > organization override > strategy.
+ *
+ * The organization override is passed in rather than fetched so callers that
+ * already hold the organization rows (the repositories list) can resolve many
+ * repositories without a database round-trip per row.
+ */
+export const resolveDestinationOwner = ({
+  config,
+  repository,
+  organizationDestination,
+  sourceUsername,
+}: {
+  config: Partial<Config>;
+  repository: Repository;
+  organizationDestination?: string | null;
+  /** Account name of the repository's own source, when already resolved. */
+  sourceUsername?: string;
+}): string => {
+  if (!config.githubConfig || !config.giteaConfig) {
+    throw new Error("GitHub or Gitea config is required.");
+  }
+
+  if (!config.giteaConfig.defaultOwner) {
+    throw new Error("Gitea username is required.");
+  }
+
+  if (repository.isStarred) {
+    const starredReposMode = config.githubConfig.starredReposMode || "dedicated-org";
+    if (starredReposMode === "preserve-owner") {
+      return repository.organization || repository.owner;
+    }
+    return config.githubConfig.starredReposOrg || "starred";
+  }
+
+  if (repository.destinationOrg) {
+    return repository.destinationOrg;
+  }
+
+  if (repository.organization && organizationDestination) {
+    return organizationDestination;
+  }
+
+  return getGiteaRepoOwner({ config, repository, sourceUsername });
 };
 
 export const isRepoPresentInGitea = async ({

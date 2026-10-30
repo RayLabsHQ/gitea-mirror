@@ -1,6 +1,8 @@
 import type { APIRoute } from "astro";
-import { db, repositories, configs, organizations } from "@/lib/db";
+import { db, repositories, configs, organizations, sources } from "@/lib/db";
 import { and, eq, sql } from "drizzle-orm";
+import { resolveDestinationOwner } from "@/lib/gitea";
+import type { Repository } from "@/lib/db/schema";
 import {
   repositoryVisibilityEnum,
   repoStatusEnum,
@@ -63,17 +65,54 @@ export const GET: APIRoute = async ({ request, locals }) => {
       .where(eq(organizations.userId, userId));
 
     const organizationDestinations: Record<string, string> = {};
+    const organizationDestinationByName = new Map<string, string>();
     for (const row of orgDestinationRows) {
-      if (row.destinationOrg) {
-        organizationDestinations[row.name] = row.destinationOrg;
-      }
+      if (!row.destinationOrg) continue;
+      organizationDestinations[row.name] = row.destinationOrg;
+      organizationDestinationByName.set(row.name, row.destinationOrg);
     }
 
-    const response: RepositoryApiResponse = {
-      success: true,
-      message: "Repositories fetched successfully",
-      organizationDestinations,
-      repositories: rawRepositories.map((repo) => ({
+    // The repository's own source username is part of the strategy fallback for
+    // personal repos, so resolve it up front instead of per row.
+    const sourceRows = await db
+      .select({ id: sources.id, username: sources.username })
+      .from(sources)
+      .where(eq(sources.userId, userId));
+    const sourceUsernames = new Map(sourceRows.map((row) => [row.id, row.username]));
+
+    // The real destination each row mirrors into. This is what the repositories
+    // page filters by; `organizationDestinations` above remains for the
+    // destination column's existing per-organization fallback (#416).
+    const destinationOwners: Record<string, string> = {};
+    const repositoriesWithDestination = rawRepositories.map((repo) => {
+      // Matched by exact name, like getOrganizationConfig on the mirror path.
+      const organizationDestination = repo.organization
+        ? organizationDestinationByName.get(repo.organization)
+        : undefined;
+
+      try {
+        destinationOwners[repo.id] = resolveDestinationOwner({
+          config: {
+            userId,
+            githubConfig: config.githubConfig as any,
+            giteaConfig: config.giteaConfig as any,
+          },
+          repository: repo as unknown as Repository,
+          organizationDestination,
+          sourceUsername: repo.sourceId
+            ? sourceUsernames.get(repo.sourceId)
+            : undefined,
+        });
+      } catch (error) {
+        // A row that cannot be resolved still belongs in the list; it simply
+        // has no destination filter value.
+        console.warn(
+          `[Repositories] Could not resolve destination owner for ${repo.fullName}:`,
+          error
+        );
+      }
+
+      return {
         ...repo,
         organization: repo.organization ?? undefined,
         lastMirrored: repo.lastMirrored ?? undefined,
@@ -81,7 +120,15 @@ export const GET: APIRoute = async ({ request, locals }) => {
         forkedFrom: repo.forkedFrom ?? undefined,
         status: repoStatusEnum.parse(repo.status),
         visibility: repositoryVisibilityEnum.parse(repo.visibility),
-      })),
+      };
+    });
+
+    const response: RepositoryApiResponse = {
+      success: true,
+      message: "Repositories fetched successfully",
+      organizationDestinations,
+      destinationOwners,
+      repositories: repositoriesWithDestination,
     };
 
     return jsonResponse({
