@@ -1166,6 +1166,9 @@ export async function syncGiteaRepoEnhanced({
               repository,
               giteaOwner: repoOwner,
               giteaRepoName: repoName,
+              issueState: mirrorOptions.mirrorIssueState,
+              includeComments: mirrorOptions.mirrorIssueComments,
+              includeMedia: mirrorOptions.mirrorIssueMedia,
               syncCursor: metadataState.syncCursors.issues,
               passProgress: metadataState.passProgress.issues,
               onPassProgress: async (progress) => {

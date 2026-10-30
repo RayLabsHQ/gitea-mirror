@@ -20,11 +20,13 @@ import {
 import { ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { withBase } from "@/lib/base-path";
-import type { MirrorOverrides, ReleaseType } from "@/lib/db/schema";
+import type { IssueStateFilter, MirrorOverrides, ReleaseType } from "@/lib/db/schema";
 import {
   compileReleaseTagPattern,
+  DEFAULT_ISSUE_STATE,
   getMirrorOverrideGating,
   MIRROR_OVERRIDE_LABELS,
+  normalizeIssueState,
   normalizeReleaseAssetLimit,
   normalizeReleaseLimit,
   normalizeReleaseTagPatterns,
@@ -47,6 +49,16 @@ type TriState = "inherit" | "on" | "off";
  * values: inherit plus the two kinds. "inherit" persists as absent.
  */
 type ReleaseTypeChoice = "inherit" | ReleaseType;
+
+/** Issue state is a choice too, so "inherit" persists as absent. */
+type IssueStateChoice = "inherit" | IssueStateFilter;
+
+/** How the issue-state row describes the value it inherits. */
+const ISSUE_STATE_LABELS: Record<IssueStateFilter, string> = {
+  all: "all issues",
+  open: "open only",
+  closed: "closed only",
+};
 
 /**
  * What the single Releases row offers. It covers both stored fields at once:
@@ -203,6 +215,9 @@ export function MirrorOverridesDialog({
   const [releaseTypeDraft, setReleaseTypeDraft] = useState<ReleaseTypeChoice>(
     () => buildReleaseTypeDraft(value)
   );
+  const [issueStateDraft, setIssueStateDraft] = useState<IssueStateChoice>(
+    () => buildIssueStateDraft(value)
+  );
   const [includeTagsDraft, setIncludeTagsDraft] = useState(() =>
     buildReleaseTagDraft(value, "releaseIncludeTags")
   );
@@ -225,6 +240,7 @@ export function MirrorOverridesDialog({
       setReleaseLimitDraft(buildReleaseLimitDraft(value));
       setReleaseAssetLimitDraft(buildReleaseAssetLimitDraft(value));
       setReleaseTypeDraft(buildReleaseTypeDraft(value));
+      setIssueStateDraft(buildIssueStateDraft(value));
       setIncludeTagsDraft(buildReleaseTagDraft(value, "releaseIncludeTags"));
       setExcludeTagsDraft(buildReleaseTagDraft(value, "releaseExcludeTags"));
     }
@@ -317,6 +333,9 @@ export function MirrorOverridesDialog({
   const pinnedReleaseType: ReleaseType | undefined =
     releaseTypeDraft === "inherit" ? undefined : normalizeReleaseType(releaseTypeDraft);
 
+  const pinnedIssueState: IssueStateFilter | undefined =
+    issueStateDraft === "inherit" ? undefined : normalizeIssueState(issueStateDraft);
+
   // One control drives two stored fields. A stored "releases on" with no kind
   // pinned still reads as Inherit and keeps its pin on save, so an override set
   // before the kind filter existed is never dropped by merely opening the dialog.
@@ -356,6 +375,7 @@ export function MirrorOverridesDialog({
     (draft.mirrorReleases !== "inherit" || releaseTypeDraft !== "inherit"
       ? 1
       : 0) +
+    (pinnedIssueState !== undefined ? 1 : 0) +
     (pinnedReleaseLimit !== undefined ? 1 : 0) +
     (pinnedReleaseAssetLimit !== undefined ? 1 : 0) +
     (includeTags.patterns !== undefined ? 1 : 0) +
@@ -380,6 +400,9 @@ export function MirrorOverridesDialog({
         next.releaseAssetLimit = pinnedReleaseAssetLimit;
       }
       if (pinnedReleaseType !== undefined) next.releaseType = pinnedReleaseType;
+      if (pinnedIssueState !== undefined) {
+        next.mirrorIssueState = pinnedIssueState;
+      }
       if (includeTags.patterns !== undefined) {
         next.releaseIncludeTags = includeTags.patterns;
       }
@@ -398,6 +421,7 @@ export function MirrorOverridesDialog({
     setReleaseLimitDraft("");
     setReleaseAssetLimitDraft("");
     setReleaseTypeDraft("inherit");
+    setIssueStateDraft("inherit");
     setIncludeTagsDraft("");
     setExcludeTagsDraft("");
   };
@@ -468,6 +492,59 @@ export function MirrorOverridesDialog({
     !releaseTagsDisabled &&
     tagPatternCount === 0 &&
     inheritedTagText !== "";
+
+  const issueStateReason = gating.mirrorIssueState;
+  const issueStateDisabled = !!issueStateReason;
+  const effectiveIssueState =
+    pinnedIssueState ?? inheritedFrom?.mirrorIssueState ?? DEFAULT_ISSUE_STATE;
+  const showIssueStateHint =
+    !inheritedLoading && !issueStateDisabled && issueStateDraft === "inherit";
+
+  // Rendered under the Issues row, with the other issue options.
+  const issueStateRow = (
+    <div key="mirrorIssueState" className="space-y-1">
+      <div className="flex items-center justify-between gap-4">
+        <Label
+          htmlFor="override-mirrorIssueState"
+          className={
+            issueStateDisabled ? "flex-1 text-muted-foreground" : "flex-1"
+          }
+        >
+          {MIRROR_OVERRIDE_LABELS.mirrorIssueState}
+          {showIssueStateHint && (
+            <span className="ml-2 text-xs font-normal text-muted-foreground">
+              currently {ISSUE_STATE_LABELS[effectiveIssueState]}
+            </span>
+          )}
+        </Label>
+        <Select
+          value={issueStateDraft}
+          disabled={issueStateDisabled}
+          onValueChange={(next) =>
+            setIssueStateDraft(next as IssueStateChoice)
+          }
+        >
+          <SelectTrigger
+            id="override-mirrorIssueState"
+            className="w-32"
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="inherit">Inherit</SelectItem>
+            <SelectItem value="all">All issues</SelectItem>
+            <SelectItem value="open">Open only</SelectItem>
+            <SelectItem value="closed">Closed only</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      {issueStateReason && (
+        <p className="text-xs text-muted-foreground">
+          {issueStateReason}
+        </p>
+      )}
+    </div>
+  );
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -668,7 +745,7 @@ export function MirrorOverridesDialog({
                 draft[key] === "inherit" &&
                 inherited !== undefined;
 
-              return (
+              const row = (
                 <div key={key} className="space-y-1">
                   <div className="flex items-center justify-between gap-4">
                     <Label
@@ -706,6 +783,7 @@ export function MirrorOverridesDialog({
                   )}
                 </div>
               );
+              return key === "mirrorIssues" ? [row, issueStateRow] : row;
             })}
 
             <p className="text-xs text-muted-foreground">
@@ -792,4 +870,10 @@ function buildReleaseTypeDraft(
   value: MirrorOverrides | null | undefined
 ): ReleaseTypeChoice {
   return normalizeReleaseType(value?.releaseType) ?? "inherit";
+}
+
+function buildIssueStateDraft(
+  value: MirrorOverrides | null | undefined
+): IssueStateChoice {
+  return normalizeIssueState(value?.mirrorIssueState) ?? "inherit";
 }

@@ -16,6 +16,7 @@ import {
   MIRROR_OVERRIDE_LIMIT_KEYS,
   MIRROR_OVERRIDE_PATTERN_KEYS,
   mirrorOptionsToFlags,
+  normalizeIssueState,
   normalizeMirrorOverrides,
   normalizeReleaseAssetLimit,
   normalizeReleaseLimit,
@@ -446,6 +447,8 @@ describe("UI_MIRROR_OVERRIDE_KEYS", () => {
       "lfs",
       "wiki",
       "mirrorIssues",
+      "mirrorIssueComments",
+      "mirrorIssueMedia",
       "mirrorPullRequests",
       "mirrorReleases",
       "mirrorLabels",
@@ -1702,15 +1705,20 @@ describe("release type filter", () => {
     });
 
     test("the choice keys and labels agree", () => {
-      expect(MIRROR_OVERRIDE_CHOICE_KEYS).toEqual(["releaseType"]);
+      expect(MIRROR_OVERRIDE_CHOICE_KEYS).toEqual([
+        "releaseType",
+        "mirrorIssueState",
+      ]);
       for (const key of MIRROR_OVERRIDE_CHOICE_KEYS) {
         expect(MIRROR_OVERRIDE_LABELS[key]).toBeTruthy();
       }
     });
 
     test("the choice keys are not walked as flags or limits", () => {
-      expect(MIRROR_OVERRIDE_KEYS).not.toContain("releaseType");
-      expect(MIRROR_OVERRIDE_LIMIT_KEYS).not.toContain("releaseType");
+      for (const key of MIRROR_OVERRIDE_CHOICE_KEYS) {
+        expect(MIRROR_OVERRIDE_KEYS).not.toContain(key);
+        expect(MIRROR_OVERRIDE_LIMIT_KEYS).not.toContain(key);
+      }
     });
   });
 
@@ -1768,5 +1776,59 @@ describe("release type filter", () => {
       });
       expect(gating.releaseType).toBe(MIRROR_GATING_REASONS.pushTarget);
     });
+  });
+});
+
+describe("issue content options", () => {
+  test("normalizes the issue state filter", () => {
+    expect(normalizeIssueState(" OPEN ")).toBe("open");
+    expect(normalizeIssueState("closed")).toBe("closed");
+    expect(normalizeIssueState("all")).toBe("all");
+    expect(normalizeIssueState("merged")).toBeUndefined();
+    expect(normalizeIssueState(null)).toBeUndefined();
+  });
+
+  test("resolves issue state per tier, most specific first", () => {
+    const resolved = resolveMirrorOptions({
+      config: makeConfig({ mirrorIssueState: "closed" }),
+      repository: makeRepo({
+        mirrorOverrides: { mirrorIssueState: "all" },
+      }),
+      orgOverrides: { mirrorIssueState: "open" },
+    });
+
+    expect(resolved.mirrorIssueState).toBe("all");
+  });
+
+  test("inherits issue state from the organization when the repository has none", () => {
+    const resolved = resolveMirrorOptions({
+      config: makeConfig({ mirrorIssueState: "closed" }),
+      repository: makeRepo(),
+      orgOverrides: { mirrorIssueState: "open" },
+    });
+
+    expect(resolved.mirrorIssueState).toBe("open");
+  });
+
+  test("keeps comments and media on when no tier pins them", () => {
+    const resolved = resolveMirrorOptions({
+      config: makeConfig({}),
+      repository: makeRepo(),
+    });
+
+    expect(resolved.mirrorIssueComments).toBe(true);
+    expect(resolved.mirrorIssueMedia).toBe(true);
+    expect(resolved.mirrorIssueState).toBe("all");
+  });
+
+  test("the content options are disabled while issues are off", () => {
+    const gating = getMirrorOverrideGating({
+      targetKind: "repository",
+      effective: { mirrorIssues: false },
+    });
+
+    expect(gating.mirrorIssueComments).toBe(MIRROR_GATING_REASONS.issuesOff);
+    expect(gating.mirrorIssueMedia).toBe(MIRROR_GATING_REASONS.issuesOff);
+    expect(gating.mirrorIssueState).toBe(MIRROR_GATING_REASONS.issuesOff);
   });
 });

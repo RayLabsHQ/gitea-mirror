@@ -58,6 +58,12 @@ export const backupStrategyEnum = z.enum([
 export const releaseTypeEnum = z.enum(["all", "stable"]);
 export type ReleaseType = z.infer<typeof releaseTypeEnum>;
 
+// Which source issues are candidates for mirroring. "all" keeps the historical
+// behavior; the other values narrow the GitHub listing before anything is
+// created in the destination.
+export const issueStateFilterEnum = z.enum(["all", "open", "closed"]);
+export type IssueStateFilter = z.infer<typeof issueStateFilterEnum>;
+
 /**
  * Per-object overrides for the global mirror options in `giteaConfigSchema`.
  *
@@ -94,6 +100,11 @@ export type ReleaseType = z.infer<typeof releaseTypeEnum>;
  * list of strings and ignores everything else, and an empty list is not a pin:
  * clearing the field means inherit.
  *
+ * `mirrorIssueState` follows the same lenient-string rule as `releaseType`
+ * (`normalizeIssueState` sanitizes it). `mirrorIssueComments` and
+ * `mirrorIssueMedia` narrow what an issue pass copies; both default to on when
+ * no tier pins them.
+ *
  * `skipForks` is organization-tier only: it opts an organization out of
  * importing and mirroring forked repositories without touching the global
  * `githubConfig.skipForks` switch. Null/absent inherits that global value.
@@ -107,6 +118,9 @@ export const mirrorOverridesSchema = z.object({
   mirrorReleases: z.boolean().nullable().optional(),
   mirrorMetadata: z.boolean().nullable().optional(),
   mirrorIssues: z.boolean().nullable().optional(),
+  mirrorIssueComments: z.boolean().nullable().optional(),
+  mirrorIssueMedia: z.boolean().nullable().optional(),
+  mirrorIssueState: z.string().nullable().optional(),
   mirrorPullRequests: z.boolean().nullable().optional(),
   mirrorLabels: z.boolean().nullable().optional(),
   mirrorMilestones: z.boolean().nullable().optional(),
@@ -171,6 +185,11 @@ export const giteaConfigSchema = z.object({
   releaseExcludeTags: z.array(z.string()).default([]),
   mirrorMetadata: z.boolean().default(false),
   mirrorIssues: z.boolean().default(false),
+  // Which issues the pass lists, and how much of each one it copies. Defaults
+  // preserve the behavior from before these options existed.
+  mirrorIssueState: issueStateFilterEnum.default("all"),
+  mirrorIssueComments: z.boolean().default(true),
+  mirrorIssueMedia: z.boolean().default(true),
   mirrorPullRequests: z.boolean().default(false),
   mirrorLabels: z.boolean().default(false),
   mirrorMilestones: z.boolean().default(false),

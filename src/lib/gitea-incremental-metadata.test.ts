@@ -195,7 +195,11 @@ function fakeOctokit(data: GitHubData) {
   const issues = {
     listForRepo: async (params: any) => {
       calls.push({ endpoint: "issues.listForRepo", params });
-      return { data: data.issueListing };
+      // GitHub answers a state filter with only the issues in that state.
+      const state = params.state ?? "open";
+      return {
+        data: data.issueListing.filter((issue) => state === "all" || issue.state === state),
+      };
     },
     listComments: async (params: any) => {
       calls.push({ endpoint: "issues.listComments", params });
@@ -981,5 +985,94 @@ describe.skipIf(!isChild)("milestone assignment (#460)", () => {
     // Tried once, not retried, and the pass still completes.
     expect(milestoneEdits).toBe(1);
     expect(cursor).toBeDefined();
+  });
+});
+
+describe.skipIf(!isChild)("mirrorGitRepoIssuesToGitea content options", () => {
+  const baseArgs = (octokit: any, extra: Record<string, unknown> = {}) => ({
+    config,
+    octokit,
+    repository,
+    giteaOwner: DEST_OWNER,
+    giteaRepoName: DEST_REPO,
+    ...extra,
+  });
+
+  it("lists every state and creates only the issues the filter keeps", async () => {
+    const gitea = fakeGitea([]);
+    const github = fakeOctokit({
+      issueListing: [ghIssue(1), ghIssue(2, { state: "closed" })],
+    });
+
+    const cursor = await mirrorGitRepoIssuesToGitea(
+      baseArgs(github.octokit, { issueState: "open" })
+    );
+
+    expect(github.callsTo("issues.listForRepo")[0]?.params.state).toBe("all");
+    expect(gitea.createdTitles()).toEqual(["[GH-ISSUE #1] Issue 1"]);
+    expect(github.callsTo("issues.listComments").map((c) => c.params.issue_number)).toEqual([1]);
+    expect(cursor?.issueState).toBe("open");
+  });
+
+  it("closes the copy of a mirrored issue that was closed on GitHub", async () => {
+    const gitea = fakeGitea([{ number: 21, title: "[GH-ISSUE #1] Issue 1" }]);
+    const github = fakeOctokit({ issueListing: [ghIssue(1, { state: "closed" })] });
+
+    await mirrorGitRepoIssuesToGitea(baseArgs(github.octokit, { issueState: "open" }));
+
+    const edit = gitea.requests.find(
+      (r) => r.method === "PATCH" && r.url === `${DEST_API}/issues/21`
+    );
+    expect(JSON.parse(edit!.body!).state).toBe("closed");
+  });
+
+  it("runs a full pass when the filter differs from the last pass", async () => {
+    fakeGitea([{ number: 21, title: "[GH-ISSUE #1] Issue 1" }]);
+    const changed = fakeOctokit({ issueListing: [] });
+    await mirrorGitRepoIssuesToGitea(
+      baseArgs(changed.octokit, { issueState: "all", syncCursor: { ...recentCursor(), issueState: "open" } })
+    );
+    expect(changed.callsTo("issues.listForRepo")[0]?.params.since).toBeUndefined();
+
+    fakeGitea([{ number: 21, title: "[GH-ISSUE #1] Issue 1" }]);
+    const same = fakeOctokit({ issueListing: [] });
+    const cursor = recentCursor();
+    await mirrorGitRepoIssuesToGitea(
+      baseArgs(same.octokit, { issueState: "open", syncCursor: { ...cursor, issueState: "open" } })
+    );
+    expect(same.callsTo("issues.listForRepo")[0]?.params.since).toBe(expectedSince(cursor));
+  });
+
+  it("skips comments when the comments option is off", async () => {
+    fakeGitea([]);
+    const github = fakeOctokit({ issueListing: [ghIssue(1)] });
+
+    await mirrorGitRepoIssuesToGitea(baseArgs(github.octokit, { includeComments: false }));
+
+    expect(github.callsTo("issues.listComments")).toHaveLength(0);
+  });
+
+  it("keeps media by default and strips it when the media option is off", async () => {
+    const issue = ghIssue(1, {
+      body: "Before ![shot](https://user-images.githubusercontent.com/1/a.png) after",
+    });
+
+    const giteaWithMedia = fakeGitea([]);
+    const withMedia = fakeOctokit({ issueListing: [issue] });
+    await mirrorGitRepoIssuesToGitea(baseArgs(withMedia.octokit));
+
+    const giteaWithoutMedia = fakeGitea([]);
+    const withoutMedia = fakeOctokit({ issueListing: [issue] });
+    await mirrorGitRepoIssuesToGitea(
+      baseArgs(withoutMedia.octokit, { includeMedia: false })
+    );
+
+    expect(giteaWithMedia.createdBodies()[0]).toContain(
+      "user-images.githubusercontent.com"
+    );
+    expect(giteaWithoutMedia.createdBodies()[0]).toContain("[media omitted]");
+    expect(giteaWithoutMedia.createdBodies()[0]).not.toContain(
+      "user-images.githubusercontent.com"
+    );
   });
 });

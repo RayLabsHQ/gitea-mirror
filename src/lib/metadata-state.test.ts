@@ -44,6 +44,7 @@ describe("sync cursor parsing", () => {
     state.syncCursors.issues = {
       lastPassStartedAt: "2026-09-20T10:00:00.000Z",
       lastFullPassStartedAt: "2026-09-18T10:00:00.000Z",
+      issueState: "open",
     };
     state.syncCursors.pullRequests = {
       lastPassStartedAt: "2026-09-20T11:00:00.000Z",
