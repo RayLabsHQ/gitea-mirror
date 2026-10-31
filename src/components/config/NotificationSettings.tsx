@@ -476,7 +476,7 @@ export function NotificationSettings({
           <CardSection>
             <SwitchRow
               label="Sync errors"
-              description="Notify when a mirror job fails"
+              description="Notify when a mirror job fails or needs attention"
               checked={notificationConfig.notifyOnSyncError}
               onCheckedChange={(checked) =>
                 onNotificationChange({

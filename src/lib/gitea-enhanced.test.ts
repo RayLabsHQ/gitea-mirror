@@ -1059,6 +1059,131 @@ describe("Enhanced Gitea Operations", () => {
       });
     });
 
+    describe("stalled mirror sync (#493)", () => {
+      const stallConfig = {
+        userId: "user123",
+        githubConfig: { username: "testuser", token: "github-token", privateRepositories: false, mirrorStarred: true },
+        giteaConfig: { url: "https://gitea.example.com", token: "encrypted-token", defaultOwner: "testuser", mirrorReleases: false },
+      } as unknown as Partial<Config>;
+      const stallDependencies = {
+        getGiteaRepoOwnerAsync: mockGetGiteaRepoOwnerAsync,
+        mirrorGitHubReleasesToGitea: mockMirrorGitHubReleasesToGitea,
+        mirrorGitRepoIssuesToGitea: mockMirrorGitRepoIssuesToGitea,
+        mirrorGitRepoPullRequestsToGitea: mockMirrorGitRepoPullRequestsToGitea,
+        mirrorGitRepoLabelsToGitea: mockMirrorGitRepoLabelsToGitea,
+        mirrorGitRepoMilestonesToGitea: mockMirrorGitRepoMilestonesToGitea,
+        syncRepositoryMetadataToGitea: mockSyncRepositoryMetadataToGitea,
+      };
+      const repoUrl = "https://gitea.example.com/api/v1/repos/starred/test-repo";
+      const mirrorUpdated = "2026-10-20T07:55:12Z";
+      const stallRepository = (metadata?: unknown): Repository => ({
+        id: "repo-stall", name: "test-repo", fullName: "ceph/test-repo", owner: "ceph",
+        cloneUrl: "https://github.com/ceph/test-repo.git", isPrivate: false, isStarred: true,
+        status: repoStatusEnum.parse("synced"), visibility: "public", userId: "user123",
+        mirroredLocation: "starred/test-repo", createdAt: new Date(), updatedAt: new Date(),
+        metadata: metadata === undefined ? null : JSON.stringify(metadata),
+      } as Repository);
+      const warningJobs = () =>
+        mockCreateMirrorJob.mock.calls
+          .map((call: any[]) => call[0])
+          .filter((job: any) => job.status === "warning");
+      const storedRequest = () => {
+        const successUpdate = dbUpdateSetCalls.find((data) => "lastMirrored" in data);
+        return JSON.parse(successUpdate.metadata).mirrorSyncRequest;
+      };
+
+      const withMirrorUpdated = async (value: string, run: () => Promise<void>) => {
+        const defaultGet = mockHttpGet.getMockImplementation()!;
+        mockHttpGet.mockImplementation(async (url: string, headers?: any) => {
+          const response: any = await defaultGet(url, headers);
+          return url === repoUrl
+            ? { ...response, data: { ...response.data, mirror_updated: value } }
+            : response;
+        });
+        try {
+          await run();
+        } finally {
+          mockHttpGet.mockImplementation(defaultGet);
+        }
+      };
+
+      test("records the request against the mirror_updated read before it", async () => {
+        await withMirrorUpdated(mirrorUpdated, async () => {
+          const result = await syncGiteaRepoEnhanced(
+            { config: stallConfig, repository: stallRepository() },
+            stallDependencies
+          );
+          expect(result).toEqual({ success: true });
+        });
+
+        expect(storedRequest()).toEqual({
+          requestedAt: expect.any(String),
+          mirrorUpdatedBefore: mirrorUpdated,
+        });
+        expect(warningJobs()).toHaveLength(0);
+      });
+
+      test("warns once when Gitea never ran the previous request", async () => {
+        const requestedAt = new Date(Date.now() - 8 * 60 * 60 * 1000).toISOString();
+
+        await withMirrorUpdated(mirrorUpdated, async () => {
+          await syncGiteaRepoEnhanced(
+            {
+              config: stallConfig,
+              repository: stallRepository({ mirrorSyncRequest: { requestedAt, mirrorUpdatedBefore: mirrorUpdated } }),
+            },
+            stallDependencies
+          );
+        });
+
+        const warnings = warningJobs();
+        expect(warnings).toHaveLength(1);
+        expect(warnings[0].message).toBe("Gitea has not run the requested sync for starred/test-repo");
+        expect(warnings[0].details).toContain("requested 8 hours ago");
+        expect(warnings[0].details).toContain(`still ${mirrorUpdated}`);
+        expect(warnings[0].details).toContain("Monitoring > Queues > mirror");
+        expect(warnings[0].skipNotification).toBe(true);
+        // The original request is kept, now marked as reported.
+        expect(storedRequest()).toEqual({
+          requestedAt,
+          mirrorUpdatedBefore: mirrorUpdated,
+          warnedAt: expect.any(String),
+        });
+
+        // The next sync finds the same request still waiting and stays quiet.
+        mockCreateMirrorJob.mockClear();
+        const warnedMetadata = dbUpdateSetCalls.find((data) => "lastMirrored" in data).metadata;
+        dbUpdateSetCalls.length = 0;
+        await withMirrorUpdated(mirrorUpdated, async () => {
+          await syncGiteaRepoEnhanced(
+            { config: stallConfig, repository: stallRepository(JSON.parse(warnedMetadata)) },
+            stallDependencies
+          );
+        });
+        expect(warningJobs()).toHaveLength(0);
+      });
+
+      test("starts over once Gitea ran the previous request", async () => {
+        const requestedAt = new Date(Date.now() - 8 * 60 * 60 * 1000).toISOString();
+        const ranAt = "2026-10-20T08:00:03Z";
+
+        await withMirrorUpdated(ranAt, async () => {
+          await syncGiteaRepoEnhanced(
+            {
+              config: stallConfig,
+              repository: stallRepository({ mirrorSyncRequest: { requestedAt, mirrorUpdatedBefore: mirrorUpdated } }),
+            },
+            stallDependencies
+          );
+        });
+
+        expect(warningJobs()).toHaveLength(0);
+        const record = storedRequest();
+        expect(record.mirrorUpdatedBefore).toBe(ranAt);
+        expect(Date.parse(record.requestedAt)).toBeGreaterThan(Date.parse(requestedAt));
+      });
+    });
+
     describe("GitHub App sources", () => {
       const appConfig = {
         userId: "user123",

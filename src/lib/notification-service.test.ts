@@ -18,7 +18,7 @@ mock.module("@/lib/utils/encryption", () => ({
 }));
 
 // Import after mocks are set up — db is already mocked via setup.bun.ts
-import { sendNotification, testNotification, buildNewRepositoriesNotificationEvent, buildAllReleasesRemovedNotificationEvent, triggerAllReleasesRemovedNotification, isNewRepositoryGroupEnabled, MAX_LISTED_NEW_REPOSITORIES, STARRED_GROUP_LABEL } from "./notification-service";
+import { sendNotification, testNotification, buildNewRepositoriesNotificationEvent, buildAllReleasesRemovedNotificationEvent, triggerAllReleasesRemovedNotification, buildMirrorSyncStalledNotificationEvent, claimMirrorSyncStalledNotification, resetMirrorSyncStalledNotifications, triggerMirrorSyncStalledNotification, MIRROR_SYNC_STALLED_NOTIFICATION_INTERVAL_MS, isNewRepositoryGroupEnabled, MAX_LISTED_NEW_REPOSITORIES, STARRED_GROUP_LABEL } from "./notification-service";
 import type { NotificationConfig } from "@/types/config";
 
 describe("sendNotification", () => {
@@ -557,5 +557,59 @@ describe("triggerAllReleasesRemovedNotification", () => {
     });
 
     expect(mockFetch).toHaveBeenCalledTimes(0);
+  });
+});
+
+describe("buildMirrorSyncStalledNotificationEvent", () => {
+  test("names the destination, how long it waited and where to look in Gitea", () => {
+    const event = buildMirrorSyncStalledNotificationEvent({
+      repositoryName: "demo",
+      destination: "mirrors/demo",
+      waited: "8 hours",
+      mirrorUpdated: "2026-10-20T07:55:12Z",
+    });
+
+    expect(event.title).toBe("Mirror Sync Stalled: demo");
+    expect(event.type).toBe("sync_error");
+    expect(event.message).toContain("sync requested for mirrors/demo 8 hours ago");
+    expect(event.message).toContain("still 2026-10-20T07:55:12Z");
+    expect(event.message).toContain("Site Administration > Monitoring > Queues > mirror");
+  });
+});
+
+describe("claimMirrorSyncStalledNotification", () => {
+  beforeEach(() => resetMirrorSyncStalledNotifications());
+
+  test("allows one alert per user per window", () => {
+    const start = Date.parse("2026-10-20T08:00:00.000Z");
+
+    expect(claimMirrorSyncStalledNotification("user-1", start)).toBe(true);
+    expect(claimMirrorSyncStalledNotification("user-1", start + 1000)).toBe(false);
+    expect(claimMirrorSyncStalledNotification("user-2", start + 1000)).toBe(true);
+    expect(
+      claimMirrorSyncStalledNotification("user-1", start + MIRROR_SYNC_STALLED_NOTIFICATION_INTERVAL_MS - 1)
+    ).toBe(false);
+    expect(
+      claimMirrorSyncStalledNotification("user-1", start + MIRROR_SYNC_STALLED_NOTIFICATION_INTERVAL_MS)
+    ).toBe(true);
+  });
+});
+
+describe("triggerMirrorSyncStalledNotification", () => {
+  beforeEach(() => resetMirrorSyncStalledNotifications());
+
+  test("never throws and keeps the alert slot when the user has no notification config", async () => {
+    await triggerMirrorSyncStalledNotification({
+      userId: "user-1",
+      repositoryName: "demo",
+      destination: "mirrors/demo",
+      waited: "8 hours",
+      mirrorUpdated: "2026-10-20T07:55:12Z",
+    });
+
+    expect(mockFetch).toHaveBeenCalledTimes(0);
+    // Nothing was sent, so the slot is still free for a user who turns
+    // notifications on later.
+    expect(claimMirrorSyncStalledNotification("user-1")).toBe(true);
   });
 });

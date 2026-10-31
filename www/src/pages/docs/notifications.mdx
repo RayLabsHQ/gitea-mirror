@@ -26,7 +26,7 @@ The **Notification Events** card controls which job outcomes produce a notificat
 
 | Event | Fires when | Default |
 |---|---|---|
-| Sync errors | A mirror job ends with status `failed` | On |
+| Sync errors | A mirror job ends with status `failed`, the release filters remove every release of a destination, or Gitea has not run a sync it accepted for over an hour (at most one such alert every six hours) | On |
 | Sync success | A mirror job ends with status `mirrored` or `synced` | Off |
 | New repository discovered | Not yet implemented, the switch is disabled and marked SOON | Off |
 

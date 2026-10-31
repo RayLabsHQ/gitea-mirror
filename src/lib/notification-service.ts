@@ -7,6 +7,7 @@ import { sendWebhookNotification } from "./providers/webhook";
 import { db, configs } from "@/lib/db";
 import { eq, sql } from "drizzle-orm";
 import { decrypt } from "@/lib/utils/encryption";
+import { STUCK_MIRROR_QUEUE_HINT } from "./mirror-sync-health";
 
 function sanitizeTestNotificationError(error: unknown): string {
   if (!(error instanceof Error)) {
@@ -427,5 +428,93 @@ export async function triggerAllReleasesRemovedNotification(args: {
     await sendNotification(decryptNotificationConfig(notificationConfig), event);
   } catch (error) {
     console.error("[NotificationService] All-releases-removed notification failed:", error);
+  }
+}
+
+/**
+ * The "Gitea never ran the requested sync" event (#493).
+ *
+ * A stuck mirror queue holds back every repository at once, so the text
+ * points at the queue rather than the one repository that happened to be
+ * checked first.
+ */
+export function buildMirrorSyncStalledNotificationEvent({
+  repositoryName,
+  destination,
+  waited,
+  mirrorUpdated,
+}: {
+  repositoryName: string;
+  destination: string;
+  /** How long ago the request was accepted, already formatted. */
+  waited: string;
+  mirrorUpdated: string;
+}): NotificationEvent {
+  return {
+    title: `Mirror Sync Stalled: ${repositoryName}`,
+    message: [
+      `Gitea has not run the sync requested for ${destination} ${waited} ago; its last mirror run is still ${mirrorUpdated}.`,
+      ` ${STUCK_MIRROR_QUEUE_HINT}`,
+      " Other repositories held back by the same queue are listed in the Activity Log.",
+    ].join(""),
+    type: "sync_error",
+  };
+}
+
+/**
+ * At most one stalled-sync alert per user in this window. Every repository
+ * reports its own stall in the activity log; the push channels only need to
+ * hear that something is wrong.
+ */
+export const MIRROR_SYNC_STALLED_NOTIFICATION_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+const lastMirrorSyncStalledNotification = new Map<string, number>();
+
+/**
+ * Takes this user's alert slot when the last alert is outside the window.
+ * Kept in memory: a restart allows one more alert, which is fine.
+ */
+export function claimMirrorSyncStalledNotification(userId: string, now: number = Date.now()): boolean {
+  const last = lastMirrorSyncStalledNotification.get(userId);
+  if (last !== undefined && now - last < MIRROR_SYNC_STALLED_NOTIFICATION_INTERVAL_MS) {
+    return false;
+  }
+  lastMirrorSyncStalledNotification.set(userId, now);
+  return true;
+}
+
+/** Test hook: forget when each user was last alerted. */
+export function resetMirrorSyncStalledNotifications(): void {
+  lastMirrorSyncStalledNotification.clear();
+}
+
+/**
+ * Warns that Gitea accepted a sync request but never ran it. The existing
+ * "Sync errors" switch gates the alert.
+ *
+ * Called fire-and-forget from the sync path, so it NEVER throws.
+ */
+export async function triggerMirrorSyncStalledNotification(args: {
+  userId: string;
+  repositoryName: string;
+  destination: string;
+  waited: string;
+  mirrorUpdated: string;
+}): Promise<void> {
+  try {
+    const notificationConfig = await loadNotificationConfig(args.userId);
+
+    if (!notificationConfig?.enabled || !notificationConfig.notifyOnSyncError) {
+      return;
+    }
+    if (!claimMirrorSyncStalledNotification(args.userId)) {
+      return;
+    }
+
+    const event = buildMirrorSyncStalledNotificationEvent(args);
+
+    await sendNotification(decryptNotificationConfig(notificationConfig), event);
+  } catch (error) {
+    console.error("[NotificationService] Mirror sync stalled notification failed:", error);
   }
 }
