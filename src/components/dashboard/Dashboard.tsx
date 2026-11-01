@@ -7,7 +7,8 @@ import type { MirrorJob, Organization, Repository } from "@/lib/db/schema";
 import { readPageCache, writePageCache } from "@/lib/page-cache";
 import { useAuth } from "@/hooks/useAuth";
 import { apiRequest, showErrorToast } from "@/lib/utils";
-import type { DashboardApiResponse } from "@/types/dashboard";
+import { DASHBOARD_LIST_LIMIT, type DashboardApiResponse } from "@/types/dashboard";
+import { useFittingRowCount } from "@/hooks/useFittingRowCount";
 import { useSSE } from "@/hooks/useSEE";
 import { toast } from "sonner";
 import { useEffect as useEffectForToasts } from "react";
@@ -86,6 +87,15 @@ export function Dashboard() {
   const [orgCount, setOrgCount] = useState<number>(cached?.orgCount ?? 0);
   const [mirroredCount, setMirroredCount] = useState<number>(cached?.mirroredCount ?? 0);
   const [lastSync, setLastSync] = useState<Date | null>(cached?.lastSync ?? null);
+
+  // The repository and activity lists end at the bottom of the screen: more
+  // rows on a tall screen, fewer on a short one.
+  const [listsElement, setListsElement] = useState<HTMLDivElement | null>(null);
+  const visibleRows = useFittingRowCount(listsElement, {
+    min: 5,
+    max: DASHBOARD_LIST_LIMIT,
+    fallback: 8,
+  });
 
   // Dashboard auto-refresh timer (30 seconds)
   const dashboardTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -360,13 +370,13 @@ export function Dashboard() {
         />
       </div>
 
-      <div className="flex flex-col lg:flex-row gap-6">
+      <div ref={setListsElement} className="flex flex-col lg:flex-row gap-6">
         <div className="w-full lg:w-1/2">
-          <RepositoryList repositories={repositories.slice(0, 8)} />
+          <RepositoryList repositories={repositories.slice(0, visibleRows)} />
         </div>
 
         <div className="w-full lg:w-1/2">
-          <RecentActivity activities={activities.slice(0, 8)} />
+          <RecentActivity activities={activities.slice(0, visibleRows)} />
         </div>
       </div>
     </div>

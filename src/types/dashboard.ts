@@ -2,6 +2,12 @@ import type { Repository } from "@/lib/db/schema";
 import type { Organization } from "@/lib/db/schema";
 import type { MirrorJob } from "@/lib/db/schema";
 
+/**
+ * The most repositories and activities the dashboard API returns. The
+ * dashboard shows as many as fit on the screen, up to this.
+ */
+export const DASHBOARD_LIST_LIMIT = 50;
+
 export interface DashboardApiSuccessResponse {
   success: true;
   message: string;

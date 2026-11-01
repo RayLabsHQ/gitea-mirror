@@ -292,7 +292,7 @@ export function OrganizationList({
         ))}
       </div>
     ) : (
-      <div className="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,minmax(27rem,1fr))] gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,minmax(30rem,1fr))] gap-4">
         {Array.from({ length: 5 }).map((_, i) => (
           <Skeleton key={i} className="h-[11.25rem] w-full" />
         ))}
@@ -350,7 +350,7 @@ export function OrganizationList({
       {overridesDialog}
     </>
   ) : (
-    <div className="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,minmax(27rem,1fr))] gap-4 pb-20 sm:pb-0">
+    <div className="grid grid-cols-1 sm:grid-cols-[repeat(auto-fill,minmax(30rem,1fr))] gap-4 pb-20 sm:pb-0">
       {filteredOrganizations.map((org, index) => {
         const isLoading = loadingOrgIds.has(org.id ?? "");
         const statusBadge = getStatusBadge(org.status);
@@ -748,8 +748,9 @@ export function OrganizationList({
               </div>
             </div>
             
-            {/* Desktop Actions */}
-            <div className="hidden sm:flex items-center justify-between mt-4">
+            {/* Desktop Actions. The grid's 30rem column fits this row with
+                "Successfully mirrored"; a longer label wraps the links below. */}
+            <div className="hidden sm:flex flex-wrap items-center justify-between gap-y-2 mt-4">
               <div className="flex items-center gap-2">
                 {org.status === "ignored" ? (
                   <Button

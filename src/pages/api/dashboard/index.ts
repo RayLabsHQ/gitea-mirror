@@ -2,7 +2,7 @@ import type { APIRoute } from "astro";
 import { db, repositories, organizations, mirrorJobs, configs } from "@/lib/db";
 import { eq, count, and, sql, or, isNotNull } from "drizzle-orm";
 import { jsonResponse, createSecureErrorResponse } from "@/lib/utils";
-import type { DashboardApiResponse } from "@/types/dashboard";
+import { DASHBOARD_LIST_LIMIT, type DashboardApiResponse } from "@/types/dashboard";
 import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 
 export const GET: APIRoute = async ({ request, locals }) => {
@@ -26,7 +26,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
         .from(repositories)
         .where(eq(repositories.userId, userId))
         .orderBy(sql`${repositories.updatedAt} DESC`)
-        .limit(10),
+        .limit(DASHBOARD_LIST_LIMIT),
       db
         .select()
         .from(organizations)
@@ -40,7 +40,7 @@ export const GET: APIRoute = async ({ request, locals }) => {
         // Timestamps are stored to the second; rowid keeps events written in
         // the same second newest first too (#454).
         .orderBy(sql`${mirrorJobs.timestamp} DESC, ${mirrorJobs}.rowid DESC`)
-        .limit(10),
+        .limit(DASHBOARD_LIST_LIMIT),
       db
         .select()
         .from(configs)
