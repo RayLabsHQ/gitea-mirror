@@ -69,7 +69,7 @@ export function RecentActivity({ activities }: RecentActivityProps) {
             </div>
           </div>
         ) : (
-          <div className="flex flex-col divide-y divide-border">
+          <div data-fit-rows className="flex flex-col divide-y divide-border">
             {activities.map((activity, index) => {
               const { Icon, color } = activityIcon(activity.status);
               return (

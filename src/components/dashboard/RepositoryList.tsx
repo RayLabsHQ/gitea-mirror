@@ -65,7 +65,7 @@ export function RepositoryList({ repositories }: RepositoryListProps) {
             </Button>
           </div>
         ) : (
-          <div className="flex flex-col divide-y divide-border">
+          <div data-fit-rows className="flex flex-col divide-y divide-border">
             {repositories.map((repo, index) => (
               <div
                 key={index}
