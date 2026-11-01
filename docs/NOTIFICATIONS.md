@@ -105,7 +105,7 @@ The secret is encrypted at rest.
 
 | Event | Default | Description |
 |-------|---------|-------------|
-| Sync errors | On | A mirror job failed |
+| Sync errors | On | A mirror job failed, the release filters removed every release of a destination, or Gitea accepted a sync request and has not run it for over an hour (at most one such alert every six hours) |
 | Sync success | Off | A mirror job completed successfully |
 | New repositories discovered | Off | New repositories were discovered and imported; the three switches below select which ones |
 | &nbsp;&nbsp;In your account | On | Repositories owned by your account |
