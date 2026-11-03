@@ -33,7 +33,15 @@ import {
   sourceAccessToken,
 } from "./sources";
 import { triggerAllReleasesRemovedNotification } from "./notification-service";
-import { isRateLimitError } from "./rate-limit-gate";
+import {
+  RATE_LIMIT_FAST_FAIL_THRESHOLD_SECONDS,
+  RateLimitPausedError,
+  isRateLimitError,
+  markRateLimited,
+  rateLimitGateKey,
+  rateLimitResetFromResponse,
+  waitForRateLimitGate,
+} from "./rate-limit-gate";
 import { assertMirrorCredentialUpdateSupported } from "./gitea-mirror-credentials";
 import { persistMetadataPassProgress } from "./metadata-progress-store";
 import { summarizeReleaseAssets } from "./repository-storage";
@@ -3624,6 +3632,64 @@ export function classifyReleasesForReconciliation(
 }
 
 /**
+ * Download one release asset from its source host.
+ *
+ * GitHub: `browser_download_url` (github.com/<owner>/<repo>/releases/download/...)
+ * is meant for browsers. For a private repository it only accepts a logged-in
+ * session and answers 404 to any API token, classic or fine-grained, so those
+ * assets carry `api_url`: the REST asset URL, which with
+ * `Accept: application/octet-stream` answers 302 to a pre-signed object-storage
+ * URL (or, rarely, 200 with the content). The redirect is followed by hand so the
+ * token is never sent to the storage host, whatever the runtime's redirect header
+ * policy is.
+ *
+ * A REST download spends the same budget as any other GitHub API call but does not
+ * go through Octokit, so it answers to the rate limit gate here: nothing is sent
+ * while the gate is closed, and a refusal closes it for the assets after this one
+ * (#437).
+ *
+ * Everything else uses browser_download_url: public GitHub assets, which cost no
+ * API budget that way, and Gitea / Forgejo, whose URL accepts that instance's token.
+ */
+async function downloadSourceAsset(
+  doFetch: typeof fetch,
+  asset: { browser_download_url: string; api_url?: string },
+  downloadAuthorization: string | null,
+  rateLimitKey: string
+): Promise<Response> {
+  if (asset.api_url && downloadAuthorization) {
+    await waitForRateLimitGate(
+      { key: rateLimitKey, maxWaitMs: RATE_LIMIT_FAST_FAIL_THRESHOLD_SECONDS * 1000 },
+      `GET ${asset.api_url}`
+    );
+    const first = await doFetch(asset.api_url, {
+      headers: { Accept: "application/octet-stream", Authorization: downloadAuthorization },
+      redirect: "manual",
+    });
+    const resetAt = rateLimitResetFromResponse(first);
+    if (resetAt) {
+      markRateLimited(rateLimitKey, resetAt);
+    }
+    if (first.status < 300 || first.status >= 400) {
+      return first;
+    }
+    const location = first.headers.get("location");
+    if (!location) {
+      return first;
+    }
+    return doFetch(new URL(location, asset.api_url).toString(), {
+      headers: { Accept: "application/octet-stream" },
+    });
+  }
+  return doFetch(asset.browser_download_url, {
+    headers: {
+      Accept: "application/octet-stream",
+      ...(downloadAuthorization ? { Authorization: downloadAuthorization } : {}),
+    },
+  });
+}
+
+/**
  * Decide what to upload, keep and delete for one release's assets.
  *
  * Destination attachments are grouped by name because the destination happily
@@ -3749,7 +3815,7 @@ export async function reconcileReleaseAssets({
   repoOwner: string;
   repoName: string;
   giteaReleaseId: number;
-  sourceAssets: Array<{ name: string; size: number; browser_download_url: string }>;
+  sourceAssets: Array<{ name: string; size: number; browser_download_url: string; api_url?: string }>;
   /**
    * Authorization header value for the download requests, or null for none.
    * The caller supplies it because the assets live on the repository's own
@@ -3853,18 +3919,17 @@ export async function reconcileReleaseAssets({
     }
 
     try {
-      // Download from the source host. fetch strips the Authorization header
-      // on a cross-host redirect (GitHub redirects to its object storage), so
-      // this works for both public and private release assets.
+      // Download from the source host (see downloadSourceAsset: private GitHub
+      // repositories go through the REST asset URL).
       console.log(
         `[Releases] Downloading asset: ${asset.name} (${asset.size} bytes) for ${tagName}`
       );
-      const assetResponse = await doFetch(asset.browser_download_url, {
-        headers: {
-          Accept: "application/octet-stream",
-          ...(downloadAuthorization ? { Authorization: downloadAuthorization } : {}),
-        },
-      });
+      const assetResponse = await downloadSourceAsset(
+        doFetch,
+        asset,
+        downloadAuthorization,
+        rateLimitGateKey(config.userId)
+      );
 
       if (!assetResponse.ok) {
         console.error(
@@ -3899,6 +3964,9 @@ export async function reconcileReleaseAssets({
         failed++;
       }
     } catch (assetError) {
+      // The gate is closed for longer than a request may wait: every asset left
+      // would be refused too, so stop here and let the sync report the pause.
+      if (assetError instanceof RateLimitPausedError) throw assetError;
       console.error(
         `[Releases] Error processing asset ${asset.name}: ${
           assetError instanceof Error ? assetError.message : String(assetError)
@@ -4188,6 +4256,9 @@ export async function mirrorGitHubReleasesToGitea(params: MirrorReleasesParams) 
             name: asset.name,
             size: asset.size,
             browser_download_url: asset.browser_download_url,
+            // Private only: this URL costs a REST request per download, and a
+            // public repository's browser URL works and costs none.
+            ...(rest.repository.isPrivate ? { api_url: asset.url } : {}),
           })),
         }));
       },
@@ -4552,6 +4623,7 @@ async function mirrorSourceReleasesToGiteaLocked({
       const noteInfo = originalReleaseNote ? ` with ${originalReleaseNote.length} character changelog` : " without changelog";
       console.log(`[Releases] Successfully mirrored release: ${release.tag_name}${noteInfo}`);
     } catch (error) {
+      if (error instanceof RateLimitPausedError) throw error;
       console.error(`[Releases] Failed to mirror release ${release.tag_name}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }

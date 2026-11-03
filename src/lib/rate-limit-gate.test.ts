@@ -6,6 +6,7 @@ import {
   isRateLimitError,
   markRateLimited,
   rateLimitGateKey,
+  rateLimitResetFromResponse,
   rateLimitedUntil,
 } from "@/lib/rate-limit-gate";
 
@@ -152,5 +153,38 @@ describe("isRateLimitError", () => {
         Object.assign(new Error("see the rate limit documentation"), { status: 404 })
       )
     ).toBe(false);
+  });
+});
+
+describe("rateLimitResetFromResponse", () => {
+  const now = new Date("2026-11-03T10:00:00.000Z");
+  const reply = (status: number, headers: Record<string, string> = {}) =>
+    new Response(null, { status, headers });
+
+  test("a primary limit gives the reset GitHub announced, on 403 and on 429", () => {
+    const reset = now.getTime() / 1000 + 1800;
+    const headers = { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(reset) };
+    expect(rateLimitResetFromResponse(reply(403, headers), now)?.getTime()).toBe(reset * 1000);
+    expect(rateLimitResetFromResponse(reply(429, headers), now)?.getTime()).toBe(reset * 1000);
+  });
+
+  test("a secondary limit gives retry-after, even with budget left", () => {
+    const headers = { "retry-after": "90", "x-ratelimit-remaining": "4000" };
+    expect(rateLimitResetFromResponse(reply(403, headers), now)?.getTime()).toBe(now.getTime() + 90_000);
+  });
+
+  test("a bare 429 waits a minute", () => {
+    expect(rateLimitResetFromResponse(reply(429), now)?.getTime()).toBe(now.getTime() + 60_000);
+  });
+
+  test("a 403 with budget left is a permission failure, not a limit", () => {
+    expect(rateLimitResetFromResponse(reply(403), now)).toBeNull();
+    expect(rateLimitResetFromResponse(reply(403, { "x-ratelimit-remaining": "4000" }), now)).toBeNull();
+  });
+
+  test("any other status is not a refusal", () => {
+    const headers = { "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1893456000" };
+    expect(rateLimitResetFromResponse(reply(302, headers), now)).toBeNull();
+    expect(rateLimitResetFromResponse(reply(200, headers), now)).toBeNull();
   });
 });
