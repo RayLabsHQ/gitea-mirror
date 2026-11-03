@@ -16,6 +16,15 @@
  * (src/lib/rate-limit-manager.ts) still persists the per-user numbers.
  */
 
+/**
+ * Longest wait a request may sleep through inside the throttling plugin.
+ * A primary rate limit resets at a fixed time that is often tens of minutes
+ * away; sleeping that long inside the request holds the scheduler lock for the
+ * whole run (issue #437), so anything longer is handed to the rate limit gate
+ * and the request fails fast instead.
+ */
+export const RATE_LIMIT_FAST_FAIL_THRESHOLD_SECONDS = 120;
+
 /** Gate key for clients built without a user, such as tokenless public sources. */
 export const TOKENLESS_RATE_LIMIT_KEY = "anonymous";
 
@@ -153,6 +162,60 @@ export interface RateLimitGateOptions {
 }
 
 /**
+ * Hold one request while the gate is closed: a reset within `maxWaitMs` is
+ * waited out, a longer one throws RateLimitPausedError before anything is sent.
+ */
+export async function waitForRateLimitGate(
+  options: RateLimitGateOptions,
+  endpoint: string
+): Promise<void> {
+  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const now = options.now ?? (() => new Date());
+
+  const until = rateLimitedUntil(options.key, now());
+  if (!until) return;
+
+  const waitMs = until.getTime() - now().getTime();
+  if (waitMs > options.maxWaitMs) {
+    throw new RateLimitPausedError(until, endpoint);
+  }
+  // Small cushion: GitHub's reset is second precision.
+  await sleep(waitMs + 1000);
+}
+
+/**
+ * When a raw GitHub response says the request was refused for a rate limit, the
+ * time it can be sent again, otherwise null. For the few requests that go around
+ * Octokit, whose throttle handler reads this for everything else.
+ *
+ * Both limits answer 403 or 429: a secondary limit sends retry-after, a primary
+ * one sends x-ratelimit-remaining: 0 with x-ratelimit-reset. A 403 with neither
+ * is a permission failure, and a bare 429 gets the minute GitHub asks for.
+ */
+export function rateLimitResetFromResponse(
+  response: Pick<Response, "status" | "headers">,
+  now: Date = new Date()
+): Date | null {
+  if (response.status !== 403 && response.status !== 429) {
+    return null;
+  }
+
+  const retryAfter = Number(response.headers.get("retry-after"));
+  if (Number.isFinite(retryAfter) && retryAfter > 0) {
+    return new Date(now.getTime() + retryAfter * 1000);
+  }
+
+  if (response.headers.get("x-ratelimit-remaining") === "0") {
+    const reset = Number(response.headers.get("x-ratelimit-reset"));
+    if (Number.isFinite(reset) && reset > 0) {
+      return new Date(reset * 1000);
+    }
+  }
+
+  return response.status === 429 ? new Date(now.getTime() + 60_000) : null;
+}
+
+/**
  * Hold every request of an Octokit client while its gate is closed
  * (issue #437, second report).
  *
@@ -168,9 +231,6 @@ export function installRateLimitGate(octokit: unknown, options: RateLimitGateOpt
   const hook = (octokit as { hook?: { wrap?: unknown } })?.hook;
   if (typeof hook?.wrap !== "function") return;
 
-  const sleep = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
-  const now = options.now ?? (() => new Date());
-
   (hook.wrap as (name: string, wrapper: (request: any, requestOptions: any) => Promise<any>) => void)(
     "request",
     async (request, requestOptions) => {
@@ -179,15 +239,7 @@ export function installRateLimitGate(octokit: unknown, options: RateLimitGateOpt
         return request(requestOptions);
       }
 
-      const until = rateLimitedUntil(options.key, now());
-      if (until) {
-        const waitMs = until.getTime() - now().getTime();
-        if (waitMs > options.maxWaitMs) {
-          throw new RateLimitPausedError(until, `${requestOptions?.method ?? "GET"} ${url}`);
-        }
-        // Small cushion: GitHub's reset is second precision.
-        await sleep(waitMs + 1000);
-      }
+      await waitForRateLimitGate(options, `${requestOptions?.method ?? "GET"} ${url}`);
 
       return request(requestOptions);
     }

@@ -94,6 +94,7 @@ if (isChild) {
   }));
 }
 
+const { clearAllRateLimits, markRateLimited, rateLimitGateKey } = await import("@/lib/rate-limit-gate");
 const { mirrorGiteaSourceReleasesToGitea, mirrorGitHubReleasesToGitea } = isChild
   ? await import("@/lib/gitea")
   : ({} as typeof import("@/lib/gitea"));
@@ -190,7 +191,11 @@ function fakeWorld(options: DestinationOptions) {
     }
 
     // Downloading an asset from the source host.
-    if (url.startsWith(`${SOURCE_URL}/attachments/`) || url.startsWith("https://github.com/")) {
+    if (
+      url.startsWith(`${SOURCE_URL}/attachments/`) ||
+      url.startsWith("https://github.com/") ||
+      url.startsWith("https://api.github.com/")
+    ) {
       return new Response(new Uint8Array([1, 2, 3, 4]), { status: 200 });
     }
 
@@ -283,7 +288,10 @@ function fakeWorld(options: DestinationOptions) {
     uploads: () => requests.filter((r) => r.method === "POST" && r.url.includes("/assets?name=")),
     downloads: () =>
       requests.filter(
-        (r) => r.url.startsWith(`${SOURCE_URL}/attachments/`) || r.url.startsWith("https://github.com/")
+        (r) =>
+          r.url.startsWith(`${SOURCE_URL}/attachments/`) ||
+          r.url.startsWith("https://github.com/") ||
+          r.url.startsWith("https://api.github.com/")
       ),
     assetListings: () =>
       requests.filter((r) => r.method === "GET" && /\/releases\/\d+\/assets$/.test(r.url)),
@@ -863,6 +871,75 @@ describe.skipIf(!isChild)("mirrorGitHubReleasesToGitea keeps its own header and 
       },
     } as any;
   }
+
+  function githubReleaseWithAsset(tag: string) {
+    return {
+      tag_name: tag,
+      name: `Release ${tag}`,
+      body: "",
+      draft: false,
+      prerelease: false,
+      created_at: "2026-01-01T00:00:00Z",
+      published_at: "2026-01-01T00:00:00Z",
+      assets: [
+        {
+          name: `${tag}.bin`,
+          size: 4,
+          url: `https://api.github.com/repos/acme/demo/releases/assets/${tag}`,
+          browser_download_url: `https://github.com/acme/demo/releases/download/${tag}/${tag}.bin`,
+        },
+      ],
+    };
+  }
+
+  function mirrorFromGitHub(releases: Array<Record<string, unknown>>, isPrivate: boolean) {
+    return mirrorGitHubReleasesToGitea({
+      config,
+      octokit: githubOctokit(releases),
+      repository: { ...repository, isPrivate } as Repository,
+      giteaOwner: DEST_OWNER,
+      giteaRepoName: DEST_REPO,
+      releaseLimit: 10,
+      releaseAssetLimit: null,
+    });
+  }
+
+  it("downloads a public repository's assets from the browser URL, which spends no API budget", async () => {
+    const world = fakeWorld({ sourceReleases: [], destinationTags: ["v1.0.0"] });
+
+    await mirrorFromGitHub([githubReleaseWithAsset("v1.0.0")], false);
+
+    expect(world.downloads().map((r) => r.url)).toEqual([
+      "https://github.com/acme/demo/releases/download/v1.0.0/v1.0.0.bin",
+    ]);
+  });
+
+  it("downloads a private repository's assets from the REST asset URL", async () => {
+    const world = fakeWorld({ sourceReleases: [], destinationTags: ["v1.0.0"] });
+
+    await mirrorFromGitHub([githubReleaseWithAsset("v1.0.0")], true);
+
+    expect(world.downloads().map((r) => r.url)).toEqual([
+      "https://api.github.com/repos/acme/demo/releases/assets/v1.0.0",
+    ]);
+    expect(world.uploads()).toHaveLength(1);
+  });
+
+  it("stops the whole pass when the rate limit gate closes, instead of trying the next release", async () => {
+    const world = fakeWorld({ sourceReleases: [], destinationTags: ["v2.0.0", "v1.0.0"] });
+    markRateLimited(rateLimitGateKey("user-1"), Date.now() + 3_600_000);
+
+    try {
+      await expect(
+        mirrorFromGitHub([githubReleaseWithAsset("v2.0.0"), githubReleaseWithAsset("v1.0.0")], true)
+      ).rejects.toThrow("rate limit");
+    } finally {
+      clearAllRateLimits();
+    }
+
+    expect(world.downloads()).toHaveLength(0);
+    expect(world.createdTags()).toEqual(["v2.0.0"]);
+  });
 
   it("writes the GitHub header byte for byte and downloads with the GitHub token", async () => {
     const world = fakeWorld({

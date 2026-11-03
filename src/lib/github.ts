@@ -9,6 +9,7 @@ import {
   conditionalRequestTokenScope,
 } from "@/lib/github-conditional-requests";
 import {
+  RATE_LIMIT_FAST_FAIL_THRESHOLD_SECONDS,
   clearRateLimit,
   installRateLimitGate,
   markRateLimited,
@@ -35,14 +36,7 @@ const MyOctokit: any = (Octokit as any)?.plugin?.call
   ? (Octokit as any).plugin(throttling)
   : (Octokit as any);
 
-/**
- * Longest wait a request may sleep through inside the throttling plugin.
- * A primary rate limit resets at a fixed time that is often tens of minutes
- * away; sleeping that long inside the request holds the scheduler lock for the
- * whole run (issue #437), so anything longer is handed to the rate limit gate
- * and the request fails fast instead.
- */
-export const RATE_LIMIT_FAST_FAIL_THRESHOLD_SECONDS = 120;
+export { RATE_LIMIT_FAST_FAIL_THRESHOLD_SECONDS };
 
 export type RateLimitRetryAction = "retry" | "fail-fast" | "give-up";
 

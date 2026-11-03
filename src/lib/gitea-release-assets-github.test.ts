@@ -17,8 +17,15 @@
  * gitea-release-assets.test.ts): reconcileReleaseAssets takes the fetch to use.
  */
 
-import { describe, expect, it } from "bun:test";
+import { beforeEach, describe, expect, it } from "bun:test";
 import { reconcileReleaseAssets } from "@/lib/gitea";
+import {
+  RateLimitPausedError,
+  clearAllRateLimits,
+  markRateLimited,
+  rateLimitGateKey,
+  rateLimitedUntil,
+} from "@/lib/rate-limit-gate";
 import type { Config } from "@/types/config";
 
 const GITEA_URL = "https://gitea.example.com";
@@ -61,7 +68,13 @@ interface SeenRequest {
   redirect?: string;
 }
 
-function createFakeHosts(options: { apiAnswersWithContent?: boolean } = {}) {
+function createFakeHosts(
+  options: {
+    apiAnswersWithContent?: boolean;
+    /** The asset API refuses every download with this status and these headers. */
+    apiRefusal?: { status: number; headers?: Record<string, string> };
+  } = {}
+) {
   const seen: SeenRequest[] = [];
   const uploads: Array<{ name: string; size: number }> = [];
 
@@ -80,6 +93,9 @@ function createFakeHosts(options: { apiAnswersWithContent?: boolean } = {}) {
     if (url.startsWith(API_ASSET)) {
       if (authorization !== `token ${GITHUB_TOKEN}`) {
         return new Response("Not Found", { status: 404, statusText: "Not Found" });
+      }
+      if (options.apiRefusal) {
+        return new Response("refused", options.apiRefusal);
       }
       if (headers.get("accept") !== "application/octet-stream") {
         throw new Error("asked the asset API for metadata instead of the file");
@@ -162,6 +178,13 @@ function reconcile(
 }
 
 describe("reconcileReleaseAssets: private GitHub repository", () => {
+  // The test config has no userId, so this is the key the downloads use.
+  const gateKey = rateLimitGateKey(undefined);
+
+  beforeEach(() => {
+    clearAllRateLimits();
+  });
+
   it("downloads through the REST asset URL and follows the redirect without the token", async () => {
     const hosts = createFakeHosts();
 
@@ -217,6 +240,67 @@ describe("reconcileReleaseAssets: private GitHub repository", () => {
     expect(result).toEqual({ uploaded: 0, failed: 1, skipped: 0 });
     expect(hosts.uploads).toHaveLength(0);
     expect(hosts.requestsTo(STORAGE)).toHaveLength(0);
+  });
+
+  it("sends nothing while the rate limit gate is closed and stops the pass", async () => {
+    const hosts = createFakeHosts();
+    markRateLimited(gateKey, Date.now() + 3_600_000);
+
+    await expect(
+      reconcile(hosts.fetchImpl, [
+        privateGitHubAsset(101, "app_linux.zip"),
+        privateGitHubAsset(102, "app_windows.exe"),
+      ])
+    ).rejects.toBeInstanceOf(RateLimitPausedError);
+
+    expect(hosts.requestsTo(API_ASSET)).toHaveLength(0);
+    expect(hosts.uploads).toHaveLength(0);
+  });
+
+  it("closes the gate when GitHub refuses a download, so the next asset is not sent", async () => {
+    const reset = Math.floor(Date.now() / 1000) + 3600;
+    const hosts = createFakeHosts({
+      apiRefusal: {
+        status: 403,
+        headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String(reset) },
+      },
+    });
+
+    await expect(
+      reconcile(hosts.fetchImpl, [
+        privateGitHubAsset(101, "app_linux.zip"),
+        privateGitHubAsset(102, "app_windows.exe"),
+      ])
+    ).rejects.toBeInstanceOf(RateLimitPausedError);
+
+    expect(hosts.requestsTo(API_ASSET)).toHaveLength(1);
+    expect(rateLimitedUntil(gateKey)?.getTime()).toBe(reset * 1000);
+  });
+
+  it("treats a 403 without rate limit headers as one failed asset and leaves the gate open", async () => {
+    const hosts = createFakeHosts({ apiRefusal: { status: 403 } });
+
+    const result = await reconcile(hosts.fetchImpl, [
+      privateGitHubAsset(101, "app_linux.zip"),
+      privateGitHubAsset(102, "app_windows.exe"),
+    ]);
+
+    expect(result).toEqual({ uploaded: 0, failed: 2, skipped: 0 });
+    expect(hosts.requestsTo(API_ASSET)).toHaveLength(2);
+    expect(rateLimitedUntil(gateKey)).toBeNull();
+  });
+
+  it("does not hold a browser URL download behind a closed gate: it spends no API budget", async () => {
+    const hosts = createFakeHosts();
+    markRateLimited(gateKey, Date.now() + 3_600_000);
+
+    const result = await reconcile(
+      hosts.fetchImpl,
+      [{ name: "tool.tar.gz", size: CONTENT.length, browser_download_url: `${OTHER_SOURCE}abc` }],
+      "token source-token"
+    );
+
+    expect(result).toEqual({ uploaded: 1, failed: 0, skipped: 0 });
   });
 
   it("keeps using browser_download_url for assets without an api_url (Gitea / Forgejo sources)", async () => {
