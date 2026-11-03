@@ -68,6 +68,8 @@ import { repositoryDestinationColumns } from "./repo-utils";
 import { resolveDestinationIdentity } from "./destination-connection";
 import { withKeyedLock } from "./utils/keyed-mutex";
 import { claimRepositoryForInFlightWork } from "./utils/repo-status-claim";
+import { waitForGiteaImport } from "./gitea-import-wait";
+import type { GiteaRepoInfo } from "./gitea-enhanced";
 
 /**
  * Run the release mirror for one repository through whichever source it came
@@ -803,6 +805,58 @@ export const syncRepositoryMetadataToGitea = async ({
   }
 };
 
+/**
+ * A mirror of this source is already on the destination, so there is nothing to
+ * migrate: bring it up to date the way a sync does. This is where a retry lands
+ * after a proxy timed out on the migrate call while Gitea carried on (#496).
+ * Only recording that the mirror exists left the row green with no releases,
+ * issues or anything else a first mirror brings, and with scheduling off nothing
+ * ever came back for them.
+ */
+async function syncExistingMirror({
+  config,
+  repository,
+  owner,
+  repoName,
+  repoInfo,
+}: {
+  config: Partial<Config>;
+  repository: Repository;
+  owner: string;
+  repoName: string;
+  repoInfo: GiteaRepoInfo;
+}): Promise<void> {
+  const { getGiteaRepoInfo, syncGiteaRepoEnhanced } = await import("./gitea-enhanced");
+  const location = {
+    mirroredLocation: `${owner}/${repoName}`,
+    ...repositoryDestinationColumns(resolveDestinationIdentity(config)),
+  };
+
+  const claimed = await claimRepositoryForInFlightWork({
+    repositoryId: repository.id!,
+    set: { status: repoStatusEnum.parse("mirroring"), updatedAt: new Date(), ...location },
+  });
+
+  if (!claimed) {
+    console.log(
+      `[Idempotency] ${repository.fullName} is being mirrored or synced by another process. Skipping.`
+    );
+    return;
+  }
+
+  await waitForGiteaImport({
+    location: location.mirroredLocation,
+    initial: repoInfo,
+    readRepo: () => getGiteaRepoInfo({ config, owner, repoName }),
+  });
+
+  await syncGiteaRepoEnhanced({
+    config,
+    repository: { ...repository, ...location },
+    alreadyClaimed: true,
+  });
+}
+
 export const mirrorGithubRepoToGitea = async ({
   octokit,
   repository,
@@ -990,44 +1044,18 @@ export const mirrorGithubRepoToGitea = async ({
           // expectedLocation is recomputed below before the "mirroring" write.
         } else {
           console.log(
-            `Repository ${targetRepoName} already exists in Gitea under ${repoOwner}. Updating database status.`
+            `Repository ${targetRepoName} already exists in Gitea under ${repoOwner}. Bringing it up to date.`
           );
 
-          await syncRepositoryMetadataToGitea({
+          // The repository is there: a failure from here on keeps its location.
+          migrateSucceeded = true;
+          await syncExistingMirror({
             config,
-            octokit,
             repository,
-            giteaOwner: repoOwner,
-            giteaRepoName: targetRepoName,
-            giteaToken: decryptedConfig.giteaConfig.token,
+            owner: repoOwner,
+            repoName: targetRepoName,
+            repoInfo: existingRepoInfo,
           });
-
-          // Update database to reflect that the repository is already mirrored
-          await db
-            .update(repositories)
-            .set({
-              status: repoStatusEnum.parse("mirrored"),
-              updatedAt: new Date(),
-              lastMirrored: new Date(),
-              errorMessage: null,
-              mirroredLocation: `${repoOwner}/${targetRepoName}`,
-              ...repositoryDestinationColumns(resolveDestinationIdentity(config)),
-            })
-            .where(eq(repositories.id, repository.id!));
-
-          // Append log for "mirrored" status
-          await createMirrorJob({
-            userId: config.userId,
-            repositoryId: repository.id,
-            repositoryName: repository.name,
-            message: `Repository ${repository.name} already exists in Gitea`,
-            details: `Repository ${repository.name} was found to already exist in Gitea under ${repoOwner} and database status was updated.`,
-            status: "mirrored",
-          });
-
-          console.log(
-            `Repository ${repository.name} database status updated to mirrored`
-          );
           return;
         }
       } else {
@@ -1892,44 +1920,18 @@ export async function mirrorGitHubRepoToGiteaOrg({
           });
         } else {
           console.log(
-            `Repository ${targetRepoName} already exists in Gitea organization ${targetOwner}. Updating database status.`
+            `Repository ${targetRepoName} already exists in Gitea organization ${targetOwner}. Bringing it up to date.`
           );
 
-          await syncRepositoryMetadataToGitea({
+          // The repository is there: a failure from here on keeps its location.
+          migrateSucceeded = true;
+          await syncExistingMirror({
             config,
-            octokit,
             repository,
-            giteaOwner: targetOwner,
-            giteaRepoName: targetRepoName,
-            giteaToken: decryptedConfig.giteaConfig.token,
+            owner: targetOwner,
+            repoName: targetRepoName,
+            repoInfo: existingRepoInfo,
           });
-
-          // Update database to reflect that the repository is already mirrored
-          await db
-            .update(repositories)
-            .set({
-              status: repoStatusEnum.parse("mirrored"),
-              updatedAt: new Date(),
-              lastMirrored: new Date(),
-              errorMessage: null,
-              mirroredLocation: `${targetOwner}/${targetRepoName}`,
-              ...repositoryDestinationColumns(resolveDestinationIdentity(config)),
-            })
-            .where(eq(repositories.id, repository.id!));
-
-          // Create a mirror job log entry
-          await createMirrorJob({
-            userId: config.userId,
-            repositoryId: repository.id,
-            repositoryName: repository.name,
-            message: `Repository ${targetRepoName} already exists in Gitea organization ${targetOwner}`,
-            details: `Repository ${targetRepoName} was found to already exist in Gitea organization ${targetOwner} and database status was updated.`,
-            status: "mirrored",
-          });
-
-          console.log(
-            `Repository ${targetRepoName} database status updated to mirrored in organization ${targetOwner}`
-          );
           return;
         }
       } else {
