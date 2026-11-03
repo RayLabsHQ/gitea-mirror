@@ -3624,6 +3624,49 @@ export function classifyReleasesForReconciliation(
 }
 
 /**
+ * Download one release asset from its source host.
+ *
+ * GitHub: `browser_download_url` (github.com/<owner>/<repo>/releases/download/...)
+ * is meant for browsers. For a private repository it only accepts a logged-in
+ * session and answers 404 to any API token, classic or fine-grained. The REST
+ * asset URL with `Accept: application/octet-stream` works for public and private
+ * repositories alike: it answers 302 to a pre-signed object-storage URL (or, rarely,
+ * 200 with the content). The redirect is followed by hand so the token is never
+ * sent to the storage host, whatever the runtime's redirect header policy is.
+ *
+ * Other sources (Gitea / Forgejo) keep using browser_download_url, which accepts
+ * that instance's token.
+ */
+async function downloadSourceAsset(
+  doFetch: typeof fetch,
+  asset: { browser_download_url: string; api_url?: string },
+  downloadAuthorization: string | null
+): Promise<Response> {
+  if (asset.api_url && downloadAuthorization) {
+    const first = await doFetch(asset.api_url, {
+      headers: { Accept: "application/octet-stream", Authorization: downloadAuthorization },
+      redirect: "manual",
+    });
+    if (first.status < 300 || first.status >= 400) {
+      return first;
+    }
+    const location = first.headers.get("location");
+    if (!location) {
+      return first;
+    }
+    return doFetch(new URL(location, asset.api_url).toString(), {
+      headers: { Accept: "application/octet-stream" },
+    });
+  }
+  return doFetch(asset.browser_download_url, {
+    headers: {
+      Accept: "application/octet-stream",
+      ...(downloadAuthorization ? { Authorization: downloadAuthorization } : {}),
+    },
+  });
+}
+
+/**
  * Decide what to upload, keep and delete for one release's assets.
  *
  * Destination attachments are grouped by name because the destination happily
@@ -3749,7 +3792,7 @@ export async function reconcileReleaseAssets({
   repoOwner: string;
   repoName: string;
   giteaReleaseId: number;
-  sourceAssets: Array<{ name: string; size: number; browser_download_url: string }>;
+  sourceAssets: Array<{ name: string; size: number; browser_download_url: string; api_url?: string }>;
   /**
    * Authorization header value for the download requests, or null for none.
    * The caller supplies it because the assets live on the repository's own
@@ -3853,18 +3896,12 @@ export async function reconcileReleaseAssets({
     }
 
     try {
-      // Download from the source host. fetch strips the Authorization header
-      // on a cross-host redirect (GitHub redirects to its object storage), so
-      // this works for both public and private release assets.
+      // Download from the source host (see downloadSourceAsset: GitHub assets
+      // go through the REST asset URL, which also works for private repos).
       console.log(
         `[Releases] Downloading asset: ${asset.name} (${asset.size} bytes) for ${tagName}`
       );
-      const assetResponse = await doFetch(asset.browser_download_url, {
-        headers: {
-          Accept: "application/octet-stream",
-          ...(downloadAuthorization ? { Authorization: downloadAuthorization } : {}),
-        },
-      });
+      const assetResponse = await downloadSourceAsset(doFetch, asset, downloadAuthorization);
 
       if (!assetResponse.ok) {
         console.error(
@@ -4188,6 +4225,7 @@ export async function mirrorGitHubReleasesToGitea(params: MirrorReleasesParams) 
             name: asset.name,
             size: asset.size,
             browser_download_url: asset.browser_download_url,
+            api_url: asset.url,
           })),
         }));
       },

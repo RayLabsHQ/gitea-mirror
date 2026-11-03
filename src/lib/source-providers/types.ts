@@ -57,6 +57,12 @@ export interface SourceReleaseAsset {
   size: number;
   /** Direct download URL on the source host. */
   browser_download_url: string;
+  /**
+   * GitHub only: the REST URL of the asset (`asset.url`). A private repository's
+   * browser_download_url answers 404 to API tokens (it only accepts a browser
+   * session), so GitHub assets are downloaded through this URL instead.
+   */
+  api_url?: string;
 }
 
 /**
