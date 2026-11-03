@@ -82,6 +82,9 @@ export interface GiteaRepoInfo {
   owner: { login: string } | string;
   mirror: boolean;
   mirror_interval?: string;
+  // True until the first commit arrives; with an empty mirror_interval it means
+  // Gitea is still importing the repository (#496).
+  empty?: boolean;
   clone_url?: string;
   // Original migration source URL. Gitea/Forgejo populate this with the
   // upstream clone address for migrated/mirrored repos, so it is the
