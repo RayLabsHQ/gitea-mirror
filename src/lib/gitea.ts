@@ -43,6 +43,7 @@ import {
   waitForRateLimitGate,
 } from "./rate-limit-gate";
 import { assertMirrorCredentialUpdateSupported } from "./gitea-mirror-credentials";
+import { guardedFetch, OutboundUrlError } from "./utils/outbound-url";
 import { persistMetadataPassProgress } from "./metadata-progress-store";
 import { summarizeReleaseAssets } from "./repository-storage";
 import { recordReleaseAssetStorage } from "./repository-storage-store";
@@ -3652,22 +3653,35 @@ export function classifyReleasesForReconciliation(
  *
  * Everything else uses browser_download_url: public GitHub assets, which cost no
  * API budget that way, and Gitea / Forgejo, whose URL accepts that instance's token.
+ *
+ * An external asset is different: the repository's owner wrote that URL, and that
+ * owner may be anybody whose repository is being mirrored. It gets no token, and
+ * it must be on the public internet at every hop, or a release could read the
+ * operator's token or their internal services into a release attachment.
  */
 async function downloadSourceAsset(
   doFetch: typeof fetch,
-  asset: { browser_download_url: string; api_url?: string },
+  asset: { browser_download_url: string; api_url?: string; external?: boolean },
   downloadAuthorization: string | null,
   rateLimitKey: string
 ): Promise<Response> {
+  if (asset.external) {
+    return guardedFetch(
+      asset.browser_download_url,
+      { headers: { Accept: "application/octet-stream" } },
+      { publicOnly: true, fetchImpl: doFetch }
+    );
+  }
   if (asset.api_url && downloadAuthorization) {
     await waitForRateLimitGate(
       { key: rateLimitKey, maxWaitMs: RATE_LIMIT_FAST_FAIL_THRESHOLD_SECONDS * 1000 },
       `GET ${asset.api_url}`
     );
-    const first = await doFetch(asset.api_url, {
-      headers: { Accept: "application/octet-stream", Authorization: downloadAuthorization },
-      redirect: "manual",
-    });
+    const first = await guardedFetch(
+      asset.api_url,
+      { headers: { Accept: "application/octet-stream", Authorization: downloadAuthorization } },
+      { maxRedirects: 0, fetchImpl: doFetch }
+    );
     const resetAt = rateLimitResetFromResponse(first);
     if (resetAt) {
       markRateLimited(rateLimitKey, resetAt);
@@ -3679,16 +3693,22 @@ async function downloadSourceAsset(
     if (!location) {
       return first;
     }
-    return doFetch(new URL(location, asset.api_url).toString(), {
-      headers: { Accept: "application/octet-stream" },
-    });
+    return guardedFetch(
+      new URL(location, asset.api_url).toString(),
+      { headers: { Accept: "application/octet-stream" } },
+      { fetchImpl: doFetch }
+    );
   }
-  return doFetch(asset.browser_download_url, {
-    headers: {
-      Accept: "application/octet-stream",
-      ...(downloadAuthorization ? { Authorization: downloadAuthorization } : {}),
+  return guardedFetch(
+    asset.browser_download_url,
+    {
+      headers: {
+        Accept: "application/octet-stream",
+        ...(downloadAuthorization ? { Authorization: downloadAuthorization } : {}),
+      },
     },
-  });
+    { fetchImpl: doFetch }
+  );
 }
 
 /**
@@ -3817,7 +3837,13 @@ export async function reconcileReleaseAssets({
   repoOwner: string;
   repoName: string;
   giteaReleaseId: number;
-  sourceAssets: Array<{ name: string; size: number; browser_download_url: string; api_url?: string }>;
+  sourceAssets: Array<{
+    name: string;
+    size: number;
+    browser_download_url: string;
+    api_url?: string;
+    external?: boolean;
+  }>;
   /**
    * Authorization header value for the download requests, or null for none.
    * The caller supplies it because the assets live on the repository's own
@@ -3969,6 +3995,15 @@ export async function reconcileReleaseAssets({
       // The gate is closed for longer than a request may wait: every asset left
       // would be refused too, so stop here and let the sync report the pause.
       if (assetError instanceof RateLimitPausedError) throw assetError;
+      // Refused by the outbound guard. Retrying cannot help, and a repository's
+      // owner should not be able to mark somebody else's mirror as failing.
+      if (assetError instanceof OutboundUrlError) {
+        console.warn(
+          `[Releases] Skipping asset ${asset.name} of ${tagName}: ${assetError.message}`
+        );
+        skipped++;
+        continue;
+      }
       console.error(
         `[Releases] Error processing asset ${asset.name}: ${
           assetError instanceof Error ? assetError.message : String(assetError)

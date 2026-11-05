@@ -1,7 +1,13 @@
 /**
  * fetch wrapper for the target adapters: JSON in, JSON out, PushTargetError
  * on a non-2xx status. Built on the global fetch so tests can swap it.
+ *
+ * The URL is checked again on every request and every redirect: the check when
+ * the destination was saved says nothing about where the name points now.
+ * Redirects still work, because hosts use them for moved projects and renamed
+ * repositories.
  */
+import { guardedFetch, OutboundUrlError } from "@/lib/utils/outbound-url";
 import { PushTargetError } from "./types";
 
 export const DEFAULT_TARGET_TIMEOUT_MS = 30_000;
@@ -24,16 +30,24 @@ export async function targetFetch<T>(
 ): Promise<TargetFetchResult<T>> {
   const { method = "GET", headers = {}, body, timeoutMs = DEFAULT_TARGET_TIMEOUT_MS } = init;
 
-  const response = await fetch(url, {
-    method,
-    headers: {
-      Accept: "application/json",
-      ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
-      ...headers,
-    },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-    signal: AbortSignal.timeout(timeoutMs),
-  });
+  let response: Response;
+  try {
+    response = await guardedFetch(url, {
+      method,
+      headers: {
+        Accept: "application/json",
+        ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+        ...headers,
+      },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (error) {
+    if (error instanceof OutboundUrlError) {
+      throw new PushTargetError(error.message, undefined, url);
+    }
+    throw error;
+  }
 
   if (!response.ok) {
     let text = "";

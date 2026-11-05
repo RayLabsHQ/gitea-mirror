@@ -66,11 +66,16 @@ export interface GiteaReleaseAsset {
   name?: string;
   size?: number;
   browser_download_url?: string;
+  /** Forgejo: "attachment" for an uploaded file, "external" for a link. */
+  type?: string;
 }
 
 export interface GiteaRelease {
   id?: number;
   tag_name?: string;
+  /** API and web URLs of the release, built by the instance from its own address. */
+  url?: string;
+  html_url?: string;
   name?: string | null;
   body?: string | null;
   draft?: boolean;
@@ -80,12 +85,39 @@ export interface GiteaRelease {
   assets?: GiteaReleaseAsset[] | null;
 }
 
+function hostOf(url: string | undefined): string | null {
+  if (!url) return null;
+  try {
+    return new URL(url).host;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * True when an asset's URL is not the instance's own. Forgejo says so itself
+ * for its external assets. The host check catches anything else that does not
+ * live on the instance, and it compares against the release's own URLs too
+ * because an instance reached by one name (a Docker service, say) builds its
+ * links from another (its ROOT_URL).
+ */
+function isExternalAsset(
+  asset: GiteaReleaseAsset,
+  release: GiteaRelease,
+  instanceUrl: string
+): boolean {
+  if (asset.type === "external") return true;
+  const assetHost = hostOf(asset.browser_download_url);
+  if (!assetHost) return true;
+  return ![instanceUrl, release.url, release.html_url].some((url) => hostOf(url) === assetHost);
+}
+
 /**
  * Normalize one Gitea/Forgejo release into the shape the release mirror works
  * on. Assets without a name or a download URL are dropped: there is nothing to
  * fetch or to name the attachment after.
  */
-export function mapGiteaRelease(release: GiteaRelease): SourceRelease {
+export function mapGiteaRelease(release: GiteaRelease, instanceUrl: string): SourceRelease {
   const createdAt = release.created_at || release.published_at || "";
   return {
     tag_name: release.tag_name || "",
@@ -101,6 +133,7 @@ export function mapGiteaRelease(release: GiteaRelease): SourceRelease {
         name: asset.name!,
         size: Number(asset.size) || 0,
         browser_download_url: asset.browser_download_url!,
+        ...(isExternalAsset(asset, release, instanceUrl) ? { external: true } : {}),
       })),
   };
 }
@@ -432,7 +465,7 @@ export class GiteaSourceProvider implements SourceProvider {
     );
     return releases
       .slice(0, max)
-      .map(mapGiteaRelease)
+      .map((release) => mapGiteaRelease(release, this.connection.url))
       .filter((release) => release.tag_name.length > 0);
   }
 
