@@ -207,6 +207,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Updated README with new features
   - Enhanced CLAUDE.md with repository status definitions
 
+### Security
+- Release assets a repository's owner links by URL are no longer trusted like files on the source. Forgejo lets an owner attach an asset by `external_url`, with any address, and mirroring that repository with release mirroring on sent the source token to that address and stored the response as a release asset on the mirror. These assets now download without the token and only from public addresses, checked again on every redirect. One that points anywhere else is skipped with a warning and does not mark the sync as failed. Assets a Gitea or Forgejo instance hosts itself keep working, private repositories and instances behind another `ROOT_URL` included.
+- The GitLab and GitHub destination client checks the address on every request and every redirect, not only when the destination is saved, so a name that later resolves to the cloud metadata address, or a redirect to it, is refused (GHSA-jpcv-7rgv-87p5). A destination token no longer follows a redirect to another host.
+- `safeFetch` connects to the address its check saw. It looked the name up a second time for the connection, and could send the request unpinned if that second answer was a blocked address.
+
 ## [3.7.1] - 2025-09-14
 
 ### Fixed

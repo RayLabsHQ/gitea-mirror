@@ -11,7 +11,7 @@
  */
 
 import { afterEach, describe, expect, it } from "bun:test";
-import { GiteaSourceProvider } from "./gitea-source";
+import { GiteaSourceProvider, mapGiteaRelease } from "./gitea-source";
 import type { SourceConnection } from "./types";
 
 const SOURCE_URL = "https://codeberg.org";
@@ -199,5 +199,71 @@ describe("GiteaSourceProvider.listReleases", () => {
     const releases = await new GiteaSourceProvider(connection()).listReleases("acme", "demo", 5);
 
     expect(releases.map((r) => r.tag_name)).toEqual(["v1"]);
+  });
+});
+
+describe("mapGiteaRelease external assets", () => {
+  const INSTANCE = "https://codeberg.org";
+  const flags = (assets: object[], extra: object = {}, instance = INSTANCE) =>
+    mapGiteaRelease({ tag_name: "v1", assets, ...extra } as any, instance).assets.map(
+      (asset) => asset.external ?? false
+    );
+  const asset = (browser_download_url: string, type?: string) => ({
+    name: "tool.tar.gz",
+    size: 1,
+    browser_download_url,
+    ...(type ? { type } : {}),
+  });
+
+  it("leaves an uploaded file on the instance alone", () => {
+    expect(flags([asset("https://codeberg.org/attachments/abc", "attachment")])).toEqual([false]);
+    expect(flags([asset("https://codeberg.org/attachments/abc")])).toEqual([false]);
+  });
+
+  it("marks the assets Forgejo reports as external, even on the instance's own host", () => {
+    expect(flags([asset("https://attacker.example/x", "external")])).toEqual([true]);
+    expect(flags([asset("https://codeberg.org/attachments/abc", "external")])).toEqual([true]);
+  });
+
+  it("marks an asset on another host even when the type says nothing", () => {
+    expect(flags([asset("https://attacker.example/x")])).toEqual([true]);
+    expect(flags([asset("http://169.254.169.254/latest/meta-data/", "attachment")])).toEqual([true]);
+    expect(flags([asset("not a url")])).toEqual([true]);
+  });
+
+  it("does not mistake a similar host or another port for the instance", () => {
+    expect(flags([asset("https://codeberg.org.attacker.example/x")])).toEqual([true]);
+    expect(flags([asset("https://codeberg.org:8443/x")])).toEqual([true]);
+  });
+
+  it("accepts the instance's public name when it is reached by another one", () => {
+    const release = {
+      url: "https://git.example.com/api/v1/repos/acme/demo/releases/1",
+      html_url: "https://git.example.com/acme/demo/releases/tag/v1",
+    };
+    expect(
+      flags([asset("https://git.example.com/attachments/abc")], release, "http://forgejo:3000")
+    ).toEqual([false]);
+    expect(flags([asset("https://attacker.example/x")], release, "http://forgejo:3000")).toEqual([
+      true,
+    ]);
+  });
+
+  it("is carried by listReleases", async () => {
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify([
+          {
+            tag_name: "v1",
+            assets: [
+              asset("https://codeberg.org/attachments/abc", "attachment"),
+              asset("https://attacker.example/x", "external"),
+            ],
+          },
+        ]),
+        { status: 200, headers: { "content-type": "application/json", "x-total-count": "1" } }
+      )) as unknown as typeof fetch;
+    const [release] = await new GiteaSourceProvider(connection()).listReleases("acme", "demo", 5);
+    expect(release.assets.map((item) => item.external ?? false)).toEqual([false, true]);
   });
 });

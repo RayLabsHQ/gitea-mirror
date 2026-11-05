@@ -234,3 +234,53 @@ describe("createPushTarget", () => {
     expect(createPushTarget("gitlab", { url: "https://gitlab.com", username: "u", token: "t" }).kind).toBe("gitlab");
   });
 });
+
+describe("target requests go through the outbound guard", () => {
+  const gitlab = () =>
+    new GitLabPushTarget({ url: "https://gitlab.example.com", username: "ops", token: "glpat-secret" });
+  const USER_URL = "https://gitlab.example.com/api/v4/user";
+  const redirectTo = (location: string, status = 302) => () =>
+    new Response(null, { status, headers: { location } });
+
+  test("a destination on the metadata address is refused before any request", async () => {
+    const target = new GitLabPushTarget({ url: "http://169.254.169.254", username: "x", token: "t" });
+    await expect(target.testConnection()).rejects.toBeInstanceOf(PushTargetError);
+    expect(calls).toHaveLength(0);
+  });
+
+  test("a redirect to the metadata address is refused and nothing is sent there", async () => {
+    on("GET", USER_URL, redirectTo("http://169.254.169.254/latest/meta-data/"));
+    await expect(gitlab().testConnection()).rejects.toThrow("link local");
+    expect(calls.map((call) => call.url)).toEqual([USER_URL]);
+  });
+
+  test("the token stays behind when a redirect leaves the host", async () => {
+    on("GET", USER_URL, redirectTo("https://other.example.net/user"));
+    on("GET", "https://other.example.net/user", () => jsonResponse({}, 401));
+    await expect(gitlab().testConnection()).rejects.toBeInstanceOf(PushTargetError);
+    expect(calls[0].headers["private-token"]).toBe("glpat-secret");
+    expect(calls[1].headers["private-token"]).toBeUndefined();
+  });
+
+  test("GitHub's redirect for a renamed repository still works, with the token", async () => {
+    const target = new GitHubPushTarget({ url: "https://github.com", username: "ops", token: "ghp-secret" });
+    const moved = "https://api.github.com/repositories/7";
+    on("GET", "https://api.github.com/repos/acme/old", redirectTo(moved, 301));
+    on("GET", moved, () => jsonResponse({ id: 7, name: "new", full_name: "acme/new", owner: { login: "acme" } }));
+
+    const repository = await target.getRepository("acme", "old");
+
+    expect(repository?.name).toBe("new");
+    expect(calls.map((call) => call.url)).toEqual(["https://api.github.com/repos/acme/old", moved]);
+    expect(calls[1].headers.authorization).toContain("ghp-secret");
+  });
+
+  test("GitLab still sees where a moved project went, and treats it as gone", async () => {
+    const moved = "https://gitlab.example.com/api/v4/projects/acme%2Fnew";
+    on("GET", /projects\/acme%2Fold/, redirectTo(moved, 301));
+    on("GET", moved, () => jsonResponse({ id: 7, name: "new", path_with_namespace: "acme/new" }));
+
+    expect(await gitlab().getRepository("acme", "old")).toBeNull();
+    expect(calls[1].headers["private-token"]).toBe("glpat-secret");
+  });
+});

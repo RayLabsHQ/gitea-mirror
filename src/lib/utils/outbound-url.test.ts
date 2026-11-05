@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it } from "bun:test";
 import {
   assertSafeOutboundUrl,
+  guardedFetch,
   isLinkLocalAddress,
+  isNonPublicAddress,
+  MAX_OUTBOUND_REDIRECTS,
   OutboundUrlError,
   resolveOutboundTarget,
   safeFetch,
@@ -141,5 +144,340 @@ describe("safeFetch", () => {
       OutboundUrlError
     );
     expect(seen).toBeNull();
+  });
+});
+
+describe("isNonPublicAddress", () => {
+  it.each([
+    "0.0.0.0",
+    "10.0.0.1",
+    "100.64.0.1",
+    "100.127.255.255",
+    "127.0.0.1",
+    "169.254.169.254",
+    "172.16.0.1",
+    "172.31.255.255",
+    "192.0.2.1",
+    "192.168.1.1",
+    "198.18.0.1",
+    "224.0.0.1",
+    "255.255.255.255",
+    "::",
+    "::1",
+    "fe80::1",
+    "fe80::1%en0",
+    "fc00::1",
+    "fd12:3456::1",
+    "ff02::1",
+    "2001:db8::1",
+    "::ffff:10.0.0.1",
+    "::ffff:a00:1",
+    "::ffff:7f00:1",
+    "::7f00:1",
+    "64:ff9b::a9fe:a9fe",
+    "2002:c0a8:101::1",
+    "not an address",
+  ])("refuses %s", (address) => {
+    expect(isNonPublicAddress(address)).toBe(true);
+  });
+
+  it.each([
+    "1.1.1.1",
+    "8.8.8.8",
+    "100.128.0.1",
+    "172.32.0.1",
+    "192.167.1.1",
+    "140.82.112.3",
+    "2606:4700:4700::1111",
+    "::ffff:8.8.8.8",
+    "64:ff9b::808:808",
+    "2002:808:808::1",
+  ])("allows %s", (address) => {
+    expect(isNonPublicAddress(address)).toBe(false);
+  });
+});
+
+describe("resolveOutboundTarget lookups", () => {
+  it("pins to the address the check saw, whatever a later lookup would answer", async () => {
+    const answers = [["10.0.0.5"], ["169.254.169.254"], ["169.254.169.254"]];
+    let lookups = 0;
+    const target = await resolveOutboundTarget("http://rebind.test/", async () => answers[lookups++]);
+    expect(lookups).toBe(1);
+    expect(target.requestUrl).toBe("http://10.0.0.5/");
+    expect(target.headers).toEqual({ Host: "rebind.test" });
+  });
+});
+
+describe("guardedFetch", () => {
+  interface Seen {
+    url: string;
+    method?: string;
+    body?: unknown;
+    headers: Record<string, string>;
+  }
+
+  /** A fake network: each request takes the next reply. */
+  function network(...replies: Array<() => Response>) {
+    const seen: Seen[] = [];
+    const fetchImpl = (async (input: any, init?: RequestInit) => {
+      seen.push({
+        url: String(input),
+        method: init?.method,
+        body: init?.body ?? undefined,
+        headers: Object.fromEntries(new Headers(init?.headers).entries()),
+      });
+      const reply = replies[seen.length - 1];
+      if (!reply) throw new Error(`unexpected request to ${input}`);
+      return reply();
+    }) as typeof fetch;
+    return { seen, fetchImpl };
+  }
+
+  const redirect = (location: string, status = 302) => () =>
+    new Response(null, { status, headers: { location } });
+  const ok = () => new Response("done");
+  const publicName = async () => ["1.1.1.1"];
+
+  it("follows a redirect and checks the next hop too", async () => {
+    const { seen, fetchImpl } = network(redirect("https://example.net/final"), ok);
+    const response = await guardedFetch("https://example.com/start", {}, { resolver: publicName, fetchImpl });
+    expect(await response.text()).toBe("done");
+    expect(seen.map((request) => request.url)).toEqual([
+      "https://example.com/start",
+      "https://example.net/final",
+    ]);
+  });
+
+  it("refuses a redirect to the metadata address before sending anything there", async () => {
+    const { seen, fetchImpl } = network(redirect("http://169.254.169.254/latest/meta-data/"));
+    await expect(
+      guardedFetch("https://example.com/start", {}, { resolver: publicName, fetchImpl })
+    ).rejects.toBeInstanceOf(OutboundUrlError);
+    expect(seen).toHaveLength(1);
+  });
+
+  it("refuses a redirect to a name that resolves to the metadata address", async () => {
+    const { seen, fetchImpl } = network(redirect("http://evil.test/"));
+    const resolver = async (name: string) =>
+      name === "evil.test" ? ["169.254.169.254"] : ["1.1.1.1"];
+    await expect(
+      guardedFetch("https://example.com/start", {}, { resolver, fetchImpl })
+    ).rejects.toBeInstanceOf(OutboundUrlError);
+    expect(seen).toHaveLength(1);
+  });
+
+  it("looks a name up on every request, so a rebind after the last check is refused", async () => {
+    const { seen, fetchImpl } = network(ok);
+    const answers = [["10.0.0.5"], ["169.254.169.254"]];
+    let lookups = 0;
+    const resolver = async () => answers[lookups++];
+
+    await guardedFetch("http://rebind.test/one", {}, { resolver, fetchImpl });
+    expect(seen[0].url).toBe("http://10.0.0.5/one");
+
+    await expect(
+      guardedFetch("http://rebind.test/two", {}, { resolver, fetchImpl })
+    ).rejects.toBeInstanceOf(OutboundUrlError);
+    expect(seen).toHaveLength(1);
+  });
+
+  it("pins every plain http hop to its own address and Host", async () => {
+    const { seen, fetchImpl } = network(redirect("http://two.test/b"), ok);
+    const resolver = async (name: string) => (name === "one.test" ? ["10.0.0.1"] : ["10.0.0.2"]);
+    await guardedFetch("http://one.test/a", {}, { resolver, fetchImpl });
+    expect(seen.map((request) => [request.url, request.headers.host])).toEqual([
+      ["http://10.0.0.1/a", "one.test"],
+      ["http://10.0.0.2/b", "two.test"],
+    ]);
+  });
+
+  it("resolves a relative redirect against the name, not the pinned address", async () => {
+    const { seen, fetchImpl } = network(redirect("/moved"), ok);
+    await guardedFetch("http://one.test/a", {}, { resolver: async () => ["10.0.0.1"], fetchImpl });
+    expect(seen[1].url).toBe("http://10.0.0.1/moved");
+    expect(seen[1].headers.host).toBe("one.test");
+  });
+
+  it("keeps credentials on the same host and on an upgrade to https", async () => {
+    const { seen, fetchImpl } = network(
+      redirect("https://git.test/a"),
+      redirect("https://git.test/b"),
+      ok
+    );
+    await guardedFetch(
+      "http://git.test/start",
+      { headers: { "PRIVATE-TOKEN": "secret", Authorization: "token secret" } },
+      { resolver: publicName, fetchImpl }
+    );
+    for (const request of seen) {
+      expect(request.headers["private-token"]).toBe("secret");
+      expect(request.headers.authorization).toBe("token secret");
+    }
+  });
+
+  it("drops credentials, custom ones included, when a redirect leaves the host", async () => {
+    const { seen, fetchImpl } = network(redirect("https://other.test/a"), ok);
+    await guardedFetch(
+      "https://git.test/start",
+      {
+        headers: {
+          Accept: "application/json",
+          "PRIVATE-TOKEN": "secret",
+          Authorization: "token secret",
+          "X-Anything": "secret",
+        },
+      },
+      { resolver: publicName, fetchImpl }
+    );
+    expect(seen[1].headers).toEqual({ accept: "application/json" });
+  });
+
+  it("does not put credentials back after leaving the host and returning", async () => {
+    const { seen, fetchImpl } = network(
+      redirect("https://other.test/a"),
+      redirect("https://git.test/b"),
+      ok
+    );
+    await guardedFetch(
+      "https://git.test/start",
+      { headers: { Authorization: "token secret" } },
+      { resolver: publicName, fetchImpl }
+    );
+    expect(seen[2].headers.authorization).toBeUndefined();
+  });
+
+  it("drops credentials on a downgrade from https to http on the same host", async () => {
+    const { seen, fetchImpl } = network(redirect("http://git.test/a"), ok);
+    await guardedFetch(
+      "https://git.test/start",
+      { headers: { Authorization: "token secret" } },
+      { resolver: publicName, fetchImpl }
+    );
+    expect(seen[1].headers.authorization).toBeUndefined();
+  });
+
+  it("treats methods the way fetch does", async () => {
+    const send = async (status: number, method: string): Promise<Record<string, unknown>> => {
+      const { seen, fetchImpl } = network(redirect("https://git.test/b", status), ok);
+      await guardedFetch(
+        "https://git.test/a",
+        { method, body: "{}", headers: { "Content-Type": "application/json" } },
+        { resolver: publicName, fetchImpl }
+      );
+      return {
+        method: seen[1].method,
+        body: seen[1].body,
+        contentType: seen[1].headers["content-type"],
+      };
+    };
+    const kept = (method: string) => ({ method, body: "{}", contentType: "application/json" });
+    const asGet = { method: "GET", body: undefined, contentType: undefined };
+
+    expect(await send(301, "POST")).toEqual(asGet);
+    expect(await send(302, "POST")).toEqual(asGet);
+    expect(await send(303, "POST")).toEqual(asGet);
+    expect(await send(303, "PATCH")).toEqual(asGet);
+    expect(await send(307, "POST")).toEqual(kept("POST"));
+    expect(await send(308, "PATCH")).toEqual(kept("PATCH"));
+    expect(await send(301, "PATCH")).toEqual(kept("PATCH"));
+  });
+
+  it("stops a redirect loop", async () => {
+    const replies = new Array(MAX_OUTBOUND_REDIRECTS + 1).fill(redirect("https://git.test/loop"));
+    const { seen, fetchImpl } = network(...replies);
+    await expect(
+      guardedFetch("https://git.test/start", {}, { resolver: publicName, fetchImpl })
+    ).rejects.toThrow("Stopped after");
+    expect(seen).toHaveLength(MAX_OUTBOUND_REDIRECTS + 1);
+  });
+
+  it("hands a redirect back at maxRedirects 0, and one without a location always", async () => {
+    let net = network(redirect("https://other.test/"));
+    let response = await guardedFetch(
+      "https://git.test/",
+      {},
+      { maxRedirects: 0, resolver: publicName, fetchImpl: net.fetchImpl }
+    );
+    expect(response.status).toBe(302);
+    expect(net.seen).toHaveLength(1);
+
+    net = network(() => new Response(null, { status: 302 }));
+    response = await guardedFetch("https://git.test/", {}, { resolver: publicName, fetchImpl: net.fetchImpl });
+    expect(response.status).toBe(302);
+  });
+
+  it("refuses a redirect to another scheme", async () => {
+    const { fetchImpl } = network(redirect("ftp://git.test/file"));
+    await expect(
+      guardedFetch("https://git.test/", {}, { resolver: publicName, fetchImpl })
+    ).rejects.toBeInstanceOf(OutboundUrlError);
+  });
+
+  it("still allows private networks without publicOnly", async () => {
+    const { seen, fetchImpl } = network(ok);
+    await guardedFetch("http://gitlab:8929/api", {}, { resolver: async () => ["172.18.0.4"], fetchImpl });
+    expect(seen[0].url).toBe("http://172.18.0.4:8929/api");
+  });
+
+  describe("publicOnly", () => {
+    const options = (extra: object = {}) => ({ publicOnly: true, ...extra });
+
+    it.each([
+      "http://127.0.0.1:3000/x",
+      "http://10.0.0.1/x",
+      "http://192.168.1.1/x",
+      "https://172.16.0.1/x",
+      "http://[::1]/x",
+      "http://[::ffff:7f00:1]/x",
+      "http://169.254.169.254/x",
+      "http://2130706433/x",
+      "http://0x7f.0.0.1/x",
+      "http://metadata.google.internal/x",
+    ])("refuses %s before any request", async (url) => {
+      const { seen, fetchImpl } = network();
+      await expect(
+        guardedFetch(url, {}, options({ resolver: publicName, fetchImpl }))
+      ).rejects.toBeInstanceOf(OutboundUrlError);
+      expect(seen).toHaveLength(0);
+    });
+
+    it("refuses a name when any of its addresses is private", async () => {
+      const { seen, fetchImpl } = network();
+      await expect(
+        guardedFetch(
+          "https://mixed.test/x",
+          {},
+          options({ resolver: async () => ["1.1.1.1", "192.168.1.1"], fetchImpl })
+        )
+      ).rejects.toThrow("not public");
+      expect(seen).toHaveLength(0);
+    });
+
+    it("refuses a name that does not resolve, because fetch could resolve it differently", async () => {
+      const { seen, fetchImpl } = network();
+      await expect(
+        guardedFetch("http://flaky.test/x", {}, options({ resolver: noResolve, fetchImpl }))
+      ).rejects.toThrow("could not be resolved");
+      expect(seen).toHaveLength(0);
+    });
+
+    it("applies to every hop", async () => {
+      const { seen, fetchImpl } = network(redirect("http://192.168.1.1/admin"));
+      await expect(
+        guardedFetch("https://example.com/x", {}, options({ resolver: publicName, fetchImpl }))
+      ).rejects.toBeInstanceOf(OutboundUrlError);
+      expect(seen).toHaveLength(1);
+    });
+
+    it("allows a public URL", async () => {
+      const { seen, fetchImpl } = network(ok);
+      const response = await guardedFetch(
+        "https://example.com/x",
+        {},
+        options({ resolver: publicName, fetchImpl })
+      );
+      expect(response.status).toBe(200);
+      expect(seen[0].url).toBe("https://example.com/x");
+    });
   });
 });
