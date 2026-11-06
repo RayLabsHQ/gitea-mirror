@@ -2,8 +2,8 @@ apiVersion: v2
 name: gitea-mirror
 description: Kubernetes helm chart for gitea-mirror
 type: application
-version: 3.51.2
-appVersion: "3.51.2"
+version: 3.51.3
+appVersion: "3.51.3"
 icon: https://github.com/RayLabsHQ/gitea-mirror/blob/main/.github/assets/logo.png
 keywords:
   - git
