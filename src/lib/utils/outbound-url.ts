@@ -337,6 +337,12 @@ export interface GuardedFetchOptions extends OutboundUrlOptions {
  * another host, or from https down to http, only the harmless headers go along.
  * That includes custom ones such as GitLab's PRIVATE-TOKEN, which a runtime's
  * own redirect handling knows nothing about.
+ *
+ * A redirect that is followed, or refused, is aborted rather than cancelled:
+ * Bun keeps reading a cancelled body, so a server that sends a redirect with an
+ * endless body would otherwise keep the connection open and grow memory long
+ * after this function returned. Each hop gets its own signal for that, tied to
+ * the caller's.
  */
 export async function guardedFetch(
   rawUrl: string,
@@ -357,17 +363,21 @@ export async function guardedFetch(
 
   for (let hop = 0; ; hop++) {
     const target = await resolveOutboundTarget(currentUrl, resolver, { publicOnly });
+    const hopRequest = new AbortController();
     const response = await doFetch(target.requestUrl, {
       ...init,
       ...(method ? { method } : {}),
       body,
       headers: { ...headers, ...target.headers },
       redirect: "manual",
+      signal: init.signal ? AbortSignal.any([init.signal, hopRequest.signal]) : hopRequest.signal,
     });
 
     if (maxRedirects === 0 || !REDIRECT_STATUSES.has(response.status)) return response;
     const location = response.headers.get("location");
     if (!location) return response;
+    // Only the Location header is needed from here on, whatever happens next.
+    hopRequest.abort();
     if (hop >= maxRedirects) {
       throw new OutboundUrlError(`Stopped after ${maxRedirects} redirects`);
     }
@@ -378,7 +388,6 @@ export async function guardedFetch(
     } catch {
       throw new OutboundUrlError("The server redirected to an invalid URL");
     }
-    await response.body?.cancel().catch(() => {});
 
     const downgraded = target.url.protocol === "https:" && next.protocol === "http:";
     if (next.host !== target.url.host || downgraded) {

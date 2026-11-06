@@ -63,7 +63,7 @@ Public mode degrades in known ways:
 
 - **GitHub metadata is best effort.** Anonymous requests run under GitHub's 60 requests per hour limit, so a large organization can end up with partial metadata. Releases, description and topics mirror anonymously with no account at all. Issues, pull requests, labels and milestones are also fetched anonymously once any source in the account carries a token; with no token anywhere they are skipped, and the mirror itself is unaffected either way.
 - **GitLab sources mirror code only; Gitea and Forgejo sources add releases.** The rest of the metadata remains GitHub only, as in the table above, and issues and merge requests from those sources stay a Not yet item with or without a token.
-- **Forgejo assets linked by URL are treated as untrusted.** A repository's owner can attach a release asset as a link to any address. Those download without the source's token and only from public addresses; one that points at a private or local address is skipped with a warning in the logs.
+- **Forgejo assets linked by URL are treated as untrusted.** A repository's owner can attach a release asset as a link to any address. Those download without the source's token and only from public addresses; one that points at a private or local address is skipped with a warning in the logs. They are also capped at 512 MB and 15 minutes, and a larger or slower one is skipped the same way.
 - **Personal auto discovery and starred repositories need a token.** Neither runs for a public only source.
 - **Cleanup does not run.** Repositories deleted upstream are not detected for public only sources.
 
