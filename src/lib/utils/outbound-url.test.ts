@@ -216,10 +216,17 @@ describe("guardedFetch", () => {
     headers: Record<string, string>;
   }
 
-  /** A fake network: each request takes the next reply. */
+  /**
+   * A fake network: each request takes the next reply. `abortedBefore[i]` says
+   * which earlier requests were already aborted when request i was sent.
+   */
   function network(...replies: Array<() => Response>) {
     const seen: Seen[] = [];
+    const signals: AbortSignal[] = [];
+    const abortedBefore: boolean[][] = [];
     const fetchImpl = (async (input: any, init?: RequestInit) => {
+      abortedBefore.push(signals.map((signal) => signal.aborted));
+      signals.push(init!.signal!);
       seen.push({
         url: String(input),
         method: init?.method,
@@ -230,7 +237,7 @@ describe("guardedFetch", () => {
       if (!reply) throw new Error(`unexpected request to ${input}`);
       return reply();
     }) as typeof fetch;
-    return { seen, fetchImpl };
+    return { seen, fetchImpl, signals, abortedBefore };
   }
 
   const redirect = (location: string, status = 302) => () =>
@@ -389,6 +396,98 @@ describe("guardedFetch", () => {
       guardedFetch("https://git.test/start", {}, { resolver: publicName, fetchImpl })
     ).rejects.toThrow("Stopped after");
     expect(seen).toHaveLength(MAX_OUTBOUND_REDIRECTS + 1);
+  });
+
+  // Bun keeps reading a cancelled body; only an aborted request closes.
+  describe("closing what it does not return", () => {
+    it("aborts each redirect before following it, and leaves the response it returns open", async () => {
+      const net = network(redirect("https://git.test/b"), redirect("https://git.test/c"), ok);
+
+      const response = await guardedFetch("https://git.test/a", {}, { resolver: publicName, fetchImpl: net.fetchImpl });
+
+      expect(await response.text()).toBe("done");
+      expect(net.abortedBefore).toEqual([[], [true], [true, true]]);
+      expect(net.signals[2].aborted).toBe(false);
+    });
+
+    it("aborts the last redirect when it stops at the limit", async () => {
+      const net = network(redirect("https://git.test/b"), redirect("https://git.test/c"));
+
+      await expect(
+        guardedFetch("https://git.test/a", {}, { maxRedirects: 1, resolver: publicName, fetchImpl: net.fetchImpl })
+      ).rejects.toThrow("Stopped after 1 redirects");
+      expect(net.signals.map((signal) => signal.aborted)).toEqual([true, true]);
+    });
+
+    it("aborts a redirect it refuses", async () => {
+      for (const location of ["http://[::1", "http://169.254.169.254/", "ftp://git.test/file"]) {
+        const net = network(redirect(location));
+
+        await expect(
+          guardedFetch("https://git.test/a", {}, { resolver: publicName, fetchImpl: net.fetchImpl })
+        ).rejects.toBeInstanceOf(OutboundUrlError);
+        expect(net.signals[0].aborted).toBe(true);
+      }
+    });
+
+    it("leaves a redirect it hands back open", async () => {
+      const net = network(redirect("https://other.test/"));
+
+      await guardedFetch("https://git.test/", {}, { maxRedirects: 0, resolver: publicName, fetchImpl: net.fetchImpl });
+
+      expect(net.signals[0].aborted).toBe(false);
+    });
+
+    it("passes the caller's abort on to the request in flight", async () => {
+      const caller = new AbortController();
+      const net = network(redirect("https://git.test/b"), ok);
+
+      await guardedFetch("https://git.test/a", { signal: caller.signal }, { resolver: publicName, fetchImpl: net.fetchImpl });
+      expect(net.signals[1].aborted).toBe(false);
+      caller.abort();
+      expect(net.signals[1].aborted).toBe(true);
+    });
+
+    it("closes the connections of real redirects with endless bodies", async () => {
+      // A raw server: every request gets a 302 whose chunked body never ends.
+      const sockets: Array<{ closed: boolean; timer?: ReturnType<typeof setInterval> }> = [];
+      const chunk = `4000\r\n${"x".repeat(0x4000)}\r\n`;
+      const server = Bun.listen<{ index: number }>({
+        hostname: "127.0.0.1",
+        port: 0,
+        socket: {
+          open(socket) {
+            socket.data = { index: sockets.push({ closed: false }) - 1 };
+          },
+          data(socket) {
+            const state = sockets[socket.data.index];
+            if (state.timer) return;
+            socket.write("HTTP/1.1 302 Found\r\nLocation: /next\r\nTransfer-Encoding: chunked\r\n\r\n");
+            state.timer = setInterval(() => socket.write(chunk), 5);
+          },
+          close(socket) {
+            const state = sockets[socket.data.index];
+            clearInterval(state.timer);
+            state.closed = true;
+          },
+        },
+      });
+
+      try {
+        await expect(
+          // Bun.fetch: other test files replace the global fetch.
+          guardedFetch(`http://127.0.0.1:${server.port}/start`, {}, { maxRedirects: 2, fetchImpl: Bun.fetch })
+        ).rejects.toThrow("Stopped after 2 redirects");
+        for (let waited = 0; waited < 2000 && sockets.some((s) => !s.closed); waited += 20) {
+          await Bun.sleep(20);
+        }
+        expect(sockets).toHaveLength(3);
+        expect(sockets.map((s) => s.closed)).toEqual([true, true, true]);
+      } finally {
+        for (const s of sockets) clearInterval(s.timer);
+        server.stop(true);
+      }
+    });
   });
 
   it("hands a redirect back at maxRedirects 0, and one without a location always", async () => {

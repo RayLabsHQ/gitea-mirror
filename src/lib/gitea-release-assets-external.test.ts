@@ -12,7 +12,7 @@
  */
 
 import { describe, expect, it } from "bun:test";
-import { reconcileReleaseAssets } from "@/lib/gitea";
+import { reconcileReleaseAssets, type ReleaseAssetDownloadLimits } from "@/lib/gitea";
 import type { Config } from "@/types/config";
 
 const DESTINATION = "https://gitea.example.com";
@@ -29,9 +29,12 @@ interface Download {
   authorization: string | null;
 }
 
-function createNetwork(replies: Record<string, () => Response> = {}) {
+type Reply = (signal: AbortSignal) => Response;
+
+function createNetwork(replies: Record<string, Reply> = {}) {
   const downloads: Download[] = [];
   const uploads: string[] = [];
+  const signals: AbortSignal[] = [];
 
   const fetchImpl = (async (input: any, init?: RequestInit) => {
     const url = String(input);
@@ -45,16 +48,18 @@ function createNetwork(replies: Record<string, () => Response> = {}) {
       return new Response('{"id":1}', { status: 201 });
     }
     downloads.push({ url, authorization: new Headers(init?.headers).get("authorization") });
+    signals.push(init!.signal!);
     const reply = replies[url];
-    return reply ? reply() : new Response("file body");
+    return reply ? reply(init!.signal!) : new Response("file body");
   }) as unknown as typeof fetch;
 
-  return { fetchImpl, downloads, uploads };
+  return { fetchImpl, downloads, uploads, signals };
 }
 
 function reconcile(
   fetchImpl: typeof fetch,
-  asset: { browser_download_url: string; external?: boolean }
+  asset: { browser_download_url: string; external?: boolean },
+  downloadLimits?: ReleaseAssetDownloadLimits
 ) {
   return reconcileReleaseAssets({
     config,
@@ -66,11 +71,27 @@ function reconcile(
     downloadAuthorization: SOURCE_TOKEN,
     tagName: "v1",
     fetchImpl,
+    downloadLimits,
   });
 }
 
 const redirectTo = (location: string) => () =>
   new Response(null, { status: 302, headers: { location } });
+
+/** Headers, then nothing; fails once the request is aborted, like a fetch body. */
+const quiet: Reply = (signal) =>
+  new Response(
+    new ReadableStream({
+      start(controller) {
+        signal.addEventListener("abort", () => controller.error(signal.reason));
+      },
+    })
+  );
+
+const tightLimits: ReleaseAssetDownloadLimits = {
+  source: { stallTimeoutMs: 40 },
+  external: { stallTimeoutMs: 40, maxBytes: 4, totalTimeoutMs: 1000 },
+};
 
 describe("external release assets", () => {
   it("downloads a public one without the source token", async () => {
@@ -110,6 +131,37 @@ describe("external release assets", () => {
     expect(network.downloads.map((download) => download.url)).toEqual([first]);
     expect(network.uploads).toEqual([]);
   });
+
+  it("skips one larger than the cap and closes its request", async () => {
+    const network = createNetwork();
+    const url = "https://1.1.1.1/tool.tar.gz";
+
+    const result = await reconcile(network.fetchImpl, { browser_download_url: url, external: true }, tightLimits);
+
+    expect(result).toEqual({ uploaded: 0, failed: 0, skipped: 1 });
+    expect(network.uploads).toEqual([]);
+    expect(network.signals[0].aborted).toBe(true);
+  });
+
+  it("skips one that goes quiet", async () => {
+    const url = "https://1.1.1.1/tool.tar.gz";
+    const network = createNetwork({ [url]: quiet });
+
+    const result = await reconcile(network.fetchImpl, { browser_download_url: url, external: true }, tightLimits);
+
+    expect(result).toEqual({ uploaded: 0, failed: 0, skipped: 1 });
+    expect(network.signals[0].aborted).toBe(true);
+  });
+
+  it("closes the request when the link answers with an error", async () => {
+    const url = "https://1.1.1.1/tool.tar.gz";
+    const network = createNetwork({ [url]: () => new Response("gone", { status: 404 }) });
+
+    const result = await reconcile(network.fetchImpl, { browser_download_url: url, external: true });
+
+    expect(result).toEqual({ uploaded: 0, failed: 1, skipped: 0 });
+    expect(network.signals[0].aborted).toBe(true);
+  });
 });
 
 describe("the instance's own release assets", () => {
@@ -146,5 +198,25 @@ describe("the instance's own release assets", () => {
     expect(result).toEqual({ uploaded: 0, failed: 0, skipped: 1 });
     expect(network.downloads.map((download) => download.url)).toEqual([first]);
     expect(network.uploads).toEqual([]);
+  });
+
+  it("fail when the download goes quiet, so the next sync retries them", async () => {
+    const url = "http://192.168.1.20:3000/attachments/abc";
+    const network = createNetwork({ [url]: quiet });
+
+    const result = await reconcile(network.fetchImpl, { browser_download_url: url }, tightLimits);
+
+    expect(result).toEqual({ uploaded: 0, failed: 1, skipped: 0 });
+    expect(network.signals[0].aborted).toBe(true);
+  });
+
+  it("have no size cap", async () => {
+    const network = createNetwork();
+    const url = "http://192.168.1.20:3000/attachments/abc";
+
+    const result = await reconcile(network.fetchImpl, { browser_download_url: url }, tightLimits);
+
+    expect(result).toEqual({ uploaded: 1, failed: 0, skipped: 0 });
+    expect(network.uploads).toEqual(["file body"]);
   });
 });

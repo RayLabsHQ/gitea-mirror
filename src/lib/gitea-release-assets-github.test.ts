@@ -77,6 +77,9 @@ function createFakeHosts(
 ) {
   const seen: SeenRequest[] = [];
   const uploads: Array<{ name: string; size: number }> = [];
+  // Whether the asset API's answer was already aborted when its redirect was followed.
+  const apiAbortedWhenFollowed: boolean[] = [];
+  let lastApiSignal: AbortSignal | undefined;
 
   const fetchImpl = (async (input: any, init?: any) => {
     const url = typeof input === "string" ? input : String(input);
@@ -91,6 +94,7 @@ function createFakeHosts(
     }
 
     if (url.startsWith(API_ASSET)) {
+      lastApiSignal = init?.signal;
       if (authorization !== `token ${GITHUB_TOKEN}`) {
         return new Response("Not Found", { status: 404, statusText: "Not Found" });
       }
@@ -117,6 +121,7 @@ function createFakeHosts(
 
     // Pre-signed storage URL: a second credential is rejected.
     if (url.startsWith(STORAGE)) {
+      apiAbortedWhenFollowed.push(Boolean(lastApiSignal?.aborted));
       if (authorization) {
         return new Response("Only one auth mechanism allowed", {
           status: 400,
@@ -155,6 +160,7 @@ function createFakeHosts(
     fetchImpl,
     seen,
     uploads,
+    apiAbortedWhenFollowed,
     requestsTo: (prefix: string) => seen.filter((r) => r.url.startsWith(prefix)),
   };
 }
@@ -213,6 +219,8 @@ describe("reconcileReleaseAssets: private GitHub repository", () => {
       `${STORAGE}101?sig=signed`,
       `${STORAGE}102?sig=signed`,
     ]);
+    // Only the Location is used: the redirect's own request is closed first.
+    expect(hosts.apiAbortedWhenFollowed).toEqual([true, true]);
     for (const request of storageRequests) {
       expect(request.authorization).toBeNull();
     }

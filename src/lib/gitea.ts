@@ -44,6 +44,12 @@ import {
 } from "./rate-limit-gate";
 import { assertMirrorCredentialUpdateSupported } from "./gitea-mirror-credentials";
 import { guardedFetch, OutboundUrlError } from "./utils/outbound-url";
+import {
+  DownloadLimitError,
+  downloadWithLimits,
+  type BoundedDownload,
+  type DownloadLimits,
+} from "./utils/bounded-download";
 import { persistMetadataPassProgress } from "./metadata-progress-store";
 import { summarizeReleaseAssets } from "./repository-storage";
 import { recordReleaseAssetStorage } from "./repository-storage-store";
@@ -3657,59 +3663,103 @@ export function classifyReleasesForReconciliation(
  * An external asset is different: the repository's owner wrote that URL, and that
  * owner may be anybody whose repository is being mirrored. It gets no token, and
  * it must be on the public internet at every hop, or a release could read the
- * operator's token or their internal services into a release attachment.
+ * operator's token or their internal services into a release attachment. That
+ * owner also decides how much the link sends and how slowly, so it is held to a
+ * size and a total time as well.
+ *
+ * Every download gives up when nothing arrives for a while, so a hung connection
+ * cannot hold a sync forever, and every way out of it closes the connection
+ * (see downloadWithLimits).
  */
 async function downloadSourceAsset(
   doFetch: typeof fetch,
   asset: { browser_download_url: string; api_url?: string; external?: boolean },
   downloadAuthorization: string | null,
-  rateLimitKey: string
-): Promise<Response> {
+  rateLimitKey: string,
+  limits: ReleaseAssetDownloadLimits
+): Promise<BoundedDownload> {
   if (asset.external) {
-    return guardedFetch(
-      asset.browser_download_url,
-      { headers: { Accept: "application/octet-stream" } },
-      { publicOnly: true, fetchImpl: doFetch }
+    return downloadWithLimits(
+      (signal) =>
+        guardedFetch(
+          asset.browser_download_url,
+          { headers: { Accept: "application/octet-stream" }, signal },
+          { publicOnly: true, fetchImpl: doFetch }
+        ),
+      limits.external
     );
   }
   if (asset.api_url && downloadAuthorization) {
+    const apiUrl = asset.api_url;
+    // Outside the limits: waiting for the gate is not a stalled download.
     await waitForRateLimitGate(
       { key: rateLimitKey, maxWaitMs: RATE_LIMIT_FAST_FAIL_THRESHOLD_SECONDS * 1000 },
-      `GET ${asset.api_url}`
+      `GET ${apiUrl}`
     );
-    const first = await guardedFetch(
-      asset.api_url,
-      { headers: { Accept: "application/octet-stream", Authorization: downloadAuthorization } },
-      { maxRedirects: 0, fetchImpl: doFetch }
-    );
-    const resetAt = rateLimitResetFromResponse(first);
-    if (resetAt) {
-      markRateLimited(rateLimitKey, resetAt);
-    }
-    if (first.status < 300 || first.status >= 400) {
-      return first;
-    }
-    const location = first.headers.get("location");
-    if (!location) {
-      return first;
-    }
-    return guardedFetch(
-      new URL(location, asset.api_url).toString(),
-      { headers: { Accept: "application/octet-stream" } },
-      { fetchImpl: doFetch }
-    );
+    return downloadWithLimits(async (signal) => {
+      const firstRequest = new AbortController();
+      const first = await guardedFetch(
+        apiUrl,
+        {
+          headers: { Accept: "application/octet-stream", Authorization: downloadAuthorization },
+          signal: AbortSignal.any([signal, firstRequest.signal]),
+        },
+        { maxRedirects: 0, fetchImpl: doFetch }
+      );
+      const resetAt = rateLimitResetFromResponse(first);
+      if (resetAt) {
+        markRateLimited(rateLimitKey, resetAt);
+      }
+      if (first.status < 300 || first.status >= 400) {
+        return first;
+      }
+      const location = first.headers.get("location");
+      if (!location) {
+        return first;
+      }
+      // Only its Location is needed; abort it so its connection closes.
+      firstRequest.abort();
+      return guardedFetch(
+        new URL(location, apiUrl).toString(),
+        { headers: { Accept: "application/octet-stream" }, signal },
+        { fetchImpl: doFetch }
+      );
+    }, limits.source);
   }
-  return guardedFetch(
-    asset.browser_download_url,
-    {
-      headers: {
-        Accept: "application/octet-stream",
-        ...(downloadAuthorization ? { Authorization: downloadAuthorization } : {}),
-      },
-    },
-    { fetchImpl: doFetch }
+  return downloadWithLimits(
+    (signal) =>
+      guardedFetch(
+        asset.browser_download_url,
+        {
+          headers: {
+            Accept: "application/octet-stream",
+            ...(downloadAuthorization ? { Authorization: downloadAuthorization } : {}),
+          },
+          signal,
+        },
+        { fetchImpl: doFetch }
+      ),
+    limits.source
   );
 }
+
+export interface ReleaseAssetDownloadLimits {
+  /** Assets on the source instance itself. */
+  source: DownloadLimits;
+  /** Assets a repository's owner linked by URL. */
+  external: DownloadLimits;
+}
+
+/**
+ * Two minutes without a byte is a dead connection, also for a large file. An
+ * external link is capped at 512 MB and 15 minutes, which still allows a full
+ * size file at about 0.6 MB/s: past that, the copy stays where the owner linked
+ * it and the mirror skips it with a warning.
+ */
+export const RELEASE_ASSET_DOWNLOAD_LIMITS: ReleaseAssetDownloadLimits = {
+  source: { stallTimeoutMs: 2 * 60_000 },
+  external: { stallTimeoutMs: 2 * 60_000, maxBytes: 512 * 1024 * 1024, totalTimeoutMs: 15 * 60_000 },
+};
 
 /**
  * Decide what to upload, keep and delete for one release's assets.
@@ -3831,6 +3881,7 @@ export async function reconcileReleaseAssets({
   downloadAuthorization,
   tagName,
   fetchImpl,
+  downloadLimits = RELEASE_ASSET_DOWNLOAD_LIMITS,
 }: {
   config: Partial<Config>;
   decryptedConfig: Config;
@@ -3856,6 +3907,8 @@ export async function reconcileReleaseAssets({
   tagName: string;
   /** Injected in tests; production uses the global fetch. */
   fetchImpl?: typeof fetch;
+  /** Injected in tests; production uses RELEASE_ASSET_DOWNLOAD_LIMITS. */
+  downloadLimits?: ReleaseAssetDownloadLimits;
 }): Promise<{ uploaded: number; failed: number; skipped: number }> {
   let uploaded = 0;
   let failed = 0;
@@ -3952,25 +4005,24 @@ export async function reconcileReleaseAssets({
       console.log(
         `[Releases] Downloading asset: ${asset.name} (${asset.size} bytes) for ${tagName}`
       );
-      const assetResponse = await downloadSourceAsset(
+      const download = await downloadSourceAsset(
         doFetch,
         asset,
         downloadAuthorization,
-        rateLimitGateKey(config.userId)
+        rateLimitGateKey(config.userId),
+        downloadLimits
       );
 
-      if (!assetResponse.ok) {
+      if (!download.ok) {
         console.error(
-          `[Releases] Failed to download asset ${asset.name}: ${assetResponse.status} ${assetResponse.statusText}`
+          `[Releases] Failed to download asset ${asset.name}: ${download.status} ${download.statusText}`
         );
         failed++;
         continue;
       }
 
-      const assetData = await assetResponse.arrayBuffer();
-
       const formData = new FormData();
-      formData.append("attachment", new Blob([assetData]), asset.name);
+      formData.append("attachment", download.data, asset.name);
 
       const uploadResponse = await doFetch(
         `${assetsUrl}?name=${encodeURIComponent(asset.name)}`,
@@ -3995,9 +4047,13 @@ export async function reconcileReleaseAssets({
       // The gate is closed for longer than a request may wait: every asset left
       // would be refused too, so stop here and let the sync report the pause.
       if (assetError instanceof RateLimitPausedError) throw assetError;
-      // Refused by the outbound guard. Retrying cannot help, and a repository's
-      // owner should not be able to mark somebody else's mirror as failing.
-      if (assetError instanceof OutboundUrlError) {
+      // Refused by the outbound guard, or a link that went past its limits. The
+      // repository's owner decides both, and should not be able to mark somebody
+      // else's mirror as failing. The next sync tries again either way.
+      if (
+        assetError instanceof OutboundUrlError ||
+        (asset.external && assetError instanceof DownloadLimitError)
+      ) {
         console.warn(
           `[Releases] Skipping asset ${asset.name} of ${tagName}: ${assetError.message}`
         );
