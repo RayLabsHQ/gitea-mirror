@@ -143,18 +143,18 @@ Both accept multiple repository IDs in one call.
 
 ## Environment variables
 
-The mode is normally set in the UI and stored in the database. Environment variables act as a fallback for instances that have never had a strategy saved, which makes them useful for provisioning a new deployment.
+The mode is normally set in the UI and stored in the database. Environment variables set the starting values: they are stored when the configuration is created, on first sign in or by the environment loader, which makes them useful for provisioning a new deployment.
 
 | Variable | Purpose | Default |
 |---|---|---|
 | `PRE_SYNC_BACKUP_STRATEGY` | Initial strategy: `disabled`, `always`, `on-force-push`, or `block-on-force-push` | unset |
 | `PRE_SYNC_BACKUP_ENABLED` | Legacy switch. `true` maps to `always`, `false` maps to `disabled` | unset |
-| `PRE_SYNC_BACKUP_DIR` | Snapshot directory when the config field is empty | `data/repo-backups` |
-| `PRE_SYNC_BACKUP_KEEP_COUNT` | Retention count when the config field is unset | `5` |
-| `PRE_SYNC_BACKUP_RETENTION_DAYS` | Retention days when the config field is unset | `30` |
+| `PRE_SYNC_BACKUP_DIR` | Starting snapshot directory | `data/repo-backups` |
+| `PRE_SYNC_BACKUP_KEEP_COUNT` | Starting retention count | `5` |
+| `PRE_SYNC_BACKUP_RETENTION_DAYS` | Starting retention days | `30` |
 | `PRE_SYNC_BACKUP_GIT_USERNAME` | Username paired with the Gitea token when cloning for a snapshot | `oauth2` |
 
-> **Note:** Saved configuration always wins over the environment. Once a strategy has been chosen in the UI, changing `PRE_SYNC_BACKUP_STRATEGY` has no effect, so change the mode in the UI instead of wondering why the variable is ignored.
+> **Note:** Saved configuration always wins over the environment. Once the configuration exists, changing these variables has no effect, so change the settings in the UI instead of wondering why a variable is ignored.
 
 The strategy is resolved in this order, stopping at the first match:
 
