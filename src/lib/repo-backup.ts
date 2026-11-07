@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import type { Config, BackupStrategy } from "@/types/config";
 import { decryptConfigTokens } from "./utils/config-encryption";
+import { backupStrategyFromEnv, storedBackupStrategy } from "./utils/backup-defaults";
 
 const TRUE_VALUES = new Set(["1", "true", "yes", "on"]);
 
@@ -131,13 +132,6 @@ export function shouldBlockSyncOnBackupFailure(config: Partial<Config>): boolean
 
 // ---- Backup strategy resolver ----
 
-const VALID_STRATEGIES = new Set<BackupStrategy>([
-  "disabled",
-  "always",
-  "on-force-push",
-  "block-on-force-push",
-]);
-
 /**
  * Resolve the effective backup strategy from config, falling back through:
  *   1. `backupStrategy` field (new)
@@ -147,35 +141,7 @@ const VALID_STRATEGIES = new Set<BackupStrategy>([
  *   5. Default: `"on-force-push"`
  */
 export function resolveBackupStrategy(config: Partial<Config>): BackupStrategy {
-  // 1. Explicit backupStrategy field
-  const explicit = config.giteaConfig?.backupStrategy;
-  if (explicit && VALID_STRATEGIES.has(explicit as BackupStrategy)) {
-    return explicit as BackupStrategy;
-  }
-
-  // 2. Legacy backupBeforeSync boolean → map to strategy
-  //    Note: backupBeforeSync: true now maps to "on-force-push" (not "always")
-  //    because mappers default backupBeforeSync to true, causing every legacy config
-  //    to silently resolve to "always" and create full git bundles on every sync.
-  const legacy = config.giteaConfig?.backupBeforeSync;
-  if (legacy !== undefined) {
-    return legacy ? "on-force-push" : "disabled";
-  }
-
-  // 3. Env var (new)
-  const envStrategy = process.env.PRE_SYNC_BACKUP_STRATEGY?.trim().toLowerCase();
-  if (envStrategy && VALID_STRATEGIES.has(envStrategy as BackupStrategy)) {
-    return envStrategy as BackupStrategy;
-  }
-
-  // 4. Env var (legacy)
-  const envEnabled = process.env.PRE_SYNC_BACKUP_ENABLED;
-  if (envEnabled !== undefined) {
-    return parseBoolean(envEnabled, true) ? "always" : "disabled";
-  }
-
-  // 5. Default
-  return "on-force-push";
+  return storedBackupStrategy(config.giteaConfig) ?? backupStrategyFromEnv() ?? "on-force-push";
 }
 
 /**

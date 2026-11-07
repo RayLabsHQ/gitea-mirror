@@ -3,6 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { encrypt } from "@/lib/utils/encryption";
 import { getNextScheduledRun, normalizeTimezone } from "@/lib/utils/schedule-utils";
+import { backupDefaultsFromEnv } from "@/lib/utils/backup-defaults";
 
 export interface DefaultConfigOptions {
   userId: string;
@@ -68,6 +69,8 @@ export async function createDefaultConfig({ userId, envOverrides = {} }: Default
     }
   }
   
+  const backupDefaults = backupDefaultsFromEnv();
+
   // Cleanup config from env - default to ENABLED
   const cleanupEnabled = envOverrides.cleanupEnabled ?? 
     (process.env.CLEANUP_ENABLED === "false" ? false : true); // Default: ENABLED
@@ -114,11 +117,12 @@ export async function createDefaultConfig({ userId, envOverrides = {} }: Default
       forkStrategy: "reference",
       issueConcurrency: 3,
       pullRequestConcurrency: 5,
-      backupStrategy: "on-force-push",
-      backupBeforeSync: true, // Deprecated: kept for backward compat
-      backupRetentionCount: 5,
-      backupRetentionDays: 30,
-      backupDirectory: "data/repo-backups",
+      // Seeded from PRE_SYNC_BACKUP_* (#503); the stored values win from here on.
+      backupStrategy: backupDefaults.backupStrategy,
+      backupBeforeSync: backupDefaults.backupBeforeSync, // Deprecated: kept for backward compat
+      backupRetentionCount: backupDefaults.backupRetentionCount,
+      backupRetentionDays: backupDefaults.backupRetentionDays,
+      backupDirectory: backupDefaults.backupDirectory ?? "data/repo-backups",
       blockSyncOnBackupFailure: true,
     },
     include: [],

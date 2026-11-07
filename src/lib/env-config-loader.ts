@@ -11,6 +11,7 @@ import { isSourceProviderKind, type SourceProviderKind } from '@/lib/source-prov
 import { DESTINATION_PROVIDER_DEFAULT_URLS, isDestinationProviderKind, type DestinationProviderKind } from '@/lib/destination-kinds';
 import { hasDestinationChanged, hasSourceChanged, loadConfigLocks } from '@/lib/config-locks';
 import type { SourceUpdateInput } from '@/lib/sources';
+import { backupDefaultsFromEnv, storedBackupStrategy } from '@/lib/utils/backup-defaults';
 import { normalizeReleaseAssetLimit, normalizeReleaseTagPatterns, normalizeReleaseType, splitReleaseTagEntries } from '@/lib/utils/mirror-overrides';
 
 interface EnvConfig {
@@ -370,6 +371,9 @@ export async function initializeConfigFromEnv(): Promise<void> {
     };
 
     // Build Gitea config
+    const storedGitea = existingConfig?.[0]?.giteaConfig;
+    const backupDefaults = backupDefaultsFromEnv();
+    const backupStrategy = storedBackupStrategy(storedGitea) ?? backupDefaults.backupStrategy;
     const giteaConfig = {
       url:
         envConfig.gitea.url ||
@@ -439,12 +443,13 @@ export async function initializeConfigFromEnv(): Promise<void> {
       mirrorPullRequests: envConfig.mirror.mirrorPullRequests ?? existingConfig?.[0]?.giteaConfig?.mirrorPullRequests ?? false,
       mirrorLabels: envConfig.mirror.mirrorLabels ?? existingConfig?.[0]?.giteaConfig?.mirrorLabels ?? false,
       mirrorMilestones: envConfig.mirror.mirrorMilestones ?? existingConfig?.[0]?.giteaConfig?.mirrorMilestones ?? false,
-      // Backup options — preserve existing values so UI-configured settings survive restart
-      backupStrategy: existingConfig?.[0]?.giteaConfig?.backupStrategy ?? 'on-force-push',
-      backupBeforeSync: existingConfig?.[0]?.giteaConfig?.backupBeforeSync ?? true,
-      backupRetentionCount: existingConfig?.[0]?.giteaConfig?.backupRetentionCount ?? 5,
-      backupRetentionDays: existingConfig?.[0]?.giteaConfig?.backupRetentionDays ?? 30,
-      backupDirectory: existingConfig?.[0]?.giteaConfig?.backupDirectory || undefined,
+      // Backup options: keep what is stored so UI-configured settings survive a
+      // restart, and start from PRE_SYNC_BACKUP_* when nothing is (#503).
+      backupStrategy,
+      backupBeforeSync: storedGitea?.backupBeforeSync ?? backupStrategy !== 'disabled',
+      backupRetentionCount: storedGitea?.backupRetentionCount ?? backupDefaults.backupRetentionCount,
+      backupRetentionDays: storedGitea?.backupRetentionDays ?? backupDefaults.backupRetentionDays,
+      backupDirectory: storedGitea?.backupDirectory || backupDefaults.backupDirectory,
       blockSyncOnBackupFailure: existingConfig?.[0]?.giteaConfig?.blockSyncOnBackupFailure ?? true,
     };
 
