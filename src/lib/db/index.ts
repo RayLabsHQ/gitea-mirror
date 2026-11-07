@@ -4,28 +4,10 @@ import fs from "fs";
 import path from "path";
 import { migrate } from "drizzle-orm/bun-sqlite/migrator";
 import { repairDuplicateSsoColumns, restoreSsoDataAfter0013, repairStrandedBetterAuth17Schema } from "./migration-repairs";
+import { resolveDbPath } from "./path";
 
 // Skip database initialization in test environment
 let db: ReturnType<typeof drizzle>;
-
-/**
- * Resolve the SQLite file location from DATABASE_URL, falling back to the
- * historical default of <cwd>/data/gitea-mirror.db. Accepts the documented
- * sqlite:// scheme, the legacy file: scheme, or a plain path; relative
- * paths resolve against the working directory.
- */
-function resolveDbPath(): string {
-  const url = process.env.DATABASE_URL?.trim();
-  if (!url) {
-    return path.join(process.cwd(), "data", "gitea-mirror.db");
-  }
-  const raw = url.startsWith("sqlite://")
-    ? url.slice("sqlite://".length)
-    : url.startsWith("file:")
-      ? url.slice("file:".length)
-      : url;
-  return path.resolve(raw);
-}
 
 if (process.env.NODE_ENV !== "test") {
   const dbPath = resolveDbPath();

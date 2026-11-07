@@ -7,19 +7,11 @@
  */
 import path from "node:path";
 import { getRepositorySource, type RepositorySourceFields } from "@/lib/source-providers/kinds";
+import { resolveDbPath } from "@/lib/db/path";
 
-/** The directory the SQLite database lives in, derived the same way src/lib/db does. */
+/** The directory the SQLite database lives in. */
 export function resolveDataDir(): string {
-  const url = process.env.DATABASE_URL?.trim();
-  if (!url) {
-    return path.join(process.cwd(), "data");
-  }
-  const raw = url.startsWith("sqlite://")
-    ? url.slice("sqlite://".length)
-    : url.startsWith("file:")
-      ? url.slice("file:".length)
-      : url;
-  return path.dirname(path.resolve(raw));
+  return path.dirname(resolveDbPath());
 }
 
 export function resolveMirrorCloneRoot(): string {

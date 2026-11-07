@@ -130,7 +130,7 @@ These are the ones that matter for nearly every deployment. The [environment var
 | `BASE_URL` | `/` | Path prefix when the app is served under a subpath, for example `/mirror`. |
 | `DATABASE_URL` | `sqlite://data/gitea-mirror.db` | SQLite database location. The container image sets `file:data/gitea-mirror.db`. |
 
-> **Note:** `DATABASE_URL` accepts the `sqlite://` scheme, the legacy `file:` scheme, or a plain path. Relative paths resolve against the process working directory and the parent directory is created if it is missing. Point it at a mounted volume to relocate the database.
+> **Note:** `DATABASE_URL` accepts the `sqlite://` scheme, the legacy `file:` scheme, or a plain path. Relative paths resolve against the process working directory and the parent directory is created if it is missing. Point it at a mounted volume to relocate the database. gitea-mirror only supports SQLite, so any other scheme, such as `postgresql://`, is ignored with a warning and the default location is used.
 
 ### Authentication and secrets
 
