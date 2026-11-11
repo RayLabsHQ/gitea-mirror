@@ -148,7 +148,7 @@ describe("GitLabSourceProvider", () => {
       }),
     ];
     installFetch((url) => {
-      // "per_page=100" also contains "page=1", so match the page parameter itself.
+      // "per_page=20" also contains "page=", so match the page parameter itself.
       if (url.endsWith("&page=1")) return json(page1, { headers: { "x-next-page": "2" } });
       if (url.endsWith("&page=2")) return json(page2);
       return json({ message: "unexpected" }, { status: 500 });
@@ -158,12 +158,39 @@ describe("GitLabSourceProvider", () => {
     const repos = await provider.listRepositories({ githubConfig: { skipForks: true } as any });
 
     expect(calls[0].url).toBe(
-      "https://gitlab.example.com/api/v4/projects?membership=true&order_by=id&sort=asc&per_page=100&page=1"
+      "https://gitlab.example.com/api/v4/projects?membership=true&order_by=id&sort=asc&per_page=20&page=1"
     );
     expect(calls[0].headers["PRIVATE-TOKEN"]).toBe("glpat-secret");
     expect(calls).toHaveLength(2);
     expect(repos.map((r) => r.fullName)).toEqual(["me/widget", "acme/tools/tool"]);
     expect(repos[1].organization).toBe("acme");
+  });
+
+  test("asks for 20 projects a page and keeps paging until GitLab stops (#506)", async () => {
+    const pages = 3;
+    installFetch((url) => {
+      const page = Number(new URL(url).searchParams.get("page"));
+      const batch = Array.from({ length: page < pages ? 20 : 5 }, (_, i) =>
+        project({ id: (page - 1) * 20 + i + 1, path_with_namespace: `me/p${(page - 1) * 20 + i + 1}` })
+      );
+      return json(batch, { headers: page < pages ? { "x-next-page": String(page + 1) } : {} });
+    });
+
+    const repos = await new GitLabSourceProvider(connection).listRepositories({});
+
+    expect(calls.map((c) => new URL(c.url).searchParams.get("per_page"))).toEqual(["20", "20", "20"]);
+    expect(repos).toHaveLength(45);
+  });
+
+  test("stops at 50,000 projects whatever the page size", async () => {
+    installFetch((url) => {
+      const page = Number(new URL(url).searchParams.get("page"));
+      return json([project({ id: page })], { headers: { "x-next-page": String(page + 1) } });
+    });
+
+    await new GitLabSourceProvider(connection).listRepositories({});
+
+    expect(calls).toHaveLength(2_500);
   });
 
   test("without a token it lists the user's public projects and sends no token header", async () => {
@@ -211,6 +238,8 @@ describe("GitLabSourceProvider", () => {
     );
 
     expect(calls[0].url).toContain("top_level_only=true");
+    // Groups are cheap for GitLab to list, so they keep the larger page.
+    expect(calls[0].url).toContain("&per_page=100&page=1");
     expect(organizations).toHaveLength(1);
     expect(organizations[0].name).toBe("acme");
     expect(organizations[0].repositoryCount).toBe(12);
@@ -249,6 +278,7 @@ describe("GitLabSourceProvider", () => {
     const repos = await new GitLabSourceProvider(connection).listOrganizationRepositories("acme");
 
     expect(calls[0].url).toContain("include_subgroups=true");
+    expect(calls[0].url).toContain("&per_page=20&page=1");
     expect(repos.map((r) => r.fullName)).toEqual(["acme/tools/tool"]);
     expect(repos[0].organization).toBe("acme");
     expect(repos[0].sourceProvider).toBe("gitlab");
