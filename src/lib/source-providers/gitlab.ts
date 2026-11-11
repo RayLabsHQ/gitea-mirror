@@ -27,8 +27,16 @@ import type {
   SourceRepositoryPath,
 } from "./types";
 
-const PAGE_SIZE = 100;
-const MAX_PAGES = 500;
+/**
+ * Projects come 20 to a page. A full project object is expensive for GitLab
+ * to build, and a busy self-hosted instance took over 30 seconds, the source
+ * request timeout, for a page of 100 even when cached; 20 kept every page
+ * under 3 seconds there (#506). Groups are cheap and stay at 100.
+ */
+const PROJECT_PAGE_SIZE = 20;
+const GROUP_PAGE_SIZE = 100;
+/** Stop after this many items, whatever the page size. */
+const MAX_ITEMS = 50_000;
 
 export interface GitLabNamespace {
   id?: number;
@@ -197,13 +205,15 @@ export class GitLabSourceProvider implements SourceProvider {
 
   private async paginate<T>(
     path: string,
-    params: Record<string, string | number | boolean | undefined> = {}
+    params: Record<string, string | number | boolean | undefined> = {},
+    pageSize: number = PROJECT_PAGE_SIZE
   ): Promise<T[]> {
     const items: T[] = [];
-    for (let page = 1; page <= MAX_PAGES; page += 1) {
+    const maxPages = Math.ceil(MAX_ITEMS / pageSize);
+    for (let page = 1; page <= maxPages; page += 1) {
       const url = withQuery(`${this.apiRoot}${path}`, {
         ...params,
-        per_page: PAGE_SIZE,
+        per_page: pageSize,
         page,
       });
       const { data, response } = await sourceFetch<T[]>(url, { headers: this.headers() });
@@ -275,12 +285,16 @@ export class GitLabSourceProvider implements SourceProvider {
       return { organizations: [], failedOrgs: [] };
     }
 
-    const groups = await this.paginate<GitLabGroup>("/groups", {
-      membership: true,
-      top_level_only: true,
-      order_by: "id",
-      sort: "asc",
-    });
+    const groups = await this.paginate<GitLabGroup>(
+      "/groups",
+      {
+        membership: true,
+        top_level_only: true,
+        order_by: "id",
+        sort: "asc",
+      },
+      GROUP_PAGE_SIZE
+    );
 
     const organizations: GitOrg[] = [];
     const failedOrgs: SourceFailedOrganization[] = [];
