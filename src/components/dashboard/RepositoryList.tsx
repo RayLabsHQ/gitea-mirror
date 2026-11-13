@@ -21,7 +21,7 @@ export function RepositoryList({ repositories }: RepositoryListProps) {
   // Helper function to construct the destination repository URL
   const getGiteaRepoUrl = (repository: Repository): string | null => {
     // Only provide links for repositories that have been or are being mirrored
-    const validStatuses = ['mirroring', 'mirrored', 'syncing', 'synced'];
+    const validStatuses = ['mirroring', 'mirrored', 'syncing', 'synced', 'archived'];
     if (!validStatuses.includes(repository.status)) {
       return null;
     }
@@ -96,7 +96,7 @@ export function RepositoryList({ repositories }: RepositoryListProps) {
                   </div>
                 </div>
 
-                <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-medium mr-2
+                <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[10px] font-medium mr-2 capitalize
                   ${repo.status === 'imported' ? 'bg-yellow-500/10 text-yellow-600 dark:text-yellow-400' :
                     repo.status === 'mirrored' || repo.status === 'synced' ? 'bg-green-500/10 text-green-600 dark:text-green-400' :
                     repo.status === 'mirroring' || repo.status === 'syncing' ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400' :
@@ -108,9 +108,11 @@ export function RepositoryList({ repositories }: RepositoryListProps) {
                 <div className="flex items-center gap-1 flex-shrink-0">
                   {(() => {
                     const giteaUrl = getGiteaRepoUrl(repo);
-                    const giteaEnabled = giteaUrl && ['mirrored', 'synced'].includes(repo.status);
 
-                    return giteaEnabled ? (
+                    // Same rule as the Repositories page: a repository that is
+                    // being mirrored, syncing or archived already has a page
+                    // on the destination (#512).
+                    return giteaUrl ? (
                       <Button variant="ghost" size="icon" className="h-8 w-8" asChild>
                         <a
                           href={giteaUrl}
