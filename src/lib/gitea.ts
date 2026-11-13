@@ -9,6 +9,7 @@ import { Octokit } from "@octokit/rest";
 import type { Config } from "@/types/config";
 import type { IssueStateFilter, Organization, ReleaseType, Repository } from "./db/schema";
 import { httpPost, httpGet, httpDelete, httpPut, httpPatch } from "./http-client";
+import { withMigrateRejectionReason } from "./utils/migrate-error";
 import { createMirrorJob } from "./helpers";
 import { applyIssueMediaOption, stripIssueMedia } from "./utils/issue-media";
 import { db, organizations, repositories } from "./db";
@@ -1243,7 +1244,10 @@ export const mirrorGithubRepoToGitea = async ({
       {
         Authorization: `token ${decryptedConfig.giteaConfig.token}`,
       }
-    );
+    ).catch((error) => {
+      // Say why the destination refused, not just the status (#511).
+      throw withMigrateRejectionReason(error);
+    });
 
     migrateSucceeded = true;
 
@@ -2046,7 +2050,10 @@ export async function mirrorGitHubRepoToGiteaOrg({
       {
         Authorization: `token ${decryptedConfig.giteaConfig.token}`,
       }
-    );
+    ).catch((error) => {
+      // Say why the destination refused, not just the status (#511).
+      throw withMigrateRejectionReason(error);
+    });
 
     migrateSucceeded = true;
 
