@@ -48,6 +48,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - A secondary rate limit pauses the whole client for its retry-after window, not only the request that was told to slow down
 
 ### Security
+- Raised Astro to 7.4.7 and the node adapter to 11.1.13 in the application (GHSA-r3h5-4585-7x3w, the image endpoint could read files from a folder whose name differs from the build output folder only in letter case, on case sensitive filesystems; GHSA-mh32-jxcr-mh9f, attribute injection in dynamic tag names). The documentation site got the same Astro bump in #516. Astro 7.4 needs vite 8.3 and devalue 6, so those overrides moved to `^8.3.5` and `^6.0.3`, both above the earlier security floors
 - Source URLs go through the outbound guard too (GHSA-p7w3-46pg-mv6h): `POST /api/sources`, `PUT /api/sources/:id` and the configuration save refuse link local and metadata addresses for source and destination URLs, the source fetch helper pins and never follows redirects like the other user supplied URLs, source errors no longer carry the upstream body in their message, and errors raised by a request to another host are never forwarded to API clients whatever words they contain
 - Fixed four privately reported vulnerabilities (GHSA-9m33-xfrc-5jxw, GHSA-6m23-28hh-gjh2, GHSA-2hpx-83vg-gm45, GHSA-5pp8-r7f5-6q8p)
   - `POST /api/gitea/test-connection` and `POST /api/github/test-connection` now require a signed-in user; they were the only non-public API routes without a guard and made a server side request to any URL in the body
