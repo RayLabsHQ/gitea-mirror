@@ -82,6 +82,16 @@ export const POST: APIRoute = async ({ request, locals }) => {
     // All sources may point at their own instance; validate explicit URLs.
     {
       const rawSourceUrl = typeof body.url === "string" ? body.url.trim() : "";
+      // A plain git source is its host: there is no default to fall back to.
+      if (provider === "git" && !rawSourceUrl) {
+        return new Response(
+          JSON.stringify({
+            success: false,
+            message: "A Git URL source needs a host URL, for example https://git.example.org.",
+          }),
+          { status: 400, headers: { "Content-Type": "application/json" } }
+        );
+      }
       if (rawSourceUrl && !isValidSourceUrl(rawSourceUrl)) {
         return new Response(
           JSON.stringify({

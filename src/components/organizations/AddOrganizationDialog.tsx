@@ -1,5 +1,5 @@
 import * as React from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -27,6 +27,7 @@ import {
   DEFAULT_SOURCE_PROVIDER,
   SOURCE_PROVIDER_DEFAULT_URLS,
   SOURCE_PROVIDER_KINDS,
+  sourceKindListsRepositories,
   SOURCE_PROVIDER_LABELS,
   SOURCE_PROVIDER_ORG_NOUNS,
   isBetaSourceProvider,
@@ -73,8 +74,13 @@ export default function AddOrganizationDialog({
   onAddOrganization,
   sourceProvider = "github",
   sourceUrl,
-  sources,
+  sources: connectedSources,
 }: AddOrganizationDialogProps) {
+  // A plain git host has no organizations to import, so it is not offered.
+  const sources = useMemo(
+    () => connectedSources?.filter((source) => sourceKindListsRepositories(source.provider)),
+    [connectedSources]
+  );
   const [url, setUrl] = useState<string>("");
   const [org, setOrg] = useState<string>("");
   const [role, setRole] = useState<MembershipRole>("member");
@@ -324,7 +330,7 @@ export default function AddOrganizationDialog({
                       <SelectValue placeholder="Select provider" />
                     </SelectTrigger>
                     <SelectContent>
-                      {SOURCE_PROVIDER_KINDS.map((kind) => {
+                      {SOURCE_PROVIDER_KINDS.filter(sourceKindListsRepositories).map((kind) => {
                         const ProviderIcon = SOURCE_PROVIDER_ICONS[kind];
                         return (
                           <SelectItem key={kind} value={kind}>

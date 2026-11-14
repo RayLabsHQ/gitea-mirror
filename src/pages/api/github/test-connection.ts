@@ -53,8 +53,12 @@ export const POST: APIRoute = async ({ request, locals }) => {
         return json({ success: false, message: (error as Error).message }, 400);
       }
     }
-    if (!credential) {
+    // A plain git host may serve everything without a login.
+    if (!credential && provider !== "git") {
       return json({ success: false, message: `${label} token is required` }, 400);
+    }
+    if (provider === "git" && !(typeof url === "string" && url.trim())) {
+      return json({ success: false, message: "Enter the host URL, for example https://git.example.org" }, 400);
     }
 
     const instanceUrl = normalizeSourceUrl(url, provider);
@@ -72,7 +76,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       provider,
       url: instanceUrl,
       username: typeof username === "string" ? username : "",
-      token: credential,
+      token: typeof credential === "string" ? credential : "",
     });
 
     const account = await sourceProvider.testConnection();
@@ -88,7 +92,10 @@ export const POST: APIRoute = async ({ request, locals }) => {
     return json(
       {
         success: true,
-        message: `Successfully connected to ${label} as ${account.login}`,
+        message:
+          provider === "git"
+            ? `Reached ${instanceUrl}. Repositories are checked when you add them.`
+            : `Successfully connected to ${label} as ${account.login}`,
         user: {
           login: account.login,
           name: account.name ?? null,

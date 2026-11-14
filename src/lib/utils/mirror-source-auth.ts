@@ -60,6 +60,7 @@ interface BuildSourceAuthPayloadParams {
 
 const GITLAB_AUTH_USERNAME = "oauth2";
 const DEFAULT_GITEA_AUTH_USERNAME = "token";
+const DEFAULT_GIT_AUTH_USERNAME = "git";
 
 /**
  * Build the clone credentials Gitea stores for a pull mirror, per source host.
@@ -67,6 +68,7 @@ const DEFAULT_GITEA_AUTH_USERNAME = "token";
  * - GitHub: account name plus the token as password.
  * - GitLab: the documented "oauth2" username plus a personal access token.
  * - Gitea and Forgejo: any username plus the token as password.
+ * - Plain git host: the source's username and password as given.
  *
  * Returns an empty object when no token is available so callers can
  * Object.assign the result unconditionally.
@@ -86,6 +88,12 @@ export function buildSourceAuthPayload({
     case "gitlab":
       return {
         auth_username: GITLAB_AUTH_USERNAME,
+        auth_password: normalizedToken,
+        auth_token: normalizedToken,
+      };
+    case "git":
+      return {
+        auth_username: normalize(username) || DEFAULT_GIT_AUTH_USERNAME,
         auth_password: normalizedToken,
         auth_token: normalizedToken,
       };

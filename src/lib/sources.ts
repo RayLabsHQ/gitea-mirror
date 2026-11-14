@@ -29,6 +29,7 @@ import {
   isSourceProviderKind,
   normalizeSourceProviderKind,
   normalizeSourceUrl,
+  sourceHostOf,
   type RepositorySourceFields,
   type SourceProviderKind,
 } from "@/lib/source-providers/kinds";
@@ -62,9 +63,21 @@ export class DuplicateSourceError extends Error {
   }
 }
 
-/** The display label for a source: "GitHub (octocat)", or just the provider label without a username. */
-export function deriveSourceName(provider: SourceProviderKind, username: string): string {
+/**
+ * The display label for a source: "GitHub (octocat)", or just the provider
+ * label without a username. A plain git source is named after its host, the
+ * one thing that tells two of them apart.
+ */
+export function deriveSourceName(
+  provider: SourceProviderKind,
+  username: string,
+  url?: string | null
+): string {
   const label = SOURCE_PROVIDER_LABELS[provider];
+  if (provider === "git") {
+    const host = sourceHostOf(url ?? "");
+    return host ? `${label} (${host})` : label;
+  }
   return username ? `${label} (${username})` : label;
 }
 
@@ -248,7 +261,7 @@ export async function createSource(userId: string, input: SourceInput): Promise<
   const url = normalizeSourceUrl(input.url, provider);
   const username = (input.username ?? "").trim();
   const rawToken = (input.token ?? "").trim();
-  const name = input.name?.trim() || deriveSourceName(provider, username);
+  const name = input.name?.trim() || deriveSourceName(provider, username, url);
 
   await assertNoDuplicate(userId, provider, url, username);
 
@@ -295,7 +308,7 @@ export async function updateSource(
   const name =
     input.name === undefined
       ? existing.name
-      : input.name?.trim() || deriveSourceName(provider, username);
+      : input.name?.trim() || deriveSourceName(provider, username, url);
   const enabled = input.enabled ?? existing.enabled;
 
   if (
@@ -410,7 +423,7 @@ export async function ensureSourcesFromConfig(userId: string): Promise<void> {
   await db.insert(sources).values({
     id: sourceId,
     userId,
-    name: deriveSourceName(provider, username),
+    name: deriveSourceName(provider, username, url),
     provider,
     url,
     username,

@@ -14,6 +14,7 @@ import {
   type SourceRecord,
 } from "@/lib/sources";
 import { GiteaSourceProvider } from "./gitea-source";
+import { GitSourceProvider } from "./git-source";
 import { GitHubSourceProvider } from "./github-source";
 import { GitLabSourceProvider } from "./gitlab";
 import {
@@ -59,6 +60,8 @@ export function createSourceProvider(connection: SourceConnection): SourceProvid
       return new GitLabSourceProvider(connection);
     case "gitea":
       return new GiteaSourceProvider(connection);
+    case "git":
+      return new GitSourceProvider(connection);
     case "github":
     default:
       return new GitHubSourceProvider(connection);

@@ -22,7 +22,7 @@ import {
   PlugZap,
   Trash2,
 } from "lucide-react";
-import { SiGitea, SiGithub, SiGitlab } from "react-icons/si";
+import { SiGit, SiGitea, SiGithub, SiGitlab } from "react-icons/si";
 import {
   Select,
   SelectContent,
@@ -109,6 +109,18 @@ const sourceProviders: SourceProviderMeta[] = [
     ],
     scopes: ["read:repository", "read:user", "read:organization"],
   },
+  {
+    value: "git",
+    label: SOURCE_PROVIDER_LABELS.git,
+    icon: SiGit,
+    badge: isBetaSourceProvider("git") ? "BETA" : undefined,
+    usernamePlaceholder: "Only if the host asks for a login",
+    tokenPlaceholder: "Password or access token",
+    tokenHint: "Only needed when the host asks for a login to clone",
+    tokenSettingsPath: "",
+    tokenSteps: [],
+    scopes: [],
+  },
 ];
 
 function providerMetaFor(provider: SourceProvider): SourceProviderMeta {
@@ -119,6 +131,8 @@ function providerHelp(provider: SourceProvider): string {
   if (provider === "github") return "Where your repositories are pulled from";
   if (provider === "gitlab")
     return "Beta. Code, tags, wiki and LFS are mirrored. Issues, merge requests and releases need a GitHub source.";
+  if (provider === "git")
+    return "Beta. Any host that can be cloned over http(s). Add each repository by its clone URL on the Repositories page. Branches and tags are mirrored; there is nothing to list, so no auto-import, releases or issues.";
   return "Beta. Code, tags, releases, wiki and LFS are mirrored. Issues and pull requests need a GitHub source.";
 }
 
@@ -215,6 +229,7 @@ export function SourcesCard({ sources, onRefresh }: SourcesCardProps) {
   // and saving both fall back to it.
   const effectiveToken = editor?.token.trim() || editing?.token || "";
   const isApp = provider === "github" && editor?.authType === "app";
+  const isGit = provider === "git";
   const isPublicOnlyDraft =
     !!editor && !editor.username.trim() && !effectiveToken && !isApp;
 
@@ -289,7 +304,11 @@ export function SourcesCard({ sources, onRefresh }: SourcesCardProps) {
 
   const handleTestConnection = async () => {
     if (!editor) return;
-    if (!effectiveToken && !isApp) {
+    if (isGit && !editor.url.trim()) {
+      toast.error("Enter the host URL first");
+      return;
+    }
+    if (!effectiveToken && !isApp && !isGit) {
       toast.error(`${providerLabel} token is required to test the connection`);
       return;
     }
@@ -327,6 +346,10 @@ export function SourcesCard({ sources, onRefresh }: SourcesCardProps) {
 
   const handleSave = async (confirmSourceChange: boolean) => {
     if (!editor) return;
+    if (isGit && !editor.url.trim()) {
+      toast.error("A Git URL source needs a host URL, for example https://git.example.org");
+      return;
+    }
     setIsSaving(true);
 
     try {
@@ -498,7 +521,7 @@ export function SourcesCard({ sources, onRefresh }: SourcesCardProps) {
                 htmlFor="source-url"
                 className="text-xs font-medium text-muted-foreground"
               >
-                Instance URL
+                {isGit ? "Host URL" : "Instance URL"}
               </Label>
                 <Input
                   id="source-url"
@@ -506,11 +529,13 @@ export function SourcesCard({ sources, onRefresh }: SourcesCardProps) {
                   type="url"
                   value={editor.url}
                   onChange={handleFieldChange}
-                  placeholder={defaultInstanceUrl}
+                  placeholder={isGit ? "https://git.example.org" : defaultInstanceUrl}
                   disabled={editingLocked}
                 />
                 <p className="text-[11px] text-muted-foreground/80">
-                  {`Leave empty for ${defaultInstanceUrl.replace(/^https?:\/\//, "")}, or enter the base URL of your own instance`}
+                  {isGit
+                    ? "The host your repositories are cloned from. Only the host is kept; each repository brings its own path"
+                    : `Leave empty for ${defaultInstanceUrl.replace(/^https?:\/\//, "")}, or enter the base URL of your own instance`}
                 </p>
             </div>
 
@@ -562,7 +587,7 @@ export function SourcesCard({ sources, onRefresh }: SourcesCardProps) {
                 htmlFor="source-token"
                 className="text-xs font-medium text-muted-foreground"
               >
-                Personal access token
+                {isGit ? "Password or token" : "Personal access token"}
               </Label>
               <Input
                 id="source-token"
@@ -581,7 +606,7 @@ export function SourcesCard({ sources, onRefresh }: SourcesCardProps) {
               </p>
             </div>}
 
-            {!isApp && <div className="space-y-3 rounded-lg bg-muted/40 p-4">
+            {!isApp && !isGit && <div className="space-y-3 rounded-lg bg-muted/40 p-4">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <KeyRound className="h-4 w-4 text-muted-foreground" />
@@ -623,7 +648,7 @@ export function SourcesCard({ sources, onRefresh }: SourcesCardProps) {
                 variant="outline"
                 size="sm"
                 onClick={handleTestConnection}
-                disabled={isTesting || (!effectiveToken && !isApp)}
+                disabled={isTesting || (isGit ? !editor.url.trim() : !effectiveToken && !isApp)}
               >
                 <PlugZap className="mr-1.5 h-3.5 w-3.5" />
                 {isTesting ? "Testing..." : "Test"}

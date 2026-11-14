@@ -150,4 +150,17 @@ describe("parseGitHubRepoReference on other hosts", () => {
       repo: "next.js",
     });
   });
+
+  it("a repository at the root of another host takes the host as its owner", () => {
+    expect(parseGitHubRepoReference("https://git.example.org/cgit")).toEqual({
+      owner: "git.example.org",
+      repo: "cgit",
+    });
+    expect(parseGitHubRepoReference("https://git.example.org:8443/tool.git")).toEqual({
+      owner: "git.example.org",
+      repo: "tool",
+    });
+    // github.com still needs an owner and a repository.
+    expect(parseGitHubRepoReference("https://github.com/vercel")).toBeNull();
+  });
 });
