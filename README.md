@@ -544,6 +544,12 @@ PRs are mirrored as issues with rich metadata including:
 
 This approach preserves all important PR information while working within Gitea/Forgejo's API constraints. The PRs appear in the issue tracker with clear visual distinction and comprehensive details.
 
+## Community Projects
+
+Built by the community on top of the [Gitea Mirror API](docs/API.md):
+
+- [GiteaMirrorBot](https://github.com/MajMcCloud/GiteaMirrorBot) by [MajMcCloud](https://github.com/MajMcCloud): a Telegram bot that spots GitHub links posted in a group and, when you confirm, adds the repository or organization to Gitea Mirror and starts the mirror. It can also post notifications back into the group. Runs as a single binary or a Docker image.
+
 ## Contributing
 
 Contributions are welcome! Please read our [Contributing Guidelines](CONTRIBUTING.md) for details on our code of conduct and the process for submitting pull requests.
