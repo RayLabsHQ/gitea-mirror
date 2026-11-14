@@ -99,8 +99,18 @@ describe("buildSourceAuthPayload", () => {
     expect(buildSourceAuthPayload({ provider: "gitea", token: "t" }).auth_username).toBe("token");
   });
 
+  test("plain git host: the username and password of the source as given", () => {
+    expect(
+      buildSourceAuthPayload({ provider: "git", token: "hunter2", username: "bob", repositoryOwner: "alice" })
+    ).toEqual({ auth_username: "bob", auth_password: "hunter2", auth_token: "hunter2" });
+    // The folder a repository sits in is not an account name.
+    expect(
+      buildSourceAuthPayload({ provider: "git", token: "t", repositoryOwner: "alice" }).auth_username
+    ).toBe("git");
+  });
+
   test("returns an empty object without a token for every provider", () => {
-    for (const provider of ["github", "gitlab", "gitea"] as const) {
+    for (const provider of ["github", "gitlab", "gitea", "git"] as const) {
       expect(buildSourceAuthPayload({ provider, token: "  ", username: "me" })).toEqual({});
     }
   });

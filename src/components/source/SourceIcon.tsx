@@ -1,4 +1,4 @@
-import { SiGitea, SiGithub, SiGitlab } from "react-icons/si";
+import { SiGit, SiGitea, SiGithub, SiGitlab } from "react-icons/si";
 import {
   SOURCE_PROVIDER_LABELS,
   getRepositorySource,
@@ -10,6 +10,7 @@ const icons: Record<SourceProviderKind, React.ComponentType<{ className?: string
   github: SiGithub,
   gitlab: SiGitlab,
   gitea: SiGitea,
+  git: SiGit,
 };
 
 /** Brand icon for the host a repository came from. */

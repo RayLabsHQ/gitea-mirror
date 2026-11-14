@@ -117,6 +117,11 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
       );
     }
 
+    // A plain git source is its host: there is no default to fall back to.
+    if (provider === "git" && typeof body.url === "string" && !body.url.trim()) {
+      return jsonError("A Git URL source needs a host URL, for example https://git.example.org.", 400);
+    }
+
     // All sources may point at their own instance; validate explicit URLs.
     if (
       typeof body.url === "string" &&

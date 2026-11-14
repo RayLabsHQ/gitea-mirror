@@ -3,6 +3,7 @@ import { toast } from "sonner";
 import { Layers } from "lucide-react";
 import type { SourceApiRecord } from "@/types/config";
 import { SOURCE_PROVIDER_ICONS } from "@/lib/source-providers/icons";
+import { sourceKindListsRepositories } from "@/lib/source-providers/kinds";
 import { cn } from "@/lib/utils";
 import {
   Select,
@@ -70,7 +71,10 @@ export function OrganizationSourceEditor({
         </SelectTrigger>
         <SelectContent>
           <SelectItem value={EVERY_SOURCE_VALUE}>Every source</SelectItem>
-          {sources.map((source) => {
+          {sources
+            // A plain git host has no organizations, so it cannot own one.
+            .filter((source) => sourceKindListsRepositories(source.provider))
+            .map((source) => {
             const SourceIcon = SOURCE_PROVIDER_ICONS[source.provider];
             return (
               <SelectItem key={source.id} value={source.id}>

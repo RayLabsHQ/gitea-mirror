@@ -3,9 +3,11 @@
  *
  * Kept free of imports so both server code and client components can use it.
  * "gitea" covers Gitea and Forgejo (and therefore Codeberg): they share the
- * same API surface.
+ * same API surface. "git" is any host that serves a repository over http(s)
+ * and has no API this app knows: repositories are added one clone URL at a
+ * time and only the code is mirrored (#514).
  */
-export const SOURCE_PROVIDER_KINDS = ["github", "gitlab", "gitea"] as const;
+export const SOURCE_PROVIDER_KINDS = ["github", "gitlab", "gitea", "git"] as const;
 
 export type SourceProviderKind = (typeof SOURCE_PROVIDER_KINDS)[number];
 
@@ -36,17 +38,31 @@ export function sourceKindSupportsReleases(kind: unknown): boolean {
   );
 }
 
-/** Base URL used when the config has no instance URL for the provider. */
+/**
+ * Sources with an account to list: repositories, organizations and stars can
+ * be discovered, and a repository missing from the listing may have been
+ * deleted upstream. A plain git host has none of that.
+ */
+export function sourceKindListsRepositories(kind: unknown): boolean {
+  return normalizeSourceProviderKind(kind) !== "git";
+}
+
+/**
+ * Base URL used when the config has no instance URL for the provider. A plain
+ * git source has no default host: its URL is required.
+ */
 export const SOURCE_PROVIDER_DEFAULT_URLS: Record<SourceProviderKind, string> = {
   github: "https://github.com",
   gitlab: "https://gitlab.com",
   gitea: "https://codeberg.org",
+  git: "",
 };
 
 export const SOURCE_PROVIDER_LABELS: Record<SourceProviderKind, string> = {
   github: "GitHub",
   gitlab: "GitLab",
   gitea: "Gitea / Forgejo",
+  git: "Git URL",
 };
 
 /** What the host calls a group of repositories owned by a team. */
@@ -54,6 +70,7 @@ export const SOURCE_PROVIDER_ORG_NOUNS: Record<SourceProviderKind, string> = {
   github: "organization",
   gitlab: "group",
   gitea: "organization",
+  git: "organization",
 };
 
 export function isSourceProviderKind(value: unknown): value is SourceProviderKind {
@@ -109,6 +126,12 @@ export function normalizeSourceUrl(
 
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     return fallback;
+  }
+
+  // A plain git source stands for the whole host: each repository carries
+  // its own path, so whatever path was pasted with the host is dropped.
+  if (provider === "git") {
+    return `${url.protocol}//${url.host}`;
   }
 
   const path = url.pathname.replace(/\/+$/, "");

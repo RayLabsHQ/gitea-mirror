@@ -169,6 +169,9 @@ export function ConfigTabs() {
   // The lastRun and nextRun should be managed by the backend and fetched via API
 
   const sourceLabel = SOURCE_PROVIDER_LABELS[config.githubConfig.provider ?? 'github'];
+  // "Import Git URL Data" would promise a listing a plain git host does not have.
+  const importLabel =
+    config.githubConfig.provider === 'git' ? 'Import Data' : `Import ${sourceLabel} Data`;
 
   const handleImportGitHubData = async () => {
     if (!user?.id) return;
@@ -735,19 +738,19 @@ export function ConfigTabs() {
                 ? 'Connect a source with a token first'
                 : isSyncing
                 ? 'Import in progress'
-                : `Import ${sourceLabel} Data`
+                : importLabel
             }
             className="w-full bg-indigo-500 text-white hover:bg-indigo-600 disabled:bg-muted disabled:text-muted-foreground md:w-auto"
           >
             {isSyncing ? (
               <>
                 <RefreshCw className="h-4 w-4 animate-spin mr-1" />
-                Import {sourceLabel} Data
+                {importLabel}
               </>
             ) : (
               <>
                 <RefreshCw className="h-4 w-4 mr-1" />
-                Import {sourceLabel} Data
+                {importLabel}
               </>
             )}
           </Button>

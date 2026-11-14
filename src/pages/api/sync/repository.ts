@@ -12,6 +12,7 @@ import { createMirrorJob } from "@/lib/helpers";
 import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 import {
   SOURCE_PROVIDER_LABELS,
+  SourceApiError,
   sourceHostOf,
 } from "@/lib/source-providers";
 import { repositorySourceColumns } from "@/lib/repo-utils";
@@ -141,12 +142,37 @@ export const POST: APIRoute = async ({ request, locals }) => {
       });
     }
 
-    const repoData = await sourceProvider.getRepository(resolvedPath.owner, resolvedPath.repo);
+    let repoData: Awaited<ReturnType<typeof sourceProvider.getRepository>>;
+    try {
+      repoData = await sourceProvider.getRepository(resolvedPath.owner, resolvedPath.repo);
+    } catch (error) {
+      // A plain git host answers with a status and nothing else. Say what it
+      // was instead of a generic server error, so a missing password or an
+      // unreachable host can be told apart.
+      if (sourceProvider.kind === "git" && error instanceof SourceApiError) {
+        const refused = error.status === 401 || error.status === 403;
+        return jsonResponse({
+          data: {
+            success: false,
+            error: refused
+              ? source.token
+                ? `${sourceHostOf(source.url)} refused the username and password saved for this source`
+                : `${sourceHostOf(source.url)} did not serve that repository without a login. Check the URL, or if the repository is private add a username and password to this source on the Configuration page`
+              : `${sourceHostOf(source.url)} answered with status ${error.status} for that repository`,
+          },
+          status: refused ? 400 : 502,
+        });
+      }
+      throw error;
+    }
     if (!repoData) {
       return jsonResponse({
         data: {
           success: false,
-          error: `Repository ${resolvedPath.owner}/${resolvedPath.repo} was not found on ${sourceLabel}`,
+          error:
+            sourceProvider.kind === "git"
+              ? `No git repository answered at that URL on ${sourceHostOf(source.url)}`
+              : `Repository ${resolvedPath.owner}/${resolvedPath.repo} was not found on ${sourceLabel}`,
         },
         status: 404,
       });

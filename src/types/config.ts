@@ -9,8 +9,11 @@ export type MirrorStrategy = "preserve" | "single-org" | "flat-user" | "mixed";
 export type StarredReposMode = "dedicated-org" | "preserve-owner";
 export type BackupStrategy = "disabled" | "always" | "on-force-push" | "block-on-force-push";
 export type ScheduleMode = "interval" | "clock";
-/** Which host repositories are pulled from. "gitea" also covers Forgejo. */
-export type SourceProvider = "github" | "gitlab" | "gitea";
+/**
+ * Which host repositories are pulled from. "gitea" also covers Forgejo;
+ * "git" is any host that serves a repository over http(s).
+ */
+export type SourceProvider = "github" | "gitlab" | "gitea" | "git";
 /**
  * Which host repositories are mirrored into. Gitea and Forgejo are pull
  * mirrors; GitHub and GitLab are push targets served by the push engine.

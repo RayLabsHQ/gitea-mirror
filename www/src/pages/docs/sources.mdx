@@ -1,7 +1,7 @@
 ---
 layout: '../../layouts/DocsLayout.astro'
 title: Sources
-description: Where Gitea Mirror pulls repositories from. GitHub is the default; GitLab and Gitea or Forgejo are available as beta sources.
+description: Where Gitea Mirror pulls repositories from. GitHub is the default; GitLab, Gitea or Forgejo, and plain git URLs are available as beta sources.
 ---
 
 # Sources
@@ -13,8 +13,9 @@ A source is the host Gitea Mirror pulls repositories from. Each account can conn
 | GitHub | github.com and GitHub Enterprise | `https://github.com` |
 | GitLab (beta) | gitlab.com and self-hosted GitLab | `https://gitlab.com` |
 | Gitea / Forgejo (beta) | Codeberg and any self-hosted Gitea or Forgejo | `https://codeberg.org` |
+| Git URL (beta) | Any host that can be cloned over http(s): cgit, gitweb, Gitflic, kernel.org and the like | none, the host is required |
 
-GitHub to Gitea is the supported path. GitLab and Gitea / Forgejo carry a BETA pill in the dropdown: they are tested end to end against real hosts, but have had less time in the field. Sources other than GitHub also carry a short note under the dropdown saying what they cannot mirror.
+GitHub to Gitea is the supported path. GitLab, Gitea / Forgejo and Git URL carry a BETA pill in the dropdown: they are tested end to end against real hosts, but have had less time in the field. Sources other than GitHub also carry a short note under the dropdown saying what they cannot mirror.
 
 ![The Configuration page with the Source and Destination dropdowns](/assets/configuration.png)
 
@@ -27,6 +28,25 @@ Pick the host in the dropdown. The rest of the card adapts to it:
 - The **Test** button in the card header makes a live authenticated call against the selected host, so you can confirm the token before importing anything.
 
 GitHub Enterprise Server and Enterprise Cloud with data residency are configured through the `GH_API_URL` environment variable rather than the Instance URL field, which only shows for the other two sources. See [Environment variables](./environment-variables.md#source).
+
+## Git URL sources
+
+A Git URL source is for hosts that have no API Gitea Mirror knows, only repositories that can be cloned. It stands for one host:
+
+- **Host URL** is required, for example `https://git.example.org`. Only the host is kept; a path pasted with it is dropped, because each repository brings its own.
+- **Username** and **Password or token** are only needed when the host asks for a login to clone. They are sent as HTTP basic auth and handed to the destination for its own fetches. With only a password or token, the username `git` is used.
+- **Test** checks that the host answers. Repositories are checked one by one when you add them.
+
+Repositories are added one at a time with **Add by URL** on the Repositories page: paste the clone URL, such as `https://git.example.org/team/project.git`. The host must match a connected source. Gitea Mirror asks the host for its refs the way `git ls-remote` does, tries the URL with and without `.git`, and stores the one that answered. A repository that needed the login is recorded as private.
+
+What to expect:
+
+- Branches and tags are mirrored. There are no releases, issues, pull requests or wikis to read.
+- There is nothing to list, so there is no import, no auto import, no organizations and no starred repositories.
+- Cleanup never treats these repositories as deleted upstream.
+- Force push detection is not available. For protection against rewritten history, use the **Always Backup** snapshot strategy; see [Force-push protection](./force-push-protection.md).
+- Only http and https URLs work. SSH remotes are not supported.
+- The folder a repository sits in is used as its owner, so `https://git.example.org/team/project.git` is owned by `team`. A repository at the root of the host is owned by the host name.
 
 ## Tokens
 
@@ -46,21 +66,21 @@ Tokens are encrypted with AES-256-GCM before they are stored, whether they come 
 
 The code itself is copied by the destination: Gitea and Forgejo pull from the source as a plain git remote, and the push engine used for GitHub and GitLab destinations clones and pushes the same way. Sources therefore differ only in what their API offers on top of git.
 
-| | GitHub | GitLab | Gitea / Forgejo |
-| --- | :---: | :---: | :---: |
-| Code, branches, tags | yes | yes | yes |
-| Wiki | yes | yes | yes |
-| LFS objects | yes | yes | yes |
-| Scheduled sync | yes | yes | yes |
-| Auto import of new repositories | yes | yes | yes |
-| Cleanup of repositories deleted upstream | yes | yes | yes |
-| Starred repositories | yes | yes | yes |
-| Private repositories | yes | yes | yes |
-| Add a single repository by URL | yes | yes | yes |
-| Issues, pull requests, labels, milestones | yes | no | no |
-| Releases with assets | yes | no | yes |
-| Star lists | yes | no | no |
-| Force push detection | yes | no | no |
+| | GitHub | GitLab | Gitea / Forgejo | Git URL |
+| --- | :---: | :---: | :---: | :---: |
+| Code, branches, tags | yes | yes | yes | yes |
+| Wiki | yes | yes | yes | no |
+| LFS objects | yes | yes | yes | untested |
+| Scheduled sync | yes | yes | yes | yes |
+| Auto import of new repositories | yes | yes | yes | no |
+| Cleanup of repositories deleted upstream | yes | yes | yes | no |
+| Starred repositories | yes | yes | yes | no |
+| Private repositories | yes | yes | yes | yes, with a login |
+| Add a single repository by URL | yes | yes | yes | yes |
+| Issues, pull requests, labels, milestones | yes | no | no | no |
+| Releases with assets | yes | no | yes | no |
+| Star lists | yes | no | no | no |
+| Force push detection | yes | no | no | no |
 
 The GitHub only rows read the GitHub API. With another source the corresponding switches in the mirror settings are disabled and say why. Releases are the exception: Gitea and Forgejo expose them through their own API, so a Gitea, Forgejo or Codeberg source mirrors releases and their assets with that instance's token, or anonymously for a public repository. Wiki and LFS also depend on the destination: they travel to Gitea and Forgejo, not to GitHub or GitLab. See [Destinations](./destinations.md).
 

@@ -168,6 +168,14 @@ export function parseGitHubRepoReference(
   // Other hosts may nest the owner (GitLab groups) or use different reserved
   // paths, so they get the looser split.
   if (host && host !== "github.com" && !host.endsWith(".github.com")) {
+    // A plain git host can serve a repository at its root
+    // (https://git.example.org/project.git). The host stands in for the
+    // owner; the server resolves the real path from the segments.
+    if (segments.length === 1) {
+      const repo = segments[0].replace(GIT_SUFFIX, "");
+      const hostname = host.replace(/:\d+$/, "");
+      return isUsableRepoName(repo) && hostname ? { owner: hostname, repo } : null;
+    }
     return splitNonGithubPath(segments);
   }
 

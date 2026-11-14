@@ -10,6 +10,7 @@ import {
   describeSource,
   getRepositorySource,
   isRepositoryFromConfiguredSource,
+  sourceKindListsRepositories,
 } from '@/lib/source-providers';
 import { createGiteaClient, deleteGiteaRepo, archiveGiteaRepo, getGiteaRepoOwnerAsync, checkRepoLocation } from '@/lib/gitea';
 import { usesPushEngine } from '@/lib/destination-connection';
@@ -136,6 +137,12 @@ async function identifyOrphanedRepositories(config: any): Promise<any[]> {
     const orphanedById = new Map<string, any>();
 
     for (const source of sources) {
+      // A plain git host has no listing to be missing from, so nothing on it
+      // can be told to be orphaned. Its repositories are left alone (#514).
+      if (!sourceKindListsRepositories(source.provider)) {
+        continue;
+      }
+
       // The source host with its token decrypted (GitHub honors GH_API_URL and tracks rate limits)
       const sourceProvider = createSourceProviderFromSource(source, { userId });
       const sourceConnection = sourceProvider.connection;
