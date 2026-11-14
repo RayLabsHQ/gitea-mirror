@@ -12,6 +12,7 @@
  * ../organizations/[id]/status.test.ts).
  */
 import { describe, test, expect, mock, beforeEach } from "bun:test";
+import * as realConcurrency from "@/lib/utils/concurrency";
 import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { readFileSync } from "node:fs";
@@ -175,7 +176,10 @@ if (isChild) {
   // The real helper retries with exponential backoff and drops the items
   // that never succeed from its results; this runs the same contract without
   // the waiting.
+  // Real exports first: Bun keeps this mock for the test files that run later,
+  // and they must still be able to import the rest of the module.
   mock.module("@/lib/utils/concurrency", () => ({
+    ...realConcurrency,
     processWithResilience: mock(async (items: unknown[], worker: (item: unknown) => Promise<unknown>) => {
       const results: unknown[] = [];
       for (const item of items) {

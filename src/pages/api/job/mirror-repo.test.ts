@@ -1,4 +1,9 @@
 import { describe, test, expect, mock, beforeEach, afterEach } from "bun:test";
+import { runsIsolated } from "@/tests/isolated";
+
+// The module mocks below would leak into the test files that run after
+// this one, so the mocks and tests only run in a child process.
+const isChild = runsIsolated(import.meta.path);
 import type { MirrorRepoRequest } from "@/types/mirror";
 import { POST } from "./mirror-repo";
 
@@ -66,7 +71,7 @@ const mockDb = {
 const mockConfigs = {};
 const mockRepositories = {};
 
-mock.module("@/lib/db", () => ({
+if (isChild) mock.module("@/lib/db", () => ({
   db: mockDb,
   configs: mockConfigs,
   repositories: mockRepositories,
@@ -82,7 +87,7 @@ mock.module("@/lib/db", () => ({
 const mockMirrorGithubRepoToGitea = mock(() => Promise.resolve());
 const mockMirrorGitHubOrgRepoToGiteaOrg = mock(() => Promise.resolve());
 
-mock.module("@/lib/gitea", () => ({
+if (isChild) mock.module("@/lib/gitea", () => ({
   mirrorGithubRepoToGitea: mockMirrorGithubRepoToGitea,
   mirrorGitHubOrgRepoToGiteaOrg: mockMirrorGitHubOrgRepoToGiteaOrg,
   getGiteaRepoOwnerAsync: mock(() => Promise.resolve("test-owner")),
@@ -93,13 +98,13 @@ mock.module("@/lib/gitea", () => ({
 // Mock the github module
 const mockCreateGitHubClient = mock(() => ({}));
 
-mock.module("@/lib/github", () => ({
+if (isChild) mock.module("@/lib/github", () => ({
   createGitHubClient: mockCreateGitHubClient
 }));
 
 // The route builds the GitHub client per repository from its own source row.
 // One GitHub source mirrors the pre-multi-source fixtures (same token).
-mock.module("@/lib/sources", () => ({
+if (isChild) mock.module("@/lib/sources", () => ({
   listSources: mock(async (userId: string) =>
     userId === "user-id"
       ? [
@@ -137,19 +142,19 @@ mock.module("@/lib/sources", () => ({
 // Mock the concurrency module
 const mockProcessWithResilience = mock(() => Promise.resolve([]));
 
-mock.module("@/lib/utils/concurrency", () => ({
+if (isChild) mock.module("@/lib/utils/concurrency", () => ({
   processWithResilience: mockProcessWithResilience
 }));
 
 // Mock drizzle-orm
-mock.module("drizzle-orm", () => ({
+if (isChild) mock.module("drizzle-orm", () => ({
   and: mock(() => ({})),
   eq: mock(() => ({})),
   inArray: mock(() => ({}))
 }));
 
 // Mock the types
-mock.module("@/types/Repository", () => ({
+if (isChild) mock.module("@/types/Repository", () => ({
   repositoryVisibilityEnum: {
     parse: mock((value: string) => value)
   },
@@ -158,7 +163,7 @@ mock.module("@/types/Repository", () => ({
   }
 }));
 
-describe("Repository Mirroring API", () => {
+describe.skipIf(!isChild)("Repository Mirroring API", () => {
   // Mock console.log and console.error to prevent test output noise
   let originalConsoleLog: typeof console.log;
   let originalConsoleError: typeof console.error;

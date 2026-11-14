@@ -5,6 +5,8 @@
  */
 
 import { describe, test, expect, mock, beforeEach } from "bun:test";
+import * as schema from "@/lib/db/schema";
+import * as realSources from "@/lib/sources";
 import { encodeGitHubAppCredentials } from "@/lib/github-app-credentials";
 
 let sourceRows: any[] = [];
@@ -18,6 +20,7 @@ function encrypted(token: string): string {
 // follows its contract (in-memory rows, tokens "encrypted" with a prefix,
 // DuplicateSourceError shape) so these tests stay about the route.
 mock.module("@/lib/sources", () => ({
+  ...realSources,
   listSources: mock(async (userId: string) =>
     sourceRows.filter((source) => source.userId === userId)
   ),
@@ -76,7 +79,12 @@ mock.module("@/lib/sources", () => ({
 }));
 
 const mockRepositories = {};
+// Bun keeps a module mock for every test file that runs after this one, and
+// a module mocked before anything loaded it exposes only the names listed.
+// Spreading the real exports first keeps every name importable for later
+// files; only the functions listed here are replaced.
 mock.module("@/lib/db", () => ({
+  ...schema,
   db: {
     select: () => ({
       from: () => ({
