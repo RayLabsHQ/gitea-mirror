@@ -5,6 +5,11 @@
  */
 
 import { describe, test, expect, mock, beforeEach } from "bun:test";
+import { runsIsolated } from "@/tests/isolated";
+
+// The module mocks below would leak into the test files that run after
+// this one, so the mocks and tests only run in a child process.
+const isChild = runsIsolated(import.meta.path);
 
 let repoRows: any[] = [];
 let configRows: any[] = [];
@@ -30,7 +35,7 @@ const mockDb = {
 
 // The route pulls in the auth module, which imports every table, so the
 // mock has to name them all.
-mock.module("@/lib/db", () => ({
+if (isChild) mock.module("@/lib/db", () => ({
   db: mockDb,
   repositories: mockRepositories,
   configs: mockConfigs,
@@ -55,7 +60,7 @@ mock.module("@/lib/db", () => ({
 // Bun keeps module mocks across test files, and an earlier route test mocks
 // this module with another owner; mocking it here keeps the answer fixed
 // whatever the order.
-mock.module("@/lib/gitea", () => ({
+if (isChild) mock.module("@/lib/gitea", () => ({
   getGiteaRepoOwnerAsync: mock(async () => "me"),
   getGiteaRepoOwner: mock(() => "me"),
   mirrorGithubRepoToGitea: mock(async () => {}),
@@ -70,7 +75,7 @@ const mockMoveMirror = mock(async () => ({
   to: "archive/hello",
   message: "Moved octocat/hello from mirrors/hello to archive/hello.",
 }));
-mock.module("@/lib/destination-transfer-service", () => ({
+if (isChild) mock.module("@/lib/destination-transfer-service", () => ({
   moveMirror: mockMoveMirror,
   moveOrganizationMirrors: mock(async () => ({})),
   ensureDestinationOwner: mock(async () => {}),
@@ -116,14 +121,14 @@ function call(body: unknown, id = "r1") {
   } as any);
 }
 
-beforeEach(() => {
+if (isChild) beforeEach(() => {
   repoRows = [repoRow];
   configRows = [configRow];
   dbUpdateSetCalls.length = 0;
   mockMoveMirror.mockClear();
 });
 
-describe("POST /api/repositories/:id/move-mirror", () => {
+describe.skipIf(!isChild)("POST /api/repositories/:id/move-mirror", () => {
   test("rejects an owner name that could change the destination URL", async () => {
     const response = await call({ destinationOrg: "arch/ive" });
     expect(response.status).toBe(400);

@@ -6,6 +6,7 @@
  */
 
 import { describe, test, expect, mock, beforeEach } from "bun:test";
+import * as schema from "@/lib/db/schema";
 import type { Config } from "@/types/config";
 import type { Repository } from "@/lib/db/schema";
 import type { MoveDeps } from "./destination-transfer-service";
@@ -33,7 +34,12 @@ const mockDb = {
   })),
 };
 
+// Bun keeps a module mock for every test file that runs after this one, and
+// a module mocked before anything loaded it exposes only the names listed.
+// Spreading the real exports first keeps every name importable for later
+// files; only the functions listed here are replaced.
 mock.module("@/lib/db", () => ({
+  ...schema,
   db: mockDb,
   users: {},
   configs: {},

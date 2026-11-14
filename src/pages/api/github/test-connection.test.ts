@@ -1,4 +1,9 @@
 import { describe, test, expect, mock, beforeEach, afterEach } from "bun:test";
+import { runsIsolated } from "@/tests/isolated";
+
+// The module mocks below would leak into the test files that run after
+// this one, so the mocks and tests only run in a child process.
+const isChild = runsIsolated(import.meta.path);
 
 // createGitHubClient returns this stub. Tests mutate `getAuthenticatedImpl`
 // to steer the behavior without re-calling mock.module (which is fragile
@@ -12,7 +17,7 @@ let getAuthenticatedImpl: () => Promise<any> = () =>
     },
   });
 
-mock.module("@/lib/github", () => {
+if (isChild) mock.module("@/lib/github", () => {
   return {
     createGitHubClient: mock(() => ({
       users: {
@@ -24,7 +29,7 @@ mock.module("@/lib/github", () => {
 
 import { POST } from "./test-connection";
 
-describe("GitHub Test Connection API", () => {
+describe.skipIf(!isChild)("GitHub Test Connection API", () => {
   // Mock console.error to prevent test output noise
   let originalConsoleError: typeof console.error;
 

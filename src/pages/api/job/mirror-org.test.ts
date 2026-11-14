@@ -1,4 +1,9 @@
 import { describe, test, expect, mock, beforeEach, afterEach } from "bun:test";
+import { runsIsolated } from "@/tests/isolated";
+
+// The module mocks below would leak into the test files that run after
+// this one, so the mocks and tests only run in a child process.
+const isChild = runsIsolated(import.meta.path);
 
 // Create a mock POST function
 const mockPOST = mock(async ({ request }) => {
@@ -30,7 +35,7 @@ const mockModule = {
   POST: mockPOST
 };
 
-describe("Organization Mirroring API", () => {
+describe.skipIf(!isChild)("Organization Mirroring API", () => {
   // Mock console.log and console.error to prevent test output noise
   let originalConsoleLog: typeof console.log;
   let originalConsoleError: typeof console.error;
@@ -121,7 +126,7 @@ const anonymousClient = { anonymous: true };
 const mockCreateGitHubClient = mock(() => authenticatedClient);
 const mockCreatePublicGitHubClient = mock(() => anonymousClient);
 
-mock.module("@/lib/github", () => ({
+if (isChild) mock.module("@/lib/github", () => ({
   createGitHubClient: mockCreateGitHubClient,
   createPublicGitHubClient: mockCreatePublicGitHubClient,
 }));
@@ -169,7 +174,7 @@ const mockDb = {
   })),
 };
 
-mock.module("@/lib/db", () => ({
+if (isChild) mock.module("@/lib/db", () => ({
   db: mockDb,
   configs: mockConfigs,
   organizations: mockOrganizations,
@@ -184,7 +189,7 @@ mock.module("@/lib/db", () => ({
 
 const mockMirrorGitHubOrgToGitea = mock(() => Promise.resolve());
 
-mock.module("@/lib/gitea", () => ({
+if (isChild) mock.module("@/lib/gitea", () => ({
   mirrorGitHubOrgToGitea: mockMirrorGitHubOrgToGitea,
 }));
 
@@ -229,7 +234,7 @@ const resolverSourceRows = [
   },
 ];
 
-mock.module("@/lib/sources", () => ({
+if (isChild) mock.module("@/lib/sources", () => ({
   listSources: mock(async (userId: string) =>
     resolverSourceRows.filter((source) => source.userId === userId)
   ),
@@ -264,7 +269,7 @@ const mockProcessWithResilience = mock(
   }
 );
 
-mock.module("@/lib/utils/concurrency", () => ({
+if (isChild) mock.module("@/lib/utils/concurrency", () => ({
   processWithResilience: mockProcessWithResilience,
 }));
 
@@ -272,7 +277,7 @@ mock.module("@/lib/utils/concurrency", () => ({
 // the mocked table stubs, and mocking the module would starve other modules
 // in the import graph (they use operators like ilike).
 
-mock.module("@/types/Repository", () => ({
+if (isChild) mock.module("@/types/Repository", () => ({
   repoStatusEnum: {
     parse: mock((value: string) => value),
   },
@@ -302,7 +307,7 @@ async function waitFor(predicate: () => boolean, timeoutMs = 2000) {
   }
 }
 
-describe("Organization Mirroring API repository octokit resolver", () => {
+describe.skipIf(!isChild)("Organization Mirroring API repository octokit resolver", () => {
   let originalConsoleLog: typeof console.log;
   let originalConsoleError: typeof console.error;
 
