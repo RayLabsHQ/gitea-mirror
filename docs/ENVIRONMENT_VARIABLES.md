@@ -78,6 +78,7 @@ Settings for connecting to the source host. GitHub is the default and, together 
 |----------|-------------|---------|---------|
 | `SOURCE_PROVIDER` | Which host repositories are pulled from. `gitea` also covers Forgejo and Codeberg. Anything other than `github` is beta. | `github` | `github`, `gitlab`, `gitea` |
 | `SOURCE_URL` | Base URL of the GitLab or Gitea/Forgejo instance. Ignored for GitHub, which uses `GH_API_URL`. | `https://gitlab.com` for GitLab, `https://codeberg.org` for Gitea | e.g. `https://gitlab.example.com` |
+| `GITLAB_PAGE_SIZE` | How many projects a GitLab listing asks for at a time, from 10 to 100. Gitea Mirror starts at 100 and drops to 50, 20, then 10 when a page times out, which costs about 30 s per step on every import. Set a lower value for a slow GitLab so it starts there; it still steps down below it. | `100` | `10` to `100` |
 | `GITHUB_USERNAME` | Your username on the source host | - | - |
 | `GITHUB_TOKEN` | Personal access token for the source host. GitHub needs the `repo` and `admin:org` scopes, GitLab `read_api` and `read_repository`, Gitea/Forgejo `read:repository`, `read:user` and `read:organization`. | - | - |
 | `GITHUB_TYPE` | GitHub account type | `personal` | `personal`, `organization` |

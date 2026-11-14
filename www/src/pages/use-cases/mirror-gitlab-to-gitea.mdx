@@ -88,6 +88,10 @@ Yes, if both Gitea Mirror and Gitea trust the CA. Gitea Mirror talks to the GitL
 
 Not from one account. Each Gitea Mirror user has one source, so create a second user for the second source. Both can point at the same Gitea server.
 
+### Importing from my GitLab is slow or times out
+
+A busy self-hosted GitLab can need more than 30 seconds to build a page of 100 projects. Gitea Mirror then asks for 50, 20 and finally 10 at a time, so the import finishes, but every run pays for those timeouts first. Set `GITLAB_PAGE_SIZE=20` (or whatever answers quickly for you) to start there instead.
+
 ### Will merge requests ever be mirrored?
 
 Reading merge requests from the GitLab API is the natural next step after the code path settled. Watch the [GitHub issues](https://github.com/RayLabsHQ/gitea-mirror/issues) for progress.
