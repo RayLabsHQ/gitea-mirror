@@ -73,6 +73,7 @@ The variable names are historical: `GITHUB_USERNAME` and `GITHUB_TOKEN` hold the
 | --- | --- | --- |
 | `SOURCE_PROVIDER` | `github` | Which host repositories are pulled from: `github`, `gitlab` or `gitea`. `gitea` also covers Forgejo and Codeberg. Anything other than `github` is beta. |
 | `SOURCE_URL` | `https://gitlab.com` or `https://codeberg.org` | Base URL of the GitLab or Gitea / Forgejo instance. Ignored for GitHub, which uses `GH_API_URL`. |
+| `GITLAB_PAGE_SIZE` | `100` | How many projects a GitLab listing asks for at a time, from 10 to 100. Gitea Mirror starts at 100 and drops to 50, 20, then 10 when a page times out, which costs about 30 s per step on every import. Set a lower value for a slow GitLab so it starts there; it still steps down below it. |
 | `GITHUB_USERNAME` | none | Your username on the source host. |
 | `GITHUB_TOKEN` | none | Personal access token for the source host. GitHub needs `repo` and `admin:org`, GitLab `read_api` and `read_repository`, Gitea / Forgejo `read:repository`, `read:user` and `read:organization`. |
 | `GITHUB_TYPE` | `personal` | Account type: `personal` or `organization`. |

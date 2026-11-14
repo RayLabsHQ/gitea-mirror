@@ -102,6 +102,7 @@ The API accepts the same fields. `POST /api/sync/organization` adds a public org
 |----------|-------------|
 | `SOURCE_PROVIDER` | `github` (default), `gitlab` or `gitea` |
 | `SOURCE_URL` | Instance base URL for GitLab and Gitea/Forgejo |
+| `GITLAB_PAGE_SIZE` | Projects per GitLab listing request, 10 to 100 (default 100). Lower it for a slow GitLab that times out |
 | `GITHUB_USERNAME` | Username on the selected host |
 | `GITHUB_TOKEN` | Token for the selected host |
 

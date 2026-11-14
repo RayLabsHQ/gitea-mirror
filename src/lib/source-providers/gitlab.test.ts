@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
 import {
   GitLabSourceProvider,
+  gitLabPageSizes,
   mapGitLabProject,
+  resetGitLabPageSizeWarning,
   resolveGitLabRepositoryPath,
   type GitLabProject,
 } from "./gitlab";
@@ -246,6 +248,74 @@ describe("GitLabSourceProvider", () => {
       installFetch(() => json({ message: "boom" }, { status: 500 }));
       await expect(new GitLabSourceProvider(connection).listRepositories({})).rejects.toBeInstanceOf(SourceApiError);
       expect(calls).toHaveLength(1);
+    });
+
+    describe("GITLAB_PAGE_SIZE", () => {
+      const saved = process.env.GITLAB_PAGE_SIZE;
+      afterEach(() => {
+        if (saved === undefined) delete process.env.GITLAB_PAGE_SIZE;
+        else process.env.GITLAB_PAGE_SIZE = saved;
+        resetGitLabPageSizeWarning();
+      });
+
+      test("a slow instance set to 20 never waits on a timeout", async () => {
+        process.env.GITLAB_PAGE_SIZE = "20";
+        slowGitLab(20);
+        const repos = await new GitLabSourceProvider(connection).listRepositories({});
+        expect(sizes().every((size) => size === 20)).toBe(true);
+        expect(calls).toHaveLength(Math.ceil(TOTAL / 20));
+        expect(ids(repos)).toEqual(all.map((p) => p.path_with_namespace!));
+        expect(warn).not.toHaveBeenCalled();
+      });
+
+      test("still steps down below the size it starts at", async () => {
+        process.env.GITLAB_PAGE_SIZE = "30";
+        slowGitLab(10);
+        const repos = await new GitLabSourceProvider(connection).listRepositories({});
+        expect(sizes().slice(0, 3)).toEqual([30, 20, 10]);
+        expect(ids(repos)).toEqual(all.map((p) => p.path_with_namespace!));
+      });
+
+      test("an invalid value warns once and starts at 100", async () => {
+        process.env.GITLAB_PAGE_SIZE = "500";
+        slowGitLab(100);
+        await new GitLabSourceProvider(connection).listRepositories({});
+        await new GitLabSourceProvider(connection).listRepositories({});
+        expect(sizes()[0]).toBe(100);
+        expect(warn).toHaveBeenCalledTimes(1);
+        expect(String(warn.mock.calls[0][0])).toContain("GITLAB_PAGE_SIZE");
+      });
+    });
+  });
+
+  describe("gitLabPageSizes", () => {
+    let warn: ReturnType<typeof spyOn>;
+    beforeEach(() => {
+      resetGitLabPageSizeWarning();
+      warn = spyOn(console, "warn").mockImplementation(() => {});
+    });
+    afterEach(() => warn.mockRestore());
+
+    test("defaults to 100, then 50, 20 and 10", () => {
+      expect(gitLabPageSizes(undefined)).toEqual([100, 50, 20, 10]);
+      expect(gitLabPageSizes("")).toEqual([100, 50, 20, 10]);
+      expect(gitLabPageSizes("  ")).toEqual([100, 50, 20, 10]);
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    test("starts at the configured size and keeps the smaller defaults below it", () => {
+      expect(gitLabPageSizes("20")).toEqual([20, 10]);
+      expect(gitLabPageSizes(" 30 ")).toEqual([30, 20, 10]);
+      expect(gitLabPageSizes("50")).toEqual([50, 20, 10]);
+      expect(gitLabPageSizes("10")).toEqual([10]);
+      expect(gitLabPageSizes("100")).toEqual([100, 50, 20, 10]);
+    });
+
+    test("ignores values outside 10 to 100 or not a whole number", () => {
+      for (const value of ["0", "9", "101", "abc", "20.5", "-20", "1e2"]) {
+        expect(gitLabPageSizes(value)).toEqual([100, 50, 20, 10]);
+      }
+      expect(warn).toHaveBeenCalledTimes(1);
     });
   });
 

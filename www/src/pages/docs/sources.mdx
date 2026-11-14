@@ -116,6 +116,7 @@ A save that tries to switch a locked source without that confirmation is refused
 | --- | --- | --- |
 | `SOURCE_PROVIDER` | `github` | `github`, `gitlab` or `gitea`. `gitea` also covers Forgejo and Codeberg. |
 | `SOURCE_URL` | per source | Base URL of the GitLab or Gitea / Forgejo instance. Ignored for GitHub. |
+| `GITLAB_PAGE_SIZE` | `100` | Projects per GitLab listing request, from 10 to 100. Lower it for a slow GitLab that times out at 100; see [Environment variables](./environment-variables.md#source). |
 | `GITHUB_USERNAME` | none | Username on the selected host. The name is kept for every source. |
 | `GITHUB_TOKEN` | none | Token for the selected host, with the scopes listed above. |
 | `GH_API_URL` | `https://api.github.com` | GitHub API base URL, for GitHub Enterprise. |

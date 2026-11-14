@@ -36,10 +36,49 @@ import type {
  * does. Starting small instead would cost every other instance about twice
  * the listing time: 300 projects from gitlab.com took 11 s at 100 a page and
  * 20 s at 20.
+ *
+ * Each listing starts again at the top, so a slow instance pays for the same
+ * timeouts on every run. GITLAB_PAGE_SIZE lets it start lower instead; the
+ * step down still runs below that size.
  */
-const PAGE_SIZES = [100, 50, 20, 10];
+const DEFAULT_PAGE_SIZES = [100, 50, 20, 10];
+/** GitLab answers at most 100 items a page; below 10 a listing only gets slower. */
+const MIN_PAGE_SIZE = 10;
+const MAX_PAGE_SIZE = 100;
 /** Stop after this many items, whatever the page size. */
 const MAX_ITEMS = 50_000;
+
+let warnedAboutPageSize = false;
+
+/**
+ * The page sizes a listing tries, largest first: GITLAB_PAGE_SIZE, when set
+ * to a whole number from 10 to 100, then the smaller default sizes below it.
+ * Anything else warns once and keeps the defaults.
+ */
+export function gitLabPageSizes(
+  raw: string | undefined = process.env.GITLAB_PAGE_SIZE
+): number[] {
+  const value = raw?.trim();
+  if (!value) return DEFAULT_PAGE_SIZES;
+
+  const size = Number(value);
+  if (!/^\d+$/.test(value) || size < MIN_PAGE_SIZE || size > MAX_PAGE_SIZE) {
+    if (!warnedAboutPageSize) {
+      warnedAboutPageSize = true;
+      console.warn(
+        `[GitLab] GITLAB_PAGE_SIZE must be a whole number from ${MIN_PAGE_SIZE} to ${MAX_PAGE_SIZE}, got ${JSON.stringify(value)}; starting at ${MAX_PAGE_SIZE}`
+      );
+    }
+    return DEFAULT_PAGE_SIZES;
+  }
+
+  return [size, ...DEFAULT_PAGE_SIZES.filter((smaller) => smaller < size)];
+}
+
+/** Lets tests see the invalid value warning more than once. */
+export function resetGitLabPageSizeWarning(): void {
+  warnedAboutPageSize = false;
+}
 
 function isTimeout(error: unknown): boolean {
   return error instanceof Error && error.name === "TimeoutError";
@@ -214,6 +253,7 @@ export class GitLabSourceProvider implements SourceProvider {
     path: string,
     params: Record<string, string | number | boolean | undefined> = {}
   ): Promise<T[]> {
+    const pageSizes = gitLabPageSizes();
     const items: T[] = [];
     let step = 0;
     let page = 1;
@@ -221,7 +261,7 @@ export class GitLabSourceProvider implements SourceProvider {
     // set after a step down, when the smaller page can start before them.
     let alreadyListed = 0;
     while (items.length < MAX_ITEMS) {
-      const pageSize = PAGE_SIZES[step];
+      const pageSize = pageSizes[step];
       const url = withQuery(`${this.apiRoot}${path}`, {
         ...params,
         per_page: pageSize,
@@ -232,9 +272,9 @@ export class GitLabSourceProvider implements SourceProvider {
       try {
         result = await sourceFetch<T[]>(url, { headers: this.headers() });
       } catch (error) {
-        if (!isTimeout(error) || step === PAGE_SIZES.length - 1) throw error;
+        if (!isTimeout(error) || step === pageSizes.length - 1) throw error;
         step += 1;
-        const smaller = PAGE_SIZES[step];
+        const smaller = pageSizes[step];
         console.warn(`[GitLab] ${path} timed out at ${pageSize} per page, continuing at ${smaller} per page`);
         // The page that holds the next item at the smaller size.
         page = Math.floor(items.length / smaller) + 1;
