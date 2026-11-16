@@ -33,6 +33,7 @@ import { db, repositories } from "./db";
 import { eq } from "drizzle-orm";
 import { repoStatusEnum } from "@/types/Repository";
 import { claimRepositoryForInFlightWork } from "./utils/repo-status-claim";
+import { waitForGiteaImport } from "./gitea-import-wait";
 import { resolveMirrorOptionsForRepository } from "./utils/mirror-overrides";
 import {
   createPreSyncBundleBackup,
@@ -71,6 +72,8 @@ type SyncDependencies = {
   mirrorGitRepoPullRequestsToGitea: typeof import("./gitea")["mirrorGitRepoPullRequestsToGitea"];
   mirrorGitRepoLabelsToGitea: typeof import("./gitea")["mirrorGitRepoLabelsToGitea"];
   mirrorGitRepoMilestonesToGitea: typeof import("./gitea")["mirrorGitRepoMilestonesToGitea"];
+  /** Optional for the same reason as mirrorGiteaSourceReleasesToGitea; tests pass one that does not sleep. */
+  waitForGiteaImport?: typeof waitForGiteaImport;
 };
 
 /**
@@ -468,6 +471,15 @@ export async function getOrCreateGiteaOrgEnhanced({
 }
 
 /**
+ * mirror-sync answers 400 "not a mirror" for a repository that is flagged as a
+ * mirror but has no mirror record, which is what an import that never finished
+ * leaves behind on Gitea and Forgejo alike (#502, #521).
+ */
+const MIRROR_RECORD_MISSING =
+  "Gitea refused to sync this repository as a mirror because it has no mirror settings. " +
+  "That usually means its import never finished. Delete the repository in Gitea and retry.";
+
+/**
  * Enhanced sync operation that handles non-mirror repositories
  */
 export async function syncGiteaRepoEnhanced({
@@ -722,6 +734,17 @@ export async function syncGiteaRepoEnhanced({
 
       throw new Error(`Repository ${repository.name} is not a mirror. Cannot sync.`);
     }
+
+    // Gitea gives a mirror its record only when the import ends, and refuses
+    // mirror-sync as "not a mirror" until then. A retry, a manual sync or a
+    // scheduled one can land in that window, after the migrate call for a large
+    // repository went unanswered (#521), so wait for the import like the
+    // migrate path does (#496).
+    repoInfo = await (deps?.waitForGiteaImport ?? waitForGiteaImport)({
+      location: `${repoOwner}/${repoName}`,
+      initial: repoInfo,
+      readRepo: () => getGiteaRepoInfo({ config, owner: repoOwner, repoName }),
+    });
 
     // Parse repository metadata state up-front. The force-push
     // detection below needs the acknowledgedDeletions list to suppress
@@ -1392,7 +1415,7 @@ export async function syncGiteaRepoEnhanced({
             .set({
               status: repoStatusEnum.parse("failed"),
               updatedAt: new Date(),
-              errorMessage: "Repository is not configured as a mirror in Gitea",
+              errorMessage: MIRROR_RECORD_MISSING,
             })
             .where(eq(repositories.id, repository.id!));
 
@@ -1401,7 +1424,7 @@ export async function syncGiteaRepoEnhanced({
             repositoryId: repository.id,
             repositoryName: repository.name,
             message: `Sync failed: ${repository.name} is not a mirror`,
-            details: "The repository exists in Gitea but is not configured as a mirror. Manual intervention required.",
+            details: MIRROR_RECORD_MISSING,
             status: "failed",
           });
         }

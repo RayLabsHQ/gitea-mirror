@@ -449,6 +449,7 @@ import {
 } from "./gitea-enhanced";
 import type { Config, Repository } from "./db/schema";
 import { repoStatusEnum } from "@/types/Repository";
+import { waitForGiteaImport as realWaitForGiteaImport } from "./gitea-import-wait";
 
 // Get HttpError from the mocked module
 const { HttpError } = await import("@/lib/http-client");
@@ -1181,6 +1182,120 @@ describe("Enhanced Gitea Operations", () => {
         const record = storedRequest();
         expect(record.mirrorUpdatedBefore).toBe(ranAt);
         expect(Date.parse(record.requestedAt)).toBeGreaterThan(Date.parse(requestedAt));
+      });
+    });
+
+    describe("import still running (#521)", () => {
+      // A retry or sync that lands while Gitea (or Forgejo) is still importing:
+      // the repository is flagged as a mirror but has no mirror record yet, so
+      // mirror-sync would answer 400 "not a mirror".
+      const importConfig = {
+        userId: "user123",
+        githubConfig: { username: "testuser", token: "github-token", privateRepositories: false, mirrorStarred: true },
+        giteaConfig: { url: "https://gitea.example.com", token: "encrypted-token", defaultOwner: "testuser", mirrorReleases: false },
+      } as unknown as Partial<Config>;
+      const repoUrl = "https://gitea.example.com/api/v1/repos/starred/test-repo";
+      const importRepository = (): Repository => ({
+        id: "repo-import", name: "test-repo", fullName: "ceph/test-repo", owner: "ceph",
+        cloneUrl: "https://github.com/ceph/test-repo.git", isPrivate: false, isStarred: true,
+        status: repoStatusEnum.parse("failed"), visibility: "public", userId: "user123",
+        mirroredLocation: "starred/test-repo", createdAt: new Date(), updatedAt: new Date(),
+      } as Repository);
+
+      let repoReads = 0;
+      let readsAtMirrorSync: number[] = [];
+      let sleeps: number[] = [];
+
+      // A wait on a fake clock, so the test does not sleep through Gitea's import.
+      const fastWait = () => {
+        let time = 0;
+        return (args: any) =>
+          realWaitForGiteaImport({
+            ...args,
+            now: () => time,
+            sleep: async (ms: number) => {
+              sleeps.push(ms);
+              time += ms;
+            },
+          }) as any;
+      };
+
+      /** Gitea reports an import for the first `importingReads` reads of the repository. */
+      const withImport = async (importingReads: number, run: () => Promise<void>) => {
+        const defaultGet = mockHttpGet.getMockImplementation()!;
+        const defaultPost = mockHttpPost.getMockImplementation()!;
+        repoReads = 0;
+        readsAtMirrorSync = [];
+        sleeps = [];
+        mockHttpGet.mockImplementation(async (url: string, headers?: any) => {
+          const response: any = await defaultGet(url, headers);
+          if (url !== repoUrl) return response;
+          repoReads++;
+          const importing = repoReads <= importingReads;
+          return {
+            ...response,
+            data: { ...response.data, empty: importing, mirror_interval: importing ? "" : "8h0m0s" },
+          };
+        });
+        mockHttpPost.mockImplementation(async (url: string, body?: any, headers?: any) => {
+          if (url.includes("/mirror-sync")) readsAtMirrorSync.push(repoReads);
+          return defaultPost(url, body, headers);
+        });
+        try {
+          await run();
+        } finally {
+          mockHttpGet.mockImplementation(defaultGet);
+          mockHttpPost.mockImplementation(defaultPost);
+        }
+      };
+
+      const dependencies = () => ({
+        getGiteaRepoOwnerAsync: mockGetGiteaRepoOwnerAsync,
+        mirrorGitHubReleasesToGitea: mockMirrorGitHubReleasesToGitea,
+        mirrorGitRepoIssuesToGitea: mockMirrorGitRepoIssuesToGitea,
+        mirrorGitRepoPullRequestsToGitea: mockMirrorGitRepoPullRequestsToGitea,
+        mirrorGitRepoLabelsToGitea: mockMirrorGitRepoLabelsToGitea,
+        mirrorGitRepoMilestonesToGitea: mockMirrorGitRepoMilestonesToGitea,
+        syncRepositoryMetadataToGitea: mockSyncRepositoryMetadataToGitea,
+        waitForGiteaImport: fastWait(),
+      });
+
+      test("waits for the import to finish before asking Gitea to sync", async () => {
+        await withImport(3, async () => {
+          const result = await syncGiteaRepoEnhanced(
+            { config: importConfig, repository: importRepository() },
+            dependencies()
+          );
+          expect(result).toEqual({ success: true });
+        });
+
+        // The first read finds the import, two polls still do, the third does not.
+        expect(sleeps).toHaveLength(3);
+        expect(readsAtMirrorSync).toEqual([4]);
+      });
+
+      test("says what to do when the import has not finished after the wait", async () => {
+        await withImport(Number.POSITIVE_INFINITY, async () => {
+          await expect(
+            syncGiteaRepoEnhanced({ config: importConfig, repository: importRepository() }, dependencies())
+          ).rejects.toThrow(
+            "Gitea is still importing starred/test-repo after 30 minutes. Retry once it has finished."
+          );
+        });
+
+        expect(readsAtMirrorSync).toEqual([]);
+        const failure = dbUpdateSetCalls.at(-1);
+        expect(failure.status).toBe("failed");
+        expect(failure.errorMessage).toContain("delete the repository in Gitea and retry");
+      });
+
+      test("a finished mirror is synced without waiting", async () => {
+        await withImport(0, async () => {
+          await syncGiteaRepoEnhanced({ config: importConfig, repository: importRepository() }, dependencies());
+        });
+
+        expect(sleeps).toEqual([]);
+        expect(readsAtMirrorSync).toEqual([1]);
       });
     });
 
