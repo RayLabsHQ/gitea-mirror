@@ -84,7 +84,7 @@ import { repositoryDestinationColumns } from "./repo-utils";
 import { resolveDestinationIdentity } from "./destination-connection";
 import { withKeyedLock } from "./utils/keyed-mutex";
 import { claimRepositoryForInFlightWork } from "./utils/repo-status-claim";
-import { waitForGiteaImport } from "./gitea-import-wait";
+import { isMigrateCutOff, waitForGiteaImport } from "./gitea-import-wait";
 import type { GiteaRepoInfo } from "./gitea-enhanced";
 
 /**
@@ -822,6 +822,52 @@ export const syncRepositoryMetadataToGitea = async ({
 };
 
 /**
+ * The migrate call failed without an answer from Gitea: our request gave up
+ * after five minutes, or a proxy did. Gitea carries on with the import either
+ * way, so failing the mirror here only sent the retry into a repository with no
+ * mirror record yet, which mirror-sync refuses as "not a mirror" (#521). When
+ * the repository is there and mirrors this source, wait for the import and
+ * hand back what Gitea has, so the caller carries on as if the call had
+ * returned. Null means there is nothing to wait for and the caller reports
+ * the original error.
+ */
+async function waitForImportAfterCutOff({
+  config,
+  owner,
+  repoName,
+  cloneUrl,
+  error,
+}: {
+  config: Partial<Config>;
+  owner: string;
+  repoName: string;
+  cloneUrl?: string | null;
+  error: unknown;
+}): Promise<GiteaRepoInfo | null> {
+  if (!isMigrateCutOff(error)) return null;
+
+  const { getGiteaRepoInfo } = await import("./gitea-enhanced");
+  const { isMirrorOfSource } = await import("./utils/mirror-source-match");
+
+  let repoInfo: GiteaRepoInfo | null;
+  try {
+    repoInfo = await getGiteaRepoInfo({ config, owner, repoName });
+  } catch {
+    return null;
+  }
+  if (!repoInfo?.mirror || !isMirrorOfSource(repoInfo, cloneUrl)) return null;
+
+  console.log(
+    `[Mirror] No answer to the migrate call for ${owner}/${repoName}, but Gitea has the repository; following its import instead`
+  );
+  return waitForGiteaImport({
+    location: `${owner}/${repoName}`,
+    initial: repoInfo,
+    readRepo: () => getGiteaRepoInfo({ config, owner, repoName }),
+  });
+}
+
+/**
  * A mirror of this source is already on the destination, so there is nothing to
  * migrate: bring it up to date the way a sync does. This is where a retry lands
  * after a proxy timed out on the migrate call while Gitea carried on (#496).
@@ -1244,7 +1290,15 @@ export const mirrorGithubRepoToGitea = async ({
       {
         Authorization: `token ${decryptedConfig.giteaConfig.token}`,
       }
-    ).catch((error) => {
+    ).catch(async (error) => {
+      const imported = await waitForImportAfterCutOff({
+        config,
+        owner: repoOwner,
+        repoName: targetRepoName,
+        cloneUrl: repository.cloneUrl,
+        error,
+      });
+      if (imported) return { data: imported };
       // Say why the destination refused, not just the status (#511).
       throw withMigrateRejectionReason(error);
     });
@@ -2050,7 +2104,15 @@ export async function mirrorGitHubRepoToGiteaOrg({
       {
         Authorization: `token ${decryptedConfig.giteaConfig.token}`,
       }
-    ).catch((error) => {
+    ).catch(async (error) => {
+      const imported = await waitForImportAfterCutOff({
+        config,
+        owner: orgName,
+        repoName: targetRepoName,
+        cloneUrl: repository.cloneUrl,
+        error,
+      });
+      if (imported) return { data: imported };
       // Say why the destination refused, not just the status (#511).
       throw withMigrateRejectionReason(error);
     });

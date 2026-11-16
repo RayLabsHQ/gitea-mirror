@@ -11,6 +11,7 @@
  * process, same harness as gitea-org-mirror-destination.test.ts.
  */
 import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { HttpError } from "./http-client";
 
 const CHILD_FLAG = "GITEA_EXISTING_MIRROR_ISOLATED";
 const isChild = !!process.env[CHILD_FLAG];
@@ -41,6 +42,15 @@ let importPolls = 0;
 let repoGone = false;
 let syncCalls: Array<{ args: any; importFinishedAtCall: boolean }> = [];
 let syncError: Error | null = null;
+// For the migrate call that goes unanswered (#521).
+let existsBeforeMigrate = true;
+let existsAfterMigrate = true;
+let migrateError: Error | null = null;
+let readsAfterMigrate = 0;
+
+/** Whether the repository is on the destination at this point of the run. */
+const repoThere = () =>
+  !repoGone && (migrateCalls === 0 ? existsBeforeMigrate : existsAfterMigrate);
 
 if (isChild) {
   const repositoriesTable = { __table: "repositories" } as any;
@@ -118,7 +128,10 @@ if (isChild) {
       throw new actualHttp.HttpError(`GET ${url} -> 404`, 404, "not found");
     }),
     httpPost: mock(async (url: string) => {
-      if (url.includes("/repos/migrate")) migrateCalls++;
+      if (url.includes("/repos/migrate")) {
+        migrateCalls++;
+        if (migrateError) throw migrateError;
+      }
       return { data: { id: 1 }, status: 201, statusText: "Created", headers: new Headers() };
     }),
   }));
@@ -127,7 +140,8 @@ if (isChild) {
     ...actualEnhanced,
     // Gitea's answers during and after an import, as seen on 1.24.7.
     getGiteaRepoInfo: mock(async ({ owner, repoName }: any) => {
-      if (repoGone) return null;
+      if (!repoThere()) return null;
+      if (migrateCalls > 0) readsAfterMigrate++;
       return {
         id: 1,
         name: repoName,
@@ -164,7 +178,7 @@ if (isChild) {
   }));
 
   // isRepoPresentInGitea reads the repository through the global fetch.
-  globalThis.fetch = mock(async () => new Response("{}", { status: repoGone ? 404 : 200 })) as any;
+  globalThis.fetch = mock(async () => new Response("{}", { status: repoThere() ? 200 : 404 })) as any;
 }
 
 const { mirrorGithubRepoToGitea, mirrorGitHubRepoToGiteaOrg } = isChild
@@ -234,6 +248,10 @@ beforeEach(() => {
   repoGone = false;
   syncCalls = [];
   syncError = null;
+  existsBeforeMigrate = true;
+  existsAfterMigrate = true;
+  migrateError = null;
+  readsAfterMigrate = 0;
 });
 
 for (const path of paths) {
@@ -283,6 +301,60 @@ for (const path of paths) {
 
       expect(syncCalls).toHaveLength(0);
       expect(migrateCalls).toBe(0);
+    });
+  });
+}
+
+// Our request gives up after five minutes (Bun's fetch default) while Gitea, or
+// Forgejo, carries on importing a large repository. Failing the mirror there sent
+// the retry into a repository with no mirror record yet (#521).
+const timedOut = () => new HttpError("Network error: The operation timed out.", 0, "Network Error");
+
+for (const path of paths) {
+  describe.skipIf(!isChild)(`migrate call cut off, ${path.name}`, () => {
+    beforeEach(() => {
+      existsBeforeMigrate = false;
+      importFinished = false;
+    });
+
+    test("follows the import Gitea carried on with instead of failing", async () => {
+      migrateError = timedOut();
+
+      await path.run();
+
+      expect(migrateCalls).toBe(1);
+      expect(importPolls).toBe(2);
+      expect(rowWrites.some((write) => write.status === "failed")).toBe(false);
+      expect(rowWrites.at(-1)).toMatchObject({ status: "mirrored", mirroredLocation: path.location });
+    });
+
+    test("a proxy timing out on the call is followed the same way", async () => {
+      migrateError = new HttpError("HTTP 504: Gateway Timeout", 504, "Gateway Timeout");
+
+      await path.run();
+
+      expect(importPolls).toBe(2);
+      expect(rowWrites.at(-1)).toMatchObject({ status: "mirrored" });
+    });
+
+    test("fails as before when Gitea has no such repository", async () => {
+      migrateError = timedOut();
+      existsAfterMigrate = false;
+
+      await expect(path.run()).rejects.toThrow("The operation timed out.");
+
+      expect(importPolls).toBe(0);
+      expect(rowWrites.at(-1)).toMatchObject({ status: "failed" });
+    });
+
+    test("an answer from Gitea is reported, not waited on", async () => {
+      migrateError = new HttpError("HTTP 422: Unprocessable Entity", 422, "Unprocessable Entity");
+
+      await expect(path.run()).rejects.toThrow("HTTP 422");
+
+      expect(readsAfterMigrate).toBe(0);
+      expect(importPolls).toBe(0);
+      expect(rowWrites.at(-1)).toMatchObject({ status: "failed" });
     });
   });
 }
