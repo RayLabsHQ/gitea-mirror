@@ -150,7 +150,7 @@ Starts mirroring in the background and returns straight away. Poll `GET /api/rep
 
 Then `POST /api/job/mirror-org` with `{ "organizationIds": ["..."] }` mirrors its repositories. It takes ids, not names, and answers `404` when none of them belong to this account.
 
-`GET /api/github/organizations` lists every tracked organization with its `id`, `name`, `status` and repository counts. `GET /api/organizations/{id}` returns one as `{ "success": true, "organization": { ... } }`, without the public, private and fork counts, or `404` when the id is not this account's. An organization's `status` turns `mirrored` once every repository in it has been processed; each repository keeps its own `status`.
+`GET /api/github/organizations` lists every tracked organization with its `id`, `name`, `status` and repository counts. `GET /api/organizations/{id}` returns one as `{ "success": true, "organization": { ... } }`, with the stored public, private and fork counts, which can be missing or older than the list's, or `404` when the id is not this account's. An organization's `status` turns `mirrored` once every repository in it has been processed; each repository keeps its own `status`.
 
 When several sources are connected, an optional `sourceId` picks which one the organization imports and mirrors from (the first connected source is the default):
 

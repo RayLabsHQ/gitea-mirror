@@ -207,6 +207,6 @@ You generally want the scheduler interval to be no shorter than the mirror inter
 
 ## Rate limits
 
-GitHub allows 5,000 authenticated API requests per hour on a personal access token. Gitea Mirror uses Octokit with the throttling plugin, which backs off automatically when it approaches the limit, and tracks remaining quota so the dashboard can show it.
+GitHub allows 5,000 authenticated API requests per hour on a personal access token. Gitea Mirror tracks the remaining quota from every response and shows it on the dashboard. Unchanged answers come back as free `304` responses, and after the first full pass issues and pull requests are fetched only when they changed. When the limit is hit, nothing more is sent until the reset: a reset within two minutes is waited out, and a longer one ends the run so the next one starts after the reset. [Working within GitHub API rate limits](/use-cases/github-api-rate-limits/) explains it in full.
 
-The batch size and concurrency settings are the main levers if you are hitting limits: lower `SCHEDULE_BATCH_SIZE`, `MIRROR_ISSUE_CONCURRENCY`, and `MIRROR_PULL_REQUEST_CONCURRENCY`, or raise `SCHEDULE_PAUSE_BETWEEN_BATCHES`. Metadata mirroring is by far the most request-hungry operation, since it walks every issue, comment, and label individually.
+Metadata mirroring is by far the most request-hungry operation. If you still hit limits, lower `SCHEDULE_BATCH_SIZE`, `MIRROR_ISSUE_CONCURRENCY` and `MIRROR_PULL_REQUEST_CONCURRENCY`, or raise `SCHEDULE_PAUSE_BETWEEN_BATCHES`.

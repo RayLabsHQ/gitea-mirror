@@ -44,7 +44,7 @@ Variables fall into two groups.
 | `BETTER_AUTH_LOG_LEVEL` | `warn` | Better Auth logger verbosity: `debug`, `info`, `warn`, or `error`. Use `debug` to trace SSO and OIDC sign-in problems. Better Auth does not read the `DEBUG` variable. |
 | `ENCRYPTION_SECRET` | none | Key for AES-256-GCM encryption of stored tokens. Generate with `openssl rand -base64 48`. |
 | `AUTH_DEFAULT_METHOD` | `email` | Tab the login page opens on when both email and SSO are available: `email` or `sso`. The method last used in that browser wins over this default. |
-| `AUTH_ALLOW_SIGNUP` | `false` | Keep email and password sign-up open after the first account exists. Off, the sign-up endpoint answers 403 once a user exists. |
+| `AUTH_ALLOW_SIGNUP` | `false` | Keep the email and password sign-up endpoint (`POST /api/auth/sign-up/email`) open after the first account exists. Off, it answers 403 once a user exists. The `/signup` page redirects to the login page either way. |
 
 In Docker, `BETTER_AUTH_SECRET` and `ENCRYPTION_SECRET` are generated on first boot if unset and saved to `/app/data/.better_auth_secret` and `/app/data/.encryption_secret` so they persist across restarts. Outside Docker there is no fallback: a missing `BETTER_AUTH_SECRET` logs a security warning in production and uses a known insecure development value.
 
@@ -71,7 +71,7 @@ The variable names are historical: `GITHUB_USERNAME` and `GITHUB_TOKEN` hold the
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `SOURCE_PROVIDER` | `github` | Which host repositories are pulled from: `github`, `gitlab` or `gitea`. `gitea` also covers Forgejo and Codeberg. Anything other than `github` is beta. |
+| `SOURCE_PROVIDER` | `github` | Which host repositories are pulled from: `github`, `gitlab`, `gitea` or `git`. `gitea` also covers Forgejo and Codeberg, and `git` is a plain git host. Anything other than `github` is beta. |
 | `SOURCE_URL` | `https://gitlab.com` or `https://codeberg.org` | Base URL of the GitLab or Gitea / Forgejo instance. Ignored for GitHub, which uses `GH_API_URL`. |
 | `GITLAB_PAGE_SIZE` | `100` | How many projects a GitLab listing asks for at a time, from 10 to 100. Gitea Mirror starts at 100 and drops to 50, 20, then 10 when a page times out, which costs about 30 s per step on every import. Set a lower value for a slow GitLab so it starts there; it still steps down below it. |
 | `GITHUB_USERNAME` | none | Your username on the source host. |

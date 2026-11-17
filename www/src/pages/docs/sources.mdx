@@ -21,13 +21,13 @@ GitHub to Gitea is the supported path. GitLab, Gitea / Forgejo and Git URL carry
 
 ## Choosing a source
 
-Pick the host in the dropdown. The rest of the card adapts to it:
+Click **Add source** on the Sources card and pick the host. The editor adapts to it:
 
-- **Instance URL** appears for GitLab and Gitea / Forgejo. Leave it empty for gitlab.com or codeberg.org, or enter the base URL of your own instance, for example `https://gitlab.example.com` or `http://gitea.local:3000/gitea`. Values without a scheme get `https://` added.
+- **Instance URL** is empty for github.com, gitlab.com or codeberg.org. For your own instance enter its base URL, for example `https://github.example.com`, `https://gitlab.example.com` or `http://gitea.local:3000/gitea`. Values without a scheme get `https://` added.
 - **Username** and **Personal access token** hold the account and token on the selected host.
-- The **Test** button in the card header makes a live authenticated call against the selected host, so you can confirm the token before importing anything.
+- The **Test** button makes a live authenticated call against the selected host, so you can confirm the token before saving.
 
-GitHub Enterprise Server and Enterprise Cloud with data residency are configured through the `GH_API_URL` environment variable rather than the Instance URL field, which only shows for the other two sources. See [Environment variables](/docs/environment-variables/#source).
+For GitHub Enterprise Server, enter the server's address as the Instance URL; the API is read from its `/api/v3` path. GitHub Enterprise Cloud with data residency serves its API at `https://api.TENANT.ghe.com`, which that field cannot express, so set the `GH_API_URL` environment variable for it. See [Environment variables](/docs/environment-variables/#source).
 
 ## Git URL sources
 
@@ -90,7 +90,7 @@ Repositories reach the database in two ways.
 
 **Import** discovers what the token can see on the source: the account's own repositories, the organizations or groups it belongs to, and its starred repositories, filtered by the selection options on the card (private, public, archived, forks, collaborator repositories, starred). Scheduled syncing can repeat the discovery so new repositories are picked up on their own.
 
-**Add by URL** takes a single repository from the Repositories page. The dialog accepts what you are likely to have on the clipboard: a browser URL, a clone URL, an SSH remote, the `owner/repo` shorthand, or a deep link into the repository such as a file or an issue. Nested GitLab groups are fine, so `https://gitlab.com/group/subgroup/project` resolves to the project in the subgroup. The Organizations page accepts a profile URL or a bare name the same way. The server re-resolves the reference against the configured source, so a URL for a different host than the configured one is refused.
+**Add by URL** takes a single repository from the Repositories page. The dialog accepts what you are likely to have on the clipboard: a browser URL, a clone URL, an SSH remote, the `owner/repo` shorthand, or a deep link into the repository such as a file or an issue. Nested GitLab groups are fine, so `https://gitlab.com/group/subgroup/project` resolves to the project in the subgroup. The Organizations page accepts a profile URL or a bare name the same way. The server picks the connected source with the URL's host and resolves the reference there; a URL for a host with no connected source is refused.
 
 ## Behaviour to know about
 
@@ -114,7 +114,7 @@ A save that tries to switch a locked source without that confirmation is refused
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `SOURCE_PROVIDER` | `github` | `github`, `gitlab` or `gitea`. `gitea` also covers Forgejo and Codeberg. |
+| `SOURCE_PROVIDER` | `github` | `github`, `gitlab`, `gitea` or `git`. `gitea` also covers Forgejo and Codeberg; `git` is a [Git URL source](#git-url-sources). |
 | `SOURCE_URL` | per source | Base URL of the GitLab or Gitea / Forgejo instance. Ignored for GitHub. |
 | `GITLAB_PAGE_SIZE` | `100` | Projects per GitLab listing request, from 10 to 100. Lower it for a slow GitLab that times out at 100; see [Environment variables](/docs/environment-variables/#source). |
 | `GITHUB_USERNAME` | none | Username on the selected host. The name is kept for every source. |

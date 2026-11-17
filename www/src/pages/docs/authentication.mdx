@@ -18,7 +18,7 @@ This method is always enabled and needs no configuration.
 
 Visit `/signup` on a fresh instance and create an account. That account owns the instance configuration, which is what "first user becomes admin" means in practice.
 
-Once one account exists, `/signup` redirects to `/login` and the sign-up endpoint refuses new accounts, so a public instance cannot accumulate accounts on its own. Additional users are created through header auth provisioning or SSO. Set `AUTH_ALLOW_SIGNUP=true` to keep email and password sign-up open.
+Once one account exists, `/signup` redirects to `/login` and the sign-up endpoint refuses new accounts, so a public instance cannot accumulate accounts on its own. Additional users are created through header auth provisioning or SSO. `AUTH_ALLOW_SIGNUP=true` keeps the sign-up endpoint (`POST /api/auth/sign-up/email`) open for scripts; the `/signup` page still redirects once an account exists.
 
 ### Sessions
 

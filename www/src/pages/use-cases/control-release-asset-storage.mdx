@@ -91,7 +91,7 @@ Multiply by the number of repositories that ship binaries and compare with the f
 
 ## Where releases apply
 
-Releases are read from the GitHub API. For GitLab and Gitea or Forgejo sources the Releases switch is disabled, and for GitHub or GitLab destinations releases are not created at all because the push engine moves branches and tags only. Both limits therefore matter on the default GitHub to Gitea path and are ignored elsewhere.
+Releases are read from the source's API, so they mirror from GitHub and from Gitea, Forgejo and Codeberg sources. For GitLab sources the Releases switch is disabled, and for GitHub or GitLab destinations releases are not created at all because the push engine moves branches and tags only. Both limits therefore matter for Gitea and Forgejo destinations and are ignored elsewhere.
 
 ## FAQ
 
