@@ -11,7 +11,7 @@ import {
   type PushDestinationKind,
 } from '@/lib/destination-kinds';
 import { createPushTarget, PushTargetError } from '@/lib/push-engine/targets';
-import { SecretHostChangedError, hasValue, savedSecretFor, sameHost } from '@/lib/utils/stored-secrets';
+import { SecretHostChangedError, hasValue, savedSecretFor, sameOrigin } from '@/lib/utils/stored-secrets';
 
 // Forgejo reports `15.0.0+gitea-1.22.0`; pure Gitea reports just `1.22.0`.
 // Forgejo < 15.0.0 has a known bug where pull-mirror credentials sent via
@@ -122,12 +122,12 @@ export const POST: APIRoute = async ({ request, locals }) => {
     const provider = normalizeDestinationProviderKind(body.provider);
 
     // Tokens are write-only, so the form tests the saved token by leaving the
-    // field empty. It is only sent to the host it was saved for.
+    // field empty. It is only sent to the origin it was saved for.
     if (!hasValue(token)) {
       const saved = await loadSavedDestination(authResult.userId);
       const nextUrl = normalizeDestinationBaseUrl(url, provider);
       if (saved?.token) {
-        if (!sameHost(saved.url, nextUrl)) {
+        if (!sameOrigin(saved.url, nextUrl)) {
           const label = `${DESTINATION_PROVIDER_LABELS[provider]} token`;
           return json({ success: false, message: new SecretHostChangedError(label, saved.url, nextUrl).message }, 400);
         }

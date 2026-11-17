@@ -251,7 +251,7 @@ describe("PUT /api/sources/:id", () => {
     const data = await response.json();
     expect(data.success).toBe(false);
     expect(data.message).toBe(
-      "Enter a GitLab token for gitlab.example.com. The saved one is only sent to github.com."
+      "Enter a GitLab token for https://gitlab.example.com. The saved one is only sent to https://github.com."
     );
     expect(sourceRows[0]).toMatchObject({ provider: "github", token: encrypted("ghp_old") });
   });
@@ -278,7 +278,7 @@ describe("PUT /api/sources/:id", () => {
     expect(sourceRows[0].token).toBe(encrypted("glpat-new"));
   });
 
-  test("an empty token keeps the saved one on the same host", async () => {
+  test("an empty token keeps the saved one on the same origin", async () => {
     const response = await put("source-1", { username: "someone-else", token: "" });
     expect(response.status).toBe(200);
     const data = await response.json();

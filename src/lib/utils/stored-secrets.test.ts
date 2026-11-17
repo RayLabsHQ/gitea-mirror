@@ -5,10 +5,10 @@ import {
   mergeNotificationSecrets,
   nextStoredSecret,
   redactNotificationSecrets,
-  sameHost,
+  sameOrigin,
   savedSecretFor,
   takeRemovedNotificationSecrets,
-  urlHost,
+  urlOrigin,
   withSavedNotificationSecrets,
 } from "./stored-secrets";
 import { runsIsolated } from "@/tests/isolated";
@@ -21,19 +21,25 @@ beforeAll(() => {
   process.env.ENCRYPTION_SECRET ??= "stored-secrets-test-secret-0123456789";
 });
 
-describe.skipIf(!isChild)("urlHost and sameHost", () => {
-  test("compare host names only, ignoring case, port, scheme and path", () => {
-    expect(urlHost("https://Git.Example.com:3000/sub/")).toBe("git.example.com");
-    expect(sameHost("https://git.example.com", "http://GIT.example.com:3000/x")).toBe(true);
-    expect(sameHost("https://git.example.com", "https://git.example.org")).toBe(false);
+describe.skipIf(!isChild)("urlOrigin and sameOrigin", () => {
+  test("compare scheme, host and port, ignoring case, path and a default port", () => {
+    expect(urlOrigin("https://Git.Example.com:3000/sub/")).toBe("https://git.example.com:3000");
+    expect(sameOrigin("https://git.example.com", "https://GIT.example.com:443/x/")).toBe(true);
+  });
+
+  test("another host, another port or a different scheme is another origin", () => {
+    expect(sameOrigin("https://git.example.com", "https://git.example.org")).toBe(false);
+    expect(sameOrigin("https://git.example.com", "https://git.example.com:8443")).toBe(false);
+    expect(sameOrigin("https://git.example.com", "http://git.example.com")).toBe(false);
+    expect(sameOrigin("http://git.example.com:3000", "https://git.example.com")).toBe(false);
   });
 
   test("never match an address that does not parse", () => {
-    expect(urlHost("")).toBeNull();
-    expect(urlHost("not a url")).toBeNull();
-    expect(urlHost("ftp://git.example.com")).toBeNull();
-    expect(sameHost("", "")).toBe(false);
-    expect(sameHost(undefined, "https://git.example.com")).toBe(false);
+    expect(urlOrigin("")).toBeNull();
+    expect(urlOrigin("not a url")).toBeNull();
+    expect(urlOrigin("ftp://git.example.com")).toBeNull();
+    expect(sameOrigin("", "")).toBe(false);
+    expect(sameOrigin(undefined, "https://git.example.com")).toBe(false);
   });
 });
 
@@ -58,7 +64,7 @@ describe.skipIf(!isChild)("nextStoredSecret", () => {
     expect(decrypt(value)).toBe("plain-token");
   });
 
-  test("keeps a bound saved value only on the same host", () => {
+  test("keeps a bound saved value only on the same origin", () => {
     const stored = saved();
     expect(
       nextStoredSecret({
@@ -67,9 +73,15 @@ describe.skipIf(!isChild)("nextStoredSecret", () => {
         stored,
         bound: true,
         storedUrl: "https://git.example.com",
-        nextUrl: "https://git.example.com:3000/",
+        nextUrl: "https://Git.Example.com/",
       })
     ).toBe(stored);
+
+    for (const nextUrl of ["http://git.example.com", "https://git.example.com:8443"]) {
+      expect(() =>
+        nextStoredSecret({ label: "Gitea token", incoming: "", stored, bound: true, storedUrl: "https://git.example.com", nextUrl })
+      ).toThrow(SecretHostChangedError);
+    }
 
     expect(() =>
       nextStoredSecret({
@@ -105,10 +117,11 @@ describe.skipIf(!isChild)("nextStoredSecret", () => {
 });
 
 describe.skipIf(!isChild)("savedSecretFor", () => {
-  test("decrypts the saved value for the same host only", () => {
+  test("decrypts the saved value for the same origin only", () => {
     const stored = encrypt("saved-token");
     expect(savedSecretFor(stored, "https://git.example.com", "https://git.example.com/")).toBe("saved-token");
     expect(savedSecretFor(stored, "https://git.example.com", "https://other.example.com")).toBeNull();
+    expect(savedSecretFor(stored, "https://git.example.com", "http://git.example.com")).toBeNull();
     expect(savedSecretFor(undefined, "https://git.example.com", "https://git.example.com")).toBeNull();
   });
 });
@@ -184,7 +197,7 @@ describe.skipIf(!isChild)("notification secrets", () => {
     const saved = stored();
     const incoming = { provider: "ntfy", ntfy: { url: "https://evil.example.net", topic: "t", token: "" } };
     expect(() => withSavedNotificationSecrets(incoming as any, saved)).toThrow(
-      "Enter a ntfy access token for evil.example.net. The saved one is only sent to ntfy.example.com."
+      "Enter a ntfy access token for https://evil.example.net. The saved one is only sent to https://ntfy.example.com."
     );
   });
 });

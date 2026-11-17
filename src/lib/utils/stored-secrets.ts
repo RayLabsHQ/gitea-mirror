@@ -3,10 +3,11 @@
  * (`hasToken`, `hasSecret`) and never sends it back, so nothing that can read
  * settings, a read-only API key included, can copy a token out.
  *
- * A saved token is also only sent to the host it was saved for. Otherwise
- * anyone who can change settings could point the address at a server of
- * their own and collect the token from the next request. Moving to another
- * host needs the token entered again.
+ * A saved token is also only sent to the origin it was saved for: the same
+ * scheme, host and port. Otherwise anyone who can change settings could
+ * point the address at a server of their own, another port on the same
+ * machine, or plain http, and collect the token from the next request.
+ * Moving to another address needs the token entered again.
  *
  * What a request sends for a secret:
  * - nothing or an empty string keeps the saved one,
@@ -15,29 +16,32 @@
  */
 import { decrypt, encrypt, isEncrypted } from "@/lib/utils/encryption";
 
-/** Host name of an http(s) URL, lower-cased, or null when it does not parse. */
-export function urlHost(url: unknown): string | null {
+/**
+ * Origin (scheme, host and port) of an http(s) URL, with the host
+ * lower-cased and a default port left out, or null when it does not parse.
+ */
+export function urlOrigin(url: unknown): string | null {
   if (typeof url !== "string" || !url.trim()) return null;
   try {
     const parsed = new URL(url.trim());
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
-    return parsed.hostname.toLowerCase();
+    return parsed.origin;
   } catch {
     return null;
   }
 }
 
 /** Whether a secret saved with `savedUrl` may be sent to `nextUrl`. */
-export function sameHost(savedUrl: unknown, nextUrl: unknown): boolean {
-  const saved = urlHost(savedUrl);
-  return saved !== null && saved === urlHost(nextUrl);
+export function sameOrigin(savedUrl: unknown, nextUrl: unknown): boolean {
+  const saved = urlOrigin(savedUrl);
+  return saved !== null && saved === urlOrigin(nextUrl);
 }
 
-/** A saved secret would have followed its address to another host. */
+/** A saved secret would have followed its address to another origin. */
 export class SecretHostChangedError extends Error {
   constructor(label: string, savedUrl: unknown, nextUrl: unknown) {
-    const to = urlHost(nextUrl);
-    const from = urlHost(savedUrl);
+    const to = urlOrigin(nextUrl);
+    const from = urlOrigin(savedUrl);
     super(
       `Enter a ${label} for ${to ?? "the new address"}. ` +
         (from ? `The saved one is only sent to ${from}.` : "The saved one is not sent to a new address.")
@@ -54,8 +58,8 @@ export function hasValue(value: unknown): value is string {
 /**
  * The encrypted value to store for one secret: the new one when the request
  * sent one, else the saved one, else empty. `bound` secrets are sent to an
- * address, so a saved one is only kept while that address stays on the same
- * host; otherwise SecretHostChangedError is thrown.
+ * address, so a saved one is only kept while that address keeps the same
+ * origin; otherwise SecretHostChangedError is thrown.
  */
 export function nextStoredSecret(options: {
   label: string;
@@ -73,7 +77,7 @@ export function nextStoredSecret(options: {
   if (hasValue(options.incoming)) return encrypt(options.incoming.trim());
   const stored = options.stored;
   if (!stored) return "";
-  if (options.bound && !sameHost(options.storedUrl, options.nextUrl)) {
+  if (options.bound && !sameOrigin(options.storedUrl, options.nextUrl)) {
     throw new SecretHostChangedError(options.label, options.storedUrl, options.nextUrl);
   }
   // Rows written before encryption hold plain text; encrypt them on the way through.
@@ -82,14 +86,14 @@ export function nextStoredSecret(options: {
 
 /**
  * The decrypted saved secret a connection test may use in place of an empty
- * field, or null when there is none or the test points at another host.
+ * field, or null when there is none or the test points at another origin.
  */
 export function savedSecretFor(
   stored: string | null | undefined,
   storedUrl: unknown,
   nextUrl: unknown
 ): string | null {
-  if (!stored || !sameHost(storedUrl, nextUrl)) return null;
+  if (!stored || !sameOrigin(storedUrl, nextUrl)) return null;
   const value = decrypt(stored);
   return value || null;
 }

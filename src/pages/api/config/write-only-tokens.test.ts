@@ -1,7 +1,7 @@
 /**
  * Saved tokens and secrets are write-only: no route sends them back, an
- * empty field keeps them, and a saved one only goes to the host it was saved
- * for. Covers GET and POST /api/config, the notification test and the
+ * empty field keeps them, and a saved one only goes to the origin it was
+ * saved for. Covers GET and POST /api/config, the notification test and the
  * destination connection test against the real schema in an in-memory
  * SQLite database.
  *
@@ -229,19 +229,25 @@ describe.skipIf(!isChild)("write-only tokens", () => {
     expect(decrypt(storedRow().giteaConfig.token)).toBe("gitea_new");
   });
 
-  test("the saved destination token does not follow the URL to another host", async () => {
+  test("the saved destination token does not follow the URL to another origin", async () => {
     const { body } = await getConfig();
     const moved = { ...body.giteaConfig, url: "https://evil.example.net" };
 
     const refused = await postConfig(saveBody(body, { giteaConfig: moved }));
     expect(refused.status).toBe(400);
     expect((await refused.json()).message).toBe(
-      "Enter a Gitea token for evil.example.net. The saved one is only sent to git.example.com."
+      "Enter a Gitea token for https://evil.example.net. The saved one is only sent to https://git.example.com."
     );
     expect(storedRow().giteaConfig.url).toBe("https://git.example.com");
 
+    // Plain http or another port on the same machine is another origin too.
+    for (const url of ["http://git.example.com", "https://git.example.com:8443"]) {
+      const response = await postConfig(saveBody(body, { giteaConfig: { ...body.giteaConfig, url } }));
+      expect(response.status).toBe(400);
+    }
+
     const sameServer = await postConfig(
-      saveBody(body, { giteaConfig: { ...body.giteaConfig, url: "http://git.example.com:3000" } })
+      saveBody(body, { giteaConfig: { ...body.giteaConfig, url: "https://GIT.example.com/" } })
     );
     expect(sameServer.status).toBe(200);
     expect(decrypt(storedRow().giteaConfig.token)).toBe(SECRETS.destination);
@@ -313,7 +319,7 @@ describe.skipIf(!isChild)("write-only tokens", () => {
     const moved = await run("https://evil.example.net");
     expect(moved.status).toBe(400);
     expect((await moved.json()).message).toBe(
-      "Enter a Gitea token for evil.example.net. The saved one is only sent to git.example.com."
+      "Enter a Gitea token for https://evil.example.net. The saved one is only sent to https://git.example.com."
     );
     expect(giteaRequests).toHaveLength(0);
   });

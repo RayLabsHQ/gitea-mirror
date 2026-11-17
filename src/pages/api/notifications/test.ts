@@ -52,7 +52,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     }
 
     // Secrets are write-only, so the form sends an empty field for a saved
-    // one; fill it in, but only for the host it was saved for.
+    // one; fill it in, but only for the address it was saved for.
     let testConfig: typeof parsed.data;
     try {
       testConfig = withSavedNotificationSecrets(

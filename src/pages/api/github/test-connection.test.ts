@@ -190,11 +190,11 @@ describe.skipIf(!isChild)("GitHub Test Connection API", () => {
       expect(clientTokens).toEqual(["ghp_typed"]);
     });
 
-    test("its saved token is not sent to another host", async () => {
+    test("its saved token is not sent to another origin", async () => {
       const response = await send({ provider: "gitea", url: "https://evil.example.net", sourceId: "s1", token: "" });
       expect(response.status).toBe(400);
       const data = await response.json();
-      expect(data.message).toBe("Enter a Gitea / Forgejo token for evil.example.net. The saved one is only sent to github.com.");
+      expect(data.message).toBe("Enter a Gitea / Forgejo token for https://evil.example.net. The saved one is only sent to https://github.com.");
       expect(clientTokens).toEqual([]);
     });
 

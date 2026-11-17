@@ -229,8 +229,8 @@ export const POST: APIRoute = async ({ request, locals }) => {
     );
 
     // Tokens are write-only: GET never returns them, so an empty field keeps
-    // the saved token. A saved token only stays while the address stays on
-    // the same host (see stored-secrets).
+    // the saved token. A saved token only stays while the address keeps the
+    // same scheme, host and port (see stored-secrets).
     let processedNotificationConfig: any = undefined;
     try {
       mappedGithubConfig.token = nextStoredSecret({

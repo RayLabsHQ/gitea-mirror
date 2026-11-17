@@ -29,7 +29,7 @@ import {
   parseGitHubAppCredentials,
 } from "@/lib/github-app-credentials";
 import { decryptSourceToken } from "@/lib/sources";
-import { SecretHostChangedError, hasValue, sameHost } from "@/lib/utils/stored-secrets";
+import { SecretHostChangedError, hasValue, sameOrigin } from "@/lib/utils/stored-secrets";
 
 /** Repositories imported from this source; they are what locks it. */
 async function countRepositoriesForSource(
@@ -160,8 +160,9 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
     }
 
     // An empty token keeps the saved one, but a saved token is only sent to
-    // the host it was saved for: moving the source to another host needs a
-    // new token, or anyone who can edit sources could collect it.
+    // the origin it was saved for: moving the source to another scheme, host
+    // or port needs a new token, or anyone who can edit sources could
+    // collect it.
     if (body.authType !== "app" && !hasValue(token)) {
       const saved = decryptSourceToken(existing.token);
       const savedUrl = normalizeSourceUrl(existing.url, existing.provider);
@@ -169,7 +170,7 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
         typeof body.url === "string" ? body.url : existing.url,
         provider
       );
-      if (saved && !isGitHubAppCredential(saved) && !sameHost(savedUrl, nextUrl)) {
+      if (saved && !isGitHubAppCredential(saved) && !sameOrigin(savedUrl, nextUrl)) {
         return jsonError(
           new SecretHostChangedError(`${SOURCE_PROVIDER_LABELS[provider]} token`, savedUrl, nextUrl).message,
           400
