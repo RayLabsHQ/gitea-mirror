@@ -34,7 +34,7 @@ If your Gitea instance is reachable at one URL from the Gitea Mirror process and
 
 ### Mirror settings
 
-Below the connection cards, the mirror settings decide what travels with the code: issues, pull requests, labels, milestones, releases, wiki and LFS objects, plus the force push protection strategy. Switches that the current source or destination cannot serve are disabled and say why.
+Below the connection cards, the mirror settings decide what travels with the code: issues, pull requests, labels, milestones, releases, wiki and LFS objects, plus the force push protection strategy. Switches that the current source or destination cannot serve are disabled and say why. LFS also needs LFS turned on in Gitea or Forgejo itself: `LFS_START_SERVER = true` in the `[server]` section of `app.ini`.
 
 Releases have two numbers under the switch. **Latest** is how many releases are mirrored per repository, newest first, ten by default. **Assets for latest** is how many of those get their assets uploaded: leave it empty to upload assets for every mirrored release, set it to `0` for release notes and tags only, or set it to a number to keep assets for the newest N releases while older ones keep their notes and tag. The limit never deletes assets that were already uploaded.
 
@@ -114,7 +114,7 @@ The second group seeds the database configuration. On startup, if any of `GITHUB
 
 Tokens supplied through the environment are encrypted with AES-256-GCM before they are stored, the same as tokens entered through the UI.
 
-The source and destination hosts are seeded the same way: `SOURCE_PROVIDER` and `SOURCE_URL` pick the source, `DESTINATION_PROVIDER` picks the destination, and the `GITHUB_*` and `GITEA_*` names keep working for every host. A value that disagrees with a locked host is ignored with a warning rather than applied.
+The source and destination hosts are seeded the same way: `SOURCE_PROVIDER` and `SOURCE_URL` pick the source, `DESTINATION_PROVIDER` picks the destination, and the `GITHUB_*` and `GITEA_*` names keep working for every host. A `SOURCE_PROVIDER`, `SOURCE_URL` or `GITEA_URL` value that disagrees with a locked host is ignored with a warning rather than applied.
 
 ## Core environment variables
 

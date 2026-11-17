@@ -26,7 +26,7 @@ Variables fall into two groups.
 | --- | --- | --- |
 | `NODE_ENV` | `development` | Runtime environment. The container image sets `production`. |
 | `HOST` | `0.0.0.0` | Interface to bind. The development server (`bun run dev`) binds `localhost` instead. |
-| `PORT` | `4321` | Port to listen on. |
+| `PORT` | `4321` | Port to listen on. In Docker, keep it at `4321` and map a different host port instead: the image's health check always probes 4321. |
 | `BASE_URL` | `/` | Path prefix for subpath deployments, for example `/mirror`. Applied at runtime, so one prebuilt image works under any prefix. |
 | `MCP_INTERNAL_URL` | `http://HOST:PORT` plus `BASE_URL` | Address the [MCP endpoint](/docs/mcp/) tools use to call the app's own API. Only needed when the app is not reachable from itself at `HOST` and `PORT`, for example when it terminates TLS itself. |
 | `DATABASE_URL` | `sqlite://data/gitea-mirror.db` | SQLite database location. The container image sets `file:data/gitea-mirror.db`. |
@@ -37,16 +37,16 @@ Variables fall into two groups.
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `BETTER_AUTH_SECRET` | none | Signs session cookies. Required. Generate with `openssl rand -base64 32`. |
+| `BETTER_AUTH_SECRET` | none | Signs session cookies. Required, except with the Docker image and the Nix package, which generate one on first start. Generate with `openssl rand -base64 32`. |
 | `BETTER_AUTH_URL` | `http://localhost:4321` | Origin the auth server runs on. Scheme and host only, any path is stripped. |
 | `PUBLIC_BETTER_AUTH_URL` | none | Leave it unset. It is only read while building from source, and the value is fixed into that build. The published image and the Nix package are built without it, so the browser sends sign-in requests to whatever address it opened the page on, and setting it on a running container changes nothing. |
 | `BETTER_AUTH_TRUSTED_ORIGINS` | none | Comma-separated additional origins allowed to make auth requests. The origin of `BETTER_AUTH_URL` is always trusted. |
 | `BETTER_AUTH_LOG_LEVEL` | `warn` | Better Auth logger verbosity: `debug`, `info`, `warn`, or `error`. Use `debug` to trace SSO and OIDC sign-in problems. Better Auth does not read the `DEBUG` variable. |
-| `ENCRYPTION_SECRET` | none | Key for AES-256-GCM encryption of stored tokens. Generate with `openssl rand -base64 48`. |
-| `AUTH_DEFAULT_METHOD` | `email` | Tab the login page opens on when both email and SSO are available: `email` or `sso`. The method last used in that browser wins over this default. |
+| `ENCRYPTION_SECRET` | none | Key for AES-256-GCM encryption of stored tokens. When unset, `BETTER_AUTH_SECRET` is used. Changing the key later makes stored tokens unreadable, so set it before saving any. Generate with `openssl rand -base64 48`. |
+| `AUTH_DEFAULT_METHOD` | `email` | Tab the login page opens on when both email and SSO are available: `email` or `sso`. Any other value means `email`. The method last used in that browser wins over this default. |
 | `AUTH_ALLOW_SIGNUP` | `false` | Keep the email and password sign-up endpoint (`POST /api/auth/sign-up/email`) open after the first account exists. Off, it answers 403 once a user exists. The `/signup` page redirects to the login page either way. |
 
-In Docker, `BETTER_AUTH_SECRET` and `ENCRYPTION_SECRET` are generated on first boot if unset and saved to `/app/data/.better_auth_secret` and `/app/data/.encryption_secret` so they persist across restarts. Outside Docker there is no fallback: a missing `BETTER_AUTH_SECRET` logs a security warning in production and uses a known insecure development value.
+In Docker, `BETTER_AUTH_SECRET` and `ENCRYPTION_SECRET` are generated on first boot if unset and saved to `/app/data/.better_auth_secret` and `/app/data/.encryption_secret` so they persist across restarts. The Nix package does the same in its data directory. Elsewhere there is no fallback: without `BETTER_AUTH_SECRET` the app refuses to start when `NODE_ENV` is `production`, and uses a known insecure value otherwise.
 
 ### Header authentication
 
@@ -59,7 +59,7 @@ For deployments behind a reverse proxy that already authenticates users.
 | `HEADER_AUTH_EMAIL_HEADER` | `X-Authentik-Email` | Request header carrying the email address. |
 | `HEADER_AUTH_NAME_HEADER` | `X-Authentik-Name` | Request header carrying the display name. |
 | `HEADER_AUTH_AUTO_PROVISION` | `false` | Create accounts automatically for unrecognized users. |
-| `HEADER_AUTH_ALLOWED_DOMAINS` | none | Comma-separated email domains allowed to auto-provision. |
+| `HEADER_AUTH_ALLOWED_DOMAINS` | none | Comma-separated email domains allowed to sign in through headers, for existing users as well as new ones. Only checked when the email header is present. |
 
 > **Warning:** Enable this only when a trusted proxy strips these headers from inbound client requests. Otherwise any client can set them and sign in as any user.
 
@@ -94,8 +94,8 @@ Standard GitHub Enterprise Cloud on `github.com` needs no override. Use a token 
 | `MIRROR_STARRED_LISTS` | none | Comma-separated GitHub Star List names to restrict starred mirroring to. Only used when `MIRROR_STARRED=true`. Empty means all starred repositories. |
 | `STARRED_REPOS_ORG` | `starred` | Gitea organization that receives starred repositories. |
 | `STARRED_REPOS_MODE` | `dedicated-org` | `dedicated-org` puts starred repositories in one organization, `preserve-owner` keeps the original owner path. |
-| `STARRED_DUPLICATE_STRATEGY` | `suffix` | Name collision handling when two starred repositories share a name. `suffix` gives `repo-owner`, `prefix` gives `owner-repo`, `owner-org` places them in an owner-named organization. |
-| `SKIP_STARRED_ISSUES` | `false` | Lightweight mode for starred repositories: mirror code but skip issues. |
+| `STARRED_DUPLICATE_STRATEGY` | `suffix` | Name collision handling when two starred repositories share a name. `suffix` gives `repo-owner`, `prefix` gives `owner-repo`, `owner-org` is accepted but not implemented yet and behaves like `suffix`. |
+| `SKIP_STARRED_ISSUES` | `false` | Lightweight mode for starred repositories: mirror code and LFS, but skip the wiki, releases, issues, pull requests, labels and milestones. |
 | `AUTO_MIRROR_STARRED` | `false` | Mirror starred repositories during scheduled syncs and "Mirror All". When `false`, they are imported for browsing but must be mirrored individually. |
 
 ### Organizations
@@ -131,7 +131,7 @@ Only used when `DESTINATION_PROVIDER` is `github` or `gitlab`.
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `MIRROR_CLONE_DIR` | `mirrors` inside the data directory | Where the push engine keeps its bare clones, one per repository. |
+| `MIRROR_CLONE_DIR` | `mirrors` next to the database file | Where the push engine keeps its bare clones, one per repository. The default follows `DATABASE_URL`. |
 | `PUSH_CONCURRENCY` | `2` | How many git fetch or push operations run at once across all repositories, 1 to 32. |
 
 > **Warning:** `GITEA_SKIP_TLS_VERIFY=true` disables certificate checking for every outbound HTTPS request the process makes, not just to Gitea. Use [CA certificates](/docs/ca-certificates/) instead for self-signed or privately signed instances.
@@ -179,7 +179,7 @@ Issues, pull requests, labels and milestones are read from the GitHub API and ne
 | `SCHEDULE_INTERVAL` | `3600` | Interval between syncs. Accepts a duration string (`30m`, `8h`, `7d`), a five-field cron expression (`0 2 * * *`), or a plain number of seconds. |
 | `DELAY` | none | Legacy alias for `SCHEDULE_INTERVAL`, in seconds. `SCHEDULE_INTERVAL` takes precedence. |
 | `SCHEDULE_TIMEZONE` | `UTC` | Timezone used to evaluate cron expressions. |
-| `SCHEDULE_CONCURRENT` | `false` | Allow a scheduled run to start while another is still in progress. |
+| `SCHEDULE_CONCURRENT` | `false` | Sync the repositories within one batch at the same time instead of one after another. |
 | `SCHEDULE_BATCH_SIZE` | `10` | Repositories processed per batch. |
 | `SCHEDULE_PAUSE_BETWEEN_BATCHES` | `5000` | Pause between batches, in milliseconds. |
 
@@ -189,8 +189,8 @@ Issues, pull requests, labels and milestones are read from the GitHub API and ne
 | --- | --- | --- |
 | `AUTO_IMPORT_REPOS` | `true` | Discover and import newly created repositories on the source during scheduled syncs. Set to `false` to disable. |
 | `AUTO_MIRROR_REPOS` | `false` | Mirror newly imported repositories automatically, without a manual "Mirror All". |
-| `SCHEDULE_ONLY_MIRROR_UPDATED` | `false` | Only mirror repositories that have changed since the last run. |
-| `SCHEDULE_UPDATE_INTERVAL` | `86400000` | How often to check for updates, in milliseconds. |
+| `SCHEDULE_ONLY_MIRROR_UPDATED` | `false` | Skip repositories mirrored within the last `SCHEDULE_UPDATE_INTERVAL`. It does not check the source for changes. |
+| `SCHEDULE_UPDATE_INTERVAL` | `86400000` | With `SCHEDULE_ONLY_MIRROR_UPDATED`, how recently a repository must have been mirrored to be skipped, in milliseconds. |
 | `SCHEDULE_SKIP_RECENTLY_MIRRORED` | `true` | Skip repositories mirrored very recently. |
 | `SCHEDULE_RECENT_THRESHOLD` | `3600000` | What counts as recent, in milliseconds. |
 
@@ -204,12 +204,12 @@ Cleanup covers both trimming the activity log and handling repositories that no 
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `CLEANUP_ENABLED` | `false` | Enable automatic cleanup. Also enabled implicitly when `CLEANUP_DELETE_IF_NOT_IN_GITHUB=true`. |
+| `CLEANUP_ENABLED` | `false` | Trim the activity log on a schedule. Repositories gone from the source are only handled when `CLEANUP_DELETE_IF_NOT_IN_GITHUB` is on, which also turns this on. |
 | `CLEANUP_RETENTION_DAYS` | `7` | How long activity events are kept, in days. |
 | `CLEANUP_DELETE_IF_NOT_IN_GITHUB` | `true` | Act on repositories that no longer exist on the source. |
 | `CLEANUP_ORPHANED_REPO_ACTION` | `archive` | What to do with an orphaned repository: `skip`, `archive`, or `delete`. |
 | `CLEANUP_DELETE_FROM_GITEA` | `false` | Apply the orphan action on the destination too, not just in the local database. Deleting on a GitHub push target needs the `delete_repo` scope. |
-| `CLEANUP_PROTECTED_REPOS` | none | Comma-separated repository names cleanup will never touch. |
+| `CLEANUP_PROTECTED_REPOS` | none | Comma-separated repositories cleanup will never touch, matched exactly by name or by `owner/name`. |
 | `CLEANUP_DRY_RUN` | `false` | Log what cleanup would do without doing it. |
 | `CLEANUP_BATCH_SIZE` | `10` | Items processed per batch. |
 | `CLEANUP_PAUSE_BETWEEN_DELETES` | `2000` | Pause between deletions, in milliseconds. |
@@ -217,8 +217,21 @@ Cleanup covers both trimming the activity log and handling repositories that no 
 Cleanup has several safety behaviors worth knowing:
 
 - If the source API returns an error, cleanup is skipped for that run. A rate limit or a failed direct lookup never causes a mirror to be treated as orphaned; only a clean 404 on the repository itself does.
-- The `archive` action never deletes. Regular repositories use Gitea's native archive flag, which makes them read-only while preserving all data. Mirror repositories cannot be archived through the Gitea API, so they are renamed with an `archived-` prefix, given a description noting the preservation, and have their mirror interval pushed out to a year to stop sync attempts. They remain fully cloneable.
+- The `archive` action never deletes. Regular repositories use Gitea's native archive flag, which makes them read-only while preserving all data. Mirror repositories cannot be archived through the Gitea API, so they are renamed with an `archived-` prefix, given a description noting the preservation, and have automatic syncing turned off. They remain fully cloneable, and you can still sync them by hand from the Repositories page.
 - If archiving fails for any reason, the repository is left alone and stays accessible.
+
+## Force-push protection
+
+These set the starting values for [force-push protection](/docs/force-push-protection/#environment-variables), which is normally configured in the UI.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `PRE_SYNC_BACKUP_STRATEGY` | unset | Initial strategy: `disabled`, `always`, `on-force-push` or `block-on-force-push`. |
+| `PRE_SYNC_BACKUP_ENABLED` | unset | Legacy switch. `true` maps to `always`, `false` to `disabled`. |
+| `PRE_SYNC_BACKUP_DIR` | `data/repo-backups` | Starting snapshot directory. |
+| `PRE_SYNC_BACKUP_KEEP_COUNT` | `5` | Starting retention count. |
+| `PRE_SYNC_BACKUP_RETENTION_DAYS` | `30` | Starting retention days. |
+| `PRE_SYNC_BACKUP_GIT_USERNAME` | `oauth2` | Username paired with the Gitea token when cloning for a snapshot. |
 
 ## TLS
 

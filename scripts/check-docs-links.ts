@@ -8,7 +8,8 @@
  * - a relative link to a .md file in a site page
  * - a site link (/docs/..., /use-cases/..., /comparison/...) to a page that
  *   does not exist, or to a heading anchor the page does not have
- * - a relative link in README.md to a file that does not exist
+ * - a relative link in a repository markdown file (README.md, docs/ and the
+ *   rest) to a file that does not exist
  *
  * Run with `bun scripts/check-docs-links.ts`; exits 1 when something is broken.
  */
@@ -111,16 +112,24 @@ for (const match of useCases.matchAll(/slug:\s*['"]([^'"]+)['"]/g)) {
   checkSiteLink("www/src/lib/use-cases.ts", `/use-cases/${match[1]}/`);
 }
 
-const readme = readFileSync(path.join(root, "README.md"), "utf8");
-for (const match of readme.matchAll(/\]\(([^)\s]+)\)/g)) {
-  const target = match[1];
-  const url = URL.canParse(target) ? new URL(target) : null;
-  if (url?.origin === SITE) {
-    const sitePath = url.pathname + url.hash;
-    if (SITE_SECTIONS.test(sitePath)) checkSiteLink("README.md", sitePath);
-  } else if (!/^[a-z]+:|^#|^mailto:/i.test(target)) {
-    const file = path.join(root, target.split("#")[0]);
-    if (!existsSync(file)) problems.push(`README.md: ${target} does not exist`);
+// Every other markdown file in the repository: site links must exist, and
+// relative links must point at a file that does, from the file's own folder.
+const markdownFiles = Bun.spawnSync(["git", "ls-files", "*.md"], { cwd: root })
+  .stdout.toString()
+  .split("\n")
+  .filter((file) => file && !file.startsWith("www/src/"));
+for (const source of markdownFiles) {
+  const text = readFileSync(path.join(root, source), "utf8");
+  for (const match of text.matchAll(/\]\(<?([^)\s>]+)>?(?:\s+"[^"]*")?\)/g)) {
+    const target = match[1];
+    const url = URL.canParse(target) ? new URL(target) : null;
+    if (url?.origin === SITE) {
+      const sitePath = url.pathname + url.hash;
+      if (SITE_SECTIONS.test(sitePath)) checkSiteLink(source, sitePath);
+    } else if (!/^[a-z][a-z0-9+.-]*:|^#|^\//i.test(target)) {
+      const file = path.join(root, path.dirname(source), decodeURI(target.split("#")[0]));
+      if (!existsSync(file)) problems.push(`${source}: ${target} does not exist`);
+    }
   }
 }
 

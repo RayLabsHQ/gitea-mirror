@@ -56,7 +56,7 @@ services:
       - gitea-mirror-data:/app/data
       # Mount custom CA certificates - choose one option:
       # Option 1: Mount individual CA certificates from certs directory
-      # - ./certs:/app/certs:ro
+      # - ./certs:/app/certs   # must be writable: the entrypoint writes ca-bundle.crt here
       # Option 2: Mount system CA bundle (if your CA is already in system store)
       # - /etc/ssl/certs/ca-certificates.crt:/etc/ssl/certs/ca-certificates.crt:ro
     depends_on:

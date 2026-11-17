@@ -20,12 +20,12 @@ services:
       - gitea-mirror-data:/app/data
       # Mount custom CA certificates - choose one option:
       # Option 1: Mount individual CA certificates from certs directory
-      # - ./certs:/app/certs:ro
+      # - ./certs:/app/certs   # must be writable: the entrypoint writes ca-bundle.crt here
       # Option 2: Mount system CA bundle (if your CA is already in system store)
       # - /etc/ssl/certs/ca-certificates.crt:/etc/ssl/certs/ca-certificates.crt:ro
     environment:
       # For a complete list of all supported environment variables, see:
-      # docs/ENVIRONMENT_VARIABLES.md or .env.example
+      # https://gitea-mirror.raylabs.io/docs/environment-variables/
       - NODE_ENV=production
       - DATABASE_URL=file:data/gitea-mirror.db
       - HOST=0.0.0.0

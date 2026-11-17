@@ -1,21 +1,21 @@
 name: Docs Links
 
-# Fails on broken links in the docs website and the README: relative .md
-# links the site cannot serve, site links to pages or headings that do not
-# exist, and README links to missing files. See scripts/check-docs-links.ts.
+# Fails on broken links in the docs website and the repository markdown:
+# relative .md links the site cannot serve, site links to pages or headings
+# that do not exist, and markdown links to missing files. See scripts/check-docs-links.ts.
 on:
   push:
     branches: ['**']
     paths:
       - 'www/src/**'
-      - 'README.md'
+      - '**/*.md'
       - 'scripts/check-docs-links.ts'
       - '.github/workflows/docs-links.yml'
   pull_request:
     branches: ['**']
     paths:
       - 'www/src/**'
-      - 'README.md'
+      - '**/*.md'
       - 'scripts/check-docs-links.ts'
       - '.github/workflows/docs-links.yml'
 

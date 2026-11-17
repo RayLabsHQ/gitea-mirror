@@ -387,7 +387,7 @@ This patch completes the authentication fixes started in v3.2.4, specifically ad
 - All users must re-authenticate after upgrade
 - Existing tokens will be automatically encrypted
 - Database schema updates applied automatically
-- See [Migration Guide](MIGRATION_GUIDE.md) for detailed instructions
+- See [Migration Guide](https://github.com/RayLabsHQ/gitea-mirror/blob/1e06e2bd4b7e034ed43187817fbdbb07865da3b3/MIGRATION_GUIDE.md) for detailed instructions
 
 ## [2.22.0] - 2025-07-07
 
