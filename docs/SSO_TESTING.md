@@ -156,6 +156,9 @@ cookie was persisted**. Work through these checks:
    to set the SSO provider's **Email Domain** field to the email domain
    your users actually have. See
    [Account linking](https://gitea-mirror.raylabs.io/docs/authentication/#account-linking).
+   A user with no account yet who lands on `error=SIGNUP_CLOSED` has an email
+   outside the provider's Email Domain. See
+   [New accounts through SSO](https://gitea-mirror.raylabs.io/docs/authentication/#new-accounts-through-sso).
 3. **Check the redirect URI** registered in your IdP exactly matches
    `https://<your-domain>/api/auth/sso/callback/<provider-id>` (scheme, host,
    and provider ID, no trailing slash).
