@@ -15,6 +15,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { MultiSelect } from '@/components/ui/multi-select';
 import { withBase } from '@/lib/base-path';
 import { SwitchRow, accentSwitch } from './settings-ui';
+import { domainIsIssuerHost, ISSUER_HOST_DOMAIN_WARNING } from '@/lib/sso/domain-check';
 
 function isTrustedIssuer(issuer: string, allowedHosts: string[]): boolean {
   try {
@@ -148,7 +149,6 @@ export function SSOSettings() {
         jwksEndpoint: discovered.jwksEndpoint || '',
         userInfoEndpoint: discovered.userInfoEndpoint || '',
         discoveryEndpoint: discovered.discoveryEndpoint || `${providerForm.issuer}/.well-known/openid-configuration`,
-        domain: discovered.suggestedDomain || prev.domain,
       }));
 
       toast.success('OIDC configuration discovered successfully');
@@ -402,7 +402,17 @@ export function SSOSettings() {
                         value={providerForm.domain}
                         onChange={e => setProviderForm(prev => ({ ...prev, domain: e.target.value }))}
                         placeholder="example.com"
+                        aria-describedby="domain-help"
                       />
+                      {domainIsIssuerHost(providerForm.domain, providerForm.issuer) ? (
+                        <p id="domain-help" className="text-xs text-amber-600 dark:text-amber-400">
+                          {ISSUER_HOST_DOMAIN_WARNING}
+                        </p>
+                      ) : (
+                        <p id="domain-help" className="text-xs text-muted-foreground">
+                          Your users' email domain. Separate several with commas. New accounts and account linking through SSO only work for these.
+                        </p>
+                      )}
                     </div>
                   </div>
 
@@ -652,6 +662,11 @@ export function SSOSettings() {
                         </Badge>
                       </div>
                       <p className="text-sm text-muted-foreground mb-3">{provider.domain}</p>
+                      {domainIsIssuerHost(provider.domain, provider.issuer) && (
+                        <p className="text-xs text-amber-600 dark:text-amber-400 -mt-2 mb-3">
+                          {ISSUER_HOST_DOMAIN_WARNING}
+                        </p>
+                      )}
 
                       <div className="space-y-2">
                         <div className="flex items-start gap-2 text-sm">

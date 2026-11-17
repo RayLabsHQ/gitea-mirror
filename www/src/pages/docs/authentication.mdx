@@ -85,7 +85,7 @@ Add these on top of the shared fields:
 | Scopes | Defaults to `openid`, `email`, `profile`. |
 | PKCE | Enabled by default. Leave it on unless your provider cannot handle it. |
 
-Enter the Issuer URL and click **Discover** to fetch the authorization, token, JWKS, and userinfo endpoints automatically. Discover also replaces the Domain field with the provider's hostname, so click it first and set Domain afterwards.
+Enter the Issuer URL and click **Discover** to fetch the authorization, token, JWKS, and userinfo endpoints automatically. Set Domain yourself: it is your users' email domain, not the provider's hostname. The form and the provider list warn when Domain is the provider's hostname, which older versions of Discover filled in.
 
 Saving a provider fetches its discovery document unless all four endpoints and the scopes are already filled in. The dialog only has fields for the authorization and token endpoints, so a provider without a discovery document has to be added through the API: a `POST` to `/api/sso/providers` with `authorizationEndpoint`, `tokenEndpoint`, `jwksEndpoint`, `userInfoEndpoint` and `scopes` set.
 

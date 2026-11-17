@@ -18,7 +18,7 @@ How to test SSO sign-in locally. The user guide is the [Authentication page](htt
    - Go to Configuration, Authentication, and click **Add provider** in the Identity Providers panel
    - Stay on the **OIDC / OAuth2** tab
    - Fill in:
-     - Issuer URL: `https://accounts.google.com`, then click **Discover** to fill in the endpoints. Discover also replaces Email Domain, so do this first
+     - Issuer URL: `https://accounts.google.com`, then click **Discover** to fill in the endpoints
      - Provider ID: `google-sso`
      - Email Domain: `gmail.com` (or your domain)
      - Client ID and Client Secret: from the Google console

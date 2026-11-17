@@ -20,9 +20,8 @@ export async function POST(context: APIContext) {
 
     // Validate issuer URL format while keeping trailing slash if provided
     const trimmedIssuer = issuer.trim();
-    let parsedIssuer: URL;
     try {
-      parsedIssuer = new URL(trimmedIssuer);
+      new URL(trimmedIssuer);
     } catch (e) {
       return new Response(
         JSON.stringify({ 
@@ -92,8 +91,8 @@ export async function POST(context: APIContext) {
         scopes: config.scopes_supported || ["openid", "profile", "email"],
         responseTypes: config.response_types_supported || ["code"],
         grantTypes: config.grant_types_supported || ["authorization_code"],
-        // Suggested domain from issuer
-        suggestedDomain: parsedIssuer.hostname.replace("www.", ""),
+        // No suggested domain: the Domain field is the users' email domain,
+        // which the issuer's hostname does not tell us.
       };
 
       return new Response(JSON.stringify(discoveredConfig), {
