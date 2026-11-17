@@ -19,9 +19,8 @@ services:
       - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:-}
       - BETTER_AUTH_URL=${BETTER_AUTH_URL:-http://localhost:4321}
       - BETTER_AUTH_TRUSTED_ORIGINS=${BETTER_AUTH_TRUSTED_ORIGINS:-http://localhost:4321}
-      # REVERSE PROXY: If accessing via a reverse proxy, set all three to your external URL:
+      # REVERSE PROXY: If accessing via a reverse proxy, set both to your external URL:
       #   BETTER_AUTH_URL=https://gitea-mirror.example.com
-      #   PUBLIC_BETTER_AUTH_URL=https://gitea-mirror.example.com
       #   BETTER_AUTH_TRUSTED_ORIGINS=https://gitea-mirror.example.com
       # Path-prefix deployments (e.g. /mirror) are supported at runtime via BASE_URL.
       
@@ -32,7 +31,6 @@ services:
       - HOST=0.0.0.0
       - PORT=4321
       - BASE_URL=${BASE_URL:-/}
-      - PUBLIC_BETTER_AUTH_URL=${PUBLIC_BETTER_AUTH_URL:-http://localhost:4321}
       
     healthcheck:
       test:

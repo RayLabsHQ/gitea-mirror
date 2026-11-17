@@ -16,7 +16,7 @@ This guide walks the supported path, GitHub to Gitea. GitLab and Gitea / Forgejo
 
 Before you start, you need:
 
-- A GitHub personal access token with the `repo` and `admin:org` scopes.
+- A GitHub personal access token (classic) with the `repo` and `read:org` scopes. See [Tokens and permissions](/docs/tokens/).
 - A Gitea or Forgejo instance you can reach from wherever Gitea Mirror runs, plus an access token for it.
 - Docker with the Compose plugin, or Bun 1.2.9 or newer for a bare metal install.
 
@@ -47,7 +47,6 @@ services:
       - PORT=4321
       - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:-}
       - BETTER_AUTH_URL=${BETTER_AUTH_URL:-http://localhost:4321}
-      - PUBLIC_BETTER_AUTH_URL=${PUBLIC_BETTER_AUTH_URL:-http://localhost:4321}
       - BETTER_AUTH_TRUSTED_ORIGINS=${BETTER_AUTH_TRUSTED_ORIGINS:-http://localhost:4321}
 ```
 
@@ -88,16 +87,15 @@ openssl rand -base64 48   # ENCRYPTION_SECRET
 
 ### Running behind a reverse proxy
 
-When you access Gitea Mirror through a proxy, the auth layer needs to know its public origin. Set all three of these to the external URL:
+When you access Gitea Mirror through a proxy, the auth layer needs to know its public origin. Set both of these to the external URL:
 
 ```yaml
 environment:
   - BETTER_AUTH_URL=https://gitea-mirror.example.com
-  - PUBLIC_BETTER_AUTH_URL=https://gitea-mirror.example.com
   - BETTER_AUTH_TRUSTED_ORIGINS=https://gitea-mirror.example.com
 ```
 
-These must be origins only, meaning scheme and host with no path. If you serve the app under a path prefix such as `https://git.example.com/mirror`, put the prefix in `BASE_URL=/mirror` and keep the three auth variables as the bare origin. See the [configuration guide](/docs/configuration/) for the full explanation.
+These must be origins only, meaning scheme and host with no path. If you serve the app under a path prefix such as `https://git.example.com/mirror`, put the prefix in `BASE_URL=/mirror` and keep both auth variables as the bare origin. See [Reverse proxy and URLs](/docs/reverse-proxy/) for the full explanation.
 
 ## Build from source with Docker
 

@@ -2,7 +2,7 @@
 import '../styles/global.css';
 import { Header } from '../components/Header';
 import Footer from '../components/Footer.astro';
-import { docsNav } from '../lib/docs-nav';
+import { docsNav, docsNeighbours } from '../lib/docs-nav';
 
 const { frontmatter, headings = [] } = Astro.props;
 const title = frontmatter?.title ?? 'Documentation';
@@ -14,6 +14,7 @@ const currentPath = Astro.url.pathname.endsWith('/')
   ? Astro.url.pathname
   : `${Astro.url.pathname}/`;
 const canonical = `https://gitea-mirror.raylabs.io${currentPath}`;
+const { prev, next } = docsNeighbours(currentPath);
 const toc = headings.filter((h: { depth: number }) => h.depth === 2 || h.depth === 3);
 
 const jsonLd = {
@@ -122,6 +123,23 @@ const jsonLd = {
           <article class="docs-content">
             <slot />
           </article>
+
+          {(prev || next) && (
+            <nav class="mt-12 grid gap-3 border-t border-border pt-6 sm:grid-cols-2" aria-label="Previous and next page">
+              {prev ? (
+                <a href={prev.href} class="group rounded-lg border border-border px-4 py-3 transition-colors hover:border-indigo-500">
+                  <div class="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Previous</div>
+                  <div class="mt-0.5 text-sm font-medium group-hover:text-foreground">{prev.title}</div>
+                </a>
+              ) : <div class="hidden sm:block" />}
+              {next && (
+                <a href={next.href} class="group rounded-lg border border-border px-4 py-3 text-right transition-colors hover:border-indigo-500">
+                  <div class="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Next</div>
+                  <div class="mt-0.5 text-sm font-medium group-hover:text-foreground">{next.title}</div>
+                </a>
+              )}
+            </nav>
+          )}
         </main>
 
         <!-- Table of contents -->

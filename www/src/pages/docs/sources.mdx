@@ -54,9 +54,11 @@ The card lists the scopes it needs and links to the token page of the selected i
 
 | Source | Where to create the token | Scopes |
 | --- | --- | --- |
-| GitHub | Settings, Developer settings, Personal access tokens (classic) | `repo`, `admin:org` |
+| GitHub | Settings, Developer settings, Personal access tokens (classic) | `repo`, `read:org` |
 | GitLab | Preferences, Access tokens | `read_api`, `read_repository` |
 | Gitea / Forgejo | Settings, Applications | `read:repository`, `read:user`, `read:organization` |
+
+The card asks for `admin:org` on GitHub; `read:org`, one of its checkboxes, is all the app uses. [Tokens and permissions](/docs/tokens/) explains each scope.
 
 Without a token, GitLab and Gitea / Forgejo only show the configured user's public repositories and starred repositories. Adding a public repository by URL works without a token on every source.
 

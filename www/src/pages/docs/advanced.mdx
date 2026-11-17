@@ -132,9 +132,7 @@ bun run cleanup-db
 
 ### Backups
 
-The application state lives inside `data/`: the SQLite file, the two generated secret files, and, when those features are used, force-push snapshots in `repo-backups/` and push clones in `mirrors/`. Backing up that directory backs up everything: configuration, repository records, job history, and the keys needed to decrypt stored tokens. The [data directory table](/docs/deployment/#data-and-persistence) lists each path.
-
-Stop the container before copying the file, or use SQLite's own backup mechanism, so you do not capture a partially written page.
+Back up the whole data directory, including the generated secret files. [Backups and upgrades](/docs/backups-and-upgrades/) covers a safe copy, restoring, and updating.
 
 ## Crash recovery
 

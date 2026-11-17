@@ -1,0 +1,165 @@
+---
+layout: '../../layouts/DocsLayout.astro'
+title: Repositories and organizations
+description: Day to day use of the Repositories, Organizations, Storage and Activity Log pages, including moving mirrors, per repository options and CSV export.
+---
+
+# Repositories and organizations
+
+Once a source and a destination are connected on the [Configuration page](/docs/configuration/), most of the work happens on four pages: **Repositories**, **Organizations**, **Storage** and **Activity Log**. This page walks through each.
+
+## Getting repositories in
+
+There are three ways a repository ends up in the list:
+
+- **Import.** The import button on the Configuration page (for example **Import GitHub Data**) reads everything the connected sources can list: your repositories, your organizations, and your starred repositories if that option is on. With automatic syncing on, the scheduler also picks up new repositories on each run.
+- **Add one by hand.** The round **+** button at the bottom right of the Repositories page opens **Add Repository**. Paste a repository URL, or type the owner and name, and optionally a target organization on the destination. The URL's host has to match a connected source, so add the source first. This also works for public repositories of other people.
+- **Add an organization.** See [Organizations](#organizations) below.
+
+An added repository starts as `imported`. Nothing is created on the destination until you mirror it, or until the scheduler does if automatic mirroring is on.
+
+## Statuses
+
+| Status | Meaning |
+| --- | --- |
+| `imported` | Known to Gitea Mirror, not mirrored yet. |
+| `mirroring` | The first mirror is running. |
+| `mirrored` | The mirror exists on the destination. |
+| `syncing`, `synced` | A sync is running, or the last one finished. |
+| `failed` | The last mirror or sync failed. On a wide screen, hover the badge to read the error. |
+| `ignored` | You chose to skip it. Mirror runs, syncs and the scheduler leave it alone. |
+| `pending-approval` | [Force-push protection](/docs/force-push-protection/) held a sync until you approve it. |
+| `archived` | The repository is gone from the source and cleanup archived the mirror. Automatic syncs are off; **Sync** still refreshes it once. |
+
+## The Repositories page
+
+### Actions on one repository
+
+Each row has one main button, chosen by its status:
+
+| Status | Button |
+| --- | --- |
+| `imported` | **Mirror** creates the mirror. |
+| `mirrored`, `synced`, `archived` | **Sync** refreshes the mirror now, including its metadata. |
+| `failed` | **Retry** syncs the mirror if it exists on the destination, and creates it otherwise. |
+| `pending-approval` | **Approve** or **Dismiss**, see [Approving a held sync](#approving-a-held-sync). |
+| `ignored` | **Include** sets it back to `imported`. |
+
+The arrow next to the main button opens **Mirror Options**, **Ignore Repository** and **Delete from Mirror**. Delete removes the repository from Gitea Mirror only; the mirror on the destination stays where it is, and you remove it there yourself if you want it gone. With a GitHub or GitLab destination, the local clone used for pushing is removed too.
+
+### Working on many at once
+
+Tick the rows you want (shift-click selects a range) and a bar appears with **Mirror**, **Sync**, **Re-run Metadata**, **Retry**, **Ignore**, **Include** and **Delete**. Each button acts only on the selected rows it applies to.
+
+**Re-run Metadata** clears what Gitea Mirror remembers about each repository's issues, pull requests, releases and other metadata, then starts a sync, so the next pass starts from the beginning instead of picking up where the last one stopped. Use it after turning a metadata option on for repositories that were already mirrored.
+
+**Mirror All** in the toolbar starts a mirror for every repository that is not mirroring, mirrored or ignored. Starred repositories of other owners are left out unless **Auto-mirror new starred repositories** is on.
+
+### Search, filters and sort
+
+The search box matches names, owners, organizations and statuses. The filters narrow by **owner**, by source **organization**, by **destination** owner, by **status**, and by **mirror options** (custom or defaults). Sort by import date, last update or name.
+
+Search, filters and sort are kept in the page address, so a filtered view can be bookmarked or shared with someone on the same instance. Clicking an organization's name on the Organizations page opens the Repositories page filtered to it.
+
+### Moving a mirror to another owner
+
+On a wide screen, hover the **Organization** column and click the pencil (**Edit destination**). Type the destination owner and press Enter; leave it empty to go back to what your [mirror strategy](/docs/configuration/#mirror-strategies) picks.
+
+When the mirror already exists on Gitea or Forgejo, a dialog asks what to do:
+
+- **Move the mirror to** the new owner (ticked by default), then **Move and save**: the destination transfers the repository with its history, issues and mirror settings, and creates the owner as an organization if it does not exist. If your token cannot create repositories under that owner, the transfer waits until an owner there accepts it; the mirror keeps syncing in its old place meanwhile, and sync follows it once accepted.
+- Untick it, then **Save the label only**: the mirror stays where it is and keeps syncing there. The new owner is only used if the mirror is ever created again.
+
+Nothing is deleted by a move. If the target already holds a mirror of the same source, the row is pointed at it and the other copy is left alone. Moving is not available for GitHub and GitLab destinations, and starred repositories keep the destination set for starred repositories.
+
+An amber **at** badge with an owner name means the mirror is not where its label says, for example after someone transferred it in Gitea by hand. Edit the destination and tick the move option, or run [Reconcile](/docs/cleanup-and-reconcile/#reconcile).
+
+### Mirror options for one repository
+
+**Mirror Options** overrides what gets mirrored for that repository. Each row can be **Inherit**, **On** or **Off**:
+
+- Git LFS files, Wiki
+- Issues, with **Issue state** (all, open only or closed only), Issue comments, and Issue images and attachments
+- Pull requests, Labels, Milestones
+- Releases (all, stable only or off), **Release limit**, **Release asset limit** and **Custom tag rules** for which tags count as releases
+
+Inherit uses the organization's options, then the global ones on the Configuration page. A repository with overrides shows a **Custom** badge. Changes apply from the next sync. Rows that cannot apply are greyed out with the reason, for example everything but code on GitHub and GitLab destinations. [Control release asset storage](/use-cases/control-release-asset-storage/) walks through the release limits.
+
+### Mirroring only open or closed issues
+
+The global setting is on the Configuration page: **Metadata to mirror**, then under Issues, **State**: **All issues**, **Open only** or **Closed only**. Each repository and organization can override it as **Issue state** in Mirror Options. The filter decides which issues get created on the destination; issues that are already there keep being updated whatever their state. Changing it makes the next sync go through all issues again. Issue mirroring needs a GitHub source.
+
+### Approving a held sync
+
+With force-push protection set to **Hold sync until you approve**, a sync that would rewrite history stops and the repository turns `pending-approval`. **Approve** takes a safety snapshot and then runs the sync, accepting the rewrite. **Dismiss** marks the repository `synced` without syncing. See [Force-push protection](/docs/force-push-protection/).
+
+### Exporting to CSV
+
+**Export CSV** downloads every repository the account tracks, whatever the page filters show, as `gitea-mirror-repositories-YYYY-MM-DD.csv`. The columns are name, fullName, url, cloneUrl, owner, organization, sourceProvider, sourceUrl, destinationProvider, destinationUrl, destinationOrg, mirroredLocation, visibility, isPrivate, isForked, forkedFrom, isStarred, isArchived, hasLFS, hasSubmodules, hasIssues, language, description, defaultBranch, size, status, lastMirrored, errorMessage, importedAt, createdAt and updatedAt.
+
+Text that starts with `=`, `+`, `-` or `@` gets a leading `'`, so spreadsheet apps show it instead of running it as a formula.
+
+## Organizations
+
+### Adding an organization
+
+Click the round **+** button on the Organizations page (GitLab calls them groups). **Add from** offers two modes:
+
+- **Connected source.** Paste the organization's URL or type its name. With more than one source, pick which one. **Membership Role** is only a label on the card; Gitea Mirror does not check it.
+- **Public only.** Mirror a public organization without connecting an account. Pick the provider (GitHub, GitLab or Gitea / Forgejo) and, for a self-hosted instance, its URL. Only public repositories are imported. The card shows a **Public only** badge.
+
+Every repository the source lists in the organization is added as `imported`. A user account cannot be added as an organization; add its repositories one at a time. GitLab subgroups cannot be added on their own: add the top level group.
+
+### Cards or list
+
+The toggle above the organizations switches between cards and a compact list. The choice is remembered in your browser.
+
+### Mirroring and syncing an organization
+
+**Mirror Organization** creates the destination organization your strategy calls for and mirrors every repository in it. **Mirror All** in the toolbar does that for every organization that is not mirrored, mirroring or ignored.
+
+**Sync Organization** (in the **⋮** menu once the organization is mirrored or failed, or **Sync** in the list view) checks the source for new repositories, mirrors the new ones, and syncs the ones already mirrored, including failed ones. In the card view, a failed organization also shows **Retry Mirror**, which runs the whole mirror again.
+
+### Choosing the destination for an organization
+
+Click the pencil next to the destination (**Edit mirror destination**) and enter an organization on the destination, or **Reset to Default**. This only changes where new mirrors go.
+
+To move the mirrors that already exist as well, tick **Also move the mirrored repositories on Gitea** before saving. You get a preview of what will move and what is left alone, and why: starred repositories, repositories with their own destination, repositories not mirrored yet, ones with a run in progress, and ones already in place. Each move works like [moving a single mirror](#moving-a-mirror-to-another-owner). The new destination is saved even if some moves fail; those repositories keep syncing where they are.
+
+### Pinning an organization to one source
+
+With more than one source connected, an organization card has a **Source** setting. **Every source** (the default) includes the organization's repositories from any source that has an organization of that name. Picking one source makes the organization mirror, sync and delete only that source's repositories.
+
+### Mirror options and forks per organization
+
+**Mirror Options** in the **⋮** menu works like the repository dialog, and the organization's repositories inherit from it. It has one extra row, **Skip forks**. With it on, **Mirror Organization** leaves forks out, and **Sync Organization** does not mirror forks for the first time but keeps updating forks that were mirrored earlier.
+
+### Ignoring, including and removing
+
+- **Ignore Organization** ignores the organization and its repositories, except ones with a run in progress.
+- **Include Organization** brings them back: repositories that were mirrored before go back to `mirrored`, the rest to `imported`.
+- **Delete from Mirror** removes the organization and its repositories from Gitea Mirror. Nothing is removed from the destination.
+
+**Export CSV** on this page downloads the organizations with name, membershipRole, isIncluded, destinationOrg, status, repositoryCount, publicRepositoryCount, privateRepositoryCount, forkRepositoryCount, lastMirrored, errorMessage, createdAt and updatedAt.
+
+## Storage
+
+The **Storage** page shows how much space your mirrors take on the destination: a total, Git and LFS data as the destination reports it, release assets, and how many mirrors have been measured. Below that are the owners and repositories taking the most space, and a table you can search and sort.
+
+Sizes are recorded during each sync from answers Gitea Mirror already gets, so they trail by one sync and cost no extra requests. Nothing is asked of the source. A repository whose release assets are at least half its size, and at least 50 MB, gets a hint pointing to its release limit.
+
+**Refresh sizes** reads every mirror's size from the destination now instead of waiting for the next sync. It works with Gitea and Forgejo destinations; GitHub and GitLab destinations are not measured.
+
+## Activity Log
+
+Every mirror, sync and cleanup step lands in the Activity Log. Search it, or filter by status, by type (repository or organization) and by name. The chips at the top count how many repositories and organizations are currently in each state; click one to filter by it.
+
+- **Export** saves the list as CSV or JSON. It uses the filters but not the search text.
+- **Stop pending mirrors** (the amber button) sets every `imported` and `failed` repository to `ignored`. Repositories that are mirroring right now are not affected.
+- **Clear activity history** (the red button) deletes the history. It does not stop anything that is running.
+
+Warnings show up here too, for example when Gitea has not run a sync it accepted an hour earlier (see [Troubleshooting](/docs/troubleshooting/#a-mirror-stays-on-syncing-or-new-commits-never-arrive)). Old entries are removed after the retention period set under **Database Maintenance** on the Automation tab.
+
+## Dashboard
+
+The Dashboard counts your repositories, mirrored repositories and organizations, shows when the last sync ran, and lists recent repositories and activity. It refreshes itself every 30 seconds while it is open, and warns when the GitHub rate limit runs low.

@@ -9,19 +9,20 @@ const frontmatter = {
 };
 
 const sectionBlurbs: Record<string, string> = {
-  'Getting Started': 'Install Gitea Mirror and get your first mirror running.',
-  'Configuration': 'Connect GitHub and Gitea, tune mirroring, and pre-configure with environment variables.',
-  'Features': 'Notifications, single sign-on, and protection against destructive updates.',
-  'Reference': 'How it all fits together, plus advanced operations.',
+  'Getting Started': 'Install Gitea Mirror, create the tokens it needs, and get your first mirror running.',
+  'Using It': 'Connect sources and a destination, choose what gets mirrored, and keep it tidy.',
+  'Operating': 'Sign-in, reverse proxies, backups, upgrades, and fixes for common problems.',
+  'Reference': 'Every environment variable, the REST API, the MCP server, and how it all fits together.',
 };
 ---
 
 <DocsLayout frontmatter={frontmatter}>
   <h1>Gitea Mirror Documentation</h1>
   <p>
-    Gitea Mirror is a self-hosted service that automatically mirrors your GitHub
-    repositories to a Gitea instance: code, releases, issues, wikis and more.
-    These docs cover installation, configuration and every feature in the app.
+    Gitea Mirror is a self-hosted service that keeps copies of your repositories
+    from GitHub, GitLab, Gitea, Forgejo or any git host on your own Gitea or
+    Forgejo server: code, releases, issues, wikis and more. These docs cover
+    installation, configuration and every feature in the app.
   </p>
 
   {docsNav.map((section) => (

@@ -56,13 +56,14 @@ Cleanup only looks at the database, so a mirror that exists on the destination w
 Click **Reconcile with destination** on the Repository Cleanup card. The dialog runs a dry run as soon as it opens and sorts what it finds into groups:
 
 - **On the destination, not in the database.** Mirrors of your source that this app does not know about. Adopting them adds a row so scheduled sync and cleanup include them.
+- **Moved on the destination.** Rows whose recorded mirror is gone while a mirror of the same source sits under another owner, usually after someone transferred it in Gitea. Recording the new location makes sync follow it.
 - **In the database, gone from the destination.** Rows marked mirrored whose repository is no longer there. Resetting them makes the next mirror run recreate the mirror.
 - **Not managed by gitea-mirror.** Native repositories and mirrors of other hosts. These are listed for information and never touched.
 - **Could not be verified.** The destination did not answer the presence check for these rows. They were left alone.
 
 The dialog also reports a healthy count, and, when it applies, how many rows are mirrored to a previous destination and were left out of the comparison.
 
-Tick **Adopt** or **Reset** for the groups you want fixed and click **Apply**. The lists refresh afterwards, and one activity entry records what changed.
+Tick what you want fixed: adopt the untracked mirrors, record the new locations of moved ones, or reset the missing rows. Then click **Apply**. The lists refresh afterwards, and one activity entry records what changed.
 
 ### What counts as this app's mirror
 
@@ -71,8 +72,8 @@ Only mirrors whose original URL points at the configured source count. The hosts
 ### Safety rules
 
 - A row is only called missing after a direct lookup of its expected location returns 404. A failed check leaves the row alone and lists it as unverified.
-- Nothing is deleted or archived on either side, and rows are never deleted. Adopting inserts rows; resetting sets a row back to imported with a note in its error field.
-- An adopted row records where the mirror already lives and keeps it there, even when the mirror strategy would put a new mirror elsewhere, so the next sync does not create a second copy.
+- Nothing is created, moved, deleted or archived on the destination, and rows are never deleted. Adopting inserts rows, recording a new location updates where a row points, and resetting sets a row back to imported with a note in its error field.
+- An adopted or relocated row records where the mirror already lives and keeps it there, even when the mirror strategy would put a new mirror elsewhere, so the next sync does not create a second copy.
 - Adoption uses the existing unique index on account and full name, so it cannot create duplicates.
 
 Reconcile works with Gitea and Forgejo destinations. It is not available for GitHub and GitLab, which have no server side mirror state to compare. The same comparison is available as `POST /api/cleanup/reconcile`; see the [API page](/docs/api/#reconcile-the-destination).

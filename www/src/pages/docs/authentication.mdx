@@ -51,11 +51,10 @@ Better Auth validates the origin of every request, so it needs to know your real
 | Variable | Purpose |
 |---|---|
 | `BETTER_AUTH_URL` | The external origin of the instance, for example `https://mirror.example.com`. |
-| `PUBLIC_BETTER_AUTH_URL` | The same value, exposed to the browser bundle. |
 | `BETTER_AUTH_TRUSTED_ORIGINS` | Comma-separated extra origins allowed to submit auth requests. |
 | `BASE_URL` | Path prefix when the app is served under a subpath, for example `/mirror`. |
 
-> **Warning:** Behind a reverse proxy, set `BETTER_AUTH_URL`, `PUBLIC_BETTER_AUTH_URL`, and `BETTER_AUTH_TRUSTED_ORIGINS` to your external HTTPS URL. A mismatch usually shows up as a 500 error or an invalid origin message right after login.
+> **Warning:** Behind a reverse proxy, set `BETTER_AUTH_URL` and `BETTER_AUTH_TRUSTED_ORIGINS` to your external HTTPS URL. See [Reverse proxy and URLs](/docs/reverse-proxy/). A mismatch usually shows up as a 500 error or an invalid origin message right after login.
 
 The app also auto-detects the origin from the incoming `X-Forwarded-Host` and `X-Forwarded-Proto` headers, which covers many proxy setups without extra configuration. Setting the variables explicitly is still the reliable path.
 
@@ -249,7 +248,7 @@ Supported scopes are `openid` for the user ID, `profile` for name and username, 
 
 ## Troubleshooting
 
-**Invalid origin errors.** `BETTER_AUTH_URL` does not match the URL users actually visit. Set it, `PUBLIC_BETTER_AUTH_URL`, and `BETTER_AUTH_TRUSTED_ORIGINS` to the external origin.
+**Invalid origin errors.** `BETTER_AUTH_URL` does not match the URL users actually visit. Set it to the external origin, and list any other address you use in `BETTER_AUTH_TRUSTED_ORIGINS`.
 
 **Redirected to the homepage with `?error=UNKNOWN` after a successful SSO login.** The upstream login worked but linking to the existing local account was refused. The usual cause is a Domain field that does not match the user's real email domain. Set `BETTER_AUTH_LOG_LEVEL=debug` to see the full callback trace, and look for a message about an account not being linked.
 

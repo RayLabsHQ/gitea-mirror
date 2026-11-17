@@ -39,7 +39,7 @@ import {
   type ApiKeyExpiryOption,
 } from '@/lib/api-keys';
 
-const DOCS_URL = 'https://github.com/RayLabsHQ/gitea-mirror/blob/main/docs/API.md';
+const DOCS_URL = 'https://gitea-mirror.raylabs.io/docs/api/';
 
 /** The subset of the plugin's key record the list needs. The secret never comes back. */
 interface ApiKeyRow {

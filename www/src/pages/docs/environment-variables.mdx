@@ -39,7 +39,7 @@ Variables fall into two groups.
 | --- | --- | --- |
 | `BETTER_AUTH_SECRET` | none | Signs session cookies. Required. Generate with `openssl rand -base64 32`. |
 | `BETTER_AUTH_URL` | `http://localhost:4321` | Origin the auth server runs on. Scheme and host only, any path is stripped. |
-| `PUBLIC_BETTER_AUTH_URL` | none | Origin the browser sends auth requests to. Set when the app is reachable at more than one origin. Scheme and host only. |
+| `PUBLIC_BETTER_AUTH_URL` | none | Leave it unset. It is only read while building from source, and the value is fixed into that build. The published image and the Nix package are built without it, so the browser sends sign-in requests to whatever address it opened the page on, and setting it on a running container changes nothing. |
 | `BETTER_AUTH_TRUSTED_ORIGINS` | none | Comma-separated additional origins allowed to make auth requests. The origin of `BETTER_AUTH_URL` is always trusted. |
 | `BETTER_AUTH_LOG_LEVEL` | `warn` | Better Auth logger verbosity: `debug`, `info`, `warn`, or `error`. Use `debug` to trace SSO and OIDC sign-in problems. Better Auth does not read the `DEBUG` variable. |
 | `ENCRYPTION_SECRET` | none | Key for AES-256-GCM encryption of stored tokens. Generate with `openssl rand -base64 48`. |
@@ -75,7 +75,7 @@ The variable names are historical: `GITHUB_USERNAME` and `GITHUB_TOKEN` hold the
 | `SOURCE_URL` | `https://gitlab.com` or `https://codeberg.org` | Base URL of the GitLab or Gitea / Forgejo instance. Ignored for GitHub, which uses `GH_API_URL`. |
 | `GITLAB_PAGE_SIZE` | `100` | How many projects a GitLab listing asks for at a time, from 10 to 100. Gitea Mirror starts at 100 and drops to 50, 20, then 10 when a page times out, which costs about 30 s per step on every import. Set a lower value for a slow GitLab so it starts there; it still steps down below it. |
 | `GITHUB_USERNAME` | none | Your username on the source host. |
-| `GITHUB_TOKEN` | none | Personal access token for the source host. GitHub needs `repo` and `admin:org`, GitLab `read_api` and `read_repository`, Gitea / Forgejo `read:repository`, `read:user` and `read:organization`. |
+| `GITHUB_TOKEN` | none | Personal access token for the source host. GitHub needs `repo` and `read:org`, GitLab `read_api` and `read_repository`, Gitea / Forgejo `read:repository`, `read:user` and `read:organization`. |
 | `GH_API_URL` | `https://api.github.com` | GitHub API base URL. Point this at GitHub Enterprise Server (`https://ghe.example.com/api/v3`) or Enterprise Cloud with data residency (`https://api.TENANT.ghe.com`). |
 | `GITHUB_API_URL` | none | Alternate name for `GH_API_URL`, checked second. Prefer `GH_API_URL`, since `GITHUB_API_URL` is set automatically inside GitHub Actions and can collide. |
 

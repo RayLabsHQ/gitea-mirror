@@ -344,17 +344,15 @@ Standard GitHub Enterprise Cloud on `github.com` needs no override. Use a token 
 If you run behind a reverse proxy on a subpath (for example `https://git.example.com/mirror`), configure:
 
 ```bash
-# BASE_URL handles the path prefix — auth URLs stay as origin only
+# BASE_URL handles the path prefix, auth URLs stay as origin only
 BASE_URL=/mirror
 BETTER_AUTH_URL=https://git.example.com
-PUBLIC_BETTER_AUTH_URL=https://git.example.com
-BETTER_AUTH_TRUSTED_ORIGINS=https://git.example.com
 # → Auth endpoints resolve to: https://git.example.com/mirror/api/auth/*
 ```
 
 Notes:
 - `BASE_URL` sets the application path prefix.
-- `BETTER_AUTH_URL` and `PUBLIC_BETTER_AUTH_URL` should be **origin only** (e.g. `https://git.example.com`). Do not include the base path — it is applied automatically from `BASE_URL`. Any path accidentally included is stripped.
+- `BETTER_AUTH_URL` should be **origin only** (e.g. `https://git.example.com`). Do not include the base path; it is applied automatically from `BASE_URL`. Any path accidentally included is stripped.
 - `BETTER_AUTH_TRUSTED_ORIGINS` should also contain origins only (no path).
 - `BASE_URL` is runtime configuration, so prebuilt registry images can be reused across different subpaths.
 
@@ -527,7 +525,7 @@ curl -sS -X POST https://your-domain.com/api/sync/repository \
   -d '{"owner":"octocat","repo":"hello-world"}'
 ```
 
-See the [API guide](docs/API.md) for the endpoints to add, list and mirror repositories.
+See the [API guide](https://gitea-mirror.raylabs.io/docs/api/) for the endpoints to add, list and mirror repositories.
 
 ## Known Limitations
 
@@ -556,7 +554,7 @@ This approach preserves all important PR information while working within Gitea/
 
 ## Community Projects
 
-Built by the community on top of the [Gitea Mirror API](docs/API.md):
+Built by the community on top of the [Gitea Mirror API](https://gitea-mirror.raylabs.io/docs/api/):
 
 - [GiteaMirrorBot](https://github.com/MajMcCloud/GiteaMirrorBot) by [MajMcCloud](https://github.com/MajMcCloud): a Telegram bot that spots GitHub links posted in a group and, when you confirm, adds the repository or organization to Gitea Mirror and starts the mirror. It can also post notifications back into the group. Runs as a single binary or a Docker image.
 

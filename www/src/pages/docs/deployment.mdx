@@ -46,7 +46,6 @@ services:
     environment:
       - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:-}
       - BETTER_AUTH_URL=http://localhost:4321
-      - PUBLIC_BETTER_AUTH_URL=http://localhost:4321
       - BETTER_AUTH_TRUSTED_ORIGINS=http://localhost:4321
 ```
 
@@ -96,7 +95,6 @@ docker run -d \
   -p 4321:4321 \
   -v gitea-mirror-data:/app/data \
   -e BETTER_AUTH_URL=https://mirror.example.com \
-  -e PUBLIC_BETTER_AUTH_URL=https://mirror.example.com \
   ghcr.io/raylabshq/gitea-mirror:latest
 ```
 
@@ -107,7 +105,7 @@ docker compose pull
 docker compose up -d
 ```
 
-Database migrations run automatically at startup. Keep the data volume attached and nothing else is required.
+Database migrations run automatically at startup. Keep the data volume attached and nothing else is required. [Backups and upgrades](/docs/backups-and-upgrades/) covers backing up first, the other install methods and pinning a version.
 
 ## Kubernetes with Helm
 
@@ -348,7 +346,6 @@ DATABASE_URL=file:data/gitea-mirror.db
 BETTER_AUTH_SECRET=your-32-character-minimum-secret
 ENCRYPTION_SECRET=your-encryption-secret
 BETTER_AUTH_URL=https://mirror.example.com
-PUBLIC_BETTER_AUTH_URL=https://mirror.example.com
 ```
 
 ## Data and persistence
@@ -368,24 +365,7 @@ Back up the whole directory; `tmp/` can be left out. Snapshots in `repo-backups/
 
 ## Reverse proxy
 
-Behind a proxy, tell the app its public URL or session cookies and CSRF checks will not line up:
-
-```bash
-BETTER_AUTH_URL=https://mirror.example.com
-PUBLIC_BETTER_AUTH_URL=https://mirror.example.com
-BETTER_AUTH_TRUSTED_ORIGINS=https://mirror.example.com
-```
-
-Serving from a subpath additionally needs `BASE_URL`, while the auth URLs stay origin-only:
-
-```bash
-BASE_URL=/mirror
-BETTER_AUTH_URL=https://git.example.com
-PUBLIC_BETTER_AUTH_URL=https://git.example.com
-BETTER_AUTH_TRUSTED_ORIGINS=https://git.example.com
-```
-
-Forward `X-Forwarded-Host` and `X-Forwarded-Proto` from your proxy. The app reads them to detect its own origin, which covers many setups even before you set the variables above.
+Behind a proxy, set `BETTER_AUTH_URL` to the address people open in the browser, and serve a path prefix with `BASE_URL`. [Reverse proxy and URLs](/docs/reverse-proxy/) covers both, plus the live update stream and an nginx example.
 
 ## Verifying a deployment
 
