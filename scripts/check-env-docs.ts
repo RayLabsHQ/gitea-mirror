@@ -6,7 +6,8 @@
  * - the reference lists a variable nothing reads.
  *
  * "Reads" means `process.env.NAME`, `import.meta.env.NAME`, `Bun.env.NAME`,
- * `env.NAME` on a ProcessEnv parameter, or the bracket forms, in src/ and
+ * `env.NAME` on a ProcessEnv parameter, the bracket forms, or a name passed
+ * to the env config loader's `envFlag` / `envFlagAny` helpers, in src/ and
  * scripts/ outside tests, plus the variables docker-entrypoint.sh takes from
  * the environment. The reference is every variable in the first column of a
  * table in www/src/pages/docs/environment-variables.mdx.
@@ -91,9 +92,15 @@ const codeFiles = trackedFiles("src", "scripts", "astro.config.mjs").filter(
 );
 const envRead =
   /(?:process\.env|import\.meta\.env|Bun\.env|(?<![.\w])env)(?:\.([A-Z][A-Z0-9_]+)|\[\s*["'`]([A-Z][A-Z0-9_]+)["'`]\s*\])/g;
+// envFlag('NAME') and envFlagAny('A', 'B') in env-config-loader.ts.
+const envHelperCall = /\benvFlag(?:Any)?\(([^)]*)\)/g;
+const quotedName = /["'`]([A-Z][A-Z0-9_]+)["'`]/g;
 for (const file of codeFiles) {
   const text = readFileSync(path.join(root, file), "utf8");
   for (const match of text.matchAll(envRead)) note(match[1] ?? match[2], file);
+  for (const call of text.matchAll(envHelperCall)) {
+    for (const name of call[1].matchAll(quotedName)) note(name[1], file);
+  }
 }
 
 // The entrypoint: a variable it reads before it ever assigns it comes from
