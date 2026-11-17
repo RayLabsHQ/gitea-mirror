@@ -1,5 +1,18 @@
-import { describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { DownloadLimitError, downloadWithLimits } from "./bounded-download";
+
+let dir: string;
+let filePath: string;
+beforeEach(async () => {
+  dir = await mkdtemp(path.join(os.tmpdir(), "bounded-download-test-"));
+  filePath = path.join(dir, "body");
+});
+afterEach(async () => {
+  await rm(dir, { recursive: true, force: true });
+});
 
 const encoder = new TextEncoder();
 
@@ -39,14 +52,48 @@ function recorder(reply: (signal: AbortSignal) => Response | Promise<Response>) 
 }
 
 describe("downloadWithLimits", () => {
-  it("returns the body", async () => {
+  it("writes the body to the file", async () => {
     const { start, signals } = recorder((signal) => new Response(streamingBody(signal, { chunks: ["ab", "cd"] })));
 
-    const download = await downloadWithLimits(start, { stallTimeoutMs: 1000, maxBytes: 4 });
+    const download = await downloadWithLimits(start, { stallTimeoutMs: 1000, maxBytes: 4 }, filePath);
 
-    expect(download.ok).toBe(true);
-    expect(download.ok && (await download.data.text())).toBe("abcd");
+    expect(download).toEqual({ ok: true, status: 200, size: 4 });
+    expect(await Bun.file(filePath).text()).toBe("abcd");
     expect(signals[0].aborted).toBe(true);
+  });
+
+  it("writes each chunk as it arrives instead of holding the body (#523)", async () => {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let sent = 0;
+    const { start } = recorder(
+      () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            async pull(controller) {
+              if (sent === 0) controller.enqueue(encoder.encode("first "));
+              else if (sent === 1) {
+                await held;
+                controller.enqueue(encoder.encode("second"));
+              } else controller.close();
+              sent++;
+            },
+          })
+        )
+    );
+
+    const download = downloadWithLimits(start, { stallTimeoutMs: 1000 }, filePath);
+    // The second chunk is held back: the first must already be on disk.
+    let onDisk = "";
+    for (let i = 0; i < 100 && onDisk !== "first "; i++) {
+      await Bun.sleep(5);
+      onDisk = await Bun.file(filePath).text().catch(() => "");
+    }
+    expect(onDisk).toBe("first ");
+
+    release();
+    expect(await download).toEqual({ ok: true, status: 200, size: 12 });
+    expect(await Bun.file(filePath).text()).toBe("first second");
   });
 
   it("hands an error status back and aborts its request without reading it", async () => {
@@ -59,11 +106,12 @@ describe("downloadWithLimits", () => {
         })
     );
 
-    const download = await downloadWithLimits(start, { stallTimeoutMs: 1000 });
+    const download = await downloadWithLimits(start, { stallTimeoutMs: 1000 }, filePath);
 
     expect(download).toEqual({ ok: false, status: 404, statusText: "Not Found" });
     expect(signals[0].aborted).toBe(true);
     expect(pulled).toBe(false);
+    expect(await Bun.file(filePath).exists()).toBe(false);
   });
 
   it("stops a body that grows past the cap", async () => {
@@ -71,7 +119,7 @@ describe("downloadWithLimits", () => {
       (signal) => new Response(streamingBody(signal, { chunks: ["aaaa", "bbbb", "cccc"], end: false }))
     );
 
-    const failure = downloadWithLimits(start, { stallTimeoutMs: 1000, maxBytes: 6 });
+    const failure = downloadWithLimits(start, { stallTimeoutMs: 1000, maxBytes: 6 }, filePath);
 
     await expect(failure).rejects.toBeInstanceOf(DownloadLimitError);
     await expect(failure).rejects.toThrow("Larger than 6 bytes");
@@ -87,7 +135,7 @@ describe("downloadWithLimits", () => {
         })
     );
 
-    await expect(downloadWithLimits(start, { stallTimeoutMs: 1000, maxBytes: 1024 * 1024 })).rejects.toThrow(
+    await expect(downloadWithLimits(start, { stallTimeoutMs: 1000, maxBytes: 1024 * 1024 }, filePath)).rejects.toThrow(
       "Larger than 1 MB"
     );
     expect(signals[0].aborted).toBe(true);
@@ -99,7 +147,7 @@ describe("downloadWithLimits", () => {
       (signal) => new Response(streamingBody(signal, { chunks: ["a"], end: false }))
     );
 
-    await expect(downloadWithLimits(start, { stallTimeoutMs: 40 })).rejects.toThrow("No data for 0 s");
+    await expect(downloadWithLimits(start, { stallTimeoutMs: 40 }, filePath)).rejects.toThrow("No data for 0 s");
     expect(signals[0].aborted).toBe(true);
   });
 
@@ -109,7 +157,7 @@ describe("downloadWithLimits", () => {
         new Promise<Response>((_, reject) => signal.addEventListener("abort", () => reject(signal.reason)))
     );
 
-    await expect(downloadWithLimits(start, { stallTimeoutMs: 40 })).rejects.toBeInstanceOf(DownloadLimitError);
+    await expect(downloadWithLimits(start, { stallTimeoutMs: 40 }, filePath)).rejects.toBeInstanceOf(DownloadLimitError);
   });
 
   it("gives up on a slow drip at the total time", async () => {
@@ -119,7 +167,7 @@ describe("downloadWithLimits", () => {
     );
 
     await expect(
-      downloadWithLimits(start, { stallTimeoutMs: 1000, totalTimeoutMs: 80 })
+      downloadWithLimits(start, { stallTimeoutMs: 1000, totalTimeoutMs: 80 }, filePath)
     ).rejects.toThrow("The download took longer than");
     expect(signals[0].aborted).toBe(true);
   });
@@ -135,7 +183,7 @@ describe("downloadWithLimits", () => {
     );
 
     const ended = await Promise.race([
-      downloadWithLimits(start, { stallTimeoutMs: 40 }).catch((error: Error) => error.message),
+      downloadWithLimits(start, { stallTimeoutMs: 40 }, filePath).catch((error: Error) => error.message),
       Bun.sleep(1000).then(() => "still reading after 1 s"),
     ]);
     expect(ended).toBe("No data for 0 s");
@@ -146,7 +194,7 @@ describe("downloadWithLimits", () => {
       throw new Error("refused by the guard");
     });
 
-    await expect(downloadWithLimits(start, { stallTimeoutMs: 1000 })).rejects.toThrow("refused by the guard");
+    await expect(downloadWithLimits(start, { stallTimeoutMs: 1000 }, filePath)).rejects.toThrow("refused by the guard");
     expect(signals[0].aborted).toBe(true);
   });
 });
