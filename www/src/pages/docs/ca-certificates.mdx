@@ -26,7 +26,7 @@ They surface when you use the test button on the Gitea Connection card, and in t
 
 ## Docker
 
-The container image handles this for you. On startup, the entrypoint scans `/app/certs` for files ending in `.crt`, concatenates them into a bundle at `/app/certs/ca-bundle.crt`, and sets `NODE_EXTRA_CA_CERTS` to point at it. If the system CA bundle inside the container is writable, it appends the certificates there too, so Bun's own TLS stack picks them up as well.
+The container image handles this for you. On startup, the entrypoint scans `/app/certs` for files ending in `.crt`, concatenates them into a bundle at `/app/certs/ca-bundle.crt`, and sets `NODE_EXTRA_CA_CERTS` to point at it. It would also append them to the system CA bundle, but the published image runs as an unprivileged user, so that file is not writable and the step is skipped.
 
 That means the whole setup is a volume mount.
 
@@ -37,7 +37,7 @@ mkdir -p ./certs
 cp /path/to/your-ca-cert.crt ./certs/
 ```
 
-Mount it read-only at `/app/certs`:
+Mount it at `/app/certs`:
 
 ```yaml
 services:
@@ -49,7 +49,19 @@ services:
       - "4321:4321"
     volumes:
       - ./data:/app/data
-      - ./certs:/app/certs:ro
+      - ./certs:/app/certs
+```
+
+> **Warning:** Do not mount `/app/certs` read-only. The entrypoint writes `ca-bundle.crt` into that directory, so it has to be writable by the user the container runs as (`1001` in the published image, or your `PUID`). A read-only mount, or a directory that user cannot write to, stops the container at startup.
+
+To keep the certificate read-only, mount it anywhere else and point `NODE_EXTRA_CA_CERTS` at it. The entrypoint leaves a value you set alone:
+
+```yaml
+    volumes:
+      - ./data:/app/data
+      - ./certs/your-ca-cert.crt:/etc/gitea-mirror/ca.crt:ro
+    environment:
+      - NODE_EXTRA_CA_CERTS=/etc/gitea-mirror/ca.crt
 ```
 
 Recreate the container so the entrypoint runs again:
@@ -69,6 +81,10 @@ NODE_EXTRA_CA_CERTS set to: /app/certs/ca-bundle.crt
 If instead you see `No custom CA certificates found in /app/certs`, the mount did not land or the files do not end in `.crt`.
 
 > **Note:** Only files matching `*.crt` are picked up. A certificate saved as `.pem` or `.cer` will be ignored even though the contents are fine. Rename it, the extension is all that matters here.
+
+### Git and your CA
+
+Gitea Mirror runs git itself for force-push snapshots and for GitHub or GitLab destinations, and git does not read `NODE_EXTRA_CA_CERTS`. It only trusts the system CA bundle. If those features talk to a server with a private CA, mount a full system bundle or bake the CA into the image, as described next.
 
 ### Mounting an existing system bundle
 
@@ -92,6 +108,8 @@ FROM ghcr.io/raylabshq/gitea-mirror:latest
 USER root
 COPY ./certs/*.crt /usr/local/share/ca-certificates/
 RUN update-ca-certificates
+ENV NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt
+USER gitea-mirror
 ```
 
 Build it:
@@ -100,7 +118,7 @@ Build it:
 docker build -t my-gitea-mirror .
 ```
 
-The base image is Debian-based, so `update-ca-certificates` is available. Note that this writes into the system trust store rather than using `/app/certs`, so the entrypoint's bundling step is bypassed entirely.
+The base image is Debian-based, so `update-ca-certificates` is available. It rebuilds the system bundle, which git uses. The `ENV` line points the app at the same bundle, because the app only picks up extra CAs through `NODE_EXTRA_CA_CERTS`. The last line switches back to the image's own unprivileged user.
 
 ## Bare metal with Bun
 
@@ -184,20 +202,24 @@ systemctl restart gitea-mirror
 
 ## Kubernetes
 
-Create a ConfigMap or Secret holding the certificate, mount it into the pod, and point `NODE_EXTRA_CA_CERTS` at the mounted path:
+Create a ConfigMap or Secret holding the certificate, mount it into the pod, and point `NODE_EXTRA_CA_CERTS` at the mounted file. With the Helm chart:
 
 ```yaml
-volumes:
+extraVolumes:
   - name: ca-certs
     configMap:
       name: gitea-mirror-ca
-volumeMounts:
+extraVolumeMounts:
   - name: ca-certs
-    mountPath: /app/certs
+    mountPath: /etc/gitea-mirror/certs
     readOnly: true
+deployment:
+  env:
+    - name: NODE_EXTRA_CA_CERTS
+      value: /etc/gitea-mirror/certs/ca.crt
 ```
 
-Mounting at `/app/certs` lets the image's entrypoint do the bundling, so no environment variable is needed. Make sure the ConfigMap key ends in `.crt`, since the key becomes the filename.
+Here the ConfigMap has one key, `ca.crt`, holding the certificate or a bundle of them. Do not mount it at `/app/certs`: ConfigMaps and Secrets are always mounted read-only, and the entrypoint needs to write in that directory.
 
 ## Multiple certificates
 

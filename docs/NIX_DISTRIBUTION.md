@@ -1,322 +1,56 @@
-# Nix Package Distribution Guide
+# Nix packaging
 
-This guide explains how Gitea Mirror is distributed via Nix and how users can consume it.
+Maintainer notes for the Nix flake. The user guide is the [Nix and NixOS section](https://gitea-mirror.raylabs.io/docs/deployment/#nix-and-nixos) on the website.
 
-## Distribution Methods
+## What the flake provides
 
-### Method 1: Direct GitHub Usage (Zero Infrastructure)
+`flake.nix` builds from source with [bun2nix](https://github.com/nix-community/bun2nix) and follows `nixos-unstable`.
 
-**No CI, releases, or setup needed!** Users can consume directly from GitHub:
+| Output | What it is |
+| --- | --- |
+| `packages.<system>.default`, `packages.<system>.gitea-mirror` | The app, with the `gitea-mirror` wrapper and the `gitea-mirror-db` helper |
+| `nixosModules.default` | The `services.gitea-mirror` module: a hardened systemd service plus a health check timer |
+| `overlays.default` | Adds `pkgs.gitea-mirror` |
+| `devShells.default` | Bun, SQLite, OpenSSL and bun2nix for development (`nix develop`, or direnv with `.envrc`) |
 
-```bash
-# Latest from main branch
-nix run --extra-experimental-features 'nix-command flakes' github:RayLabsHQ/gitea-mirror
+The wrapper keeps its data in `DATA_DIR` (default `~/.local/share/gitea-mirror`), generates the two secrets there on first start, and runs the env config loader, startup recovery and the repository repair before starting the server. Because the store is read-only, it runs from `$DATA_DIR/.workdir`, a folder of symlinks into the store that is rebuilt on every start.
 
-# Pin to specific commit
-nix run github:RayLabsHQ/gitea-mirror/abc123def
+There is no binary cache of our own: users build locally, and `flake.lock` keeps the build reproducible.
 
-# Pin to git tag
-nix run github:RayLabsHQ/gitea-mirror/vX.Y.Z
-```
+## bun.nix
 
-**How it works:**
-1. Nix fetches the repository from GitHub
-2. Nix reads `flake.nix` and `flake.lock`
-3. Nix builds the package locally on the user's machine
-4. Package is cached in `/nix/store` for reuse
-
-**Pros:**
-- Zero infrastructure needed
-- Works immediately after pushing code
-- Users always get reproducible builds
-
-**Cons:**
-- Users must build from source (slower first time)
-- Requires build dependencies (Bun, etc.)
-
----
-
-### Method 2: CI Build Caching
-
-The GitHub Actions workflow uses **Magic Nix Cache** (by Determinate Systems) to cache builds:
-
-- **Zero configuration required** - no accounts or tokens needed
-- **Automatic** - CI workflow handles everything
-- **Uses GitHub Actions cache** - fast, reliable, free
-
-#### How It Works:
-
-1. GitHub Actions builds the package on each push/PR
-2. Build artifacts are cached in GitHub Actions cache
-3. Subsequent builds reuse cached dependencies (faster CI)
-
-Note: This caches CI builds. Users still build locally, but the flake.lock ensures reproducibility.
-
----
-
-### Method 3: nixpkgs Submission (Official Distribution)
-
-Submit to the official Nix package repository for maximum visibility.
-
-#### Process:
-
-1. **Prepare package** (already done with `flake.nix`)
-2. **Test thoroughly**
-3. **Submit PR to nixpkgs:** https://github.com/NixOS/nixpkgs
-
-#### User Experience:
+`bun.nix` pins every package in `bun.lock` for the Nix build. After any change to `bun.lock`, regenerate it and commit the result:
 
 ```bash
-# After acceptance into nixpkgs
-nix run nixpkgs#gitea-mirror
-
-# NixOS configuration
-environment.systemPackages = [ pkgs.gitea-mirror ];
+nix run github:nix-community/bun2nix -- -o bun.nix
 ```
 
-**Pros:**
-- Maximum discoverability (official repo)
-- Trusted by Nix community
-- Included in NixOS search
-- Binary caching by cache.nixos.org
+Without Nix, build bun2nix with `cargo install --git https://github.com/nix-community/bun2nix bun2nix --locked` and run `bun2nix -o bun.nix`.
 
-**Cons:**
-- Submission/review process
-- Must follow nixpkgs guidelines
-- Updates require PRs
+CI fails when the committed `bun.nix` does not match `bun.lock`.
 
----
+## CI
 
-## Current Distribution Strategy
+`.github/workflows/nix-build.yml` runs on ubuntu-latest, with Magic Nix Cache for the GitHub Actions cache. It runs for pushes to `main` and `nix`, for `v*` tags, and for pull requests to `main`, but only when `flake.nix`, `flake.lock`, `bun.nix`, `bun.lock`, `package.json` or the workflow itself change. It:
 
-### Phase 1: Direct GitHub (Immediate) ✅
+1. Regenerates `bun.nix` and fails if it differs from the committed one.
+2. Runs `nix flake check` and `nix flake show`.
+3. Runs `nix build`, on `main` and on tags only.
 
-Already working! Users can:
+## Versions
 
-```bash
-nix run github:RayLabsHQ/gitea-mirror
-```
+The package version in `flake.nix` is hardcoded and still says `3.14.1`. Release bumps touch `package.json` and `helm/gitea-mirror/Chart.yaml` only, so `nix profile list` shows the wrong version. Reading it from `package.json` would fix that.
 
-### Phase 2: CI Build Validation ✅
+Users pin a release with its tag:
 
-GitHub Actions workflow validates builds on every push/PR:
-
-- Uses Magic Nix Cache for fast CI builds
-- Tests on both Linux and macOS
-- No setup required - works automatically
-
-### Phase 3: Version Releases (Optional)
-
-Tag releases for version pinning:
-
-```bash
-git tag vX.Y.Z
-git push origin vX.Y.Z
-
-# Users can then pin:
-nix run github:RayLabsHQ/gitea-mirror/vX.Y.Z
-```
-
-### Phase 4: nixpkgs Submission (Long Term)
-
-Once package is stable and well-tested, submit to nixpkgs.
-
----
-
-## User Documentation
-
-### For Users: How to Install
-
-Add this to your `docs/NIX_DEPLOYMENT.md`:
-
-#### Option 1: Direct Install (No Configuration)
-
-```bash
-# Run immediately
-nix run --extra-experimental-features 'nix-command flakes' github:RayLabsHQ/gitea-mirror
-
-# Install to profile
-nix profile install --extra-experimental-features 'nix-command flakes' github:RayLabsHQ/gitea-mirror
-```
-
-#### Option 2: Pin to Specific Version
-
-```bash
-# Pin to git tag
-nix run github:RayLabsHQ/gitea-mirror/vX.Y.Z
-
-# Pin to commit
-nix run github:RayLabsHQ/gitea-mirror/abc123def
-
-# Lock in flake.nix
-inputs.gitea-mirror.url = "github:RayLabsHQ/gitea-mirror/vX.Y.Z";
-```
-
-#### Option 3: NixOS Configuration
-
-```nix
-{
-  inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    gitea-mirror.url = "github:RayLabsHQ/gitea-mirror";
-    # Or pin to version:
-    # gitea-mirror.url = "github:RayLabsHQ/gitea-mirror/vX.Y.Z";
-  };
-
-  outputs = { nixpkgs, gitea-mirror, ... }: {
-    nixosConfigurations.your-host = nixpkgs.lib.nixosSystem {
-      modules = [
-        gitea-mirror.nixosModules.default
-        {
-          services.gitea-mirror = {
-            enable = true;
-            betterAuthUrl = "https://mirror.example.com";
-            openFirewall = true;
-          };
-        }
-      ];
-    };
-  };
-}
-```
-
----
-
-## Maintaining the Distribution
-
-### Releasing New Versions
-
-```bash
-# 1. Update version in package.json
-vim package.json  # Update version field
-
-# 2. Update flake.nix version (line 17)
-vim flake.nix  # Update version = "X.Y.Z";
-
-# 3. Commit changes
-git add package.json flake.nix
-git commit -m "chore: bump version to vX.Y.Z"
-
-# 4. Create git tag
-git tag vX.Y.Z
-git push origin main
-git push origin vX.Y.Z
-
-# 5. GitHub Actions builds and caches automatically
-```
-
-Users can then pin to the new version:
 ```bash
 nix run github:RayLabsHQ/gitea-mirror/vX.Y.Z
 ```
 
-### Updating Flake Lock
+## Known issues
 
-The `flake.lock` file pins all dependencies. Update it periodically:
+- `gitea-mirror-db` does not work: it changes into the read-only store, and `scripts/manage-db.ts` looks for the database in `./data` instead of `DATA_DIR` or `DATABASE_URL`.
 
-```bash
-# Update all inputs
-nix flake update
+## Later
 
-# Update specific input
-nix flake lock --update-input nixpkgs
-
-# Test after update
-nix build
-nix flake check
-
-# Commit the updated lock file
-git add flake.lock
-git commit -m "chore: update flake dependencies"
-git push
-```
-
----
-
-## Troubleshooting Distribution Issues
-
-### Users Report Build Failures
-
-1. **Check GitHub Actions:** Ensure CI is passing
-2. **Test locally:** `nix flake check`
-3. **Check flake.lock:** May need update if dependencies changed
-
-### CI Cache Not Working
-
-1. **Check workflow logs:** Review GitHub Actions for errors
-2. **Clear cache:** GitHub Actions → Caches → Delete relevant cache
-3. **Verify flake.lock:** May need `nix flake update` if dependencies changed
-
-### Version Pinning Not Working
-
-```bash
-# Verify tag exists
-git tag -l
-
-# Ensure tag is pushed
-git ls-remote --tags origin
-
-# Test specific tag
-nix run github:RayLabsHQ/gitea-mirror/vX.Y.Z
-```
-
----
-
-## Advanced: Custom Binary Cache
-
-If you prefer self-hosting instead of Cachix:
-
-### Option 1: S3-Compatible Storage
-
-```nix
-# Generate signing key
-nix-store --generate-binary-cache-key cache.example.com cache-priv-key.pem cache-pub-key.pem
-
-# Push to S3
-nix copy --to s3://my-nix-cache?region=us-east-1 $(nix-build)
-```
-
-Users configure:
-```nix
-substituters = https://my-bucket.s3.amazonaws.com/nix-cache
-trusted-public-keys = cache.example.com:BASE64_PUBLIC_KEY
-```
-
-### Option 2: Self-Hosted Nix Store
-
-Run `nix-serve` on your server:
-
-```bash
-# On server
-nix-serve -p 8080
-
-# Behind nginx/caddy
-proxy_pass http://localhost:8080;
-```
-
-Users configure:
-```nix
-substituters = https://cache.example.com
-trusted-public-keys = YOUR_KEY
-```
-
----
-
-## Comparison: Distribution Methods
-
-| Method | Setup Time | User Speed | Cost | Discoverability |
-|--------|-----------|------------|------|-----------------|
-| Direct GitHub | 0 min | Slow (build) | Free | Low |
-| nixpkgs | Hours/days | Fast (binary) | Free | High |
-| Self-hosted cache | 30+ min | Fast (binary) | Server cost | Low |
-
-**Current approach:** Direct GitHub consumption with CI validation using Magic Nix Cache. Users build locally (reproducible via flake.lock). Consider **nixpkgs** submission for maximum reach once the package is mature.
-
----
-
-## Resources
-
-- [Nix Flakes Documentation](https://nixos.wiki/wiki/Flakes)
-- [Magic Nix Cache](https://github.com/DeterminateSystems/magic-nix-cache-action)
-- [nixpkgs Contributing Guide](https://github.com/NixOS/nixpkgs/blob/master/CONTRIBUTING.md)
-- [Nix Binary Cache Setup](https://nixos.org/manual/nix/stable/package-management/binary-cache-substituter.html)
+Submitting the package to nixpkgs would let users install it without the flake. It would need the version fix above and a release process that updates the nixpkgs package.

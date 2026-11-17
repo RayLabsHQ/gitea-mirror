@@ -10,549 +10,69 @@
   </p>
 </p>
 
-## 🚀 Quick Start
+Gitea Mirror keeps a self-hosted copy of your repositories. Connect GitHub (or GitLab, Gitea, Forgejo or any git host), pick a Gitea or Forgejo server, and it mirrors your repositories, organizations and starred projects there, with issues, pull requests, releases, wiki and LFS if you want them, and keeps them in sync on a schedule.
+
+📖 **[Documentation](https://gitea-mirror.raylabs.io/docs/)**
+
+## Quick start
 
 ```bash
-# Fastest way - using the simplified Docker setup
 git clone https://github.com/RayLabsHQ/gitea-mirror.git
 cd gitea-mirror
 docker compose -f docker-compose.alt.yml up -d
-
-# Access at http://localhost:4321
 ```
 
-First user signup becomes admin. Configure GitHub and Gitea/Forgejo through the web interface!
-
-📖 **[Full documentation](https://gitea-mirror.raylabs.io/docs/)** - quickstart, deployment, configuration, notifications, SSO and more.
+Open http://localhost:4321 and create an account; the first one becomes the admin. Then connect a source and a destination on the **Configuration** page. The [Quickstart](https://gitea-mirror.raylabs.io/docs/quickstart/) walks through it, including the compose file to use without cloning.
 
 <p align="center">
   <img src=".github/assets/dashboard.png" alt="Dashboard" width="600" />
   <img src=".github/assets/dashboard_mobile.png" alt="Dashboard Mobile" width="200" />
 </p>
 
-## ✨ Features
+## Features
 
-- 🔁 Mirror public, private, and starred GitHub repos to Gitea/Forgejo
-- 🦊 **Multiple sources (GitLab and Gitea/Forgejo beta)** - Connect several sources at once: GitHub and GitHub Enterprise, GitLab, Gitea/Forgejo, and each repository keeps its source. gitlab.com, Codeberg and self hosted instances mirror code, tags, wiki and LFS; Gitea and Forgejo sources mirror releases with their assets too (issues and pull requests need a GitHub source). GitHub to Gitea is the supported default; every other source or destination is beta. See [docs/SOURCE_PROVIDERS.md](docs/SOURCE_PROVIDERS.md)
-- 🏛️ **GitHub Enterprise support** - GHES through a source's Instance URL or `GH_API_URL`, GHEC with data residency through `GH_API_URL`
-- 🚀 **Forgejo, GitHub and GitLab destinations (beta)** - Forgejo works like Gitea. Pick GitHub or GitLab and the app keeps a bare clone of each repository and pushes its branches and tags there. Code only, and the target is overwritten on every sync. See [docs/PUSH_TARGETS.md](docs/PUSH_TARGETS.md)
-- 🏢 Mirror entire organizations with flexible strategies, including public organizations from GitHub, GitLab or Gitea/Forgejo with no source account configured
-- 🎯 Custom destination control for repos and organizations
-- 📦 **Git LFS support** - Mirror large files with Git LFS
-- 📝 **Metadata mirroring** - Issues, pull requests (as issues), labels, milestones, releases, wiki
-- 🚫 **Repository ignore** - Mark specific repos to skip
-- 🔐 Secure authentication with Better Auth (email/password, SSO, OIDC, header auth)
-- 🔔 **[Notifications](docs/NOTIFICATIONS.md)** - ntfy, Apprise, Gotify, or any webhook with signed payloads
-- 📊 Real-time dashboard with activity logs
-- ⏱️ Scheduled automatic mirroring with configurable intervals
-- 🔄 **Auto-discovery** - Automatically import new GitHub repositories
-- 🧹 **Repository cleanup** - Auto-remove repos deleted from GitHub
-- 🎯 **Proper mirror intervals** - Respects configured sync intervals
-- 🛡️ **[Force-push protection](docs/FORCE_PUSH_PROTECTION.md)** - Smart detection with backup-on-demand or block-and-approve modes
-- 🗑️ Automatic database cleanup with configurable retention
-- 🐳 Dockerized with multi-arch support (AMD64/ARM64)
+- Mirror your public, private and starred repositories and whole organizations, including public organizations you are not a member of
+- Sources: GitHub, GitHub Enterprise and GitHub Apps, plus GitLab, Gitea, Forgejo and plain git hosts in beta ([Sources](https://gitea-mirror.raylabs.io/docs/sources/))
+- Destinations: Gitea as pull mirrors, plus Forgejo, and GitHub or GitLab as push targets, in beta ([Destinations](https://gitea-mirror.raylabs.io/docs/destinations/))
+- Issues, pull requests (as issues), labels, milestones, releases with assets, wiki and Git LFS, with filters and limits per organization and repository
+- Mirror strategies to keep the source's structure, use one organization, or put everything under your user, plus a destination per organization or repository
+- Scheduled syncs, discovery of new repositories, and cleanup that archives mirrors whose source is gone ([Cleanup and reconcile](https://gitea-mirror.raylabs.io/docs/cleanup-and-reconcile/))
+- [Force-push protection](https://gitea-mirror.raylabs.io/docs/force-push-protection/): a snapshot, or your approval, before a sync rewrites history
+- [Notifications](https://gitea-mirror.raylabs.io/docs/notifications/) through ntfy, Apprise, Gotify or a signed webhook
+- Sign in with email and password, OIDC single sign-on, or a header from your reverse proxy ([Authentication](https://gitea-mirror.raylabs.io/docs/authentication/))
+- A REST [API](https://gitea-mirror.raylabs.io/docs/api/) with API keys, and an [MCP server](https://gitea-mirror.raylabs.io/docs/mcp/) for AI assistants
+- Live dashboard, activity log, storage overview and CSV export
+- Tokens encrypted at rest with AES-256-GCM
 
-## 📸 Screenshots
+## Install
+
+| Method | Guide |
+| --- | --- |
+| Docker Compose | [Quickstart](https://gitea-mirror.raylabs.io/docs/quickstart/) |
+| Plain `docker run` | [Deployment](https://gitea-mirror.raylabs.io/docs/deployment/#plain-docker-run) |
+| Kubernetes with Helm | [Deployment](https://gitea-mirror.raylabs.io/docs/deployment/#kubernetes-with-helm) |
+| Nix and NixOS | [Deployment](https://gitea-mirror.raylabs.io/docs/deployment/#nix-and-nixos) |
+| Proxmox LXC | [Deployment](https://gitea-mirror.raylabs.io/docs/deployment/#lxc-on-proxmox) |
+| Unraid | [Unraid guide](https://gitea-mirror.raylabs.io/use-cases/unraid-github-backup/) |
+| Bare metal with Bun | [Deployment](https://gitea-mirror.raylabs.io/docs/deployment/#bare-metal-with-bun) |
+
+The image is `ghcr.io/raylabshq/gitea-mirror`, built for amd64 and arm64. Before upgrading, see [Backups and upgrades](https://gitea-mirror.raylabs.io/docs/backups-and-upgrades/).
+
+## Documentation
+
+- [Configuration guide](https://gitea-mirror.raylabs.io/docs/configuration/) and [environment variables](https://gitea-mirror.raylabs.io/docs/environment-variables/)
+- [Tokens and permissions](https://gitea-mirror.raylabs.io/docs/tokens/) for every source and destination
+- [Repositories and organizations](https://gitea-mirror.raylabs.io/docs/repositories-and-organizations/) for day to day use
+- [Reverse proxy and URLs](https://gitea-mirror.raylabs.io/docs/reverse-proxy/)
+- [Troubleshooting](https://gitea-mirror.raylabs.io/docs/troubleshooting/) for the questions that come up most
+- [Use cases](https://gitea-mirror.raylabs.io/use-cases/) such as backing up GitHub, moving to Gitea, or mirroring GitLab
 
 <div align="center">
   <img src=".github/assets/repositories.png" alt="Repositories" width="600" />
   <img src=".github/assets/repositories_mobile.png" alt="Repositories Mobile" width="200" />
 </div>
 
-<div align="center">
-  <img src=".github/assets/organisation.png" alt="Organisations" width="600" />
-  <img src=".github/assets/organisation_mobile.png" alt="Organisations Mobile" width="200" />
-</div>
-
-## Installation
-
-### Docker (Recommended)
-
-We provide two Docker Compose options:
-
-#### Option 1: Quick Start (docker-compose.alt.yml)
-Perfect for trying out Gitea Mirror or simple deployments:
-
-```bash
-# Clone repository
-git clone https://github.com/RayLabsHQ/gitea-mirror.git
-cd gitea-mirror
-
-# Start with simplified setup
-docker compose -f docker-compose.alt.yml up -d
-
-# Access at http://localhost:4321
-```
-
-**Features:**
-- ✅ Pre-built image - no building required
-- ✅ Minimal configuration needed
-- ✅ Data stored in `./data` directory
-- ✅ Configure everything through web UI
-- ✅ Automatic user/group ID mapping
-
-**Best for:**
-- First-time users
-- Testing and evaluation
-- Simple deployments
-- When you prefer web-based configuration
-
-#### Option 2: Full Setup (docker-compose.yml)
-For production deployments with environment-based configuration:
-
-```bash
-# Start with full configuration options
-docker compose up -d
-```
-
-**Features:**
-- ✅ Build from source or use pre-built image
-- ✅ Complete environment variable configuration
-- ✅ Support for custom CA certificates
-- ✅ Advanced mirror settings (forks, wiki, issues)
-- ✅ Multi-registry support
-
-**Best for:**
-- Production deployments
-- Automated/scripted setups
-- Advanced mirror configurations
-- When using self-signed certificates
-
-#### Using Pre-built Image Directly
-
-```bash
-docker pull ghcr.io/raylabshq/gitea-mirror:latest
-```
-
-### Configuration Options
-
-#### Quick Start Configuration (docker-compose.alt.yml)
-
-Minimal `.env` file (optional - has sensible defaults):
-
-```bash
-# Custom port (default: 4321)
-PORT=4321
-
-# User/Group IDs for file permissions (default: 1000)
-PUID=1000
-PGID=1000
-
-# Session secret (auto-generated if not set)
-BETTER_AUTH_SECRET=your-secret-key-change-this-in-production
-```
-
-All other settings are configured through the web interface after starting.
-
-#### Full Setup Configuration (docker-compose.yml)
-
-Supports extensive environment variables for automated deployment. See the full [docker-compose.yml](docker-compose.yml) for all available options including GitHub tokens, Gitea URLs, mirror settings, and more.
-
-📚 **For a complete list of all supported environment variables, see the [Environment Variables Documentation](docs/ENVIRONMENT_VARIABLES.md).**
-
-### LXC Container (Proxmox)
-
-```bash
-# One-line install on Proxmox VE
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/community-scripts/ProxmoxVE/main/ct/gitea-mirror.sh)"
-```
-
-See the [Proxmox VE Community Scripts](https://community-scripts.github.io/ProxmoxVE/scripts?id=gitea-mirror) for more details.
-
-### Nix/NixOS
-
-Zero-configuration deployment with Nix:
-
-```bash
-# Run immediately - no setup needed!
-nix run --extra-experimental-features 'nix-command flakes' github:RayLabsHQ/gitea-mirror
-
-# Or build and run locally
-nix build --extra-experimental-features 'nix-command flakes'
-./result/bin/gitea-mirror
-
-# Or install to profile
-nix profile install --extra-experimental-features 'nix-command flakes' github:RayLabsHQ/gitea-mirror
-gitea-mirror
-```
-
-**NixOS users** - add the flake input, import the module, then enable the service:
-```nix
-# flake.nix
-inputs.gitea-mirror.url = "github:RayLabsHQ/gitea-mirror";
-
-# configuration.nix (needs `inputs` passed through specialArgs)
-{ inputs, ... }:
-{
-  imports = [ inputs.gitea-mirror.nixosModules.default ];
-
-  services.gitea-mirror = {
-    enable = true;
-    betterAuthUrl = "https://mirror.example.com";
-    openFirewall = true;
-  };
-}
-```
-
-Secrets auto-generate, database auto-initializes. See [NIX.md](NIX.md) for quick reference or [docs/NIX_DEPLOYMENT.md](docs/NIX_DEPLOYMENT.md) for full documentation.
-
-### Manual Installation
-
-```bash
-# Install Bun
-curl -fsSL https://bun.sh/install | bash
-
-# Get the source, install and build
-git clone https://github.com/RayLabsHQ/gitea-mirror.git
-cd gitea-mirror
-bun run setup
-bun run build
-
-# Set the two secrets once and keep them, then start
-printf 'BETTER_AUTH_SECRET=%s\nENCRYPTION_SECRET=%s\n' "$(openssl rand -base64 32)" "$(openssl rand -base64 32)" > .env
-bun run start
-```
-
-See [Bare metal with Bun](https://gitea-mirror.raylabs.io/docs/deployment/#bare-metal-with-bun) for running it under systemd.
-
-## Usage
-
-1. **First Time Setup**
-   - Navigate to http://localhost:4321
-   - Create admin account (first user signup)
-   - Configure the source and destination connections. GitHub to Gitea is the default. Forgejo works like Gitea, and GitHub or GitLab as destination uses push targets. Everything other than GitHub to Gitea is beta
-
-2. **Mirror Strategies**
-   - **Preserve Structure**: Maintains GitHub organization structure
-   - **Single Organization**: All repos go to one Gitea/Forgejo organization
-   - **Flat User**: All repos under your Gitea/Forgejo user account
-   - **Mixed Mode**: Personal repos in one org, organization repos preserve structure
-
-3. **Customization**
-   - Click edit buttons on organization cards to set custom destinations
-   - Override individual repository destinations in the table view
-   - Starred repositories can go to a dedicated org or preserve source owner/org paths
-
-## Advanced Features
-
-### Git LFS (Large File Storage)
-Mirror Git LFS objects along with your repositories:
-- Enable "Git LFS objects" under Configuration → Connections → Mirror Content
-- Requires Gitea/Forgejo server with LFS enabled (`LFS_START_SERVER = true`)
-- Requires Git v2.1.2+ on the server
-
-### Metadata Mirroring
-Transfer complete repository metadata from GitHub to Gitea/Forgejo:
-- **Issues** - Mirror all issues with comments and labels
-- **Pull Requests** - Transfer PR discussions to Gitea/Forgejo
-- **Labels** - Preserve repository labels
-- **Milestones** - Keep project milestones
-- **Wiki** - Mirror wiki content
-- **Releases** - Transfer GitHub releases with assets
-
-Releases have two limits and two filters. The release limit keeps only the newest N releases in Gitea/Forgejo. The release asset limit uploads assets only for the newest N of those, so a repository with years of releases can keep every release note and tag while only the recent binaries take up space. Leave the asset limit empty to upload assets for every mirrored release, or set it to 0 for release notes only. The **Pre-releases** switch skips everything the source marks as a pre-release, and **Custom tag rules** narrows releases by tag name (`v1.*`, `*-rc.*`, or a regular expression in slashes) for projects that ship candidates without marking them.
-
-All of it can be overridden per organization and per repository in the **Mirror options** dialog, and lowering the asset limit never deletes assets that were already uploaded. Enable **Remove old release assets** if you want each sync to delete the attachments of releases past that count instead.
-
-Enable them under Configuration → Connections → Mirror Content.
-
-### Repository Management
-- **Ignore Status** - Mark repositories to skip from mirroring
-- **Automatic Cleanup** - Configure retention period for activity logs
-- **Scheduled Sync** - Set custom intervals for automatic mirroring
-- **Reconcile with Destination** - Compare Gitea/Forgejo with the database from Configuration > Automation: adopt mirrors the database lost track of, record the new owner of mirrors you transferred in Gitea, or reset rows whose mirror is gone so the next sync recreates them. Nothing is deleted or archived by this step.
-- **Move Mirrors from the App** - Changing a repository's or an organization's destination offers to transfer the existing mirrors on Gitea/Forgejo as well, with their history, issues and mirror settings. When the token cannot create repositories under the new owner, Gitea asks its owners to accept and sync follows the mirror once they do.
-
-### Automatic Syncing & Synchronization
-
-Gitea Mirror provides powerful automatic synchronization features:
-
-#### Features (v3.4.0+)
-- **Auto-discovery**: Automatically discovers and imports new GitHub repositories
-- **Repository cleanup**: Removes repositories that no longer exist in GitHub
-- **Proper intervals**: Mirrors respect your configured sync intervals (not Gitea/Forgejo's default 8h)
-- **Smart scheduling**: Only syncs repositories that need updating
-- **Auto-start on boot** (v3.5.3+): Automatically imports and mirrors all repositories when `SCHEDULE_ENABLED=true` or `GITEA_MIRROR_INTERVAL` is set - no manual clicks required!
-
-#### Configuration via Web Interface (Recommended)
-Navigate to the Configuration page and enable "Automatic Syncing" with your preferred interval.
-
-#### Configuration via Environment Variables
-
-**🚀 Set it and forget it!** With these environment variables, Gitea Mirror will automatically:
-1. **Import** all your GitHub repositories on startup (no manual import needed!)
-2. **Mirror** them to Gitea/Forgejo immediately  
-3. **Keep them synchronized** based on your interval
-4. **Auto-discover** new repos you create/star on GitHub
-5. **Clean up** repos you delete from GitHub
-
-```bash
-# Option 1: Enable automatic scheduling (triggers auto-start)
-SCHEDULE_ENABLED=true
-SCHEDULE_INTERVAL=3600        # Check every hour (or use cron: "0 * * * *")
-
-# Option 2: Set mirror interval (also triggers auto-start)
-GITEA_MIRROR_INTERVAL=8h     # Every 8 hours
-# Other examples: 30m, 1h, 24h, 168h (Gitea needs hours or minutes, not days, and at least 10m)
-
-# Advanced: Use cron expressions for specific times
-SCHEDULE_INTERVAL="0 2 * * *"  # Daily at 2 AM (optimize bandwidth usage)
-
-# Auto-import new repositories (default: true)
-AUTO_IMPORT_REPOS=true
-
-# Auto-cleanup orphaned repositories
-CLEANUP_DELETE_IF_NOT_IN_GITHUB=true
-CLEANUP_ORPHANED_REPO_ACTION=archive  # 'archive' (recommended) or 'delete'
-CLEANUP_DRY_RUN=false                 # Set to true to test without changes
-```
-
-**Important Notes**:
-- **Auto-Start**: When `SCHEDULE_ENABLED=true` or `GITEA_MIRROR_INTERVAL` is set, the service automatically imports all GitHub repositories and mirrors them on startup. No manual "Import" or "Mirror" button clicks required!
-- The scheduler checks every minute for tasks to run. The `GITEA_MIRROR_INTERVAL` determines how often each repository is actually synced. For example, with `8h`, each repo syncs every 8 hours from its last successful sync.
-- **Large repo bootstrap**: For first-time mirroring of large repositories (especially with metadata/LFS), avoid very short intervals (for example `5m`). Start with a longer interval (`1h` to `8h`) or temporarily disable scheduling during the initial import/mirror run, then enable your regular interval after the first pass completes.
-- **Why this matters**: If your Gitea/Forgejo instance takes a long time to complete migrations/imports, aggressive schedules can cause repeated retries and duplicate-looking mirror attempts.
-
-**🛡️ Backup Protection Features**:
-- **No Accidental Deletions**: Repository cleanup is automatically skipped if GitHub is inaccessible (account deleted, banned, or API errors)
-- **Archive Never Deletes Data**: The `archive` action preserves all repository data:
-  - Regular repositories: Made read-only using Gitea/Forgejo's archive feature
-  - Mirror repositories: Renamed with `archived-` prefix (Gitea/Forgejo API limitation prevents archiving mirrors)
-  - Failed operations: Repository remains fully accessible even if marking as archived fails
-- **Sync on Demand**: Archived mirrors stay in Gitea/Forgejo with automatic syncs disabled; use `Sync` on the Repositories page whenever you need fresh data.
-- **The Whole Point of Backups**: Your Gitea/Forgejo mirrors are preserved even when GitHub sources disappear - that's why you have backups!
-- **Strongly Recommended**: Always use `CLEANUP_ORPHANED_REPO_ACTION=archive` (default) instead of `delete`
-
-### GitHub Enterprise (GHES / GHEC with Data Residency)
-
-Gitea Mirror works with non-`github.com` GitHub deployments. Point the client at your Enterprise API via the `GH_API_URL` environment variable:
-
-```bash
-# GitHub Enterprise Server (self-hosted)
-GH_API_URL=https://ghe.example.com/api/v3
-
-# GitHub Enterprise Cloud with data residency
-GH_API_URL=https://api.TENANT.ghe.com
-```
-
-Standard GitHub Enterprise Cloud on `github.com` needs no override. Use a token issued by the target Enterprise instance for `GITHUB_TOKEN`.
-
-## Troubleshooting
-
-### Reverse Proxy Configuration
-
-If you run behind a reverse proxy on a subpath (for example `https://git.example.com/mirror`), configure:
-
-```bash
-# BASE_URL handles the path prefix, auth URLs stay as origin only
-BASE_URL=/mirror
-BETTER_AUTH_URL=https://git.example.com
-# → Auth endpoints resolve to: https://git.example.com/mirror/api/auth/*
-```
-
-Notes:
-- `BASE_URL` sets the application path prefix.
-- `BETTER_AUTH_URL` should be **origin only** (e.g. `https://git.example.com`). Do not include the base path; it is applied automatically from `BASE_URL`. Any path accidentally included is stripped.
-- `BETTER_AUTH_TRUSTED_ORIGINS` should also contain origins only (no path).
-- `BASE_URL` is runtime configuration, so prebuilt registry images can be reused across different subpaths.
-
-### Mirror Token Rotation (GitHub Token Changed)
-
-For existing pull-mirror repositories, changing the GitHub token in Gitea Mirror does not always update stored mirror credentials in Gitea/Forgejo for already-created repositories.
-
-If sync logs show authentication failures (for example `terminal prompts disabled`), do one of the following:
-
-1. In Gitea/Forgejo, open repository **Settings → Mirror Settings** and update the mirror authorization password/token.
-2. Or delete and re-mirror the repository so it is recreated with current credentials.
-
-### Re-sync Metadata After Changing Mirror Options
-
-If you enable metadata options (issues/PRs/labels/milestones/releases) after repositories were already mirrored:
-
-1. Go to **Repositories**, select the repositories, and click **Sync** to run a fresh sync pass.
-2. For a full metadata refresh, use **Re-run Metadata** on selected repositories. This clears metadata sync state for those repos and immediately starts Sync.
-3. If some repositories still miss metadata, reset metadata sync state in SQLite and sync again:
-
-```bash
-sqlite3 data/gitea-mirror.db "UPDATE repositories SET metadata = NULL;"
-```
-
-This clears per-repository metadata completion flags so the next sync can re-run metadata import steps.
-
-### Mirror Interval vs Gitea/Forgejo `MIN_INTERVAL`
-
-Gitea Mirror treats the interval configured in **Configuration** (or `GITEA_MIRROR_INTERVAL`) as the source of truth and applies it to mirrored repositories during sync.
-
-If your Gitea/Forgejo server has `mirror.MIN_INTERVAL` set to a higher value (for example `24h`) and Gitea Mirror is set lower (for example `8h`), sync/mirror operations can fail when updating mirror settings.
-
-To avoid this:
-
-1. Set Gitea Mirror interval to a value greater than or equal to your server `MIN_INTERVAL`.
-2. Do not rely on manual per-repository mirror interval edits in Gitea/Forgejo, as they will be overwritten on sync.
-
-### Pushing to a mirror fails with `mirror repository is read-only`
-
-Every repository this tool creates is a Gitea/Forgejo pull mirror, and pull mirrors are read-only by design. Gitea/Forgejo refuses pushes to them so the copy can never drift from the source.
-
-Make your commits in the source repository (on GitHub, GitLab or wherever the mirror pulls from). They arrive in the mirror on the next sync. Gitea Mirror is a backup tool and does not push changes back to the source.
-
-If you want a repository you can push to, clone the mirror, push the clone to a normal (non-mirror) repository, and stop mirroring the original.
-
-## Development
-
-```bash
-# Install dependencies
-bun install
-
-# Run development server
-bun run dev
-
-# Run tests
-bun test
-
-# Build for production
-bun run build
-```
-
-## Technologies
-
-- **Frontend**: Astro, React, Shadcn UI, Tailwind CSS v4
-- **Backend**: Bun runtime, SQLite, Drizzle ORM
-- **APIs**: GitHub (Octokit), Gitea/Forgejo REST API
-- **Auth**: Better Auth with session-based authentication
-
-## Security
-
-### Token Encryption
-- All GitHub and Gitea/Forgejo API tokens are encrypted at rest using AES-256-GCM
-- Encryption is automatic and transparent to users
-- Set `ENCRYPTION_SECRET` environment variable for production deployments
-- Falls back to `BETTER_AUTH_SECRET` if not set
-
-### Password Security
-- User passwords are securely hashed by Better Auth
-- Never stored in plaintext
-- Secure cookie-based session management
-
-### Admin Password Recovery (CLI)
-If email delivery is not configured, an admin with server access can reset a user password from the command line:
-
-```bash
-bun run reset-password -- --email=user@example.com --new-password='new-secure-password'
-```
-
-What this does:
-- Updates the credential password hash for the matching user
-- Creates a credential account if one does not already exist
-- Invalidates all active sessions for that user (forces re-login)
-
-Use this only from trusted server/admin environments.
-
-## Authentication
-
-Gitea Mirror supports multiple authentication methods. **Email/password authentication is the default and always enabled.**
-
-### 1. Email & Password (Default)
-The standard authentication method. First user to sign up becomes the admin.
-
-### 2. Single Sign-On (SSO) with OIDC
-Enable users to sign in with external identity providers like Google, Azure AD, Okta, Authentik, or any OIDC-compliant service.
-
-**Configuration:**
-1. Navigate to Configuration → Authentication
-2. Click "Add Provider"
-3. Enter your OIDC provider details:
-   - Issuer URL (e.g., `https://accounts.google.com`)
-   - Client ID and Secret from your provider
-   - Use the "Discover" button to auto-fill endpoints
-
-**Redirect URL for your provider:**
-```
-https://your-domain.com/api/auth/sso/callback/{provider-id}
-```
-
-Need help? The [SSO & OIDC guide](docs/SSO-OIDC-SETUP.md) now includes a working Authentik walkthrough plus troubleshooting tips. If you upgraded from a version earlier than v3.8.10 and see `TypeError … url.startsWith` after the callback, delete the old provider and add it again using the Discover button (see [#73](https://github.com/RayLabsHQ/gitea-mirror/issues/73) and [#122](https://github.com/RayLabsHQ/gitea-mirror/issues/122)).
-
-### 3. Header Authentication (Reverse Proxy)
-Perfect for automatic authentication when using reverse proxies like Authentik, Authelia, or Traefik Forward Auth.
-
-**Environment Variables:**
-```bash
-# Enable header authentication
-HEADER_AUTH_ENABLED=true
-
-# Header names (customize based on your proxy)
-HEADER_AUTH_USER_HEADER=X-Authentik-Username
-HEADER_AUTH_EMAIL_HEADER=X-Authentik-Email
-HEADER_AUTH_NAME_HEADER=X-Authentik-Name
-
-# Auto-provision new users
-HEADER_AUTH_AUTO_PROVISION=true
-
-# Restrict to specific email domains (optional)
-HEADER_AUTH_ALLOWED_DOMAINS=example.com,company.org
-```
-
-**How it works:**
-- Users authenticated by your reverse proxy are automatically logged in
-- No additional login step required
-- New users can be auto-provisioned if enabled
-- Falls back to regular authentication if headers are missing
-
-**Example Authentik Configuration:**
-```nginx
-# In your reverse proxy configuration
-proxy_set_header X-Authentik-Username $authentik_username;
-proxy_set_header X-Authentik-Email $authentik_email;
-proxy_set_header X-Authentik-Name $authentik_name;
-```
-
-### 4. OAuth Applications (Act as Identity Provider)
-Gitea Mirror can also act as an OIDC provider for other applications. The app has no page for this; register OAuth applications through the API (`POST /api/sso/applications`), see [Gitea Mirror as an OIDC provider](https://gitea-mirror.raylabs.io/docs/authentication/#gitea-mirror-as-an-oidc-provider).
-
-**Use cases:**
-- Allow other services to authenticate using Gitea Mirror accounts
-- Create service-to-service authentication
-- Build integrations with your Gitea Mirror instance
-
-### 5. API Keys (Scripts and CI)
-Create a personal API key under Configuration → Authentication → API Keys and send it in the `x-api-key` header to call the app from scripts, CI pipelines or workflow tools. Keys act as the user who created them, can be given an expiry, and can be revoked at any time.
-
-```bash
-curl -sS -X POST https://your-domain.com/api/sync/repository \
-  -H "x-api-key: gm_..." \
-  -H "Content-Type: application/json" \
-  -d '{"owner":"octocat","repo":"hello-world"}'
-```
-
-See the [API guide](https://gitea-mirror.raylabs.io/docs/api/) for the endpoints to add, list and mirror repositories.
-
-## Known Limitations
-
-### Pull Request Mirroring Implementation
-Pull requests **cannot be created as actual PRs** in Gitea/Forgejo due to API limitations. Instead, they are mirrored as **enriched issues** with comprehensive metadata.
-
-**Why real PR mirroring isn't possible:**
-- Gitea/Forgejo's API doesn't support creating pull requests from external sources
-- Real PRs require actual Git branches with commits to exist in the repository
-- Would require complex branch synchronization and commit replication
-- The mirror relationship is one-way (GitHub → Gitea/Forgejo) for repository content
-
-**How we handle Pull Requests:**
-PRs are mirrored as issues with rich metadata including:
-- 🏷️ Special "pull-request" label for identification
-- 📌 [PR #number] prefix in title with status indicators ([MERGED], [CLOSED])
-- 👤 Original author and creation date
-- 📝 Complete commit history (up to 10 commits with links)
-- 📊 File changes summary with additions/deletions
-- 📁 List of modified files (up to 20 files)
-- 💬 Original PR description and comments
-- 🔀 Base and head branch information
-- ✅ Merge status tracking
-
-This approach preserves all important PR information while working within Gitea/Forgejo's API constraints. The PRs appear in the issue tracker with clear visual distinction and comprehensive details.
-
-## Community Projects
+## Community projects
 
 Built by the community on top of the [Gitea Mirror API](https://gitea-mirror.raylabs.io/docs/api/):
 
@@ -560,13 +80,13 @@ Built by the community on top of the [Gitea Mirror API](https://gitea-mirror.ray
 
 ## Contributing
 
-Contributions are welcome! Please read our [Contributing Guidelines](CONTRIBUTING.md) for details on our code of conduct and the process for submitting pull requests.
+Contributions are welcome. Read the [contributing guide](CONTRIBUTING.md) first; [docs/DEVELOPMENT_WORKFLOW.md](docs/DEVELOPMENT_WORKFLOW.md) covers the local setup. Report security issues privately through [GitHub security advisories](https://github.com/RayLabsHQ/gitea-mirror/security).
 
 ## License
 
-GNU Affero General Public License v3.0 (AGPL-3.0) - see [LICENSE](LICENSE) file for details.
+GNU Affero General Public License v3.0 (AGPL-3.0), see [LICENSE](LICENSE).
 
-## Star History
+## Star history
 
 <a href="https://www.star-history.com/?repos=RayLabsHQ%2Fgitea-mirror&type=date&legend=top-left">
  <picture>
@@ -578,9 +98,5 @@ GNU Affero General Public License v3.0 (AGPL-3.0) - see [LICENSE](LICENSE) file 
 
 ## Support
 
-- 📖 [Documentation](https://github.com/RayLabsHQ/gitea-mirror/tree/main/docs)
-- 🔐 [Environment Variables](docs/ENVIRONMENT_VARIABLES.md)
-- 🛡️ [Force-Push Protection](docs/FORCE_PUSH_PROTECTION.md)
-- 🐛 [Report Issues](https://github.com/RayLabsHQ/gitea-mirror/issues)
+- 🐛 [Report an issue](https://github.com/RayLabsHQ/gitea-mirror/issues)
 - 💬 [Discussions](https://github.com/RayLabsHQ/gitea-mirror/discussions)
-- 🔧 [Proxmox VE Script](https://community-scripts.github.io/ProxmoxVE/scripts?id=gitea-mirror)

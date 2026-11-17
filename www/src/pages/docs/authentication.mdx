@@ -1,7 +1,7 @@
 ---
 layout: '../../layouts/DocsLayout.astro'
 title: Authentication
-description: Sign in with email and password, an external OIDC or SAML identity provider, or trusted headers from a reverse proxy.
+description: Sign in with email and password, an external OIDC identity provider, or trusted headers from a reverse proxy.
 ---
 
 # Authentication
@@ -60,9 +60,9 @@ The app also auto-detects the origin from the incoming `X-Forwarded-Host` and `X
 
 ## Single sign-on
 
-SSO lets users authenticate against an external identity provider such as Google, Okta, Authentik, or Azure AD. Providers are managed in the UI under **Configuration > Authentication > SSO Providers**.
+SSO lets users authenticate against an external identity provider such as Google, Okta, Authentik, or Azure AD. Providers are managed under **Configuration > Authentication**, in the **Identity Providers** panel: click **Add provider**.
 
-Both OIDC and SAML 2.0 providers are supported. You choose the protocol on a tab when adding a provider.
+Use OIDC. The dialog also has a SAML 2.0 tab, but SAML sign-in does not work in the current release, see [SAML 2.0 providers](#saml-20-providers).
 
 ### Shared fields
 
@@ -85,7 +85,11 @@ Add these on top of the shared fields:
 | Scopes | Defaults to `openid`, `email`, `profile`. |
 | PKCE | Enabled by default. Leave it on unless your provider cannot handle it. |
 
-Enter the Issuer URL and click **Discover** to fetch the authorization, token, JWKS, and userinfo endpoints automatically. For providers without a discovery document, fill those four endpoints in by hand.
+Enter the Issuer URL and click **Discover** to fetch the authorization, token, JWKS, and userinfo endpoints automatically. Discover also replaces the Domain field with the provider's hostname, so click it first and set Domain afterwards.
+
+Saving a provider fetches its discovery document unless all four endpoints and the scopes are already filled in. The dialog only has fields for the authorization and token endpoints, so a provider without a discovery document has to be added through the API: a `POST` to `/api/sso/providers` with `authorizationEndpoint`, `tokenEndpoint`, `jwksEndpoint`, `userInfoEndpoint` and `scopes` set.
+
+When you edit a provider, the Provider ID is locked, and leaving Client Secret empty keeps the saved secret.
 
 > **Warning:** Google rejects the `offline_access` scope. Remove it from the scope list for Google providers or the sign-in fails.
 
@@ -113,18 +117,20 @@ Replace `{provider-id}` with the Provider ID you chose. The UI shows the exact U
 
 ### SAML 2.0 providers
 
-Switch to the **SAML 2.0** tab when adding a provider, then supply:
+> **Warning:** SAML sign-in does not work in the current release. The SAML 2.0 tab saves the provider through the OIDC path, so the SAML settings below are not stored. Use OIDC if your identity provider offers it.
+
+The SAML 2.0 tab asks for:
 
 | Field | Description |
 |---|---|
 | SAML Entry Point | Your identity provider's SSO URL, where authentication requests are sent. |
 | X.509 Certificate | The signing certificate from your identity provider, used to validate assertions. |
-| Callback URL | Optional. Defaults to the URL below if you leave it blank. |
+| Callback URL | Optional. Where users are sent after a successful sign-in. |
 
 The assertion consumer service URL is:
 
 ```text
-https://your-domain.com/api/auth/sso/saml2/callback/{provider-id}
+https://your-domain.com/api/auth/sso/saml2/sp/acs/{provider-id}
 ```
 
 Gitea Mirror also publishes service provider metadata, which many identity providers can import directly:
@@ -222,7 +228,7 @@ Beyond stripping headers:
 
 ### Confirming it is active
 
-The Authentication settings page shows a green "Header Authentication / Via reverse proxy" badge when the feature is live. You can also check the API:
+On the **Configuration > Authentication** page, the **Header Authentication** switch is on when the feature is live. It only shows the state; the environment variables control it. You can also check the API:
 
 ```bash
 curl https://your-domain.com/api/auth/header-status
@@ -232,25 +238,29 @@ It returns `{"enabled": true, ...}` once the variables are set.
 
 ## Gitea Mirror as an OIDC provider
 
-Gitea Mirror can also issue identities to other applications. The app has no page for OAuth applications; create one through the API with a `POST` to `/api/sso/applications`, sending `name` and `redirectURLs` as JSON. The response carries the `client_id` and the `client_secret`, which is shown only once. `GET` lists the applications, `PUT` changes its name, redirect URLs or `disabled` flag, and `DELETE` removes it.
+Gitea Mirror can also issue identities to other applications. The app has no page for OAuth applications; create one through the API with a `POST` to `/api/sso/applications`, sending `name` and `redirectURLs` as JSON, plus `type` set to `web` (the default) or `native`. The response carries the `client_id` and the `client_secret`, which is shown only once. `GET` lists the applications. `PUT /api/sso/applications?id={client_id}` changes its name, redirect URLs or `disabled` flag, and `DELETE /api/sso/applications?id={client_id}` removes it.
+
+The issuer is your `BETTER_AUTH_URL` followed by `/api/auth`, so set `BETTER_AUTH_URL` to the address the other applications use. With `BASE_URL` set, every URL below gets that prefix before `/api/auth`.
 
 Standard endpoints:
 
 | Purpose | URL |
 |---|---|
-| Discovery | `https://your-domain.com/.well-known/openid-configuration` |
+| Discovery | `https://your-domain.com/api/auth/.well-known/openid-configuration` |
 | Authorization | `https://your-domain.com/api/auth/oauth2/authorize` |
 | Token | `https://your-domain.com/api/auth/oauth2/token` |
 | UserInfo | `https://your-domain.com/api/auth/oauth2/userinfo` |
 | JWKS | `https://your-domain.com/api/auth/jwks` |
 
-Supported scopes are `openid` for the user ID, `profile` for name and username, and `email` for the address and its verification status. Users see a consent screen the first time an application asks for access.
+Supported scopes are `openid` for the user ID, `profile` for name and username, `email` for the address and its verification status, and `offline_access` for a refresh token, which needs PKCE or an OIDC nonce. Users see a consent screen the first time an application asks for access.
 
 ## Troubleshooting
 
 **Invalid origin errors.** `BETTER_AUTH_URL` does not match the URL users actually visit. Set it to the external origin, and list any other address you use in `BETTER_AUTH_TRUSTED_ORIGINS`.
 
 **Redirected to the homepage with `?error=UNKNOWN` after a successful SSO login.** The upstream login worked but linking to the existing local account was refused. The usual cause is a Domain field that does not match the user's real email domain. Set `BETTER_AUTH_LOG_LEVEL=debug` to see the full callback trace, and look for a message about an account not being linked.
+
+**Sent to an error page with `error=sso_callback_failed`.** The SSO callback threw an error, and `error_description` in the address bar carries its message. Set `BETTER_AUTH_LOG_LEVEL=debug` for the full trace.
 
 **`TypeError: undefined is not an object (evaluating 'url.startsWith')`.** The stored provider record is missing its OIDC endpoints. Delete the provider and add it again using the **Discover** button so the endpoints are saved.
 

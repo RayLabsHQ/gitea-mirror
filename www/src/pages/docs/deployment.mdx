@@ -217,7 +217,11 @@ If you have not enabled flakes globally, add `--extra-experimental-features 'nix
 experimental-features = nix-command flakes
 ```
 
-Run this way, data lands in `~/.local/share/gitea-mirror` unless you override `DATA_DIR`.
+Run this way, data lands in `~/.local/share/gitea-mirror` unless you set `DATA_DIR`, and the server listens on all interfaces at port 4321. Set `HOST=127.0.0.1` to keep it local:
+
+```bash
+DATA_DIR=/srv/gitea-mirror HOST=127.0.0.1 nix run github:RayLabsHQ/gitea-mirror
+```
 
 ### NixOS module
 
@@ -249,26 +253,30 @@ Available options:
 |---|---|---|
 | `enable` | `false` | Turn the service on. |
 | `package` | flake default | Override the package. |
-| `dataDir` | `/var/lib/gitea-mirror` | Data and database location. |
+| `dataDir` | `/var/lib/gitea-mirror` | Data and database location. The service can only write here. |
 | `user` / `group` | `gitea-mirror` | Service account. |
 | `host` | `0.0.0.0` | Bind address. |
 | `port` | `4321` | Listen port. |
 | `betterAuthUrl` | `http://localhost:4321` | External URL of the service. |
-| `betterAuthTrustedOrigins` | `http://localhost:4321` | Comma-separated trusted origins. |
+| `betterAuthTrustedOrigins` | `http://localhost:4321` | Trusted origins, as one comma-separated string. |
 | `mirrorIssueConcurrency` | `3` | Concurrent issue mirror operations. |
 | `mirrorPullRequestConcurrency` | `5` | Concurrent pull request mirror operations. |
-| `environmentFile` | `null` | File holding `BETTER_AUTH_SECRET` and `ENCRYPTION_SECRET` if you want to set them yourself. |
+| `environmentFile` | `null` | File with extra environment variables, such as the two secrets or a token. Give it as a string, for example `"/run/agenix/gitea-mirror"`: a Nix path literal is copied into the world-readable store. |
 | `openFirewall` | `false` | Open the configured port in the firewall. |
 
 Without an `environmentFile`, both secrets are generated on first start and stored in `dataDir`.
 
-Database helpers ship alongside the main binary:
+The module has no option for other settings. Any variable from [Environment Variables](/docs/environment-variables/) can go in `environmentFile`, which is the place for tokens. Values that are not secret can also go straight on the service:
 
-```bash
-gitea-mirror-db init
-gitea-mirror-db check
-gitea-mirror-db fix
+```nix
+systemd.services.gitea-mirror.environment = {
+  GITEA_MIRROR_INTERVAL = "8h";
+};
 ```
+
+The service is hardened with `ProtectSystem=strict` and `ProtectHome=true`, so it can only write to `dataDir`. Keep `dataDir` outside `/home`. Behind a reverse proxy on the same machine, set `host = "127.0.0.1"` and leave `openFirewall` off.
+
+The module also installs a `gitea-mirror-healthcheck` timer that requests `/api/health` every five minutes. It never reports a failure, so point your own monitoring at `/api/health`.
 
 ## LXC on Proxmox
 

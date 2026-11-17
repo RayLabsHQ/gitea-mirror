@@ -22,7 +22,7 @@ What is inside is listed in [Deployment](/docs/deployment/#data-and-persistence)
 
 ## What to back up
 
-- **The data directory.** `tmp/` can be left out. `mirrors/` can be left out too: a missing clone for a GitHub or GitLab destination is cloned again on its next sync, at the cost of a full download.
+- **The data directory.** `tmp/` can be left out, and so can `.workdir/` in a Nix install, which is rebuilt on every start. `mirrors/` can be left out too: a missing clone for a GitHub or GitLab destination is cloned again on its next sync, at the cost of a full download.
 - **Your secrets, if you set them yourself.** When you let the app generate them, they are in the data directory as `.better_auth_secret` and `.encryption_secret`. When you set `BETTER_AUTH_SECRET` and `ENCRYPTION_SECRET` in a `.env` file, a compose file, a Kubernetes Secret or a NixOS `environmentFile`, back that up as well.
 
 Without the same `ENCRYPTION_SECRET`, every stored token is unreadable and has to be entered again. Without the same `BETTER_AUTH_SECRET`, everyone is signed out.
@@ -63,6 +63,8 @@ Then copy `gitea-mirror-backup.db` off the machine together with the rest of the
 3. Start the app with the same secrets.
 
 If you used the online backup, rename `gitea-mirror-backup.db` to `gitea-mirror.db` first. On first start the app applies any database migrations the restored copy is missing, so a backup from an older version restores fine into a newer one.
+
+The same steps move an install to another method, because the database and any generated secrets live in the data directory. For example, to move from Docker to NixOS, copy the contents of the data volume into `dataDir` and run `chown -R gitea-mirror:gitea-mirror` on it before starting the service.
 
 ## Upgrading
 

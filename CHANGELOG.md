@@ -238,6 +238,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The API page now lists every endpoint the app offers to scripts, including moving mirrors, CSV export, retry, organization sync, approving held syncs and status changes. `docs/API.md` points to it, and so does the link on the API Keys card
 - `PUBLIC_BETTER_AUTH_URL` is no longer suggested anywhere. It is only read while building from source and fixed into that build, so setting it on a running container did nothing, and `.env.example` no longer sets it
 - GitHub tokens are documented with `repo` and `read:org`, which is all the app uses. Reconcile's moved group is documented
+- The README is a short overview with a quick start and links to the website. The pages in `docs/` that repeated the website, plus `NIX.md` and `certs/README.md`, now point to it, after their remaining facts moved there
+- More pages corrected against the code: SAML sign-in does not work from the UI and is marked so, with the right ACS URL; the OIDC provider's discovery URL is under `/api/auth`; force-push protection does not pause Gitea's own mirror schedule; `/app/certs` must be writable, since a read-only mount stops the container, and a read-only setup through `NODE_EXTRA_CA_CERTS` is described, along with git not reading that variable; the Nix `gitea-mirror-db` helper is no longer suggested; `DESTINATION_PROVIDER` is not checked against a locked destination; and several environment variable rows, including `SCHEDULE_CONCURRENT`, `SCHEDULE_ONLY_MIRROR_UPDATED`, `SKIP_STARRED_ISSUES` and `HEADER_AUTH_ALLOWED_DOMAINS`, now say what the code does
+- CI checks the links in every markdown file in the repository, and fails when the app reads an environment variable the reference page does not list, or the page lists one nothing reads
+- The contributor docs (`CONTRIBUTING.md`, `CLAUDE.md`, the development workflow, SSO testing and Nix packaging notes) match the code again, and the two shutdown and recovery notes are merged into `docs/SHUTDOWN_AND_RECOVERY.md`
 
 ## [3.7.1] - 2025-09-14
 
@@ -387,7 +391,7 @@ This patch completes the authentication fixes started in v3.2.4, specifically ad
 - All users must re-authenticate after upgrade
 - Existing tokens will be automatically encrypted
 - Database schema updates applied automatically
-- See [Migration Guide](MIGRATION_GUIDE.md) for detailed instructions
+- See [Migration Guide](https://github.com/RayLabsHQ/gitea-mirror/blob/1e06e2bd4b7e034ed43187817fbdbb07865da3b3/MIGRATION_GUIDE.md) for detailed instructions
 
 ## [2.22.0] - 2025-07-07
 

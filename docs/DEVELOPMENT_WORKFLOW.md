@@ -1,354 +1,132 @@
-# Development Workflow
+# Development workflow
 
-This guide covers the development workflow for the open-source Gitea Mirror.
+Local setup and day to day work on Gitea Mirror. [CLAUDE.md](../CLAUDE.md) has a map of the code, and [CONTRIBUTING.md](../CONTRIBUTING.md) covers what a pull request needs.
 
-## Getting Started
+## Prerequisites
 
-### Prerequisites
+- Bun 1.2.9 or later. The app runs on Bun only.
+- Git.
+- A source account and a Gitea or Forgejo instance to test against. `docker-compose.dev.yml` starts a local Gitea on port 3001.
+- For the end to end tests only: Docker or Podman with compose, and Node 22 (what CI uses for Playwright).
 
-- Bun >= 1.2.9
-- Node.js >= 20
-- Git
-- GitHub account (for API access)
-- Gitea instance (for testing)
+## Setup
 
-### Initial Setup
-
-1. **Clone the repository**:
 ```bash
 git clone https://github.com/RayLabsHQ/gitea-mirror.git
 cd gitea-mirror
+bun run setup      # install dependencies and create data/gitea-mirror.db
+bun run dev        # http://localhost:4321
 ```
 
-2. **Install dependencies and seed the SQLite database**:
-```bash
-bun run setup
-```
+A `.env` file is optional; copy `.env.example` to preset settings. Without `BETTER_AUTH_SECRET`, development uses a known insecure value, which is fine locally.
 
-3. **Configure environment (optional)**:
-```bash
-cp .env.example .env
-# Edit .env with your settings
-```
+## Commands
 
-4. **Start the development server**:
-```bash
-bun run dev
-```
+| Command | What it does |
+| --- | --- |
+| `bun run dev` | Astro dev server with hot reload. Change the port with `bun run dev --port 3001`; `PORT` is ignored here. |
+| `bun run dev:clean` | Delete the database, create it again and start the dev server. |
+| `bun run build` | Production build into `dist/`. |
+| `bun run start` | Run the production build, the way the Docker image does. |
+| `bun test` | Unit tests. `bun test path/to/file.test.ts` runs one file. |
+| `bun run test:coverage` | Unit tests with coverage, as in CI. |
+| `bun run test:migrations` | Validate the migrations in `drizzle/`. |
+| `bun run test:e2e` | Playwright suite in `tests/e2e/`, against containers it starts. |
+| `bun run db:studio` | Browse the database in Drizzle Studio. |
+| `bun run manage-db check` | Check the database. `init`, `fix`, `reset-users` and `reset-password` are the other commands. |
 
-## Development Commands
+Some things only show up in a production build, such as hydration or navigation problems that the dev server's hot reload hides. Check UI changes with `bun run build && bun run start` before calling them done.
 
-| Command | Description |
-|---------|-------------|
-| `bun run dev` | Start the Bun + Astro dev server with hot reload |
-| `bun run build` | Build the production bundle |
-| `bun run preview` | Preview the production build locally |
-| `bun test` | Run the Bun test suite |
-| `bun test:watch` | Run tests in watch mode |
-| `bun run db:studio` | Launch Drizzle Kit Studio |
-
-## Project Structure
+## Project structure
 
 ```
 gitea-mirror/
-├── src/                     # Application UI, API routes, and services
-│   ├── components/          # React components rendered inside Astro pages
-│   ├── pages/               # Astro pages and API routes (e.g., /api/*)
-│   ├── lib/                 # Core logic: GitHub/Gitea clients, scheduler, recovery, db helpers
-│   │   ├── db/              # Drizzle adapter + schema
-│   │   ├── modules/         # Module wiring (jobs, integrations)
-│   │   └── utils/           # Shared utilities
-│   ├── hooks/               # React hooks
-│   ├── content/             # In-app documentation and templated content
-│   ├── layouts/             # Shared layout components
-│   ├── styles/              # Tailwind CSS entrypoints
-│   └── types/               # TypeScript types
-├── scripts/                 # Bun scripts for DB management and maintenance
-├── www/                     # Marketing site (Astro + MDX use cases)
-├── public/                  # Static assets served by Vite/Astro
-└── tests/                   # Dedicated integration/unit test helpers
+├── src/
+│   ├── components/      React components, shadcn UI in ui/
+│   ├── pages/           Astro pages, API routes under api/
+│   ├── lib/             mirroring, sources, push engine, scheduler, auth, db
+│   ├── hooks/           React hooks
+│   ├── layouts/         page layouts
+│   ├── styles/          Tailwind entry points
+│   ├── tests/           test setup and helpers (isolated.ts, mock-fetch.ts)
+│   └── types/           shared types
+├── drizzle/             SQL migrations
+├── scripts/             database, recovery and maintenance scripts
+├── tests/e2e/           Playwright suite
+├── www/                 website and user docs, uses pnpm
+├── mcp/                 MCP stdio bridge
+├── helm/gitea-mirror/   Helm chart
+└── flake.nix            Nix package and NixOS module
 ```
 
-## Feature Development
+## Writing an API route
 
-### Adding a New Feature
-
-1. **Create feature branch**:
-```bash
-git checkout -b feature/my-feature
-```
-
-2. **Plan your changes**:
-- UI components live in `src/components/`
-- API endpoints live in `src/pages/api/`
-- Database logic is under `src/lib/db/` (schema + adapter)
-- Shared types are in `src/types/`
-
-3. **Implement the feature**:
-
-**Example: Adding a new API endpoint**
 ```typescript
 // src/pages/api/my-endpoint.ts
-import type { APIRoute } from 'astro';
-import { getUserFromCookie } from '@/lib/auth-utils';
+import type { APIRoute } from "astro";
+import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 
-export const GET: APIRoute = async ({ request }) => {
-  const user = await getUserFromCookie(request);
-  if (!user) {
-    return new Response('Unauthorized', { status: 401 });
-  }
+export const GET: APIRoute = async ({ request, locals }) => {
+  const authResult = await requireAuthenticatedUserId({ request, locals });
+  if ("response" in authResult) return authResult.response;
 
-  // Your logic here
-  return new Response(JSON.stringify({ data: 'success' }), {
-    headers: { 'Content-Type': 'application/json' }
+  // authResult.userId is the signed-in user, by session or API key
+  return new Response(JSON.stringify({ data: "ok" }), {
+    headers: { "Content-Type": "application/json" },
   });
 };
 ```
 
-4. **Write tests**:
-```typescript
-// src/lib/my-feature.test.ts
-import { describe, it, expect } from 'bun:test';
+Validate the body with Zod and return JSON errors with a status code. Writes from scripts need `Content-Type: application/json`, and calls to `/api/auth/*` with a cookie need an `Origin` header, or they are refused.
 
-describe('My Feature', () => {
-  it('should work correctly', () => {
-    expect(myFunction()).toBe('expected');
-  });
-});
-```
+## Database changes
 
-5. **Update documentation**:
-- Add JSDoc comments
-- Update README/docs if needed
-- Document API changes
+1. Change the table in `src/lib/db/schema.ts`.
+2. `bun run db:generate` writes a migration into `drizzle/`. Read the SQL it produced.
+3. The app applies pending migrations on startup. `bun run db:migrate` applies them by hand.
+4. `bun run db:check` and `bun run test:migrations` must pass.
 
-## Database Development
-
-### Schema Changes
-
-1. **Modify schema**:
-```typescript
-// src/lib/db/schema.ts
-export const myTable = sqliteTable('my_table', {
-  id: text('id').primaryKey(),
-  name: text('name').notNull(),
-  createdAt: integer('created_at').notNull(),
-});
-```
-
-2. **Generate migration**:
-```bash
-bun run db:generate
-```
-
-3. **Apply migration**:
-```bash
-bun run db:migrate
-```
-
-### Writing Queries
+Query through the exports of `@/lib/db`:
 
 ```typescript
-// src/lib/db/queries/my-queries.ts
-import { db } from '../index';
-import { myTable } from '../schema';
+import { db, repositories } from "@/lib/db";
+import { eq } from "drizzle-orm";
 
-export async function getMyData(userId: string) {
-  return db.select()
-    .from(myTable)
-    .where(eq(myTable.userId, userId));
-}
+const rows = await db.select().from(repositories).where(eq(repositories.userId, userId));
 ```
 
-## Testing
+## Tests
 
-### Unit Tests
+- Unit tests sit next to their code as `*.test.ts`.
+- `src/tests/setup.bun.ts` is preloaded for every file. It mocks `@/lib/db` and the migrator and makes `setTimeout` fire right away.
+- `mock.module` leaks into the files that run after it. A file that mocks modules should call `runsIsolated(import.meta.path)` from `src/tests/isolated.ts` and wrap its tests in `describe.skipIf(!isChild)`.
+- A test that needs a real database opens an in-memory SQLite and applies `drizzle/*.sql` itself.
+- Run the whole suite before pushing. CI runs the files in a different order than your machine.
+
+## Type checking
+
+TypeScript 7 rejects the `baseUrl` in `tsconfig.json`, so `bunx tsc --noEmit` stops with TS5102. Check with a copy that drops it:
 
 ```bash
-# Run all tests
-bun test
-
-# Run specific test file
-bun test auth
-
-# Watch mode
-bun test:watch
-
-# Coverage
-bun test:coverage
+sed '/"baseUrl"/d' tsconfig.json > tsconfig.typecheck.json
+bunx tsc --noEmit -p tsconfig.typecheck.json
 ```
 
-### Manual Testing Checklist
+`main` has existing errors, so compare your branch against it rather than expecting zero. CI does not type check.
 
-- [ ] Feature works as expected
-- [ ] No console errors
-- [ ] Responsive on mobile
-- [ ] Handles errors gracefully
-- [ ] Loading states work
-- [ ] Form validation works
-- [ ] API returns correct status codes
+## Common problems
 
-## Debugging
+- **Port in use:** `bun run dev --port 3001`.
+- **Database locked or broken:** stop the server, then `bun run dev:clean`. This deletes your local data.
 
-### VSCode Configuration
+## Releasing
 
-Create `.vscode/launch.json`:
-```json
-{
-  "version": "0.2.0",
-  "configurations": [
-    {
-      "type": "bun",
-      "request": "launch", 
-      "name": "Debug Bun",
-      "program": "${workspaceFolder}/src/index.ts",
-      "cwd": "${workspaceFolder}",
-      "env": {
-        "NODE_ENV": "development"
-      }
-    }
-  ]
-}
-```
+1. Update `CHANGELOG.md`, and bump the version in `package.json` and `helm/gitea-mirror/Chart.yaml` (`version` and `appVersion`) in one commit on `main`.
+2. Tag it: `git tag -a vX.Y.Z -m "vX.Y.Z" && git push origin vX.Y.Z`.
+3. Publish a GitHub release for the tag with the release notes.
 
-### Debug Logging
-
-```typescript
-// Development only logging
-if (import.meta.env.DEV) {
-  console.log('[Debug]', data);
-}
-```
-
-## Code Style
-
-### TypeScript
-
-- Use strict mode
-- Define interfaces for all data structures
-- Avoid `any` type
-- Use proper error handling
-
-### React Components
-
-- Use functional components
-- Implement proper loading states
-- Handle errors with error boundaries
-- Use TypeScript for props
-
-### API Routes
-
-- Always validate input
-- Return proper status codes
-- Use consistent error format
-- Document with JSDoc
-
-## Git Workflow
-
-### Commit Messages
-
-Follow conventional commits:
-```
-feat: add repository filtering
-fix: resolve sync timeout issue
-docs: update API documentation
-style: format code with prettier
-refactor: simplify auth logic
-test: add user creation tests
-chore: update dependencies
-```
-
-### Pull Request Process
-
-1. Create feature branch
-2. Make changes
-3. Write/update tests
-4. Update documentation
-5. Create PR with description
-6. Address review feedback
-7. Squash and merge
-
-## Performance
-
-### Development Tips
-
-- Use React DevTools
-- Monitor bundle size
-- Profile database queries
-- Check memory usage
-
-### Optimization
-
-- Lazy load components
-- Optimize images
-- Use database indexes
-- Cache API responses
-
-## Common Issues
-
-### Port Already in Use
-
-```bash
-# Use different port
-PORT=3001 bun run dev
-```
-
-### Database Locked
-
-```bash
-# Reset database
-bun run cleanup-db
-bun run init-db
-```
-
-### Type Errors
-
-```bash
-# Check types
-bunx tsc --noEmit
-```
-
-## Release Process
-
-1. **Choose release version** (`X.Y.Z`) and update `CHANGELOG.md`
-
-2. **Build and test**:
-```bash
-bun run build
-bun test
-```
-
-3. **Create release tag** (semver format required):
-```bash
-git tag vX.Y.Z
-git push origin vX.Y.Z
-```
-
-4. **Create GitHub release**
-
-5. **CI version sync and chart publish (automatic)**:
-- On `v*` tags, release CI updates `package.json` version in the build context from the tag (`vX.Y.Z` -> `X.Y.Z`), so Docker release images always report the correct app version.
-- After the release build succeeds, CI packages the Helm chart with the same version as chart version and `appVersion` and pushes it to `oci://ghcr.io/raylabshq/charts/gitea-mirror`. The chart's default image tag is `v<appVersion>`, so a default install runs that release.
-- CI then commits the same version to `package.json` and `helm/gitea-mirror/Chart.yaml` on `main` automatically.
-
-## Contributing
-
-1. Fork the repository
-2. Create your feature branch
-3. Commit your changes
-4. Push to your fork
-5. Create a Pull Request
+The tag triggers the image build. CI builds the image with the tag's version, publishes the Helm chart with the same version to `oci://ghcr.io/raylabshq/charts/gitea-mirror`, and commits the version to `package.json` and `Chart.yaml` on `main` if step 1 missed it. The version in `flake.nix` is not bumped today.
 
 ## Resources
 
-- [Astro Documentation](https://docs.astro.build)
-- [Bun Documentation](https://bun.sh/docs)
-- [Drizzle ORM](https://orm.drizzle.team)
-- [React Documentation](https://react.dev)
-- [TypeScript Handbook](https://www.typescriptlang.org/docs/)
-
-## Getting Help
-
-- Check existing [issues](https://github.com/RayLabsHQ/gitea-mirror/issues)
-- Join [discussions](https://github.com/RayLabsHQ/gitea-mirror/discussions)
-- Review project docs in [docs/README.md](./README.md)
+- [Astro](https://docs.astro.build), [Bun](https://bun.sh/docs), [Drizzle ORM](https://orm.drizzle.team), [Better Auth](https://www.better-auth.com/docs), [React](https://react.dev)

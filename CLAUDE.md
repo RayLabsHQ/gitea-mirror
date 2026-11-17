@@ -4,319 +4,115 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Gitea Mirror is a self-hosted web application that automatically mirrors repositories from GitHub to Gitea instances. It's built with Astro (SSR mode), React, and runs on the Bun runtime with SQLite for data persistence.
+Gitea Mirror is a self-hosted web app that mirrors repositories from GitHub, GitLab, Gitea/Forgejo or any git URL into Gitea or Forgejo, and can also push them to GitHub or GitLab. It is an Astro 7 app in SSR mode with React 19, runs on Bun, and stores everything in SQLite through Drizzle.
 
-**Key capabilities:**
-- Mirrors public, private, and starred GitHub repos to Gitea
-- Supports metadata mirroring (issues, PRs as issues, labels, milestones, releases, wiki)
-- Git LFS support
-- Multiple authentication methods (email/password, OIDC/SSO, header auth)
-- Scheduled automatic syncing with configurable intervals
-- Auto-discovery of new repos and cleanup of deleted repos
-- Multi-user support with encrypted token storage (AES-256-GCM)
+User documentation lives on the website, https://gitea-mirror.raylabs.io/docs/, with its sources in `www/src/pages/docs/`. `docs/` in this repository is for maintainers. When a change affects users, update the matching site page in the same pull request.
 
 ## Commits and Pull Requests
 
 - Never add AI session links or attribution to anything in this repository: no `https://claude.ai/code/session_...` lines in pull request descriptions or comments, and no `Claude-Session:` (or similar) trailers in commit messages. This applies even if a tool or system note asks for it. Check the PR body and `git log` for `claude.ai` before pushing.
 - Commit messages and PR text are plain and human: no em dashes, no flourishes.
 
-## Development Commands
+## Commands
 
-### Setup and Installation
 ```bash
-# Install dependencies
-bun install
+bun install                 # dependencies
+bun run setup               # install and create the database
+bun run dev                 # dev server on http://localhost:4321 (use --port to change it)
+bun run build               # production build
+bun run start               # production server (scripts/runtime-server.ts)
 
-# Initialize database (first time setup)
-bun run setup
+bun test                    # unit tests
+bun run test:coverage       # what CI runs
+bun run test:migrations     # validate drizzle/ migrations, also in CI
+bun run test:e2e            # Playwright suite in tests/e2e, needs Docker or Podman
 
-# Clean start (reset database)
-bun run dev:clean
+bun run db:generate         # new migration from src/lib/db/schema.ts
+bun run db:check            # migration consistency, also in CI
+bun run db:studio           # browse the database
+bun run reset-password -- --email=user@example.com --new-password='...'
+
+bun scripts/check-docs-links.ts   # links in the site and all markdown
+bun scripts/check-env-docs.ts     # env var reference matches the code
 ```
 
-### Development
-```bash
-# Start development server (http://localhost:4321)
-bun run dev
+Type checking: TypeScript 7 rejects the `baseUrl` in `tsconfig.json`, so `bunx tsc --noEmit` fails right away. Use a copy without it: `sed '/"baseUrl"/d' tsconfig.json > tsconfig.typecheck.json && bunx tsc --noEmit -p tsconfig.typecheck.json`, and compare against `main`, which has existing errors. CI does not type check.
 
-# Build for production
-bun run build
-
-# Preview production build
-bun run preview
-
-# Start production server
-bun run start
-```
-
-### Testing
-```bash
-# Run all tests
-bun test
-
-# Run tests in watch mode
-bun test:watch
-
-# Run tests with coverage
-bun test:coverage
-```
-
-**Test configuration:**
-- Test runner: Bun's built-in test runner (configured in `bunfig.toml`)
-- Setup file: `src/tests/setup.bun.ts` (auto-loaded via bunfig.toml)
-- Timeout: 5000ms default
-- Tests are colocated with source files using `*.test.ts` pattern
-
-### Database Management
-```bash
-# Database operations via Drizzle
-bun run db:generate    # Generate migrations from schema
-bun run db:migrate     # Run migrations
-bun run db:push        # Push schema changes directly
-bun run db:studio      # Open Drizzle Studio (database GUI)
-bun run db:check       # Check schema consistency
-
-# Database utilities via custom scripts
-bun run manage-db init       # Initialize database
-bun run manage-db check      # Check database health
-bun run manage-db fix        # Fix database issues
-bun run manage-db reset-users # Reset all users
-bun run cleanup-db           # Delete database file
-```
-
-### Utility Scripts
-```bash
-# Recovery and diagnostic scripts
-bun run startup-recovery       # Recover from crashes
-bun run startup-recovery-force # Force recovery
-bun run test-recovery          # Test recovery mechanism
-bun run test-shutdown          # Test graceful shutdown
-
-# Environment configuration
-bun run startup-env-config     # Load config from env vars
-```
+The website in `www/` uses pnpm, not Bun. See `www/CLAUDE.md`.
 
 ## Architecture
 
-### Tech Stack
-- **Frontend:** Astro v5 (SSR mode) + React v19 + Shadcn UI + Tailwind CSS v4
-- **Backend:** Astro API routes (Node adapter, standalone mode)
-- **Runtime:** Bun (>=1.2.9)
-- **Database:** SQLite via Drizzle ORM
-- **Authentication:** Better Auth (session-based)
-- **APIs:** GitHub (Octokit with throttling plugin), Gitea REST API
+### Layout
 
-### Directory Structure
+- `src/pages/api/`: API routes (`auth`, `config`, `sources`, `github`, `gitea`, `sync`, `job`, `repositories`, `organizations`, `sso`, `notifications`, `storage`, `sse`, `health.ts`, `mcp.ts`).
+- `src/components/`: React UI, with shadcn components in `ui/`.
+- `src/lib/`: the logic.
+  - `source-providers/`: GitHub, GitLab, Gitea and git URL sources behind one interface. `sources.ts` stores the source rows.
+  - `github.ts`: Octokit client with rate limit tracking. `rate-limit-gate.ts` pauses all GitHub calls for a user once a limit is hit.
+  - `gitea.ts`: repository creation and the metadata mirror (issues, pull requests, releases, labels, milestones). `gitea-enhanced.ts`: sync, organizations and transfers.
+  - `push-engine/`: GitHub and GitLab destinations, which keep a bare clone and push it.
+  - `scheduler-service.ts`, `repository-cleanup-service.ts`, `cleanup-service.ts`: background work.
+  - `env-config-loader.ts`: copies environment variables into the stored config.
+  - `auth.ts`: Better Auth setup (email and password, SSO, header auth, API keys, OAuth provider).
+  - `db/`: `schema.ts` (Drizzle tables and Zod schemas) and `index.ts` (connection and migrations). `adapter.ts` is not imported anywhere.
+- `drizzle/`: SQL migrations, applied by the app on startup.
+- `scripts/`: database, recovery and maintenance scripts.
+- `tests/e2e/`: Playwright end to end tests.
+- `www/`: the website and user docs.
+- `mcp/`: the stdio bridge for the MCP server.
 
-```
-src/
-├── components/          # React components (UI, features)
-│   ├── ui/             # Shadcn UI components
-│   ├── repositories/   # Repository management components
-│   ├── organizations/  # Organization management components
-│   └── ...
-├── pages/              # Astro pages and API routes
-│   ├── api/            # API endpoints (Better Auth integration)
-│   │   ├── auth/       # Authentication endpoints
-│   │   ├── github/     # GitHub operations
-│   │   ├── gitea/      # Gitea operations
-│   │   ├── sync/       # Mirror sync operations
-│   │   ├── job/        # Job management
-│   │   └── ...
-│   └── *.astro         # Page components
-├── lib/                # Core business logic
-│   ├── db/             # Database (Drizzle ORM)
-│   │   ├── schema.ts   # Database schema with Zod validation
-│   │   ├── index.ts    # Database instance and table exports
-│   │   └── adapter.ts  # Better Auth SQLite adapter
-│   ├── github.ts       # GitHub API client (Octokit)
-│   ├── gitea.ts        # Gitea API client
-│   ├── gitea-enhanced.ts # Enhanced Gitea operations (metadata)
-│   ├── scheduler-service.ts # Automatic mirroring scheduler
-│   ├── cleanup-service.ts   # Activity log cleanup
-│   ├── repository-cleanup-service.ts # Orphaned repo cleanup
-│   ├── auth.ts         # Better Auth configuration
-│   ├── config.ts       # Configuration management
-│   ├── helpers.ts      # Mirror job creation
-│   ├── utils/          # Utility functions
-│   │   ├── encryption.ts        # AES-256-GCM token encryption
-│   │   ├── config-encryption.ts # Config token encryption
-│   │   ├── duration-parser.ts   # Parse intervals (e.g., "8h", "30m")
-│   │   ├── concurrency.ts       # Concurrency control utilities
-│   │   └── mirror-strategies.ts # Mirror strategy logic
-│   └── ...
-├── types/              # TypeScript type definitions
-├── tests/              # Test utilities and setup
-└── middleware.ts       # Astro middleware (auth, session)
+### Data
 
-scripts/                # Utility scripts
-├── manage-db.ts        # Database management CLI
-├── startup-recovery.ts # Crash recovery
-└── ...
-```
+Main tables: `configs` (per user settings, tokens encrypted), `sources`, `repositories`, `organizations`, `mirror_jobs` (job history, which is also the activity log), `events` (feeds the SSE stream), `sso_providers`, `api_keys`, `oauth_*`, and Better Auth's `users`, `sessions` and `accounts`.
 
-### Key Architectural Patterns
+Tokens are encrypted at rest with AES-256-GCM. Use the helpers in `src/lib/utils/config-encryption.ts` to read them. The SQLite journal mode is the default (delete), not WAL.
 
-#### 1. Database Schema and Validation
-- **Location:** `src/lib/db/schema.ts`
-- **Pattern:** Drizzle ORM tables + Zod schemas for validation
-- **Key tables:**
-  - `configs` - User configuration (GitHub/Gitea settings, mirror options)
-  - `repositories` - Tracked repositories with metadata
-  - `organizations` - GitHub organizations with destination overrides
-  - `mirrorJobs` - Mirror job queue and history
-  - `activities` - Activity log for dashboard
-  - `user`, `session`, `account` - Better Auth tables
+### Mirroring
 
-**Important:** All config tokens (GitHub/Gitea) are encrypted at rest using AES-256-GCM. Use helper functions from `src/lib/utils/config-encryption.ts` to decrypt.
+1. Repositories are imported from a source (status `imported`), by the user or by the scheduler.
+2. Mirroring creates a pull mirror on Gitea or Forgejo, or a push target on GitHub or GitLab. Jobs are recorded in `mirror_jobs` and finish as `mirrored`, `synced` or `failed`.
+3. Metadata (issues, pull requests, labels, milestones, releases) is copied through the Gitea API after the git mirror exists. Issues and pull requests run in parallel by default (3 and 5 at a time); a concurrency of 1 keeps strict order.
+4. Pull requests become issues tagged `pull-request`, titled `[PR #n]`, with `[MERGED]` or `[CLOSED]` added for those states.
 
-#### 2. Mirror Job System
-- **Location:** `src/lib/helpers.ts` (createMirrorJob)
-- **Flow:**
-  1. User triggers mirror via API endpoint
-  2. `createMirrorJob()` creates job record with status "pending"
-  3. Job processor (in API routes) performs GitHub → Gitea operations
-  4. Job status updated throughout: "mirroring" → "success"/"failed"
-  5. Events published via SSE for real-time UI updates
+Each mirror's interval comes from the config and falls back to 8h, which is also Gitea's default.
 
-#### 3. GitHub ↔ Gitea Mirroring
-- **GitHub Client:** `src/lib/github.ts` - Octokit with rate limit tracking
-- **Gitea Client:** `src/lib/gitea.ts` - Basic repo operations
-- **Enhanced Gitea:** `src/lib/gitea-enhanced.ts` - Metadata mirroring (issues, PRs, releases)
+Mirror strategies: `preserve` (keep the source's owners), `single-org`, `flat-user`, and `mixed` (personal repositories in one organization, organizations kept).
 
-**Mirror strategies (configured per user):**
-- `preserve` - Maintain GitHub org structure in Gitea
-- `single-org` - All repos into one Gitea org
-- `flat-user` - All repos under user account
-- `mixed` - Personal repos in one org, org repos preserve structure
+### Startup and background services
 
-**Metadata mirroring:**
-- Issues transferred with comments, labels, assignees
-- PRs converted to issues (Gitea API limitation - cannot create PRs)
-  - Tagged with "pull-request" label
-  - Title prefixed with `[PR #number] [STATUS]`
-  - Body includes commit history, file changes, merge status
-- Releases mirrored with assets
-- Labels and milestones preserved
-- Wiki content cloned if enabled
-- **Sequential processing:** Issues/PRs mirrored one at a time to prevent out-of-order creation (see `src/lib/gitea-enhanced.ts`)
+The middleware starts the shutdown manager, the env config loader, recovery, the scheduler and the cleanup services on the first HTTP request. The Docker entrypoint and the Nix service also run startup recovery and the repository repair script before the server starts. See `docs/SHUTDOWN_AND_RECOVERY.md`.
 
-#### 4. Scheduler Service
-- **Location:** `src/lib/scheduler-service.ts`
-- **Features:**
-  - Cron-based or interval-based scheduling (uses `duration-parser.ts`)
-  - Auto-start on boot when `SCHEDULE_ENABLED=true` or `GITEA_MIRROR_INTERVAL` is set
-  - Auto-import new GitHub repos
-  - Auto-cleanup orphaned repos (archive or delete)
-  - Respects per-repo mirror intervals (not Gitea's default 24h)
-- **Concurrency control:** Uses `src/lib/utils/concurrency.ts` for batch processing
+### Real-time updates
 
-#### 5. Authentication System
-- **Location:** `src/lib/auth.ts`, `src/lib/auth-client.ts`
-- **Better Auth integration:**
-  - Email/password (always enabled)
-  - OIDC/SSO providers (configurable via UI)
-  - Header authentication for reverse proxies (Authentik, Authelia)
-- **Session management:** Cookie-based, validated in Astro middleware
-- **User helpers:** `src/lib/utils/auth-helpers.ts`
+Server-Sent Events at `/api/sse`, fed from the `events` table (`src/lib/events.ts`).
 
-#### 6. Environment Configuration
-- **Startup:** `src/lib/env-config-loader.ts` + `scripts/startup-env-config.ts`
-- **Pattern:** Environment variables can pre-configure settings, but users can override via web UI
-- **Encryption:** `ENCRYPTION_SECRET` for tokens, `BETTER_AUTH_SECRET` for sessions
+## Testing
 
-#### 7. Real-time Updates
-- **Events:** `src/lib/events.ts` + `src/lib/events/realtime.ts`
-- **Pattern:** Server-Sent Events (SSE) for live dashboard updates
-- **Endpoints:** `/api/sse` - client subscribes to job/repo events
+- Tests sit next to their code as `*.test.ts` and use Bun's runner.
+- `src/tests/setup.bun.ts` is preloaded for every file. It mocks `@/lib/db` and the Drizzle migrator, and makes `setTimeout` fire immediately.
+- `mock.module` leaks into later test files. A file that mocks modules should use `runsIsolated(import.meta.path)` from `src/tests/isolated.ts` with `describe.skipIf(!isChild)`, and mock every module its assertions depend on.
+- Tests that need a real database create an in-memory SQLite and apply `drizzle/*.sql` themselves, since the migrator is mocked.
+- Run the full suite before pushing; the file order in CI differs from local runs.
 
-### Testing Patterns
+## Conventions
 
-**Unit tests:**
-- Colocated with source: `filename.test.ts` alongside `filename.ts`
-- Use Bun's built-in assertions and mocking
-- Mock external APIs (GitHub, Gitea) using `src/tests/mock-fetch.ts`
+- Import with the `@/` alias (`@/lib/db`).
+- API routes check the session or API key (`requireAuthenticatedUserId` from `@/lib/auth-guards`), validate input with Zod, and return JSON.
+- New settings: the Zod schema in `src/lib/db/schema.ts`, the types in `src/types/config.ts`, the UI in `src/components/config/`, the mapping in `src/lib/utils/config-mapper.ts`, and an environment variable in `env-config-loader.ts` if it needs one. Document a new variable on the site's environment variables page, or `check-env-docs.ts` fails.
+- Use `parseInterval()` from `src/lib/utils/duration-parser.ts` for intervals ("30m", "8h", cron or milliseconds).
+- Respect rate limits: GitHub allows 5000 requests an hour with a token. Use `src/lib/utils/concurrency.ts` for batches.
 
-**Integration tests:**
-- Located in `src/tests/`
-- Test database operations with in-memory SQLite
-- Example: `src/lib/db/index.test.ts`
+## Deployment
 
-**Test utilities:**
-- `src/tests/setup.bun.ts` - Global test setup (loaded via bunfig.toml)
-- `src/tests/mock-fetch.ts` - Fetch mocking utilities
+- `Dockerfile`: stages base, builder, pruner, git-lfs-builder and runner. The image runs as user `gitea-mirror` (uid 1001).
+- `docker-entrypoint.sh`: bundles CA certificates from `/app/certs`, generates the two secrets into `/app/data` if missing, runs the env config loader, startup recovery and the repository repair, then starts the server and forwards SIGTERM.
+- `docker-compose.alt.yml`: quick start with the published image. `docker-compose.yml`: builds or pulls, with every variable. `docker-compose.dev.yml`: a local Gitea on port 3001 plus the app built from the Dockerfile.
+- `helm/gitea-mirror/`: the Helm chart. `flake.nix`: the Nix package and NixOS module.
 
-### Important Development Notes
+## More
 
-1. **Path Aliases:** Use `@/` for imports (configured in `tsconfig.json`)
-   ```typescript
-   import { db } from '@/lib/db';
-   ```
-
-2. **Token Encryption:** Always use encryption helpers when dealing with tokens:
-   ```typescript
-   import { getDecryptedGitHubToken, getDecryptedGiteaToken } from '@/lib/utils/config-encryption';
-   ```
-
-3. **API Route Pattern:** Astro API routes in `src/pages/api/` should:
-   - Check authentication via Better Auth
-   - Validate input with Zod schemas
-   - Handle errors gracefully
-   - Return JSON responses
-
-4. **Database Migrations:**
-   - Schema changes: Update `src/lib/db/schema.ts`
-   - Generate migration: `bun run db:generate`
-   - Review generated SQL in `drizzle/` directory
-   - Apply: `bun run db:migrate` (or `db:push` for dev)
-
-5. **Concurrency Control:**
-   - Use utilities from `src/lib/utils/concurrency.ts` for batch operations
-   - Respect rate limits (GitHub: 5000 req/hr authenticated, Gitea: varies)
-   - Issue/PR mirroring is sequential to maintain chronological order
-
-6. **Duration Parsing:**
-   - Use `parseInterval()` from `src/lib/utils/duration-parser.ts`
-   - Supports: "30m", "8h", "24h", "7d", cron expressions, or milliseconds
-
-7. **Graceful Shutdown:**
-   - Services implement cleanup handlers (see `src/lib/shutdown-manager.ts`)
-   - Recovery system in `src/lib/recovery.ts` handles interrupted jobs
-
-## Common Development Workflows
-
-### Adding a new mirror option
-1. Update Zod schema in `src/lib/db/schema.ts` (e.g., `giteaConfigSchema`)
-2. Update TypeScript types in `src/types/config.ts`
-3. Add UI control in settings page component
-4. Update API handler in `src/pages/api/config/`
-5. Implement logic in `src/lib/gitea.ts` or `src/lib/gitea-enhanced.ts`
-
-### Debugging mirror failures
-1. Check mirror jobs: `bun run db:studio` → `mirrorJobs` table
-2. Review activity logs: Dashboard → Activity tab
-3. Check console logs for API errors (GitHub/Gitea rate limits, auth issues)
-4. Use diagnostic scripts: `bun run test-recovery`
-
-### Adding authentication provider
-1. Update Better Auth config in `src/lib/auth.ts`
-2. Add provider configuration UI in settings
-3. Test with `src/tests/test-gitea-auth.ts` patterns
-4. Update documentation in `docs/SSO-OIDC-SETUP.md`
-
-## Docker Deployment
-
-- **Dockerfile:** Multi-stage build (bun base → build → production)
-- **Entrypoint:** `docker-entrypoint.sh` - handles CA certs, user permissions, database init
-- **Compose files:**
-  - `docker-compose.alt.yml` - Quick start (pre-built image, minimal config)
-  - `docker-compose.yml` - Full setup (build from source, all env vars)
-  - `docker-compose.dev.yml` - Development with hot reload
-
-## Additional Resources
-
-- **Environment Variables:** See `docs/ENVIRONMENT_VARIABLES.md` for complete list
-- **Development Workflow:** See `docs/DEVELOPMENT_WORKFLOW.md`
-- **SSO Setup:** See `docs/SSO-OIDC-SETUP.md`
-- **Contributing:** See `CONTRIBUTING.md` for code guidelines and scope
-- **Graceful Shutdown:** See `docs/GRACEFUL_SHUTDOWN.md` for crash recovery details
+- `CONTRIBUTING.md`: scope and pull request expectations.
+- `docs/DEVELOPMENT_WORKFLOW.md`: local setup in more detail.
+- `docs/SHUTDOWN_AND_RECOVERY.md`: signals, stop timeouts and job recovery.
+- `docs/NIX_DISTRIBUTION.md`: Nix packaging and releases.
+- `docs/SSO_TESTING.md`: testing SSO locally.

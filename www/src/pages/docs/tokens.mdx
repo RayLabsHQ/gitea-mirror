@@ -28,6 +28,7 @@ A few things to know:
 A GitHub source can authenticate as a GitHub App installation instead. Create a GitHub App with read access to repository **Contents** and **Metadata**, plus **Issues** and **Pull requests** if you mirror that metadata. Install it on the repositories you want, then in the source editor set **Authentication** to **GitHub App installation** and enter the installation's account or organization as the username, the App ID, the installation ID and the PEM private key.
 
 - The App sees only the repositories selected for its installation. It cannot see your starred repositories or star lists; use a token for those.
+- The private key is encrypted when it is saved and is never sent back by the API.
 - Installation tokens expire after an hour, so the app hands the mirror a fresh one before each sync and turns off Gitea's own pull schedule for those repositories. Keep the [scheduler](/docs/configuration/) on.
 - This needs **Gitea 1.27 or later** as the destination. Older Gitea and Forgejo cannot update a mirror's credentials through the API, so mirroring an App-backed repository to them is refused.
 

@@ -1,0 +1,44 @@
+name: Env Docs
+
+# Fails when the app reads an environment variable that the reference page
+# does not list, or the page lists one nothing reads.
+# See scripts/check-env-docs.ts.
+on:
+  push:
+    branches: ['**']
+    paths:
+      - 'src/**'
+      - 'scripts/**'
+      - 'astro.config.mjs'
+      - 'docker-entrypoint.sh'
+      - 'www/src/pages/docs/environment-variables.mdx'
+      - '.github/workflows/env-docs.yml'
+  pull_request:
+    branches: ['**']
+    paths:
+      - 'src/**'
+      - 'scripts/**'
+      - 'astro.config.mjs'
+      - 'docker-entrypoint.sh'
+      - 'www/src/pages/docs/environment-variables.mdx'
+      - '.github/workflows/env-docs.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  env-docs:
+    name: Check environment variable docs
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: '1.3.13'
+
+      - name: Check environment variable docs
+        run: bun scripts/check-env-docs.ts

@@ -26,7 +26,7 @@ import { authenticateWithHeaders, isHeaderAuthEnabled } from "./auth-header";
  * The endpoint trusts whatever upstream sets the configured headers —
  * the security model here is "the operator controls the reverse
  * proxy." Make sure the proxy strips inbound copies of these headers
- * before forwarding (documented in docs/SSO-OIDC-SETUP.md).
+ * before forwarding (see www/src/pages/docs/authentication.mdx).
  */
 export const headerAuthPlugin = () =>
   ({

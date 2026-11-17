@@ -28,7 +28,7 @@ The **Notification Events** card controls which job outcomes produce a notificat
 |---|---|---|
 | Sync errors | A mirror job ends with status `failed`, the release filters remove every release of a destination, or Gitea has not run a sync it accepted for over an hour (at most one such alert every six hours) | On |
 | Sync success | A mirror job ends with status `mirrored` or `synced` | Off |
-| New repositories discovered | New repositories are found and imported, by the scheduled auto import or by a sync of an organization. Three switches below it pick which ones count: in your account, in an organization, and starred. All three are on by default | Off |
+| New repositories discovered | New repositories are found and imported, by the scheduled auto import, the import that runs at startup when scheduling is on, or a sync of an organization. Three switches below it pick which ones count: in your account, in an organization, and starred. All three are on by default | Off |
 
 Only terminal job statuses trigger sync notifications. Jobs that are still queued or in progress produce nothing.
 
@@ -270,6 +270,8 @@ Notification delivery never breaks a mirror job. Failures are caught and logged,
 **The test works but real jobs are quiet.** The test always sends, real notifications are filtered by the event switches. Confirm that **Sync errors** or **Sync success** matches the job outcome you are waiting on.
 
 **ntfy returns 401 or 403.** Your server requires authentication. Add an access token, and make sure it grants publish rights on that specific topic.
+
+**A redirect or a link local address fails.** Notification requests never follow redirects, so use the final URL of your server. Addresses in `169.254.0.0/16` and `fe80::/10`, where cloud metadata services live, are refused.
 
 **Apprise connection refused.** Confirm the Apprise container is reachable from the Gitea Mirror container. Inside Docker they need to share a network, and the URL should use the service name rather than `localhost`.
 

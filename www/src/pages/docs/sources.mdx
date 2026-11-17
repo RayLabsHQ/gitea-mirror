@@ -27,7 +27,7 @@ Click **Add source** on the Sources card and pick the host. The editor adapts to
 - **Username** and **Personal access token** hold the account and token on the selected host.
 - The **Test** button makes a live authenticated call against the selected host, so you can confirm the token before saving.
 
-For GitHub Enterprise Server, enter the server's address as the Instance URL; the API is read from its `/api/v3` path. GitHub Enterprise Cloud with data residency serves its API at `https://api.TENANT.ghe.com`, which that field cannot express, so set the `GH_API_URL` environment variable for it. See [Environment variables](/docs/environment-variables/#source).
+For GitHub Enterprise Server, enter the server's address as the Instance URL; the API is read from its `/api/v3` path. GitHub Enterprise Cloud with data residency serves its API at `https://api.TENANT.ghe.com`, which that field cannot express, so set the `GH_API_URL` environment variable for it. See [Environment variables](/docs/environment-variables/#source). `GH_API_URL` applies to every source that points at github.com, so connect an Enterprise Server as its own source with its Instance URL instead.
 
 ## Git URL sources
 
@@ -76,6 +76,7 @@ The code itself is copied by the destination: Gitea and Forgejo pull from the so
 | Scheduled sync | yes | yes | yes | yes |
 | Auto import of new repositories | yes | yes | yes | no |
 | Cleanup of repositories deleted upstream | yes | yes | yes | no |
+| Entire organizations (GitLab: top level groups) | yes | yes | yes | no |
 | Starred repositories | yes | yes | yes | no |
 | Private repositories | yes | yes | yes | yes, with a login |
 | Add a single repository by URL | yes | yes | yes | yes |
@@ -84,7 +85,7 @@ The code itself is copied by the destination: Gitea and Forgejo pull from the so
 | Star lists | yes | no | no | no |
 | Force push detection | yes | no | no | no |
 
-The GitHub only rows read the GitHub API. With another source the corresponding switches in the mirror settings are disabled and say why. Releases are the exception: Gitea and Forgejo expose them through their own API, so a Gitea, Forgejo or Codeberg source mirrors releases and their assets with that instance's token, or anonymously for a public repository. Wiki and LFS also depend on the destination: they travel to Gitea and Forgejo, not to GitHub or GitLab. See [Destinations](/docs/destinations/).
+The GitHub only rows read the GitHub API. With another source the corresponding switches in the mirror settings are disabled and say why. Releases are the exception: Gitea and Forgejo expose them through their own API, so a Gitea, Forgejo or Codeberg source mirrors releases and their assets with that instance's token, or anonymously for a public repository. A Forgejo release asset can also be a link to any address. Those are downloaded without your token, only from public addresses, and only up to 512 MB and 15 minutes; anything else is skipped with a warning in the log. Wiki and LFS also depend on the destination: they travel to Gitea and Forgejo, not to GitHub or GitLab. See [Destinations](/docs/destinations/).
 
 ## Adding repositories
 
@@ -103,6 +104,10 @@ Repositories reach the database in two ways.
 - New imports come from the new source only.
 
 A save that tries to switch a locked source without that confirmation is refused by the API, and a `SOURCE_PROVIDER` or `SOURCE_URL` value that disagrees with a locked source is ignored on boot with a warning in the log.
+
+**Removing a source that has imported repositories asks for confirmation.** Those mirrors keep syncing on the destination with the credentials they were created with, but cleanup leaves them alone.
+
+**Public only sources.** Adding a public organization without an account, see [Repositories and organizations](/docs/repositories-and-organizations/), creates a source with no token, shown as **Public only** on the Sources card. It imports the public repositories of the organizations you add, but finds no personal or starred repositories. Its API calls are anonymous, so on GitHub they share the limit of 60 requests an hour per IP address, and a large organization can end up with partial metadata; the mirrors themselves are plain git clones and use no API requests. Add a username and token to the source to turn it into a normal one.
 
 **Each repository remembers its host.** A row imported from one host is never mirrored with another host's token, so switching sources cannot send a token to the wrong server.
 
@@ -132,9 +137,10 @@ GITHUB_USERNAME=your-gitlab-username
 GITHUB_TOKEN=${GITLAB_TOKEN}
 ```
 
-The [environment variables reference](/docs/environment-variables/) has the complete list, and the [configuration guide](/docs/configuration/) explains how seeded values relate to the form.
+These variables set up the first source, and create it when there is none. Add more sources in the app. The [environment variables reference](/docs/environment-variables/) has the complete list, and the [configuration guide](/docs/configuration/) explains how seeded values relate to the form.
 
 ## Not yet
 
 - Issues, pull requests, merge requests, labels and milestones are read from GitHub only.
 - Releases from GitLab are not mirrored. Gitea, Forgejo and Codeberg sources do mirror releases.
+- The import filters on the card apply to all sources at once, and when one GitHub source hits its rate limit, the other GitHub sources of the same user pause with it.

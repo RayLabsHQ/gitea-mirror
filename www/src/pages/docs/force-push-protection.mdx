@@ -8,6 +8,8 @@ description: Detect rewritten history on GitHub before it overwrites your mirror
 
 A GitHub repository can be force-pushed at any time, rewriting history, dropping commits, or deleting branches. When Gitea Mirror syncs a repository after that happens, the old history in Gitea is replaced with no way to get it back. Force-push protection notices the rewrite before the sync runs and either snapshots the current mirror or stops the sync entirely.
 
+> **Warning:** Protection only covers the syncs Gitea Mirror runs. Gitea and Forgejo also pull each mirror on their own schedule, set to your mirror interval (8h by default), and nothing pauses that. If Gitea pulls a rewrite before Gitea Mirror checks the repository, both sides already match, so nothing is detected and no snapshot is taken.
+
 Configure it under **Configuration > Connections > Destructive Update Protection**.
 
 ## How detection works
@@ -18,11 +20,13 @@ Before each sync, Gitea Mirror compares branch tips on both sides.
 2. **Compare SHAs.** Branches whose SHAs match are unchanged and need no further work.
 3. **Check ancestry.** For each branch whose SHA differs, ask GitHub's compare API how the two commits relate:
    - The new commit descends from the old one, so this is an ordinary push and the sync is safe.
-   - The histories have diverged, so this is a force-push.
-   - GitHub returns 404 because the old commit no longer exists, which also means history was rewritten.
-   - The branch is gone from GitHub entirely, which is flagged as a destructive change.
+   - The branch moved backwards or the histories have diverged, so this is a force-push.
+   - GitHub returns 404 or 422 because the old commit no longer exists, which also means history was rewritten.
+   - The branch is gone from GitHub entirely, which is flagged as a destructive change. Deletions never reach the mirror, so a deleted branch fires once and only fires again if its last commit in Gitea changes.
 
 Detection is fail-open. If the check itself cannot complete because of rate limits, network trouble, or an API outage, the sync proceeds as normal. A single branch that fails to check is skipped without affecting the others. Detection never blocks a sync because detection broke.
+
+Detection asks the GitHub API, so it only runs for repositories from a GitHub source that has a token or is a GitHub App. Repositories from other sources, or from a GitHub source without a token, sync without the check.
 
 > **Note:** A rebase is a force-push. If you rebase branches routinely, expect detection to fire routinely, which is worth keeping in mind when choosing between Smart and Block & Approve.
 
@@ -53,13 +57,13 @@ This is the recommended setting for most people: protection when it matters, clo
 
 ### Block & Approve
 
-Runs detection and, when a rewrite is found, stops. The repository is marked `pending-approval` and is skipped by scheduled syncs until you decide what to do. Nothing is overwritten and nothing is snapshotted while it waits.
+Runs detection and, when a rewrite is found, stops. The repository is marked `pending-approval` and is skipped by scheduled syncs until you decide what to do. Gitea Mirror does not sync it and takes no snapshot while it waits, but Gitea's own mirror schedule keeps pulling it, see the warning at the top of this page.
 
 Use this for repositories where a destructive change should never land without a human looking at it first.
 
 ## Snapshot storage
 
-Snapshots are [git bundles](https://git-scm.com/docs/git-bundle), single files containing the complete repository. Gitea Mirror creates one by making a mirror clone of the **Gitea** side, the state that is about to be overwritten, and bundling all refs from it.
+Snapshots are [git bundles](https://git-scm.com/docs/git-bundle), single files containing the complete repository. Gitea Mirror creates one by making a mirror clone of the **Gitea** side, the state that is about to be overwritten, and bundling all refs from it. The clone goes into the system temp folder first, so that folder needs room for your largest repository.
 
 Bundles are written to:
 
@@ -120,7 +124,7 @@ Retention is enforced right after a new bundle is written, so pruning only happe
 
 In Block & Approve mode, a detected force-push leaves the repository with status `pending-approval`. Scheduled syncs skip it until you act. The repository table shows a badge along with **Approve** and **Dismiss** buttons.
 
-- **Approve** creates a snapshot first, then runs the sync. The rewritten history lands in Gitea and the previous state is preserved in a bundle.
+- **Approve** creates a snapshot first, then runs the sync. The rewritten history lands in Gitea and the previous state is preserved in a bundle. If the snapshot fails, the approved sync still runs.
 - **Dismiss** clears the flag and resumes normal syncing without creating a snapshot. Use this when you already know the rewrite is fine.
 
 Both actions are also available through the API:
