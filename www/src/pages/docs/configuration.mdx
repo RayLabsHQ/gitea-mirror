@@ -110,7 +110,7 @@ The first group is read directly by the running process at startup and has no eq
 
 The second group seeds the database configuration. On startup, if any of `GITHUB_USERNAME`, `GITHUB_TOKEN`, `GITEA_URL`, `GITEA_USERNAME`, or `GITEA_TOKEN` is set, Gitea Mirror loads the whole environment configuration and writes it into the first user's config row. If no user exists yet, it does nothing and tries again on the next start.
 
-> **Note:** Values written from the environment overwrite the corresponding fields in the database on every start. If you set `GITEA_ORGANIZATION` in your compose file and then change the organization through the UI, the next restart puts the environment value back. Either manage a setting through the UI or through the environment, not both.
+> **Note:** A variable that is set overwrites the matching field in the database on every start. If you set `GITEA_ORGANIZATION` in your compose file and then change the organization through the UI, the next restart puts the environment value back. Variables you leave unset do not touch what the UI saved. Either manage a setting through the UI or through the environment, not both.
 
 Tokens supplied through the environment are encrypted with AES-256-GCM before they are stored, the same as tokens entered through the UI.
 
