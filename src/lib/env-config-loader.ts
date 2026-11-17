@@ -110,6 +110,26 @@ interface EnvConfig {
 }
 
 /**
+ * A true/false variable. Unset or empty is undefined, so the value stored from
+ * the Configuration page is kept; "true" (any case) is true and anything else
+ * is false. Unset used to read as false and was saved over the stored value on
+ * every start, so setting a token through the environment turned topics, issue
+ * mirroring, scheduling and more back off at each restart.
+ */
+function envFlag(name: string): boolean | undefined {
+  const raw = process.env[name]?.trim();
+  if (!raw) return undefined;
+  return raw.toLowerCase() === 'true';
+}
+
+/** True when any of the variables is "true", undefined when none is set. */
+function envFlagAny(...names: string[]): boolean | undefined {
+  const values = names.map(envFlag);
+  if (values.includes(true)) return true;
+  return values.includes(false) ? false : undefined;
+}
+
+/**
  * Parse environment variables into configuration object
  */
 function parseEnvConfig(): EnvConfig {
@@ -145,22 +165,18 @@ function parseEnvConfig(): EnvConfig {
       username: process.env.GITHUB_USERNAME,
       token: process.env.GITHUB_TOKEN,
       type: process.env.GITHUB_TYPE as 'personal' | 'organization',
-      privateRepositories: process.env.PRIVATE_REPOSITORIES === 'true',
-      publicRepositories: process.env.PUBLIC_REPOSITORIES === 'true',
-      // Tri-state parse so unset falls through to existingConfig / schema default (true).
-      includeCollaboratorRepos:
-        process.env.INCLUDE_COLLABORATOR_REPOS === 'true' ? true
-        : process.env.INCLUDE_COLLABORATOR_REPOS === 'false' ? false
-        : undefined,
-      mirrorStarred: process.env.MIRROR_STARRED === 'true',
-      skipForks: process.env.SKIP_FORKS === 'true',
-      includeArchived: process.env.INCLUDE_ARCHIVED === 'true',
-      mirrorOrganizations: process.env.MIRROR_ORGANIZATIONS === 'true',
+      privateRepositories: envFlag('PRIVATE_REPOSITORIES'),
+      publicRepositories: envFlag('PUBLIC_REPOSITORIES'),
+      includeCollaboratorRepos: envFlag('INCLUDE_COLLABORATOR_REPOS'),
+      mirrorStarred: envFlag('MIRROR_STARRED'),
+      skipForks: envFlag('SKIP_FORKS'),
+      includeArchived: envFlag('INCLUDE_ARCHIVED'),
+      mirrorOrganizations: envFlag('MIRROR_ORGANIZATIONS'),
       includeOrganizations,
-      preserveOrgStructure: process.env.PRESERVE_ORG_STRUCTURE === 'true',
-      onlyMirrorOrgs: process.env.ONLY_MIRROR_ORGS === 'true',
-      starredCodeOnly: process.env.SKIP_STARRED_ISSUES === 'true',
-      autoMirrorStarred: process.env.AUTO_MIRROR_STARRED === 'true',
+      preserveOrgStructure: envFlag('PRESERVE_ORG_STRUCTURE'),
+      onlyMirrorOrgs: envFlag('ONLY_MIRROR_ORGS'),
+      starredCodeOnly: envFlag('SKIP_STARRED_ISSUES'),
+      autoMirrorStarred: envFlag('AUTO_MIRROR_STARRED'),
       starredReposOrg: process.env.STARRED_REPOS_ORG,
       starredReposMode: process.env.STARRED_REPOS_MODE as 'dedicated-org' | 'preserve-owner',
       starredDuplicateStrategy: process.env.STARRED_DUPLICATE_STRATEGY as 'suffix' | 'prefix' | 'owner-org',
@@ -180,29 +196,26 @@ function parseEnvConfig(): EnvConfig {
       organization: process.env.GITEA_ORGANIZATION,
       visibility: process.env.GITEA_ORG_VISIBILITY as 'public' | 'private' | 'limited' | 'default',
       mirrorInterval: process.env.GITEA_MIRROR_INTERVAL,
-      lfs: process.env.GITEA_LFS === 'true',
-      createOrg: process.env.GITEA_CREATE_ORG === 'true',
+      lfs: envFlag('GITEA_LFS'),
+      createOrg: envFlag('GITEA_CREATE_ORG'),
       templateOwner: process.env.GITEA_TEMPLATE_OWNER,
       templateRepo: process.env.GITEA_TEMPLATE_REPO,
-      addTopics: process.env.GITEA_ADD_TOPICS === 'true',
+      addTopics: envFlag('GITEA_ADD_TOPICS'),
       topicPrefix: process.env.GITEA_TOPIC_PREFIX,
-      preserveVisibility: process.env.GITEA_PRESERVE_VISIBILITY === 'true',
+      preserveVisibility: envFlag('GITEA_PRESERVE_VISIBILITY'),
       forkStrategy: process.env.GITEA_FORK_STRATEGY as 'skip' | 'reference' | 'full-copy',
     },
     mirror: {
-      mirrorIssues: process.env.MIRROR_ISSUES === 'true',
-      mirrorWiki: process.env.MIRROR_WIKI === 'true',
-      mirrorReleases: process.env.MIRROR_RELEASES === 'true',
-      mirrorPullRequests: process.env.MIRROR_PULL_REQUESTS === 'true',
-      mirrorLabels: process.env.MIRROR_LABELS === 'true',
-      mirrorMilestones: process.env.MIRROR_MILESTONES === 'true',
-      mirrorMetadata: process.env.MIRROR_METADATA === 'true',
+      mirrorIssues: envFlag('MIRROR_ISSUES'),
+      mirrorWiki: envFlag('MIRROR_WIKI'),
+      mirrorReleases: envFlag('MIRROR_RELEASES'),
+      mirrorPullRequests: envFlag('MIRROR_PULL_REQUESTS'),
+      mirrorLabels: envFlag('MIRROR_LABELS'),
+      mirrorMilestones: envFlag('MIRROR_MILESTONES'),
+      mirrorMetadata: envFlag('MIRROR_METADATA'),
       releaseLimit: process.env.RELEASE_LIMIT ? parseInt(process.env.RELEASE_LIMIT, 10) : undefined,
       releaseAssetLimit: process.env.RELEASE_ASSET_LIMIT ? parseInt(process.env.RELEASE_ASSET_LIMIT, 10) : undefined,
-      pruneOldReleaseAssets:
-        process.env.PRUNE_OLD_RELEASE_ASSETS === undefined
-          ? undefined
-          : process.env.PRUNE_OLD_RELEASE_ASSETS === 'true',
+      pruneOldReleaseAssets: envFlag('PRUNE_OLD_RELEASE_ASSETS'),
       releaseType: process.env.RELEASE_TYPE,
       releaseIncludeTags,
       releaseExcludeTags,
@@ -210,38 +223,43 @@ function parseEnvConfig(): EnvConfig {
       pullRequestConcurrency: process.env.MIRROR_PULL_REQUEST_CONCURRENCY ? parseInt(process.env.MIRROR_PULL_REQUEST_CONCURRENCY, 10) : undefined,
     },
     schedule: {
-      enabled: process.env.SCHEDULE_ENABLED === 'true' || 
-               !!process.env.GITEA_MIRROR_INTERVAL || 
-               !!process.env.SCHEDULE_INTERVAL || 
-               !!process.env.DELAY, // Auto-enable if any interval is specified
+      // Any interval variable switches the schedule on, as it always has, even
+      // next to SCHEDULE_ENABLED=false. With none of them set, the stored
+      // value stays.
+      enabled:
+        process.env.GITEA_MIRROR_INTERVAL || process.env.SCHEDULE_INTERVAL || process.env.DELAY
+          ? true
+          : envFlag('SCHEDULE_ENABLED'),
       interval: process.env.SCHEDULE_INTERVAL || process.env.GITEA_MIRROR_INTERVAL || process.env.DELAY, // Support GITEA_MIRROR_INTERVAL, SCHEDULE_INTERVAL, and old DELAY
-      concurrent: process.env.SCHEDULE_CONCURRENT === 'true',
+      concurrent: envFlag('SCHEDULE_CONCURRENT'),
       batchSize: process.env.SCHEDULE_BATCH_SIZE ? parseInt(process.env.SCHEDULE_BATCH_SIZE, 10) : undefined,
       pauseBetweenBatches: process.env.SCHEDULE_PAUSE_BETWEEN_BATCHES ? parseInt(process.env.SCHEDULE_PAUSE_BETWEEN_BATCHES, 10) : undefined,
       retryAttempts: process.env.SCHEDULE_RETRY_ATTEMPTS ? parseInt(process.env.SCHEDULE_RETRY_ATTEMPTS, 10) : undefined,
       retryDelay: process.env.SCHEDULE_RETRY_DELAY ? parseInt(process.env.SCHEDULE_RETRY_DELAY, 10) : undefined,
       timeout: process.env.SCHEDULE_TIMEOUT ? parseInt(process.env.SCHEDULE_TIMEOUT, 10) : undefined,
-      autoRetry: process.env.SCHEDULE_AUTO_RETRY === 'true',
-      cleanupBeforeMirror: process.env.SCHEDULE_CLEANUP_BEFORE_MIRROR === 'true',
-      notifyOnFailure: process.env.SCHEDULE_NOTIFY_ON_FAILURE === 'true',
-      notifyOnSuccess: process.env.SCHEDULE_NOTIFY_ON_SUCCESS === 'true',
+      autoRetry: envFlag('SCHEDULE_AUTO_RETRY'),
+      cleanupBeforeMirror: envFlag('SCHEDULE_CLEANUP_BEFORE_MIRROR'),
+      notifyOnFailure: envFlag('SCHEDULE_NOTIFY_ON_FAILURE'),
+      notifyOnSuccess: envFlag('SCHEDULE_NOTIFY_ON_SUCCESS'),
       logLevel: process.env.SCHEDULE_LOG_LEVEL as 'error' | 'warn' | 'info' | 'debug',
       timezone: process.env.SCHEDULE_TIMEZONE,
-      onlyMirrorUpdated: process.env.SCHEDULE_ONLY_MIRROR_UPDATED === 'true',
+      onlyMirrorUpdated: envFlag('SCHEDULE_ONLY_MIRROR_UPDATED'),
       updateInterval: process.env.SCHEDULE_UPDATE_INTERVAL ? parseInt(process.env.SCHEDULE_UPDATE_INTERVAL, 10) : undefined,
-      skipRecentlyMirrored: process.env.SCHEDULE_SKIP_RECENTLY_MIRRORED === 'true',
+      skipRecentlyMirrored: envFlag('SCHEDULE_SKIP_RECENTLY_MIRRORED'),
       recentThreshold: process.env.SCHEDULE_RECENT_THRESHOLD ? parseInt(process.env.SCHEDULE_RECENT_THRESHOLD, 10) : undefined,
-      autoImport: process.env.AUTO_IMPORT_REPOS !== 'false',
-      autoMirror: process.env.AUTO_MIRROR_REPOS === 'true',
+      // On by default: only an explicit "false" turns it off, and unset keeps
+      // what is stored.
+      autoImport: process.env.AUTO_IMPORT_REPOS?.trim() ? process.env.AUTO_IMPORT_REPOS.trim().toLowerCase() !== 'false' : undefined,
+      autoMirror: envFlag('AUTO_MIRROR_REPOS'),
     },
     cleanup: {
-      enabled: process.env.CLEANUP_ENABLED === 'true' || 
-               process.env.CLEANUP_DELETE_IF_NOT_IN_GITHUB === 'true', // Auto-enable if deleteIfNotInGitHub is enabled
+      // CLEANUP_DELETE_IF_NOT_IN_GITHUB=true switches cleanup on too.
+      enabled: envFlagAny('CLEANUP_ENABLED', 'CLEANUP_DELETE_IF_NOT_IN_GITHUB'),
       retentionDays: process.env.CLEANUP_RETENTION_DAYS ? parseInt(process.env.CLEANUP_RETENTION_DAYS, 10) : undefined,
-      deleteFromGitea: process.env.CLEANUP_DELETE_FROM_GITEA === 'true',
-      deleteIfNotInGitHub: process.env.CLEANUP_DELETE_IF_NOT_IN_GITHUB === 'true',
+      deleteFromGitea: envFlag('CLEANUP_DELETE_FROM_GITEA'),
+      deleteIfNotInGitHub: envFlag('CLEANUP_DELETE_IF_NOT_IN_GITHUB'),
       protectedRepos,
-      dryRun: process.env.CLEANUP_DRY_RUN === 'true' ? true : process.env.CLEANUP_DRY_RUN === 'false' ? false : false,
+      dryRun: envFlag('CLEANUP_DRY_RUN'),
       orphanedRepoAction: process.env.CLEANUP_ORPHANED_REPO_ACTION as 'skip' | 'archive' | 'delete',
       batchSize: process.env.CLEANUP_BATCH_SIZE ? parseInt(process.env.CLEANUP_BATCH_SIZE, 10) : undefined,
       pauseBetweenDeletes: process.env.CLEANUP_PAUSE_BETWEEN_DELETES ? parseInt(process.env.CLEANUP_PAUSE_BETWEEN_DELETES, 10) : undefined,
@@ -331,14 +349,23 @@ export async function initializeConfigFromEnv(): Promise<void> {
       }
     }
 
-    // Determine mirror strategy based on environment variables or use explicit value
-    let mirrorStrategy: 'preserve' | 'single-org' | 'flat-user' | 'mixed' = 'preserve';
+    // MIRROR_STRATEGY wins, then PRESERVE_ORG_STRUCTURE when it is set. With
+    // neither, the stored strategy stays, so a choice made on the
+    // Configuration page survives a restart. A first start with nothing
+    // stored keeps the old rule: an organization means single-org.
+    type MirrorStrategy = 'preserve' | 'single-org' | 'flat-user' | 'mixed';
+    const storedStrategy = existingConfig?.[0]?.githubConfig?.mirrorStrategy as MirrorStrategy | undefined;
+    let mirrorStrategy: MirrorStrategy;
     if (envConfig.github.mirrorStrategy) {
       mirrorStrategy = envConfig.github.mirrorStrategy;
-    } else if (envConfig.github.preserveOrgStructure === false && envConfig.gitea.organization) {
-      mirrorStrategy = 'single-org';
     } else if (envConfig.github.preserveOrgStructure === true) {
       mirrorStrategy = 'preserve';
+    } else if (envConfig.github.preserveOrgStructure === false && envConfig.gitea.organization) {
+      mirrorStrategy = 'single-org';
+    } else if (storedStrategy) {
+      mirrorStrategy = storedStrategy;
+    } else {
+      mirrorStrategy = envConfig.gitea.organization ? 'single-org' : 'preserve';
     }
 
     // Build GitHub config
@@ -349,7 +376,7 @@ export async function initializeConfigFromEnv(): Promise<void> {
       url: envConfig.github.url || existingConfig?.[0]?.githubConfig?.url || undefined,
       token: envConfig.github.token ? encrypt(envConfig.github.token) : existingConfig?.[0]?.githubConfig?.token || '',
       includeStarred: envConfig.github.mirrorStarred ?? existingConfig?.[0]?.githubConfig?.includeStarred ?? false,
-      includeForks: !(envConfig.github.skipForks ?? false),
+      includeForks: !(envConfig.github.skipForks ?? existingConfig?.[0]?.githubConfig?.skipForks ?? false),
       skipForks: envConfig.github.skipForks ?? existingConfig?.[0]?.githubConfig?.skipForks ?? false,
       includeArchived: envConfig.github.includeArchived ?? existingConfig?.[0]?.githubConfig?.includeArchived ?? false,
       includePrivate: envConfig.github.privateRepositories ?? existingConfig?.[0]?.githubConfig?.includePrivate ?? false,
@@ -406,8 +433,7 @@ export async function initializeConfigFromEnv(): Promise<void> {
         normalizeReleaseAssetLimit(envConfig.mirror.releaseAssetLimit) ??
         existingConfig?.[0]?.giteaConfig?.releaseAssetLimit ??
         null,
-      // Unset env var keeps what the UI stored; anything but "true" is false,
-      // matching how the other boolean mirror switches here are read.
+      // Unset env var keeps what the UI stored, like every switch here.
       pruneOldReleaseAssets:
         envConfig.mirror.pruneOldReleaseAssets ??
         existingConfig?.[0]?.giteaConfig?.pruneOldReleaseAssets ??
@@ -434,7 +460,14 @@ export async function initializeConfigFromEnv(): Promise<void> {
       pullRequestConcurrency: envConfig.mirror.pullRequestConcurrency && envConfig.mirror.pullRequestConcurrency > 0
         ? envConfig.mirror.pullRequestConcurrency
         : existingConfig?.[0]?.giteaConfig?.pullRequestConcurrency ?? 5,
-      mirrorMetadata: envConfig.mirror.mirrorMetadata ?? (envConfig.mirror.mirrorIssues || envConfig.mirror.mirrorPullRequests || envConfig.mirror.mirrorLabels || envConfig.mirror.mirrorMilestones) ?? existingConfig?.[0]?.giteaConfig?.mirrorMetadata ?? false,
+      // Turning on any metadata kind turns on the metadata switch too.
+      mirrorMetadata:
+        envConfig.mirror.mirrorMetadata ??
+        ([envConfig.mirror.mirrorIssues, envConfig.mirror.mirrorPullRequests, envConfig.mirror.mirrorLabels, envConfig.mirror.mirrorMilestones].includes(true)
+          ? true
+          : undefined) ??
+        existingConfig?.[0]?.giteaConfig?.mirrorMetadata ??
+        false,
       mirrorIssues: envConfig.mirror.mirrorIssues ?? existingConfig?.[0]?.giteaConfig?.mirrorIssues ?? false,
       // No env vars for these; keep what the UI stored across restarts.
       mirrorIssueState: existingConfig?.[0]?.giteaConfig?.mirrorIssueState ?? 'all',

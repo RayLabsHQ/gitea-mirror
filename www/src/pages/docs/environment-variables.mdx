@@ -16,9 +16,9 @@ Variables fall into two groups.
 
 **Seeded variables** are copied into the database. On startup, if any of `GITHUB_USERNAME`, `GITHUB_TOKEN`, `GITEA_URL`, `GITEA_USERNAME`, or `GITEA_TOKEN` is set, Gitea Mirror parses the whole environment configuration and writes it to the first user's configuration row. If no user account exists yet, nothing is written and it tries again on the next start.
 
-> **Warning:** Seeded values are rewritten on every startup, so they win over changes you make in the UI. Manage a given setting either through the environment or through the UI, not both.
+> **Warning:** A seeded variable that is set is written again on every startup, so it wins over changes you make in the UI. A variable you leave unset (or empty) is not written, and the value saved on the Configuration page stays. Manage a given setting either through the environment or through the UI, not both. `docker-compose.yml` sets most of these variables with a default, so with that file they are always set: remove a line to manage that setting in the UI.
 
-> **Note:** Boolean seeded variables are matched against the exact string `true`. Any other value, including an unset variable, is written as `false`, which means the schema defaults listed below only apply when the environment loader is not running. The one exception is `INCLUDE_COLLABORATOR_REPOS`, which distinguishes unset from `false`, and `AUTO_IMPORT_REPOS` and `SEQUENTIAL_ORG_CREATION`, which are matched against `false` instead so unset means enabled.
+> **Note:** A true/false variable is true when set to `true` (in any case) and false for any other value. `AUTO_IMPORT_REPOS` is the reverse: only `false` turns it off. The defaults listed below apply on a first start, when nothing is stored yet.
 
 ## Core
 

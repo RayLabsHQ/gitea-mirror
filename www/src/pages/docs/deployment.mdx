@@ -83,7 +83,7 @@ docker compose up -d
 
 `docker-compose.yml` is the one to use when you want to configure everything through environment variables rather than the UI. It covers GitHub and Gitea credentials, mirror options, scheduling, cleanup behaviour, header authentication, and custom CA certificates, and it can build the image locally instead of pulling it.
 
-> **Note:** Environment variables pre-fill the configuration on first start. You can still change any of it later in the web UI, and your changes are stored in the database.
+> **Note:** Once a GitHub or Gitea credential is set in the environment, the variables that are set are written into the configuration on every start, so they win over changes made in the web UI. This file sets most of them with a default; remove a line to manage that setting in the UI instead. See [how environment variables are applied](/docs/environment-variables/).
 
 ### Plain docker run
 
