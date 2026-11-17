@@ -45,6 +45,7 @@ let inFlightRequest: { userId: string; promise: Promise<ConfigApiResponse> } | n
 export function hasConfiguredSource(configResponse: ConfigApiResponse | null): boolean {
   return Boolean(
     configResponse?.githubConfig?.token ||
+    configResponse?.githubConfig?.hasToken ||
     configResponse?.sources?.some(source => source.provider === 'github' && source.authType === 'app')
   );
 }
@@ -114,13 +115,13 @@ export function useConfigStatus(): ConfigStatus {
     if (isCacheValid && hasCheckedRef.current) {
       const configResponse = configCache.data!;
 
-      // App private keys are redacted from the config response, so connected
-      // App sources count alongside a visible PAT for dashboard access.
+      // Tokens are never returned, only hasToken, and App sources have none,
+      // so connected App sources count alongside a saved token.
       const isGitHubConfigured = hasConfiguredSource(configResponse);
 
       const isGiteaConfigured = !!(
         configResponse?.giteaConfig?.url &&
-        configResponse?.giteaConfig?.token
+        (configResponse?.giteaConfig?.token || configResponse?.giteaConfig?.hasToken)
       );
 
       const isFullyConfigured = isGitHubConfigured && isGiteaConfigured;
@@ -166,7 +167,7 @@ export function useConfigStatus(): ConfigStatus {
 
       const isGiteaConfigured = !!(
         configResponse?.giteaConfig?.url &&
-        configResponse?.giteaConfig?.token
+        (configResponse?.giteaConfig?.token || configResponse?.giteaConfig?.hasToken)
       );
 
       const isFullyConfigured = isGitHubConfigured && isGiteaConfigured;

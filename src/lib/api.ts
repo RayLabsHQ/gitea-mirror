@@ -79,7 +79,8 @@ export const githubApi = {
   /** Test the source connection. The route serves every source provider. */
   testConnection: (
     token: string,
-    options: { provider?: SourceProvider; url?: string; username?: string } = {}
+    // With an empty token and a sourceId, the server tests that source's saved token.
+    options: { provider?: SourceProvider; url?: string; username?: string; sourceId?: string } = {}
   ) =>
     apiRequest<{ success: boolean; message?: string }>("/github/test-connection", {
       method: "POST",

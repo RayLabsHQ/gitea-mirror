@@ -5,6 +5,7 @@ import {
   SOURCE_PROVIDER_LABELS,
   isSourceProviderKind,
   isValidSourceUrl,
+  normalizeSourceUrl,
   type SourceProviderKind,
 } from "@/lib/source-providers/kinds";
 import {
@@ -28,6 +29,7 @@ import {
   parseGitHubAppCredentials,
 } from "@/lib/github-app-credentials";
 import { decryptSourceToken } from "@/lib/sources";
+import { SecretHostChangedError, hasValue, sameHost } from "@/lib/utils/stored-secrets";
 
 /** Repositories imported from this source; they are what locks it. */
 async function countRepositoriesForSource(
@@ -155,6 +157,24 @@ export const PUT: APIRoute = async ({ params, request, locals }) => {
     });
     if (!verdict.ok) {
       return jsonError(verdict.message, 409, { lock: verdict.lock });
+    }
+
+    // An empty token keeps the saved one, but a saved token is only sent to
+    // the host it was saved for: moving the source to another host needs a
+    // new token, or anyone who can edit sources could collect it.
+    if (body.authType !== "app" && !hasValue(token)) {
+      const saved = decryptSourceToken(existing.token);
+      const savedUrl = normalizeSourceUrl(existing.url, existing.provider);
+      const nextUrl = normalizeSourceUrl(
+        typeof body.url === "string" ? body.url : existing.url,
+        provider
+      );
+      if (saved && !isGitHubAppCredential(saved) && !sameHost(savedUrl, nextUrl)) {
+        return jsonError(
+          new SecretHostChangedError(`${SOURCE_PROVIDER_LABELS[provider]} token`, savedUrl, nextUrl).message,
+          400
+        );
+      }
     }
 
     const updated = await updateSource(userId, sourceId, {

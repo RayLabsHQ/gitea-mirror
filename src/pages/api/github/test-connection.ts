@@ -2,8 +2,13 @@ import type { APIRoute } from "astro";
 import { createSecureErrorResponse } from "@/lib/utils";
 import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 import { assertSafeOutboundUrl, OutboundUrlError } from "@/lib/utils/outbound-url";
-import { encodeGitHubAppCredentials, parseGitHubAppCredentials } from "@/lib/github-app-credentials";
+import {
+  encodeGitHubAppCredentials,
+  isGitHubAppCredential,
+  parseGitHubAppCredentials,
+} from "@/lib/github-app-credentials";
 import { decryptSourceToken, listSources } from "@/lib/sources";
+import { SecretHostChangedError, hasValue, sameHost } from "@/lib/utils/stored-secrets";
 import {
   SOURCE_PROVIDER_LABELS,
   createSourceProvider,
@@ -51,6 +56,23 @@ export const POST: APIRoute = async ({ request, locals }) => {
         });
       } catch (error) {
         return json({ success: false, message: (error as Error).message }, 400);
+      }
+    }
+    // Tokens are write-only, so the Sources card tests a saved source by its
+    // id. The saved token is only sent to the host it was saved for.
+    if (!hasValue(credential) && body?.authType !== "app" && typeof body?.sourceId === "string") {
+      const source = (await listSources(authResult.userId)).find((item) => item.id === body.sourceId);
+      const saved = source ? decryptSourceToken(source.token) : "";
+      if (source && saved && !isGitHubAppCredential(saved)) {
+        const savedUrl = normalizeSourceUrl(source.url, source.provider);
+        const nextUrl = normalizeSourceUrl(url, provider);
+        if (!sameHost(savedUrl, nextUrl)) {
+          return json(
+            { success: false, message: new SecretHostChangedError(`${label} token`, savedUrl, nextUrl).message },
+            400
+          );
+        }
+        credential = saved;
       }
     }
     // A plain git host may serve everything without a login.

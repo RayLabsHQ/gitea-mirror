@@ -144,11 +144,11 @@ export function ConfigTabs() {
         if (source.authType === 'app') {
           return Boolean(source.appId?.trim() && source.installationId?.trim());
         }
-        return Boolean(source.token && source.token.trim());
+        return source.hasToken;
       });
     }
     const { githubConfig } = config;
-    return !!(githubConfig.username.trim() && githubConfig.token.trim());
+    return !!(githubConfig.username.trim() && (githubConfig.token.trim() || githubConfig.hasToken));
   };
 
   const isConfigFormValid = (): boolean => {
@@ -156,7 +156,8 @@ export function ConfigTabs() {
     const isGiteaValid = !!(
       giteaConfig.url.trim() &&
       giteaConfig.username.trim() &&
-      giteaConfig.token.trim()
+      // The API never returns the token, only whether one is saved.
+      (giteaConfig.token.trim() || giteaConfig.hasToken)
     );
     return isSourceConnected() && isGiteaValid;
   };

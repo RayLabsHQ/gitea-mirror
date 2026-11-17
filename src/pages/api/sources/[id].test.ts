@@ -154,7 +154,7 @@ test("editing App IDs preserves the private key without returning it", async () 
   expect(response.status).toBe(200);
   expect(parseGitHubAppCredentials(sourceRows[0].token.slice(4))).toEqual({ appId: "123", installationId: "789", privateKey });
   const body = await response.json();
-  expect(body.source).toMatchObject({ authType: "app", installationId: "789", token: "" });
+  expect(body.source).toMatchObject({ authType: "app", installationId: "789", hasToken: false });
   expect(JSON.stringify(body)).not.toContain("PRIVATE KEY");
 });
 
@@ -240,11 +240,27 @@ describe("PUT /api/sources/:id", () => {
     expect(data.source.name).toBe("My GitHub");
   });
 
-  test("switches the host with confirmSourceChange and preserves an empty token", async () => {
+  test("does not carry the saved token to another host", async () => {
     const response = await put("source-1", {
       provider: "gitlab",
       url: "https://gitlab.example.com",
       token: "",
+      confirmSourceChange: true,
+    });
+    expect(response.status).toBe(400);
+    const data = await response.json();
+    expect(data.success).toBe(false);
+    expect(data.message).toBe(
+      "Enter a GitLab token for gitlab.example.com. The saved one is only sent to github.com."
+    );
+    expect(sourceRows[0]).toMatchObject({ provider: "github", token: encrypted("ghp_old") });
+  });
+
+  test("switches the host with confirmSourceChange and a new token", async () => {
+    const response = await put("source-1", {
+      provider: "gitlab",
+      url: "https://gitlab.example.com",
+      token: "glpat-new",
       confirmSourceChange: true,
     });
     expect(response.status).toBe(200);
@@ -254,10 +270,20 @@ describe("PUT /api/sources/:id", () => {
       id: "source-1",
       provider: "gitlab",
       url: "https://gitlab.example.com",
-      token: "ghp_old",
+      hasToken: true,
       repositoryCount: 2,
       locked: true,
     });
+    expect(data.source).not.toHaveProperty("token");
+    expect(sourceRows[0].token).toBe(encrypted("glpat-new"));
+  });
+
+  test("an empty token keeps the saved one on the same host", async () => {
+    const response = await put("source-1", { username: "someone-else", token: "" });
+    expect(response.status).toBe(200);
+    const data = await response.json();
+    expect(data.source).toMatchObject({ username: "someone-else", hasToken: true });
+    expect(sourceRows[0].token).toBe(encrypted("ghp_old"));
   });
 });
 

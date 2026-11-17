@@ -35,7 +35,10 @@ export function resolveOrganizationSource(
   const label = SOURCE_PROVIDER_LABELS[provider];
   return {
     pinnedSource,
-    isPublicOnlySource: pinnedSource?.token === "",
+    // GitHub App sources have no token but are not public only.
+    isPublicOnlySource: Boolean(
+      pinnedSource && !pinnedSource.hasToken && pinnedSource.authType !== "app"
+    ),
     provider,
     sourceUrl: pinnedSource
       ? normalizeSourceUrl(pinnedSource.url, pinnedSource.provider)

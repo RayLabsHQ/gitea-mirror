@@ -26,7 +26,10 @@ export interface GiteaConfig {
   url: string;
   externalUrl?: string;
   username: string;
+  /** Write-only: always empty from the API; an empty value on save keeps the saved token. */
   token: string;
+  /** The API's answer to whether a token is saved. */
+  hasToken?: boolean;
   organization: string;
   visibility: GiteaOrgVisibility;
   starredReposOrg: string;
@@ -79,7 +82,10 @@ export interface GitHubConfig {
   /** Instance base URL for GitLab and Gitea sources. */
   url?: string;
   username: string;
+  /** Write-only: always empty from the API; an empty value on save keeps the saved token. */
   token: string;
+  /** The API's answer to whether a token is saved. */
+  hasToken?: boolean;
   privateRepositories: boolean;
   includeCollaboratorRepos?: boolean;
   includeOrganizations?: string[];
@@ -146,7 +152,8 @@ export interface SourceApiRecord {
   provider: SourceProvider;
   url: string;
   username: string;
-  token: string;
+  /** A token is saved. Tokens themselves are never returned. */
+  hasToken: boolean;
   authType?: "pat" | "app";
   appId?: string;
   installationId?: string;
@@ -175,28 +182,36 @@ export interface SaveConfigApiResponse {
   message: string;
 }
 
+// Notification secrets are write-only: the API sends them empty with
+// hasToken or hasSecret set, an empty value on save keeps the saved one and
+// null removes it.
+
 export interface NtfyConfig {
   url: string;
   topic: string;
-  token?: string;
+  token?: string | null;
+  hasToken?: boolean;
   priority: "min" | "low" | "default" | "high" | "urgent";
 }
 
 export interface AppriseConfig {
   url: string;
   token: string;
+  hasToken?: boolean;
   tag?: string;
 }
 
 export interface GotifyConfig {
   url: string;
   token: string;
+  hasToken?: boolean;
   priority: number;
 }
 
 export interface WebhookConfig {
   url: string;
-  secret?: string;
+  secret?: string | null;
+  hasSecret?: boolean;
 }
 
 export interface NotificationConfig {
