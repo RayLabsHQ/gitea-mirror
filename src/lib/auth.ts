@@ -273,6 +273,10 @@ export const auth = betterAuth({
   //               domain match) OR userInfo.emailVerified === true
   //   - local:    existing user is verified (or requireLocalEmailVerified=false)
   //
+  // The SSO plugin's `trustEmailVerified` stays off (below), so
+  // userInfo.emailVerified is always false for SSO sign-ins and only the
+  // domain-scoped trust can link.
+  //
   // We don't wire an email-verification flow, so the local admin always has
   // emailVerified=false — `requireLocalEmailVerified: false` is required.
   //
@@ -286,6 +290,9 @@ export const auth = betterAuth({
   // domain that was vouched for. Cross-domain claims from a compromised or
   // permissive IdP do not silently absorb local accounts. (Same-domain
   // claims still require the operator to trust their IdP's identity model.)
+  // This only holds while `trustEmailVerified` is off: with it on, any IdP
+  // asserting email_verified=true linked to the local account of that email,
+  // whatever the domain.
   account: {
     accountLinking: {
       enabled: true,
@@ -354,10 +361,15 @@ export const auth = betterAuth({
       },
       // Override user info with provider data by default
       defaultOverrideUserInfo: true,
-      // Allow implicit sign up for new users
+      // New accounts through SSO are gated by signupGuardPlugin below (email
+      // in the provider's domain, or AUTH_ALLOW_SIGNUP=true). This option
+      // is no gate on its own: the client can override it by sending
+      // requestSignUp with the sign-in.
       disableImplicitSignUp: false,
-      // Trust email_verified claims from the upstream provider so we can link by matching email
-      trustEmailVerified: true,
+      // Keep off. When on, the IdP's email_verified claim alone lets a
+      // sign-in link to the local account with that email, skipping the
+      // provider domain check described at accountLinking above.
+      trustEmailVerified: false,
       // Surface `domainVerified` to the model so account-linking can read it.
       //
       // Better Auth's adapter transformOutput (factory.mjs) only copies fields
@@ -410,13 +422,22 @@ export const auth = betterAuth({
 
     // Refuses email sign-up once an account exists unless
     // AUTH_ALLOW_SIGNUP=true. The signup page only redirected; the endpoint
-    // itself was open. See auth-signup-guard.ts.
+    // itself was open. Also refuses new accounts through SSO whose email is
+    // outside the provider's domain. See auth-signup-guard.ts.
     signupGuardPlugin({
       countUsers: async () => {
         const { db, users } = await import("./db");
         const { sql } = await import("drizzle-orm");
         const [row] = await db.select({ count: sql<number>`count(*)` }).from(users);
         return Number(row?.count ?? 0);
+      },
+      findSsoProviderDomain: async (providerId) => {
+        const [row] = await db
+          .select({ domain: ssoProviders.domain })
+          .from(ssoProviders)
+          .where(eq(ssoProviders.providerId, providerId))
+          .limit(1);
+        return row?.domain ?? null;
       },
     }),
 

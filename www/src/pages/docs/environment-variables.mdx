@@ -44,7 +44,7 @@ Variables fall into two groups.
 | `BETTER_AUTH_LOG_LEVEL` | `warn` | Better Auth logger verbosity: `debug`, `info`, `warn`, or `error`. Use `debug` to trace SSO and OIDC sign-in problems. Better Auth does not read the `DEBUG` variable. |
 | `ENCRYPTION_SECRET` | none | Key for AES-256-GCM encryption of stored tokens. When unset, `BETTER_AUTH_SECRET` is used. Changing the key later makes stored tokens unreadable, so set it before saving any. Generate with `openssl rand -base64 48`. |
 | `AUTH_DEFAULT_METHOD` | `email` | Tab the login page opens on when both email and SSO are available: `email` or `sso`. Any other value means `email`. The method last used in that browser wins over this default. |
-| `AUTH_ALLOW_SIGNUP` | `false` | Keep the email and password sign-up endpoint (`POST /api/auth/sign-up/email`) open after the first account exists. Off, it answers 403 once a user exists. The `/signup` page redirects to the login page either way. |
+| `AUTH_ALLOW_SIGNUP` | `false` | Allow new accounts after the first one exists. On, the email and password sign-up endpoint (`POST /api/auth/sign-up/email`) stays open and SSO creates an account for any email. Off, the endpoint answers 403 once a user exists and SSO only creates accounts for emails in the provider's Domain. The `/signup` page redirects to the login page either way. |
 
 In Docker, `BETTER_AUTH_SECRET` and `ENCRYPTION_SECRET` are generated on first boot if unset and saved to `/app/data/.better_auth_secret` and `/app/data/.encryption_secret` so they persist across restarts. The Nix package does the same in its data directory. Elsewhere there is no fallback: without `BETTER_AUTH_SECRET` the app refuses to start when `NODE_ENV` is `production`, and uses a known insecure value otherwise.
 

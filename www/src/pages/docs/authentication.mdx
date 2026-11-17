@@ -18,7 +18,7 @@ This method is always enabled and needs no configuration.
 
 Visit `/signup` on a fresh instance and create an account. That account owns the instance configuration, which is what "first user becomes admin" means in practice.
 
-Once one account exists, `/signup` redirects to `/login` and the sign-up endpoint refuses new accounts, so a public instance cannot accumulate accounts on its own. Additional users are created through header auth provisioning or SSO. `AUTH_ALLOW_SIGNUP=true` keeps the sign-up endpoint (`POST /api/auth/sign-up/email`) open for scripts; the `/signup` page still redirects once an account exists.
+Once one account exists, `/signup` redirects to `/login` and the sign-up endpoint refuses new accounts, so a public instance cannot accumulate accounts on its own. Additional users are created through header auth provisioning or SSO, which only creates accounts for emails in the provider's Domain (see [New accounts through SSO](#new-accounts-through-sso)). `AUTH_ALLOW_SIGNUP=true` keeps the sign-up endpoint (`POST /api/auth/sign-up/email`) open for scripts; the `/signup` page still redirects once an account exists.
 
 ### Sessions
 
@@ -71,7 +71,7 @@ Every provider, regardless of protocol, needs these:
 | Field | Description |
 |---|---|
 | Issuer URL | The identity provider's issuer, for example `https://accounts.google.com`. Keep any trailing slash your provider shows. |
-| Domain | The email domain this provider serves. Multi-domain providers take a comma-separated list. This field controls account linking, see below. |
+| Domain | The email domain this provider serves. Multi-domain providers take a comma-separated list. This field controls account linking and who can get a new account through SSO, see below. |
 | Provider ID | A short unique slug such as `google-sso`. It appears in the callback URL, so pick it before configuring the upstream provider. |
 
 ### OIDC providers
@@ -141,6 +141,12 @@ https://your-domain.com/api/auth/sso/saml2/sp/metadata?providerId={provider-id}
 
 The default name ID format is `urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress`, which keeps identities aligned with the email-based account matching described next.
 
+### New accounts through SSO
+
+Once an account exists, signing in through SSO with an email that has no account yet only creates one when the email belongs to one of the provider's domains, or a subdomain of one. Anyone else lands on an error page with `SIGNUP_CLOSED`.
+
+This keeps a provider that anyone can sign up at, such as Google, from letting every account there in. To let anyone the provider knows get an account, set `AUTH_ALLOW_SIGNUP=true`, which also opens email sign-up.
+
 ### Account linking
 
 When someone signs in through SSO with an email that already has a local account, Gitea Mirror links the two so they land on the same data instead of getting a duplicate account or an error page. Matching is by email address.
@@ -148,7 +154,7 @@ When someone signs in through SSO with an email that already has a local account
 The trust model is scoped to the Domain field you set on the provider:
 
 - Registering a provider marks it as verified for the domains you listed.
-- A sign-in is auto-linked only when the user's email actually belongs to one of those domains. A cross-domain email is refused even though the provider is registered.
+- A sign-in is auto-linked only when the user's email actually belongs to one of those domains. A cross-domain email is refused even though the provider is registered, and even when the provider says the email is verified.
 - Local accounts are never email-verified in this app, so the linker deliberately does not require local verification. Otherwise linking could never happen.
 
 > **Warning:** Set Domain to the email domains your identity provider genuinely issues. If that provider lets users self-register or claim arbitrary addresses within the domain, someone there can claim an address matching a local account and take it over. Registering a provider means vouching for its identity model for those domains.
@@ -259,6 +265,8 @@ Supported scopes are `openid` for the user ID, `profile` for name and username, 
 **Invalid origin errors.** `BETTER_AUTH_URL` does not match the URL users actually visit. Set it to the external origin, and list any other address you use in `BETTER_AUTH_TRUSTED_ORIGINS`.
 
 **Redirected to the homepage with `?error=UNKNOWN` after a successful SSO login.** The upstream login worked but linking to the existing local account was refused. The usual cause is a Domain field that does not match the user's real email domain. Set `BETTER_AUTH_LOG_LEVEL=debug` to see the full callback trace, and look for a message about an account not being linked.
+
+**Sent to an error page with `error=SIGNUP_CLOSED` after an SSO login.** The person has no account yet and their email is not in the provider's Domain. Add their email domain to the provider's Domain field, or set `AUTH_ALLOW_SIGNUP=true` to let anyone in. See [New accounts through SSO](#new-accounts-through-sso).
 
 **Sent to an error page with `error=sso_callback_failed`.** The SSO callback threw an error, and `error_description` in the address bar carries its message. Set `BETTER_AUTH_LOG_LEVEL=debug` for the full trace.
 
