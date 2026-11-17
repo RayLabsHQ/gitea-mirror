@@ -5,11 +5,10 @@ This document provides a comprehensive list of all environment variables support
 ## Environment Variables and UI Interaction
 
 When environment variables are set:
-1. They are loaded on application startup
-2. Values are stored in the database on first load
-3. The UI will display these values and they can be modified
-4. UI changes are saved to the database and persist
-5. Environment variables provide initial defaults but don't override UI changes
+1. They are loaded on application startup, once any of `GITHUB_USERNAME`, `GITHUB_TOKEN`, `GITEA_URL`, `GITEA_USERNAME` or `GITEA_TOKEN` is set
+2. A variable that is set is written to the database on every start, so it wins over a change made in the UI
+3. A variable that is not set (or empty) is not written, so the value saved in the UI stays
+4. Manage each setting either through the environment or through the UI, not both
 
 **Note**: Some critical settings like `GITEA_LFS`, `MIRROR_RELEASES`, and `MIRROR_METADATA` will be visible and configurable in the UI even when set via environment variables.
 
@@ -511,7 +510,7 @@ BETTER_AUTH_TRUSTED_ORIGINS=http://localhost:3000,http://192.168.1.100:3000
 
 1. **First Run**: Environment variables are loaded when the container starts. The configuration is applied after the first user account is created.
 
-2. **UI Priority**: Manual changes made through the web UI will be preserved. Environment variables only set values for empty fields.
+2. **UI Priority**: A variable that is set is applied again on every start and wins over the web UI. Settings whose variables are not set keep what the web UI saved.
 
 3. **Token Security**: All tokens are encrypted before being stored in the database.
 
