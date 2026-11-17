@@ -114,8 +114,9 @@ for (const match of useCases.matchAll(/slug:\s*['"]([^'"]+)['"]/g)) {
 const readme = readFileSync(path.join(root, "README.md"), "utf8");
 for (const match of readme.matchAll(/\]\(([^)\s]+)\)/g)) {
   const target = match[1];
-  if (target.startsWith(SITE)) {
-    const sitePath = target.slice(SITE.length) || "/";
+  const url = URL.canParse(target) ? new URL(target) : null;
+  if (url?.origin === SITE) {
+    const sitePath = url.pathname + url.hash;
     if (SITE_SECTIONS.test(sitePath)) checkSiteLink("README.md", sitePath);
   } else if (!/^[a-z]+:|^#|^mailto:/i.test(target)) {
     const file = path.join(root, target.split("#")[0]);
