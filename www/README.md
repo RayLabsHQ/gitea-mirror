@@ -1,30 +1,35 @@
-# Gitea Mirror Marketing Site
+# Gitea Mirror website
 
-This Astro workspace powers the public marketing experience for Gitea Mirror. It includes the landing page, screenshots, call-to-action components, and the new use case library that highlights real-world workflows.
+The source of https://gitea-mirror.raylabs.io: the landing page, the user documentation and the use case guides.
 
-## Developing Locally
+## Developing locally
 
 ```bash
 pnpm install
 pnpm dev
 ```
 
-The site is available at `http://localhost:4321`. Tailwind CSS v4 handles styling; classes can be used directly inside Astro, MDX, and React components.
+The site runs at http://localhost:4321. Run `bun scripts/check-docs-links.ts` from the repository root before opening a pull request; CI runs it too.
 
-## Project Structure
+## Structure
 
-- `src/pages/index.astro` – Main landing page
-- `src/components/` – Reusable UI (Header, Hero, Features, UseCases, etc.)
-- `src/lib/use-cases.ts` – Central data source for use case titles, summaries, and tags
-- `src/pages/use-cases/` – MDX guides for each use case, rendered with `UseCaseLayout`
-- `src/layouts/UseCaseLayout.astro` – Shared layout that injects the header, shader background, and footer into MDX guides
+- `src/pages/index.astro`: the landing page, built from the components in `src/components/`
+- `src/pages/docs/`: the documentation, one MDX file per page, listed in `src/lib/docs-nav.ts`
+- `src/pages/use-cases/`: the use case guides, listed in `src/lib/use-cases.ts`
+- `src/pages/comparison/`: comparison pages
+- `public/assets/`: screenshots and images
 
-## Authoring Use Case Guides
+## Adding a docs page
 
-1. Add or update a record in `src/lib/use-cases.ts`. This keeps the landing page and library listing in sync.
-2. Create a new MDX file in `src/pages/use-cases/<slug>.mdx` with the `UseCaseLayout` layout and descriptive frontmatter.
-3. Run `pnpm dev` to preview the layout and ensure the new guide inherits global styles.
+1. Create `src/pages/docs/<slug>.mdx` with `layout: '../../layouts/DocsLayout.astro'`, a `title` and a `description`.
+2. Add it to `src/lib/docs-nav.ts` in the right section.
+3. Link to it with its site path, such as `/docs/<slug>/`.
+
+## Adding a use case
+
+1. Add a record to `src/lib/use-cases.ts`. The landing page and the use case index read it.
+2. Create `src/pages/use-cases/<slug>.mdx` with `layout: ../../layouts/UseCaseLayout.astro`, a `title`, a `description` and a `canonical` URL.
 
 ## Deployment
 
-The marketing site is built with the standard Astro pipeline. Use `pnpm build` to generate a production build before deploying.
+The site is deployed on Cloudflare Pages. Keep `pnpm-lock.yaml` as the only lockfile here: with a `bun.lock` present, Cloudflare installs with Bun and the build fails.

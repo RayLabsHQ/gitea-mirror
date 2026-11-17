@@ -1,6 +1,6 @@
 # Local SSO Testing Guide
 
-This guide explains how to test SSO authentication locally with Gitea Mirror.
+How to test SSO sign-in locally. The user guide is the [Authentication page](https://gitea-mirror.raylabs.io/docs/authentication/). The dev server runs on `http://localhost:4321`, which the redirect URIs below assume.
 
 ## Option 1: Using Google OAuth (Recommended for Quick Testing)
 
@@ -12,21 +12,17 @@ This guide explains how to test SSO authentication locally with Gitea Mirror.
    - Enable Google+ API
    - Go to "Credentials" → "Create Credentials" → "OAuth client ID"
    - Choose "Web application"
-   - Add authorized redirect URIs:
-     - `http://localhost:3000/api/auth/sso/callback/google-sso`
-     - `http://localhost:9876/api/auth/sso/callback/google-sso`
+   - Add the authorized redirect URI `http://localhost:4321/api/auth/sso/callback/google-sso`
 
 2. **Configure in Gitea Mirror**
-   - Go to Configuration → Authentication tab
-   - Click "Add Provider"
-   - Select "OIDC / OAuth2"
+   - Go to Configuration, Authentication, and click **Add provider** in the Identity Providers panel
+   - Stay on the **OIDC / OAuth2** tab
    - Fill in:
+     - Issuer URL: `https://accounts.google.com`, then click **Discover** to fill in the endpoints. Discover also replaces Email Domain, so do this first
      - Provider ID: `google-sso`
      - Email Domain: `gmail.com` (or your domain)
-     - Issuer URL: `https://accounts.google.com`
-     - Click "Discover" to auto-fill endpoints
-     - Client ID: (from Google Console)
-     - Client Secret: (from Google Console)
+     - Client ID and Client Secret: from the Google console
+     - Remove `offline_access` from the scopes; Google rejects it
    - Save the provider
 
 ## Option 2: Using Keycloak (Local Identity Provider)
@@ -58,12 +54,11 @@ docker run -d --name keycloak \
 
 ### Configure in Gitea Mirror:
 
+- Issuer URL: `http://localhost:8080/realms/gitea-mirror`, then click **Discover**
 - Provider ID: `keycloak`
 - Email Domain: `example.com`
-- Issuer URL: `http://localhost:8080/realms/gitea-mirror`
 - Client ID: `gitea-mirror`
-- Client Secret: (from Keycloak)
-- Click "Discover" to auto-fill endpoints
+- Client Secret: from Keycloak
 
 ## Option 3: Using Mock SSO Provider (Development)
 
@@ -77,19 +72,19 @@ git clone https://github.com/panva/node-oidc-provider-example.git
 cd node-oidc-provider-example
 npm install
 npm start
-
-# Runs on http://localhost:3001
 ```
+
+Note the port it prints. If you also run `docker-compose.dev.yml`, its Gitea uses port 3001.
 
 ### Configure in Gitea Mirror:
 
+- Issuer URL: the provider's address, then click **Discover**
 - Provider ID: `mock-provider`
 - Email Domain: `test.com`
-- Issuer URL: `http://localhost:3001`
 - Client ID: `foo`
 - Client Secret: `bar`
-- Authorization Endpoint: `http://localhost:3001/auth`
-- Token Endpoint: `http://localhost:3001/token`
+
+Saving a provider fetches its discovery document unless all four endpoints and the scopes are sent, so the mock provider has to be running when you save.
 
 ## Testing the SSO Flow
 
@@ -108,8 +103,7 @@ npm start
 ### Common Issues:
 
 1. **"Invalid origin" error**
-   - Check that `trustedOrigins` in `/src/lib/auth.ts` includes your dev URL
-   - Restart the dev server after changes
+   - The trusted origins come from `BETTER_AUTH_URL`, `BETTER_AUTH_TRUSTED_ORIGINS`, the saved providers and the request's own host. Set `BETTER_AUTH_URL` or add your address to `BETTER_AUTH_TRUSTED_ORIGINS`, then restart
 
 2. **Provider not showing in login**
    - Check browser console for errors
@@ -120,14 +114,11 @@ npm start
    - Ensure the redirect URI in your OAuth app matches exactly:
      `http://localhost:PORT/api/auth/sso/callback/PROVIDER_ID`
 
-4. **CORS errors**
-   - Add your identity provider domain to CORS allowed origins if needed
-
 ### Debug Mode:
 
 > **Note:** Better Auth uses its own logger and does **not** read the `DEBUG`
 > environment variable (it is not based on the `debug` npm package). An older
-> version of this guide suggested `DEBUG=better-auth:*` — that has no effect.
+> version of this guide suggested `DEBUG=better-auth:*`, which has no effect.
 
 Better Auth's logger defaults to the `warn` level, so SSO/OIDC sign-in and
 callback details are hidden. Set the log level to `debug` to surface the full
@@ -161,22 +152,22 @@ cookie was persisted**. Work through these checks:
 2. **Check for `?error=UNKNOWN` on the landing URL** (or `?error=account%20not%20linked` in dev).
    That's Better Auth's account-linking step refusing to attach the SSO identity
    to an existing email/password account. The debug log line to look for is
-   `User already exist but account isn't linked to <providerId>`. The fix is
-   almost always to set the SSO provider's **Domain** field to the email domain
-   your users actually have — auto-linking is gated on that domain match.
-   See [docs/SSO-OIDC-SETUP.md#account-linking](./SSO-OIDC-SETUP.md#account-linking).
+   `User already exist but account isn't linked to <providerId>`. The usual fix is
+   to set the SSO provider's **Email Domain** field to the email domain
+   your users actually have. See
+   [Account linking](https://gitea-mirror.raylabs.io/docs/authentication/#account-linking).
 3. **Check the redirect URI** registered in your IdP exactly matches
    `https://<your-domain>/api/auth/sso/callback/<provider-id>` (scheme, host,
-   and provider ID — no trailing slash).
+   and provider ID, no trailing slash).
 4. **Confirm the session cookie is set.** In the browser DevTools → Network,
-   inspect the callback response for a `Set-Cookie: better-auth-session=…`
-   header, and DevTools → Application → Cookies for the stored cookie. Behind a
+   inspect the callback response for a `Set-Cookie: better-auth.session_token=...`
+   header (`__Secure-better-auth.session_token` over HTTPS), and DevTools → Application → Cookies for the stored cookie. Behind a
    reverse proxy, ensure `BETTER_AUTH_URL` is your **external HTTPS** URL so the
    cookie is issued with the correct domain and `Secure` flag, and that the
    proxy forwards `X-Forwarded-Proto: https` and `X-Forwarded-Host`.
-5. **A `401` on `/api/sso/applications` is unrelated** to client login — that
-   endpoint backs the OAuth *provider* (consent) management UI and requires an
-   existing session. It is not part of the Authentik/OIDC sign-in flow.
+5. **A `401` on `/api/sso/applications` is unrelated** to client login. That
+   endpoint manages the apps that use Gitea Mirror as an OAuth provider and
+   needs an existing session. It is not part of the SSO sign-in flow.
 
 ## Testing Different Scenarios
 
@@ -211,24 +202,12 @@ cookie was persisted**. Work through these checks:
    - Enable/disable PKCE
    - Verify code challenge works
 
-## Using with Better Auth CLI
-
-Better Auth provides CLI tools for testing:
-
-```bash
-# List registered providers
-bun run auth:providers list
-
-# Test provider configuration
-bun run auth:providers test google-sso
-```
-
 ## Environment Variables
 
 For production-like testing:
 
 ```env
-BETTER_AUTH_URL=http://localhost:3000
+BETTER_AUTH_URL=http://localhost:4321
 BETTER_AUTH_SECRET=your-secret-key
 ```
 
@@ -237,5 +216,6 @@ BETTER_AUTH_SECRET=your-secret-key
 After successful SSO setup:
 1. Test user attribute mapping
 2. Configure role-based access
-3. Set up SAML if needed
-4. Test with your organization's actual IdP
+3. Test with your organization's actual IdP
+
+SAML sign-in does not work in the current release, so there is nothing to test there yet.

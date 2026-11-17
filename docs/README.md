@@ -1,46 +1,14 @@
-# Gitea Mirror Documentation
+# docs/
 
-This folder contains engineering and operations references for the open-source Gitea Mirror project. Each guide focuses on the parts of the system that still require bespoke explanation beyond the in-app help and the main `README.md`.
+User documentation lives on the website: **[gitea-mirror.raylabs.io/docs](https://gitea-mirror.raylabs.io/docs/)**, with its sources in [`www/src/pages/docs/`](../www/src/pages/docs/). Change those pages when behavior changes.
 
-## Available Guides
+This folder holds notes for maintainers and contributors:
 
-### Core workflow
-- **[DEVELOPMENT_WORKFLOW.md](./DEVELOPMENT_WORKFLOW.md)** – Set up a local environment, run scripts, and understand the repo layout (app + marketing site).
-- **[ENVIRONMENT_VARIABLES.md](./ENVIRONMENT_VARIABLES.md)** – Complete reference for every configuration flag supported by the app and Docker images.
-- **[NIX_DEPLOYMENT.md](./NIX_DEPLOYMENT.md)** – User-facing deployment guide for Nix and NixOS.
-- **[NIX_DISTRIBUTION.md](./NIX_DISTRIBUTION.md)** – Maintainer notes for packaging, releases, and distribution strategy.
+- [DEVELOPMENT_WORKFLOW.md](DEVELOPMENT_WORKFLOW.md): local setup, commands, tests, type checking and releases.
+- [SHUTDOWN_AND_RECOVERY.md](SHUTDOWN_AND_RECOVERY.md): signals, stop timeouts, job recovery and the related scripts.
+- [NIX_DISTRIBUTION.md](NIX_DISTRIBUTION.md): the Nix flake, `bun.nix` and the Nix CI.
+- [SSO_TESTING.md](SSO_TESTING.md): testing SSO sign-in locally against Google, Keycloak or a mock provider.
 
-### Reliability & recovery
-- **[GRACEFUL_SHUTDOWN.md](./GRACEFUL_SHUTDOWN.md)** – How signal handling, shutdown coordination, and job persistence work in v3.
-- **[RECOVERY_IMPROVEMENTS.md](./RECOVERY_IMPROVEMENTS.md)** – Deep dive into the startup recovery workflow and supporting scripts.
+The other files here are short pointers to the website, kept so old links keep working.
 
-### Authentication
-- **[SSO-OIDC-SETUP.md](./SSO-OIDC-SETUP.md)** – Configure OIDC/SSO providers through the admin UI.
-- **[SSO_TESTING.md](./SSO_TESTING.md)** – Recipes for local and staging SSO testing (Google, Keycloak, mock providers).
-
-### API
-- **[API.md](./API.md)** – Points to the API guide on the documentation website.
-
-### Sources and destinations
-- **[SOURCE_PROVIDERS.md](./SOURCE_PROVIDERS.md)** – GitHub, GitLab and Gitea/Forgejo as sources: tokens, what each can mirror, the source lock.
-- **[PUSH_TARGETS.md](./PUSH_TARGETS.md)** – GitHub and GitLab as destinations: how the push engine works, token scopes, disk usage, what is not mirrored.
-
-The user-facing documentation lives on the website at <https://gitea-mirror.raylabs.io/docs/>, with its sources under `www/src/pages/docs/`. If you are looking for playbooks, see the MDX use cases under `www/src/pages/use-cases/`.
-
-## Quick start for local development
-
-```bash
-git clone https://github.com/RayLabsHQ/gitea-mirror.git
-cd gitea-mirror
-bun run setup           # installs deps and seeds the SQLite DB
-bun run dev             # starts the Astro/Bun app on http://localhost:4321
-```
-
-The first user you create locally becomes the administrator. All other configuration—GitHub owners, Gitea targets, scheduling, cleanup—is done through the **Configuration** screen in the UI.
-
-## Contributing & support
-
-- 🎯 Contribution guide: [../CONTRIBUTING.md](../CONTRIBUTING.md)
-- 🐞 Issues & feature requests: <https://github.com/RayLabsHQ/gitea-mirror/issues>
-- 💬 Discussions: <https://github.com/RayLabsHQ/gitea-mirror/discussions>
-- 🔐 Security policy & advisories: <https://github.com/RayLabsHQ/gitea-mirror/security>
+See also [CONTRIBUTING.md](../CONTRIBUTING.md) and [CLAUDE.md](../CLAUDE.md) in the repository root.
