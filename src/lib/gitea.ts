@@ -51,6 +51,10 @@ import {
   type BoundedDownload,
   type DownloadLimits,
 } from "./utils/bounded-download";
+import { multipartFileBody } from "./utils/multipart-file-body";
+import { createReleaseAssetDir } from "./utils/release-asset-files";
+import { rm } from "node:fs/promises";
+import path from "node:path";
 import { persistMetadataPassProgress } from "./metadata-progress-store";
 import { summarizeReleaseAssets } from "./repository-storage";
 import { recordReleaseAssetStorage } from "./repository-storage-store";
@@ -3745,7 +3749,8 @@ async function downloadSourceAsset(
   asset: { browser_download_url: string; api_url?: string; external?: boolean },
   downloadAuthorization: string | null,
   rateLimitKey: string,
-  limits: ReleaseAssetDownloadLimits
+  limits: ReleaseAssetDownloadLimits,
+  filePath: string
 ): Promise<BoundedDownload> {
   if (asset.external) {
     return downloadWithLimits(
@@ -3755,7 +3760,8 @@ async function downloadSourceAsset(
           { headers: { Accept: "application/octet-stream" }, signal },
           { publicOnly: true, fetchImpl: doFetch }
         ),
-      limits.external
+      limits.external,
+      filePath
     );
   }
   if (asset.api_url && downloadAuthorization) {
@@ -3793,7 +3799,7 @@ async function downloadSourceAsset(
         { headers: { Accept: "application/octet-stream" }, signal },
         { fetchImpl: doFetch }
       );
-    }, limits.source);
+    }, limits.source, filePath);
   }
   return downloadWithLimits(
     (signal) =>
@@ -3808,7 +3814,8 @@ async function downloadSourceAsset(
         },
         { fetchImpl: doFetch }
       ),
-    limits.source
+    limits.source,
+    filePath
   );
 }
 
@@ -4068,7 +4075,13 @@ export async function reconcileReleaseAssets({
       continue;
     }
 
+    // The asset goes through a file of its own, so its size never decides how
+    // much memory a sync takes (#523).
+    let tempDir: string | undefined;
     try {
+      tempDir = await createReleaseAssetDir();
+      const filePath = path.join(tempDir, "asset");
+
       // Download from the source host (see downloadSourceAsset: private GitHub
       // repositories go through the REST asset URL).
       console.log(
@@ -4079,7 +4092,8 @@ export async function reconcileReleaseAssets({
         asset,
         downloadAuthorization,
         rateLimitGateKey(config.userId),
-        downloadLimits
+        downloadLimits,
+        filePath
       );
 
       if (!download.ok) {
@@ -4090,16 +4104,16 @@ export async function reconcileReleaseAssets({
         continue;
       }
 
-      const formData = new FormData();
-      formData.append("attachment", download.data, asset.name);
-
+      // Gitea and Forgejo take the name from the query, as they always have.
+      const upload = multipartFileBody(filePath, { field: "attachment", fileName: asset.name });
       const uploadResponse = await doFetch(
         `${assetsUrl}?name=${encodeURIComponent(asset.name)}`,
         {
           method: "POST",
-          headers: giteaAuth,
-          body: formData,
-        }
+          headers: { ...giteaAuth, "Content-Type": upload.contentType },
+          body: upload.body,
+          duplex: "half",
+        } as RequestInit
       );
 
       if (uploadResponse.ok) {
@@ -4135,6 +4149,10 @@ export async function reconcileReleaseAssets({
         }`
       );
       failed++;
+    } finally {
+      if (tempDir) {
+        await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+      }
     }
   }
 

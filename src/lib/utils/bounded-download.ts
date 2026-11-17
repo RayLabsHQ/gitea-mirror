@@ -6,7 +6,15 @@
  * dies. Only aborting the request closes the connection. Every way out of a
  * download here aborts its request: an error status, a limit, an exception,
  * and the normal end, where the abort changes nothing.
+ *
+ * The body goes to a file as it arrives, never into memory as a whole (#523).
+ * Release assets run to gigabytes, and holding one in memory, then copying it
+ * into a Blob and again into the upload, took up to about three times its size.
+ * Reading promptly matters too: Bun does not slow a download down for a reader
+ * that falls behind, it keeps what arrives in memory until it is read.
  */
+
+import { open, type FileHandle } from "node:fs/promises";
 
 export class DownloadLimitError extends Error {
   constructor(message: string) {
@@ -25,7 +33,7 @@ export interface DownloadLimits {
 }
 
 export type BoundedDownload =
-  | { ok: true; status: number; data: Blob }
+  | { ok: true; status: number; size: number }
   | { ok: false; status: number; statusText: string };
 
 function formatBytes(bytes: number): string {
@@ -38,16 +46,20 @@ function formatDuration(ms: number): string {
 }
 
 /**
- * Runs `start` with a signal to hand to fetch, then reads the body under the
- * limits. An error status comes back as `ok: false` with its body unread and its
- * request aborted; a limit throws DownloadLimitError.
+ * Runs `start` with a signal to hand to fetch, then writes the body to
+ * `filePath` under the limits. An error status comes back as `ok: false` with
+ * its body unread, its request aborted and no file written; a limit throws
+ * DownloadLimitError. After a failure the file may hold part of the body, so
+ * the caller removes it.
  */
 export async function downloadWithLimits(
   start: (signal: AbortSignal) => Promise<Response>,
-  limits: DownloadLimits
+  limits: DownloadLimits,
+  filePath: string
 ): Promise<BoundedDownload> {
   const controller = new AbortController();
   let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  let file: FileHandle | undefined;
   let limitError: DownloadLimitError | undefined;
   const stop = (message: string) => {
     if (limitError) return;
@@ -86,7 +98,7 @@ export async function downloadWithLimits(
       throw tooLarge(maxBytes);
     }
 
-    const chunks: Uint8Array[] = [];
+    file = await open(filePath, "w");
     let received = 0;
     reader = response.body?.getReader();
     if (reader) {
@@ -98,11 +110,13 @@ export async function downloadWithLimits(
         if (maxBytes !== undefined && received > maxBytes) {
           throw tooLarge(maxBytes);
         }
-        chunks.push(value);
+        for (let written = 0; written < value.byteLength; ) {
+          written += (await file.write(value, written)).bytesWritten;
+        }
       }
     }
     if (limitError) throw limitError;
-    return { ok: true, status: response.status, data: new Blob(chunks as BlobPart[]) };
+    return { ok: true, status: response.status, size: received };
   } catch (error) {
     // A limit aborts the request, and fetch or the read then fails with the
     // abort; report the limit, not the abort.
@@ -110,5 +124,6 @@ export async function downloadWithLimits(
   } finally {
     clearInterval(watchdog);
     controller.abort();
+    await file?.close().catch(() => {});
   }
 }

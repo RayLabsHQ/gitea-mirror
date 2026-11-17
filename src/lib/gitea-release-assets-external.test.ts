@@ -12,7 +12,9 @@
  */
 
 import { describe, expect, it } from "bun:test";
+import { readdir } from "node:fs/promises";
 import { reconcileReleaseAssets, type ReleaseAssetDownloadLimits } from "@/lib/gitea";
+import { releaseAssetFilesRoot } from "@/lib/utils/release-asset-files";
 import type { Config } from "@/types/config";
 
 const DESTINATION = "https://gitea.example.com";
@@ -43,7 +45,8 @@ function createNetwork(replies: Record<string, Reply> = {}) {
       return new Response("[]", { headers: { "content-type": "application/json" } });
     }
     if (url.startsWith(`${ASSETS_URL}?`) && method === "POST") {
-      const file = (init!.body as FormData).get("attachment") as Blob;
+      // Parsed the way a server would, from the streamed multipart body (#523).
+      const file = (await new Request(url, init).formData()).get("attachment") as Blob;
       uploads.push(await file.text());
       return new Response('{"id":1}', { status: 201 });
     }
@@ -217,6 +220,38 @@ describe("the instance's own release assets", () => {
     const result = await reconcile(network.fetchImpl, { browser_download_url: url }, tightLimits);
 
     expect(result).toEqual({ uploaded: 1, failed: 0, skipped: 0 });
+    expect(network.uploads).toEqual(["file body"]);
+  });
+});
+
+describe("the file an asset passes through (#523)", () => {
+  const assetDirs = async () => readdir(releaseAssetFilesRoot()).catch(() => [] as string[]);
+
+  it("is gone after an upload, a failed download and a limit", async () => {
+    const before = new Set(await assetDirs());
+    const url = "http://192.168.1.20:3000/attachments/abc";
+
+    await reconcile(createNetwork().fetchImpl, { browser_download_url: url });
+    await reconcile(createNetwork({ [url]: () => new Response("gone", { status: 404 }) }).fetchImpl, {
+      browser_download_url: url,
+    });
+    await reconcile(createNetwork({ [url]: quiet }).fetchImpl, { browser_download_url: url }, tightLimits);
+
+    expect((await assetDirs()).filter((name) => !before.has(name))).toEqual([]);
+  });
+
+  it("is what the upload streams, not a copy held in memory", async () => {
+    let uploadBody: unknown;
+    const network = createNetwork();
+    const fetchImpl = (async (input: any, init?: RequestInit) => {
+      if (init?.method === "POST") uploadBody = init.body;
+      return network.fetchImpl(input, init);
+    }) as unknown as typeof fetch;
+
+    const result = await reconcile(fetchImpl, { browser_download_url: "http://192.168.1.20:3000/attachments/abc" });
+
+    expect(result).toEqual({ uploaded: 1, failed: 0, skipped: 0 });
+    expect(uploadBody).toBeInstanceOf(ReadableStream);
     expect(network.uploads).toEqual(["file body"]);
   });
 });

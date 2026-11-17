@@ -145,7 +145,7 @@ function createFakeHosts(
 
     if (method === "POST" && url.startsWith(`${ASSETS_URL}?`)) {
       const name = new URL(url).searchParams.get("name") ?? "";
-      const attachment = (init?.body as FormData).get("attachment") as Blob;
+      const attachment = (await new Request(url, init).formData()).get("attachment") as Blob;
       uploads.push({ name, size: attachment.size });
       return new Response(JSON.stringify({ id: uploads.length }), {
         status: 201,
