@@ -1,0 +1,95 @@
+---
+layout: '../../layouts/DocsLayout.astro'
+title: Reverse proxy and URLs
+description: Run Gitea Mirror behind nginx, Caddy, Traefik or a tunnel, under its own domain or a path prefix, without sign-in or live update problems.
+---
+
+# Reverse proxy and URLs
+
+Gitea Mirror works behind any reverse proxy. Two things need care: telling the sign-in layer which address people use, and letting the live update stream through unbuffered.
+
+## The URL settings
+
+| Variable | Set it to |
+| --- | --- |
+| `BETTER_AUTH_URL` | The address you open in the browser, for example `https://mirror.example.com`. |
+| `BETTER_AUTH_TRUSTED_ORIGINS` | Any other address you also use, comma separated, for example a local IP next to the domain name. The `BETTER_AUTH_URL` address is always trusted. |
+
+Both take an **origin only**: scheme, host and port, with no path. A path in them is stripped.
+
+```bash
+BETTER_AUTH_URL=https://mirror.example.com
+```
+
+The browser sends sign-in requests to the address it opened the page on, and the server accepts them only from these addresses. If the address in the browser is not one of them, sign-in fails with "Invalid origin" or sends you back to the login page.
+
+> **Note:** Older guides also set `PUBLIC_BETTER_AUTH_URL`. Leave it out. It is only read while building from source and gets fixed into that build; the published image is built without it, so setting it on a container changes nothing.
+
+### Reaching it at more than one address
+
+To use both a domain and a local IP, put the domain in `BETTER_AUTH_URL` and list the others as trusted origins:
+
+```bash
+BETTER_AUTH_URL=https://mirror.example.com
+BETTER_AUTH_TRUSTED_ORIGINS=http://192.168.1.100:4321
+```
+
+Browsers keep cookies per origin, so you sign in separately on each address.
+
+## Under a path prefix
+
+To serve the app at `https://git.example.com/mirror`, set the prefix in `BASE_URL` and keep the auth URLs as the bare origin:
+
+```bash
+BASE_URL=/mirror
+BETTER_AUTH_URL=https://git.example.com
+```
+
+Sign-in requests then go to `https://git.example.com/mirror/api/auth/*`. `BASE_URL` is read when the app starts, so the published image works under any prefix. Have the proxy pass the full path through, including the prefix; the app strips it itself.
+
+## Live updates
+
+The Dashboard, Repositories, Organizations and Activity pages get live updates over server-sent events, long-lived responses from `/api/sse` and `/api/events` (with your `BASE_URL` in front). A proxy that buffers or compresses responses holds them back, so status badges and progress only change when you reload.
+
+The app sends `X-Accel-Buffering: no` on both, which nginx honours, and a heartbeat every 30 seconds so idle timeouts do not cut them. nginx needs nothing special. For other proxies and tunnels, turn off response buffering and compression for those two paths.
+
+## Example: nginx
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name mirror.example.com;
+    # ssl_certificate and ssl_certificate_key as usual
+
+    location / {
+        proxy_pass http://127.0.0.1:4321;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+}
+```
+
+The app reads `X-Forwarded-Host` to work out its own address.
+
+## Helm
+
+The chart sets `BETTER_AUTH_URL` and `BETTER_AUTH_TRUSTED_ORIGINS` from `gitea-mirror.core.betterAuthUrl` and `gitea-mirror.core.betterAuthTrustedOrigins`. It has no value for `BASE_URL`; add it through `deployment.env`:
+
+```yaml
+gitea-mirror:
+  core:
+    betterAuthUrl: "https://git.example.com"
+    betterAuthTrustedOrigins: "https://git.example.com"
+
+deployment:
+  env:
+    - name: BASE_URL
+      value: "/mirror"
+```
+
+## Single sign-on through the proxy
+
+Authentik, Authelia and other proxies that log users in can pass the user to Gitea Mirror in a header. See [Header authentication](/docs/authentication/#header-authentication).

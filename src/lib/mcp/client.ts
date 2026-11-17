@@ -1,5 +1,5 @@
 /**
- * The MCP tools act through the app's own REST API (docs/API.md), with the
+ * The MCP tools act through the app's own REST API (www/src/pages/docs/api.mdx), with the
  * credential the MCP request came with, so every route's checks and the
  * read only key rule apply exactly as they do for a script. Writes always
  * send a JSON content type, which the app requires even without a body.

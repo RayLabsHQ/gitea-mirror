@@ -1,0 +1,127 @@
+---
+layout: '../../layouts/DocsLayout.astro'
+title: Backups and upgrades
+description: What to back up, how to restore it, and how to update Gitea Mirror safely with each install method.
+---
+
+# Backups and upgrades
+
+Gitea Mirror keeps everything in one data directory. Back that up, keep your two secrets, and an upgrade or a move to a new machine is a matter of copying the directory back.
+
+## Where the data lives
+
+| Install | Data directory |
+| --- | --- |
+| Docker and Docker Compose | `/app/data` in the container, usually the `./data` folder or a named volume on the host |
+| Helm | The PersistentVolumeClaim mounted at `/app/data` |
+| NixOS module | `dataDir`, `/var/lib/gitea-mirror` by default |
+| `nix run` | `~/.local/share/gitea-mirror`, or `DATA_DIR` |
+| Bare metal | `data/` in the folder you start it from |
+
+What is inside is listed in [Deployment](/docs/deployment/#data-and-persistence).
+
+## What to back up
+
+- **The data directory.** `tmp/` can be left out. `mirrors/` can be left out too: a missing clone for a GitHub or GitLab destination is cloned again on its next sync, at the cost of a full download.
+- **Your secrets, if you set them yourself.** When you let the app generate them, they are in the data directory as `.better_auth_secret` and `.encryption_secret`. When you set `BETTER_AUTH_SECRET` and `ENCRYPTION_SECRET` in a `.env` file, a compose file, a Kubernetes Secret or a NixOS `environmentFile`, back that up as well.
+
+Without the same `ENCRYPTION_SECRET`, every stored token is unreadable and has to be entered again. Without the same `BETTER_AUTH_SECRET`, everyone is signed out.
+
+The mirrors themselves live on your Gitea or Forgejo server and are backed up with it, not here.
+
+## Taking a backup
+
+The simplest safe backup is to stop the app, copy the directory and start it again:
+
+```bash
+docker compose stop
+tar czf gitea-mirror-backup.tar.gz data
+docker compose start
+```
+
+That is for the quick start compose file, which keeps the data in `./data` next to it. `docker-compose.yml` uses a named volume instead; copy it out with a throwaway container while the app is stopped:
+
+```bash
+docker run --rm -v gitea-mirror_gitea-mirror-data:/data -v "$PWD":/backup alpine \
+  tar czf /backup/gitea-mirror-backup.tar.gz -C /data .
+```
+
+Compose puts the project name, usually the folder name, in front of the volume name. `docker volume ls` shows the exact name.
+
+Copying the database file while the app is writing to it can catch a write halfway. To back up without stopping, let SQLite make the copy. The Docker image includes the `sqlite3` tool:
+
+```bash
+docker compose exec gitea-mirror sqlite3 /app/data/gitea-mirror.db ".backup '/app/data/gitea-mirror-backup.db'"
+```
+
+Then copy `gitea-mirror-backup.db` off the machine together with the rest of the directory. On bare metal, run the same `sqlite3` command against `data/gitea-mirror.db`.
+
+## Restoring
+
+1. Stop the app.
+2. Put the data directory back where it was, owned by the user the app runs as.
+3. Start the app with the same secrets.
+
+If you used the online backup, rename `gitea-mirror-backup.db` to `gitea-mirror.db` first. On first start the app applies any database migrations the restored copy is missing, so a backup from an older version restores fine into a newer one.
+
+## Upgrading
+
+Back up first, and read the [release notes](https://github.com/RayLabsHQ/gitea-mirror/releases) for anything marked as a change in behavior. Database migrations run on their own when the new version starts.
+
+**Docker Compose:**
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+`docker compose up -d` alone keeps the image you already have.
+
+**Plain `docker run`:** `docker pull ghcr.io/raylabshq/gitea-mirror:latest`, then remove the container and run it again with the same flags and the same data volume.
+
+**Helm:** run the same `helm upgrade --install` command you installed with. Without `--version` it moves to the newest chart.
+
+**NixOS:** update the flake input, then rebuild:
+
+```bash
+nix flake update gitea-mirror
+sudo nixos-rebuild switch
+```
+
+**Proxmox LXC:** the Community Scripts installer has its own update command; see the [Community Scripts page](https://community-scripts.github.io/ProxmoxVE/scripts?id=gitea-mirror).
+
+**Bare metal:**
+
+```bash
+git pull
+bun install
+bun run build
+```
+
+Then restart the app (`bun run start`, or your systemd service).
+
+### Going back
+
+Downgrades are not tested. If an upgrade goes wrong, start the version you had before and restore the backup you took before upgrading.
+
+## Pinning a version
+
+`latest` follows the newest stable release. To update only when you choose, pin a release tag instead:
+
+| Tag | What it is |
+| --- | --- |
+| `latest` | The newest stable release. Pre-releases do not move it. |
+| `v3.53.1` | One release. Every release has its own tag. |
+| `edge` | Every commit to `main`, including unreleased changes. |
+
+```yaml
+services:
+  gitea-mirror:
+    image: ghcr.io/raylabshq/gitea-mirror:v3.53.1
+```
+
+With Helm, pin the chart with `--version`. With Nix, use `github:RayLabsHQ/gitea-mirror/v3.53.1` as the flake reference.
+
+## Knowing when there is an update
+
+The running version is shown at the bottom of the sidebar, with a line underneath when a newer release is out. The same information is in `/api/health` as `version`, `latestVersion` and `updateAvailable`, which suits monitoring tools.

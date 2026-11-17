@@ -91,7 +91,7 @@ Things you might ask:
 - The tools call the app's REST API from inside the app, at the address it listens on (`HOST` and `PORT`, under `BASE_URL`). If that address is not reachable from the app itself, set `MCP_INTERNAL_URL` on the server, for example `http://127.0.0.1:4321`.
 - Repository names, error messages and activity text come from your source and destination hosts. The server tells the assistant to treat them as data, but review what an assistant proposes before it acts on a full access key.
 - This package logs to stderr only and never prints the key.
-- Anything the tools do not cover is available through the [REST API](https://github.com/RayLabsHQ/gitea-mirror/blob/main/docs/API.md) with the same key.
+- Anything the tools do not cover is available through the [REST API](https://gitea-mirror.raylabs.io/docs/api/) with the same key.
 
 ## License
 

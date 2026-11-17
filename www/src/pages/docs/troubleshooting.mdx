@@ -1,0 +1,104 @@
+---
+layout: '../../layouts/DocsLayout.astro'
+title: Troubleshooting
+description: Fixes for the problems people run into most often, from stuck mirrors and refused imports to sign-in errors behind a proxy.
+---
+
+# Troubleshooting
+
+The questions that come up most often, with what causes them and what to do. Error messages in the Activity Log usually name the step that failed; search this page for the text you see there.
+
+## A mirror stays on "syncing", or new commits never arrive
+
+Gitea and Forgejo answer a sync request by putting it in a queue, and say OK before it runs. If the queue is stuck, every sync looks fine in Gitea Mirror while Gitea fetches nothing. After a request has gone unrun for over an hour, the Activity Log shows a warning for that repository, and a notification goes out through the **Sync errors** switch.
+
+To check, open Gitea's **Site Administration**, then **Monitoring**, **Queues**, and the `mirror` queue. **Remove all** clears a stuck queue.
+
+## A new mirror shows "Migrating" on Gitea, or a sync fails with "not a mirror"
+
+A big repository can take Gitea longer to import than Gitea Mirror waits for an answer (five minutes). Gitea keeps importing in the background, so Gitea Mirror follows the import instead of failing, and **Retry** or **Sync** wait up to 30 minutes for it to finish.
+
+An import that failed never cleans itself up: the repository stays on the destination in the "Migrating" state, or without mirror settings, and syncs fail with HTTP 400 "Repository is not a mirror". Delete that repository on the destination (its page says the migration failed and offers to delete it), then **Retry** it in Gitea Mirror.
+
+If you deleted a repository and Gitea still refuses the name, its files may be left on disk. They are listed under **Site Administration**, **Repositories**, **Unadopted repositories**, where you can delete them.
+
+## Mirroring fails with HTTP 422 "You can not import from disallowed hosts"
+
+Gitea refuses to import from private network addresses by default. That hits a self-hosted GitLab, Forgejo or git host on your LAN, or a source reached through a local IP. Allow it in the destination's `app.ini`:
+
+```ini
+[migrations]
+ALLOW_LOCALNETWORKS = true
+```
+
+Where `app.ini` lives depends on the install: `/data/gitea/conf/app.ini` in the standard Docker image, `/etc/gitea/app.ini` in the rootless image. In Docker you can also set the environment variable `GITEA__migrations__ALLOW_LOCALNETWORKS=true` on the Gitea container. Restart Gitea afterwards.
+
+## Private repositories fail with "terminal prompts disabled" or "Invalid username or token"
+
+Gitea pulls private repositories with the source token it stored when the mirror was created. When that token expires, is revoked or is replaced, Gitea's own pulls fail. Enter the new token in each repository's **Settings**, **Mirror Settings** on the destination, or delete the mirror and mirror it again. See [Tokens and permissions](/docs/tokens/#when-a-token-changes).
+
+Forgejo before 15.0.0 never stores that token, so private repositories fail on their first scheduled pull. Upgrade Forgejo, then re-enter the token or re-mirror. See [Destinations](/docs/destinations/#gitea-and-forgejo).
+
+## Organizations are missing after an import
+
+- A **fine-grained** GitHub token gets an empty organization list from GitHub. Use a classic token with `repo` and `read:org`.
+- An organization with **SAML single sign-on** refuses the token until it is authorized for that organization (**Configure SSO** on the token's page in GitHub).
+- A **GitHub App** sees only the repositories selected for its installation.
+
+## Creating a mirror fails because the interval is too short
+
+Gitea refuses a mirror interval below its `[mirror] MIN_INTERVAL` (10 minutes by default), and creating the mirror fails. If your Gitea sets a higher minimum, for example `24h`, set the mirror interval on the Configuration page (or `GITEA_MIRROR_INTERVAL`) to at least that. The interval is a Go duration: use `30m`, `8h` or `24h`, not `1d`.
+
+Gitea Mirror applies its interval to every mirror on each sync, so changing it by hand on Gitea does not last.
+
+## Issues or releases are missing after turning metadata on
+
+Mirroring metadata starts with the next sync. Select the repositories on the Repositories page and click **Sync**. For a full pass from the start, use **Re-run Metadata**, which clears what the app remembers about each repository's metadata and starts a sync.
+
+Issues, pull requests, labels and milestones need a GitHub source; releases also work with Gitea and Forgejo sources. Push destinations (GitHub, GitLab) get no metadata at all.
+
+## Pushing to a mirror fails with "mirror repository is read-only"
+
+Every repository Gitea Mirror creates on Gitea or Forgejo is a pull mirror, and pull mirrors refuse pushes so the copy cannot drift from the source. Commit to the source instead; the change arrives with the next sync. If you want a copy you can push to, clone the mirror, push it to a new regular repository, and stop mirroring the original.
+
+## Sign-in fails with "Invalid origin", or loops back to the login page
+
+The auth layer only accepts requests from the origins it knows. Set `BETTER_AUTH_URL` to the address you open in the browser, and add every other address you use (a local IP next to a domain name, for example) to `BETTER_AUTH_TRUSTED_ORIGINS`. See [Reverse proxy and URLs](/docs/reverse-proxy/).
+
+If you built the app from source with `PUBLIC_BETTER_AUTH_URL` set, for example in a `.env` file copied from an older `.env.example`, that address is fixed into the build and sign-in only works there. Remove it and build again.
+
+## Status badges and progress never update
+
+The dashboard gets live updates over a long-lived server-sent events stream (`/api/sse` and `/api/events`). A proxy that buffers or compresses responses holds the stream back, so pages show stale state until you reload. The app already sends `X-Accel-Buffering: no`, which nginx honours; for other proxies, turn buffering and compression off for those two paths. See [Reverse proxy and URLs](/docs/reverse-proxy/#live-updates).
+
+## The container uses a lot of memory, or gets killed
+
+- **Release assets** are streamed through `tmp/release-assets/` in the data directory since 3.53.1. Older versions held each asset in memory up to about three times over; upgrade if large releases are involved.
+- **Snapshots** in `repo-backups/` grow with every force-push snapshot. Lower the retention in the force-push protection settings, or switch the strategy. See [Force-push protection](/docs/force-push-protection/).
+- **Building from source** before 3.41.0 could run out of memory when `data/repo-backups` was large, because the CSS build scanned it. Update.
+
+## An update did not take effect
+
+`docker compose up -d` reuses the image you already have. Pull first:
+
+```bash
+docker compose pull
+docker compose up -d
+```
+
+The running version is shown at the bottom of the sidebar. Pin a release tag such as `ghcr.io/raylabshq/gitea-mirror:v3.53.1` if you want updates only when you choose. See [Backups and upgrades](/docs/backups-and-upgrades/).
+
+## `DATABASE_URL` points at PostgreSQL
+
+Gitea Mirror only supports SQLite. A `postgres://` or `postgresql://` value is ignored with a warning, and the app uses `data/gitea-mirror.db`. Use a `file:` URL, or leave `DATABASE_URL` unset.
+
+## Resetting the admin password
+
+Gitea Mirror sends no email, so there is no reset link. From a checkout of the repository, with the data directory at `./data`:
+
+```bash
+bun install
+bun run reset-password -- --email=user@example.com --new-password='new-secure-password'
+```
+
+The command signs the user out everywhere. The Docker image does not include this script: stop the container and run it from a checkout instead. With the compose quick start, the checkout you started it from already has the data directory at `./data`.

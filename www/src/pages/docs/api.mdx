@@ -18,7 +18,7 @@ The web interface talks to a set of JSON endpoints under `/api`. With an API key
 
 Keys start with `gm_` and belong to the user who created them. A full access key carries the same rights as that user's session. Revoke a key from the same list at any time. Keys are stored hashed. They are not rate limited by the app, so a runaway script is stopped by revoking its key.
 
-Pick **Read only** under **Access** for a key that only needs to look: it can call every `GET` endpoint and nothing else. Any `POST`, `PUT`, `PATCH` or `DELETE` with a read only key gets `403`:
+Pick **Read only** under **Access** for a key that only needs to look: it can call the app's `GET` endpoints and the [MCP server](/docs/mcp/), and nothing else. Any `POST`, `PUT`, `PATCH` or `DELETE`, and any call under `/api/auth/` other than `GET /api/auth/get-session`, gets `403`:
 
 ```json
 { "success": false, "error": "This API key is read only. Use a key with full access to make changes.", "code": "API_KEY_READ_ONLY" }
@@ -30,18 +30,14 @@ Saved tokens and secrets never come back from the API, whatever the key: respons
 
 ## Send the key
 
-Put the key in the `x-api-key` header. Every endpoint that accepts a session cookie accepts the header instead.
+Put the key in the `x-api-key` header. The app's endpoints accept it in place of a session cookie. Two exceptions: managing keys needs a browser session (see [Managing keys](#managing-keys-from-the-api)), and the MCP endpoint is the other way round, it only takes a key.
 
 ```bash
 curl -sS "https://mirror.example.com/api/github/repositories" \
   -H "x-api-key: gm_..."
 ```
 
-A missing, malformed, expired or revoked key gets `401 Unauthorized`:
-
-```json
-{ "success": false, "error": "Unauthorized" }
-```
+A missing, malformed, expired or revoked key gets `401 Unauthorized` with a JSON `error` message.
 
 Send `Content-Type: application/json` on every `POST`, `PUT`, `PATCH` and `DELETE`, also when the call has no body. Without it a script gets `403` with `Cross-site POST form submissions are forbidden`: the app's protection against cross-site form posts treats a write with no content type, or a form content type, as a form unless its `Origin` header matches the app. curl's `-d` sends a form content type unless you set the header.
 
@@ -55,7 +51,7 @@ If the app is served under a path prefix (`BASE_URL=/mirror`), prefix every URL 
 
 ## Endpoints
 
-The calls below cover the common automation cases. Response bodies show the fields you are most likely to use; the app returns more.
+The calls below cover the common automation cases. Response bodies show the fields you are most likely to use; the app returns more. The [endpoint reference](#endpoint-reference) further down lists the rest.
 
 ### Health
 
@@ -77,11 +73,9 @@ Despite the name it lists every repository the account tracks, whatever the conf
       "name": "hello-world",
       "fullName": "octocat/hello-world",
       "owner": "octocat",
-      "organization": null,
       "status": "mirrored",
       "mirroredLocation": "github-mirrors/hello-world",
       "lastMirrored": "2026-09-02T08:00:00.000Z",
-      "errorMessage": null,
       "destinationOrg": null,
       "sourceProvider": "github",
       "isPrivate": false
@@ -89,6 +83,8 @@ Despite the name it lists every repository the account tracks, whatever the conf
   ]
 }
 ```
+
+Fields with no value, such as `organization`, `lastMirrored` and `errorMessage`, are left out of the entry rather than sent as `null`. The response also carries `destinationOwners`, the destination owner each repository resolves to, and `organizationDestinations`, each organization's destination override.
 
 `status` is one of `imported`, `mirroring`, `mirrored`, `failed`, `syncing`, `synced`, `skipped`, `ignored`, `pending-approval`, `deleting`, `deleted`, `archived`. `ignored` means you chose to skip the repository, and `pending-approval` means force-push protection held a sync until you approve or dismiss it.
 
@@ -131,7 +127,7 @@ Starts mirroring in the background and returns straight away. Poll `GET /api/rep
 | `400` | `repositoryIds` missing or empty, or no destination (Gitea) token saved. |
 | `404` | None of the ids belong to this account. |
 
-`POST /api/job/sync-repo` takes the same body and re-syncs repositories that are already mirrored.
+`POST /api/job/sync-repo` takes the same body and starts a sync of those repositories. `POST /api/job/retry-repo` does what the **Retry** button does: it syncs a repository whose mirror exists on the destination and mirrors it again otherwise.
 
 ### Organizations
 
@@ -146,11 +142,17 @@ Starts mirroring in the background and returns straight away. Poll `GET /api/rep
 | Status | Meaning |
 | --- | --- |
 | `200` | Added, with every repository the source lists in it. `organization.id` is what the mirror call needs. |
-| `400` | `org` missing, an unknown `role` or `provider`, or no source is connected. |
+| `400` | `org` missing or containing `/` (add the top level group), an unknown `role` or `provider`, a `sourceId` that is not this account's, or no source is connected. |
 | `404` | No configuration for this account, or the source has no organization of that name. A user account is not an organization: add its repositories one at a time with `POST /api/sync/repository`. |
-| `409` | Already tracked. `organization` is the stored record. Send `force: true` to refresh it instead. |
+| `409` | Already tracked. `organization` is the stored record. |
+
+`force: true` on an organization that is already tracked answers `200` and only updates its stored `role` and source pin; it does not import anything. To pick up repositories added to the organization since, use `POST /api/job/sync-org` (below).
+
+To add a public organization without an account, the way **Public only** does in the app, send `provider` (`github`, `gitlab` or `gitea`) instead of `sourceId`, and `sourceUrl` for a self-hosted instance. Only public repositories are imported.
 
 Then `POST /api/job/mirror-org` with `{ "organizationIds": ["..."] }` mirrors its repositories. It takes ids, not names, and answers `404` when none of them belong to this account.
+
+`POST /api/job/sync-org` with `{ "orgId": "..." }` does what **Sync Organization** does: it checks the source for new repositories, mirrors the new ones and syncs the rest. The answer's `queued` counts what it started (`mirror`, `sync`, `skipped`). It answers `409` when the organization is ignored or already running.
 
 `GET /api/github/organizations` lists every tracked organization with its `id`, `name`, `status` and repository counts. `GET /api/organizations/{id}` returns one as `{ "success": true, "organization": { ... } }`, with the stored public, private and fork counts, which can be missing or older than the list's, or `404` when the id is not this account's. An organization's `status` turns `mirrored` once every repository in it has been processed; each repository keeps its own `status`.
 
@@ -162,9 +164,59 @@ When several sources are connected, an optional `sourceId` picks which one the o
 
 `PATCH /api/organizations/:id` with `{ "sourceId": "…" }` re-pins an existing organization to another source, and `{ "sourceId": null }` clears the pin so the organization follows every source's repositories of the same name again. A pin whose source was removed falls back the same way.
 
+### Move a mirror to another owner
+
+`POST /api/repositories/{id}/move-mirror`
+
+```json
+{ "destinationOrg": "archive" }
+```
+
+Changes the repository's destination and transfers its existing mirror there on the destination (Gitea or Forgejo), as **Move and save** does in the app. `PATCH /api/repositories/{id}` with `destinationOrg` only changes the label: the mirror stays where it is and the new destination applies if the mirror is ever created again. Send `null` to remove the override and move the mirror back to where the strategy puts it.
+
+The mirror is looked for at its recorded location first, then anywhere on the destination in case someone transferred it by hand. A target organization that does not exist is created, the way a mirror run creates one. When a mirror of the same source already sits under the target, the row is pointed at it and the old copy is left alone. The row is only written once the destination has accepted the transfer, so a refused move changes nothing.
+
+```json
+{
+  "success": true,
+  "destinationOrg": "archive",
+  "mirroredLocation": "archive/hello-world",
+  "transfer": {
+    "outcome": "moved",
+    "from": "github-mirrors/hello-world",
+    "to": "archive/hello-world",
+    "message": "Moved octocat/hello-world from github-mirrors/hello-world to archive/hello-world."
+  }
+}
+```
+
+| `transfer.outcome` | Meaning |
+| --- | --- |
+| `moved` | The destination moved the repository. `mirroredLocation` is the new place. |
+| `pending` | The token cannot create repositories under the new owner, so the destination waits for one of its owners to accept. The mirror keeps syncing where it is, and sync follows it once accepted. |
+| `recorded` | A mirror of the same source already sat under the target; the row now points at it. |
+| `not-mirrored` | The row has never been mirrored, so only the destination changed. |
+
+| Status | Meaning |
+| --- | --- |
+| `200` | Done, see `transfer`. |
+| `400` | Bad owner name, destination not configured, or a GitHub or GitLab destination (`destination-unsupported`). |
+| `403` | The destination token may not transfer the repository (`forbidden`). |
+| `404` | The repository or the configuration does not belong to this account. |
+| `409` | Nothing changed. `code` says why: `not-on-destination`, `name-taken`, `transfer-pending`, or `destination-mismatch` for a row mirrored to another host. |
+| `502` | The destination refused for another reason (`destination-error`). |
+
+`POST /api/organizations/{id}/move-mirrors` does the same for every mirrored repository of an organization:
+
+```json
+{ "destinationOrg": "archive", "dryRun": true }
+```
+
+`dryRun` defaults to `true` and answers with `plan.moves` (`id`, `fullName`, `from`, `to`) and `plan.skipped` (`fullName`, `reason`) without touching anything. Repositories with their own destination, starred repositories, rows that are not mirrored yet and rows in a running mirror or sync are skipped. With `dryRun: false` each planned move runs, the organization's `destinationOrg` is written, and the answer lists `moved`, `pending`, `recorded` and `failed` (`fullName`, `error`). A failed repository keeps syncing where it is.
+
 ### Storage
 
-`GET /api/storage` returns what the Storage page shows: how much space the account's mirrors take on the destination (issue #479).
+`GET /api/storage` returns what the Storage page shows: how much space the account's mirrors take on the destination.
 
 ```json
 {
@@ -189,6 +241,10 @@ Sizes are bytes. `destinationSize` is Git and LFS together as Gitea or Forgejo r
 
 `missing` counts mirrors not found on the destination and `failed` the ones a request failed for; both keep their stored numbers. A read only API key cannot start a run.
 
+### Export as CSV
+
+`GET /api/repositories/export` and `GET /api/organizations/export` return the same CSV files as the **Export CSV** buttons, with every repository or organization the account tracks. The columns are listed in [Repositories and organizations](/docs/repositories-and-organizations/#exporting-to-csv).
+
 ### Run cleanup
 
 `POST /api/cleanup/trigger` runs the [repository cleanup](/docs/cleanup-and-reconcile/) now, with the account's saved cleanup settings, and returns how many orphaned repositories were found and processed and any errors. `GET /api/cleanup/trigger` returns the cleanup configuration and the last and next run times.
@@ -200,15 +256,16 @@ Sizes are bytes. `destinationSize` is Git and LFS together as Gitea or Forgejo r
 Compares what the destination (Gitea or Forgejo) holds with the repositories this account tracks. See [Cleanup and reconcile](/docs/cleanup-and-reconcile/#reconcile) for what the groups mean.
 
 ```json
-{ "dryRun": true, "adoptUntracked": false, "resetMissing": false }
+{ "dryRun": true, "adoptUntracked": false, "resetMissing": false, "relocateMoved": false }
 ```
 
 The body is optional and every field defaults to the value above, so an empty `POST` (with the JSON content type, see [Send the key](#send-the-key)) is a dry run. With `dryRun: false`:
 
 - `adoptUntracked: true` creates a row for each untracked mirror from its source URL, so scheduled sync and the cleanup service include it from then on. The row keeps the mirror where it is, even when the strategy would put it elsewhere.
 - `resetMissing: true` sets each missing row back to `imported` so the next mirror run recreates the mirror. Rows are never deleted.
+- `relocateMoved: true` points each moved row at where its mirror is now, for mirrors someone transferred to another owner on the destination.
 
-Nothing is deleted or archived on either side by this call.
+Nothing is created, moved, deleted or archived on the destination by this call.
 
 ```json
 {
@@ -217,6 +274,7 @@ Nothing is deleted or archived on either side by this call.
   "report": {
     "untracked": [{ "location": "github-mirrors/hello-world", "originalUrl": "https://github.com/octocat/hello-world.git", "sourcePath": "octocat/hello-world", "isPrivate": false }],
     "missing": [{ "id": "9b2f...", "fullName": "octocat/gone", "location": "github-mirrors/gone" }],
+    "moved": [{ "id": "4c1d...", "fullName": "octocat/tools", "from": "github-mirrors/tools", "to": "archive/tools" }],
     "notManaged": [{ "location": "me/notes", "reason": "not a mirror" }],
     "unverified": [],
     "healthyCount": 41,
@@ -225,7 +283,7 @@ Nothing is deleted or archived on either side by this call.
     "skippedOwners": ["starred"],
     "totalOnDestination": 43
   },
-  "applied": { "adopted": 1, "reset": 1, "skipped": 0 }
+  "applied": { "adopted": 1, "reset": 1, "relocated": 1, "skipped": 0 }
 }
 ```
 
@@ -236,6 +294,74 @@ Nothing is deleted or archived on either side by this call.
 | `200` | Report computed, and applied when asked. |
 | `400` | A field has the wrong type, the destination is not configured yet, or the destination is a push target. |
 | `404` | No configuration for this account. |
+
+## Endpoint reference
+
+Every endpoint below takes the key the same way. Ids are the ones the list endpoints return. Calls under `/api/job/` answer straight away and do the work in the background; watch the repository or organization `status` to follow it.
+
+### Repositories
+
+| Call | What it does |
+| --- | --- |
+| `GET /api/github/repositories` | Every tracked repository. |
+| `GET /api/repositories/{id}` | One repository. |
+| `PATCH /api/repositories/{id}` | Body: `destinationOrg`, `mirrorOverrides`. Sets the destination label or the per repository [mirror options](/docs/repositories-and-organizations/#mirror-options-for-one-repository). `null` clears either. Does not move an existing mirror; use `move-mirror` for that. |
+| `PATCH /api/repositories/{id}/status` | Body: `status`. Sets the status directly. The app uses it for **Ignore** (`ignored`) and **Include** (`imported`). |
+| `POST /api/repositories/{id}/move-mirror` | Body: `destinationOrg`. Moves the mirror, see [above](#move-a-mirror-to-another-owner). |
+| `GET /api/repositories/{id}/releases` | The releases the destination holds for a mirrored repository (`tag`, `prerelease`), up to 300. |
+| `DELETE /api/repositories` | Body: `ids`. Removes repositories from Gitea Mirror. The mirrors on the destination stay. |
+| `GET /api/repositories/export` | CSV of every tracked repository. |
+
+### Jobs
+
+| Call | What it does |
+| --- | --- |
+| `POST /api/job/mirror-repo` | Body: `repositoryIds`. Creates the mirrors. |
+| `POST /api/job/sync-repo` | Body: `repositoryIds`. Syncs them now. |
+| `POST /api/job/retry-repo` | Body: `repositoryIds`. Syncs a mirror that exists, mirrors again one that does not. |
+| `POST /api/job/reset-metadata` | Body: `repositoryIds`. Forgets what was mirrored of each repository's metadata, so the next sync goes through all of it. It does not start that sync; call `sync-repo` afterwards, as **Re-run Metadata** does. |
+| `POST /api/job/approve-sync` | Body: `repositoryIds`, `action`. `approve` runs a sync held by force-push protection after a safety snapshot; `dismiss` marks it synced without syncing. |
+| `POST /api/job/schedule-sync-repo` | Syncs every mirrored, synced or failed repository now and records it as the schedule's last run. |
+| `POST /api/job/cancel-pending` | Sets every `imported` and `failed` repository to `ignored`, like **Stop pending mirrors**. |
+| `POST /api/job/mirror-org` | Body: `organizationIds`. Mirrors the organizations' repositories. |
+| `POST /api/job/sync-org` | Body: `orgId`. Checks the source for new repositories, mirrors them and syncs the rest. |
+
+### Importing
+
+| Call | What it does |
+| --- | --- |
+| `POST /api/sync` | Imports from every enabled source, like the import button on the Configuration page. Answers with `newRepositories`, `newOrganizations` and `failedSources`. |
+| `POST /api/sync/repository` | Body: `owner`, `repo`. Adds one repository, see [above](#add-a-repository). |
+| `POST /api/sync/organization` | Body: `org`. Adds an organization, see [above](#organizations). |
+
+### Organizations
+
+| Call | What it does |
+| --- | --- |
+| `GET /api/github/organizations` | Every tracked organization. |
+| `GET /api/organizations/{id}` | One organization. |
+| `PATCH /api/organizations/{id}` | Body: `destinationOrg`, `mirrorOverrides`, `sourceId`. Sets the destination, the mirror options or the source pin. `null` clears each. |
+| `PATCH /api/organizations/{id}/status` | Body: `status`, `cascade`. Sets the status. With `cascade: true`, `ignored` also ignores its repositories and `imported` brings them back, like **Ignore Organization** and **Include Organization**. |
+| `POST /api/organizations/{id}/move-mirrors` | Body: `destinationOrg`, `dryRun`. Moves the organization's mirrors, see [above](#move-a-mirror-to-another-owner). |
+| `DELETE /api/organizations/{id}` | Removes the organization and its repositories from Gitea Mirror. Nothing is removed from the destination. |
+| `GET /api/organizations/export` | CSV of every tracked organization. |
+
+### Activity, status and storage
+
+| Call | What it does |
+| --- | --- |
+| `GET /api/health` | Status, version and database check. Needs no key. |
+| `GET /api/dashboard` | The Dashboard's counts and recent lists. |
+| `GET /api/activities` | The whole activity log, newest first. |
+| `POST /api/activities/cleanup` | Clears the activity log. Stops nothing. |
+| `GET /api/rate-limit` | GitHub's rate limit as last seen. Add `?refresh=true` to ask GitHub now. |
+| `GET /api/storage` | Sizes, see [above](#storage). |
+| `POST /api/storage/refresh` | Starts Refresh sizes. |
+| `POST /api/cleanup/trigger` | Runs repository cleanup now. `GET` returns its settings and run times. |
+| `POST /api/cleanup/reconcile` | Compares the destination with the database, see [above](#reconcile-the-destination). |
+| `POST /api/mcp` | Body: JSON-RPC. The [MCP server](/docs/mcp/). |
+
+`GET /api/sse` and `GET /api/events` are the live update streams the pages use. The endpoints behind the Configuration page (`/api/config`, `/api/sources`, `/api/sso/*`, `/api/notifications/test` and the test connection calls) are left out here; they follow the forms and may change with them.
 
 ## A complete example
 

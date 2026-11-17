@@ -1,0 +1,83 @@
+---
+layout: '../../layouts/DocsLayout.astro'
+title: Tokens and permissions
+description: Which token each source and destination needs, the scopes to tick, and what to do when a token changes.
+---
+
+# Tokens and permissions
+
+Every connection on the Configuration page needs a token: one for each source you pull from and one for the destination. This page lists the scopes each one needs and why. Tokens are encrypted with AES-256-GCM before they are stored, whether they come from the form or from the environment, and the **Test** button on each card makes a live call so you can check a token before saving it.
+
+## GitHub source
+
+Use a **classic** personal access token (GitHub, Settings, Developer settings, Personal access tokens, Tokens (classic)).
+
+| Scope | Why |
+| --- | --- |
+| `repo` | Read your private repositories and the private repositories of your organizations. |
+| `read:org` | List the organizations you belong to. The hint in the app asks for `admin:org`, which includes `read:org`; the app only reads organizations. |
+
+A few things to know:
+
+- **Fine-grained tokens do not see organizations.** GitHub answers the organization listing with an empty list for them, so organization discovery finds nothing. Use a classic token, or a GitHub App.
+- **Organizations with SAML single sign-on** refuse a token until it is authorized for that organization. On the token's page in GitHub, use **Configure SSO** and authorize it for each such organization.
+- **GitHub Enterprise Server** works the same way; enter the server's address as the source's Instance URL. See [Sources](/docs/sources/#choosing-a-source).
+
+### GitHub App instead of a token
+
+A GitHub source can authenticate as a GitHub App installation instead. Create a GitHub App with read access to repository **Contents** and **Metadata**, plus **Issues** and **Pull requests** if you mirror that metadata. Install it on the repositories you want, then in the source editor set **Authentication** to **GitHub App installation** and enter the installation's account or organization as the username, the App ID, the installation ID and the PEM private key.
+
+- The App sees only the repositories selected for its installation. It cannot see your starred repositories or star lists; use a token for those.
+- Installation tokens expire after an hour, so the app hands the mirror a fresh one before each sync and turns off Gitea's own pull schedule for those repositories. Keep the [scheduler](/docs/configuration/) on.
+- This needs **Gitea 1.27 or later** as the destination. Older Gitea and Forgejo cannot update a mirror's credentials through the API, so mirroring an App-backed repository to them is refused.
+
+## GitLab source
+
+A personal access token with `read_api` and `read_repository`. Without a token, only the configured user's public projects and stars are visible.
+
+## Gitea, Forgejo and Codeberg sources
+
+An access token with `read:repository`, `read:user` and `read:organization` (in Gitea and Forgejo: Settings, Applications). Without a token, only the configured user's public repositories and stars are visible. Releases are read with this token too.
+
+## Git URL source
+
+No token. Enter a username and password only if the host asks for a login to clone.
+
+## Gitea and Forgejo destination
+
+The token belongs to the user who owns the mirrors (the username on the destination card). Create it on the destination under Settings, Applications.
+
+| Scope | Why |
+| --- | --- |
+| `write:repository` | Create the mirrors, start syncs, set descriptions and topics, create releases and upload their assets, move mirrors to another owner, and archive or delete them during cleanup. |
+| `write:organization` | Create the destination organizations your mirror strategy needs, and read the ones that exist. |
+| `read:user` | Read the account the token belongs to. |
+| `write:issue` | Only when you mirror issues, pull requests, labels or milestones. Gitea files all four under its issue scope. |
+
+The user also needs permission to create repositories in each destination organization: an owner, or a member of a team allowed to create repositories. An admin token is not needed.
+
+Gitea itself pulls the code from the source with the source token, which is stored in the mirror's settings on the destination. See [Destinations](/docs/destinations/) for the Forgejo versions that do not keep it.
+
+## GitHub and GitLab destinations
+
+| Target | Scopes | Notes |
+| --- | --- | --- |
+| GitHub | `repo`, `workflow` | GitHub refuses a push that adds GitHub Actions workflow files unless the token has `workflow`. Add `delete_repo` only if cleanup should delete repositories on GitHub. |
+| GitLab | `api`, `write_repository` | |
+
+GitHub organizations cannot be created through the API. Create the organization first and make the token's user a member who can create repositories. More in [Destinations](/docs/destinations/#github-and-gitlab).
+
+## When a token changes
+
+**A new source token** is used for everything the app does from then on, but mirrors that already exist on Gitea or Forgejo keep the token they were created with: Gitea uses it for its own scheduled pulls. Once the old token expires or is revoked, syncs of private repositories fail with `terminal prompts disabled` or `Invalid username or token`. Fix each affected mirror one of two ways:
+
+1. On the destination, open the repository's **Settings**, then **Mirror Settings**, and enter the new token as the authorization password.
+2. Or delete the repository on the destination and mirror it again from the Repositories page, so it is created with the current token.
+
+GitHub App sources are the exception: their token is handed over before every sync.
+
+**A new destination token** only needs to be saved on the destination card. Nothing on the destination stores it.
+
+## Gitea Mirror's own API keys
+
+Scripts, CI jobs and the [MCP server](/docs/mcp/) authenticate to Gitea Mirror itself with an API key, created under Configuration, Authentication, API Keys. See [API and API keys](/docs/api/).

@@ -125,7 +125,7 @@ These are the ones that matter for nearly every deployment. The [environment var
 | Variable | Default | Description |
 | --- | --- | --- |
 | `NODE_ENV` | `development` | Runtime environment. The container image sets `production`. |
-| `HOST` | `localhost` | Interface to bind. The container image sets `0.0.0.0`. |
+| `HOST` | `0.0.0.0` | Interface to bind. |
 | `PORT` | `4321` | Port to listen on. |
 | `BASE_URL` | `/` | Path prefix when the app is served under a subpath, for example `/mirror`. |
 | `DATABASE_URL` | `sqlite://data/gitea-mirror.db` | SQLite database location. The container image sets `file:data/gitea-mirror.db`. |
@@ -138,7 +138,6 @@ These are the ones that matter for nearly every deployment. The [environment var
 | --- | --- | --- |
 | `BETTER_AUTH_SECRET` | generated in Docker and Nix | Signs session cookies. Generate with `openssl rand -base64 32`. Required for a bare metal install. |
 | `BETTER_AUTH_URL` | `http://localhost:4321` | The origin the auth server runs on. Scheme and host only, no path. |
-| `PUBLIC_BETTER_AUTH_URL` | none | The origin the browser should send auth requests to. Set this when the app is reachable at more than one origin. Scheme and host only. |
 | `BETTER_AUTH_TRUSTED_ORIGINS` | none | Comma-separated list of additional origins allowed to make auth requests. |
 | `ENCRYPTION_SECRET` | generated in Docker and Nix | Key for AES-256-GCM encryption of stored GitHub and Gitea tokens. Generate with `openssl rand -base64 48`. Falls back to `BETTER_AUTH_SECRET` when unset. |
 
@@ -146,30 +145,7 @@ These are the ones that matter for nearly every deployment. The [environment var
 
 The origin of `BETTER_AUTH_URL` is trusted automatically, so `BETTER_AUTH_TRUSTED_ORIGINS` is only for additional origins. Common reasons to add one: reaching the app by local IP as well as by domain name, an external SSO provider, or a reverse proxy on a different hostname.
 
-### Multiple access URLs
-
-To reach the app at both a local IP and a public domain:
-
-```bash
-BETTER_AUTH_URL=https://gitea-mirror.example.com
-PUBLIC_BETTER_AUTH_URL=https://gitea-mirror.example.com
-BETTER_AUTH_TRUSTED_ORIGINS=http://10.10.20.45:4321,http://192.168.1.100:4321
-```
-
-Browsers isolate cookies per origin, so you will need to sign in separately on each origin. That is a browser security rule, not something the application can work around.
-
-### Path prefix deployments
-
-To serve the app at `https://git.example.com/mirror`:
-
-```bash
-BASE_URL=/mirror
-BETTER_AUTH_URL=https://git.example.com
-PUBLIC_BETTER_AUTH_URL=https://git.example.com
-BETTER_AUTH_TRUSTED_ORIGINS=https://git.example.com
-```
-
-The auth variables stay as bare origins. The prefix comes from `BASE_URL` and is applied when auth endpoints are built, so they resolve to `https://git.example.com/mirror/api/auth/*`. Any path accidentally included in the auth URLs is stripped. `BASE_URL` is read at runtime rather than baked in at build time, so the same prebuilt image works under any prefix.
+Reaching the app at more than one address, serving it under a path prefix and running it behind a proxy are covered in [Reverse proxy and URLs](/docs/reverse-proxy/).
 
 ## Example: fully declared deployment
 
@@ -191,7 +167,6 @@ services:
       - PORT=4321
       - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}
       - BETTER_AUTH_URL=https://gitea-mirror.example.com
-      - PUBLIC_BETTER_AUTH_URL=https://gitea-mirror.example.com
       - BETTER_AUTH_TRUSTED_ORIGINS=https://gitea-mirror.example.com
       - ENCRYPTION_SECRET=${ENCRYPTION_SECRET}
 

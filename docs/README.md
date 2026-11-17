@@ -19,7 +19,7 @@ This folder contains engineering and operations references for the open-source G
 - **[SSO_TESTING.md](./SSO_TESTING.md)** – Recipes for local and staging SSO testing (Google, Keycloak, mock providers).
 
 ### API
-- **[API.md](./API.md)** – Create API keys and call the app from scripts, CI pipelines and workflow tools.
+- **[API.md](./API.md)** – Points to the API guide on the documentation website.
 
 ### Sources and destinations
 - **[SOURCE_PROVIDERS.md](./SOURCE_PROVIDERS.md)** – GitHub, GitLab and Gitea/Forgejo as sources: tokens, what each can mirror, the source lock.
