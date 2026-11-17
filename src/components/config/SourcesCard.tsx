@@ -225,13 +225,15 @@ export function SourcesCard({ sources, onRefresh }: SourcesCardProps) {
     tokenSettingsUrlFor(instanceUrl, providerMeta.tokenSettingsPath) ??
     tokenSettingsUrlFor(defaultInstanceUrl, providerMeta.tokenSettingsPath) ??
     defaultInstanceUrl;
-  // An empty token field while editing keeps the stored one, so testing
-  // and saving both fall back to it.
-  const effectiveToken = editor?.token.trim() || editing?.token || "";
+  // The API never returns a saved token, only hasToken. An empty field while
+  // editing keeps the saved one, and Test asks the server to use it.
+  const typedToken = editor?.token.trim() ?? "";
+  const hasSavedToken = Boolean(editing?.hasToken);
+  const hasAnyToken = Boolean(typedToken) || hasSavedToken;
   const isApp = provider === "github" && editor?.authType === "app";
   const isGit = provider === "git";
   const isPublicOnlyDraft =
-    !!editor && !editor.username.trim() && !effectiveToken && !isApp;
+    !!editor && !editor.username.trim() && !hasAnyToken && !isApp;
 
   const refreshSources = async () => {
     setIsRefreshing(true);
@@ -308,7 +310,7 @@ export function SourcesCard({ sources, onRefresh }: SourcesCardProps) {
       toast.error("Enter the host URL first");
       return;
     }
-    if (!effectiveToken && !isApp && !isGit) {
+    if (!hasAnyToken && !isApp && !isGit) {
       toast.error(`${providerLabel} token is required to test the connection`);
       return;
     }
@@ -323,10 +325,11 @@ export function SourcesCard({ sources, onRefresh }: SourcesCardProps) {
           body: JSON.stringify({ provider, url: editor.url, username: editor.username.trim(), authType: "app", appId: editor.appId, installationId: editor.installationId, privateKey: editor.privateKey, sourceId: editing?.id }),
         });
         return response.json();
-      })() : await githubApi.testConnection(effectiveToken, {
+      })() : await githubApi.testConnection(typedToken, {
         provider,
         url: editor.url.trim() || undefined,
         username: editor.username.trim() || undefined,
+        sourceId: typedToken ? undefined : editing?.id,
       });
       if (result.success) {
         toast.success(result.message || `Successfully connected to ${providerLabel}!`);
@@ -596,8 +599,8 @@ export function SourcesCard({ sources, onRefresh }: SourcesCardProps) {
                 value={editor.token}
                 onChange={handleFieldChange}
                 placeholder={
-                  editing
-                    ? "leave empty to keep the current token"
+                  hasSavedToken
+                    ? "Saved. Leave empty to keep it"
                     : providerMeta.tokenPlaceholder
                 }
               />
@@ -648,7 +651,7 @@ export function SourcesCard({ sources, onRefresh }: SourcesCardProps) {
                 variant="outline"
                 size="sm"
                 onClick={handleTestConnection}
-                disabled={isTesting || (isGit ? !editor.url.trim() : !effectiveToken && !isApp)}
+                disabled={isTesting || (isGit ? !editor.url.trim() : !hasAnyToken && !isApp)}
               >
                 <PlugZap className="mr-1.5 h-3.5 w-3.5" />
                 {isTesting ? "Testing..." : "Test"}
@@ -716,7 +719,7 @@ export function SourcesCard({ sources, onRefresh }: SourcesCardProps) {
                         </span>
                       )}
                       {source.authType === "app" && <span className="text-[11px] text-muted-foreground">GitHub App</span>}
-                      {source.token === "" && source.authType !== "app" && (
+                      {!source.hasToken && source.authType !== "app" && (
                         <span className="inline-flex items-center gap-1 rounded-full border border-border bg-muted/40 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
                           <Globe className="h-3 w-3" />
                           Public only

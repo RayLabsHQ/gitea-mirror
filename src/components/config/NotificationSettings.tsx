@@ -44,25 +44,50 @@ function Field({
   label,
   required,
   helper,
+  action,
   children,
 }: {
   id: string;
   label: string;
   required?: boolean;
   helper?: string;
+  /** Shown at the end of the label row, for example a Remove button. */
+  action?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
     <div className="space-y-1.5">
-      <Label htmlFor={id} className="text-xs font-medium text-muted-foreground">
-        {label}
-        {required && <span className="text-destructive"> *</span>}
-      </Label>
+      <div className="flex items-center justify-between gap-2">
+        <Label htmlFor={id} className="text-xs font-medium text-muted-foreground">
+          {label}
+          {required && <span className="text-destructive"> *</span>}
+        </Label>
+        {action}
+      </div>
       {children}
       {helper && (
         <p className="text-[11px] text-muted-foreground/80">{helper}</p>
       )}
     </div>
+  );
+}
+
+// Secrets are write-only: the API sends them empty with hasToken or
+// hasSecret set. An empty field keeps the saved one, null removes it.
+function secretPlaceholder(saved: boolean | undefined, fallback: string): string {
+  return saved ? "Saved. Leave empty to keep it" : fallback;
+}
+
+function RemoveSecretButton({ onClick }: { onClick: () => void }) {
+  return (
+    <Button
+      type="button"
+      variant="link"
+      className="h-auto p-0 text-[11px] text-muted-foreground"
+      onClick={onClick}
+    >
+      Remove
+    </Button>
   );
 }
 
@@ -207,11 +232,23 @@ export function NotificationSettings({
                   id="ntfy-token"
                   label="Access token (optional)"
                   helper="Required if your ntfy server uses authentication"
+                  action={
+                    notificationConfig.ntfy?.hasToken && !notificationConfig.ntfy?.token ? (
+                      <RemoveSecretButton
+                        onClick={() =>
+                          onNotificationChange({
+                            ...notificationConfig,
+                            ntfy: { ...notificationConfig.ntfy!, token: null, hasToken: false },
+                          })
+                        }
+                      />
+                    ) : undefined
+                  }
                 >
                   <Input
                     id="ntfy-token"
                     type="password"
-                    placeholder="tk_..."
+                    placeholder={secretPlaceholder(notificationConfig.ntfy?.hasToken, "tk_...")}
                     value={notificationConfig.ntfy?.token || ""}
                     onChange={(e) =>
                       onNotificationChange({
@@ -294,7 +331,7 @@ export function NotificationSettings({
                 >
                   <Input
                     id="apprise-token"
-                    placeholder="gitea-mirror"
+                    placeholder={secretPlaceholder(notificationConfig.apprise?.hasToken, "gitea-mirror")}
                     value={notificationConfig.apprise?.token || ""}
                     onChange={(e) =>
                       onNotificationChange({
@@ -368,7 +405,7 @@ export function NotificationSettings({
                   <Input
                     id="gotify-token"
                     type="password"
-                    placeholder="A1b2C3d4..."
+                    placeholder={secretPlaceholder(notificationConfig.gotify?.hasToken, "A1b2C3d4...")}
                     value={notificationConfig.gotify?.token || ""}
                     onChange={(e) =>
                       onNotificationChange({
@@ -438,11 +475,28 @@ export function NotificationSettings({
                   id="webhook-secret"
                   label="Signing secret (optional)"
                   helper="If set, requests include an X-Webhook-Signature header with an HMAC-SHA256 hex digest of the body (sha256=...)"
+                  action={
+                    notificationConfig.webhook?.hasSecret && !notificationConfig.webhook?.secret ? (
+                      <RemoveSecretButton
+                        onClick={() =>
+                          onNotificationChange({
+                            ...notificationConfig,
+                            webhook: {
+                              ...notificationConfig.webhook,
+                              url: notificationConfig.webhook?.url || "",
+                              secret: null,
+                              hasSecret: false,
+                            },
+                          })
+                        }
+                      />
+                    ) : undefined
+                  }
                 >
                   <Input
                     id="webhook-secret"
                     type="password"
-                    placeholder="whsec_..."
+                    placeholder={secretPlaceholder(notificationConfig.webhook?.hasSecret, "whsec_...")}
                     value={notificationConfig.webhook?.secret || ""}
                     onChange={(e) =>
                       onNotificationChange({

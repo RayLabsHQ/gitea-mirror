@@ -1,8 +1,8 @@
 /**
  * Shared shaping for the /api/sources endpoints and the sources array the
  * configuration GET returns: source rows from the service layer joined with
- * per-source repository counts, tokens decrypted like every other config
- * endpoint.
+ * per-source repository counts. Tokens are write-only: an item says whether
+ * one is saved (hasToken) and never carries it.
  *
  * The database and service modules are imported lazily (the same pattern as
  * loadConfigLocks) so per-test-file module mocks keep working.
@@ -18,7 +18,8 @@ export interface SourceApiItem {
   provider: SourceProviderKind;
   url: string;
   username: string;
-  token: string;
+  /** A token is saved. False for public-only sources and GitHub App sources. */
+  hasToken: boolean;
   authType: "pat" | "app";
   appId?: string;
   installationId?: string;
@@ -44,8 +45,8 @@ export async function toSourceApiItem(
 ): Promise<SourceApiItem> {
   const { decryptSourceToken } = await import("@/lib/sources");
   const token = decryptSourceToken(source.token);
-  // A stored App credential holds the private key: never return it, whatever
-  // the provider, and don't fail the whole listing over a damaged one.
+  // Only an App credential is read here, for its App and installation IDs.
+  // Don't fail the whole listing over a damaged one.
   const appCredential = isGitHubAppCredential(token);
   let app: ReturnType<typeof parseGitHubAppCredentials> = null;
   if (appCredential && source.provider === "github") {
@@ -61,7 +62,7 @@ export async function toSourceApiItem(
     provider: source.provider,
     url: source.url ?? "",
     username: source.username,
-    token: appCredential ? "" : token,
+    hasToken: !appCredential && token.trim().length > 0,
     authType: app ? "app" : "pat",
     appId: app?.appId,
     installationId: app?.installationId,

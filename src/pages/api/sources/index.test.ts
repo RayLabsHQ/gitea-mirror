@@ -148,7 +148,8 @@ describe("GET /api/sources", () => {
     sourceRows = [{ id: "app-1", userId: "user-1", name: "App", provider: "github", url: "https://github.com", username: "acme", token: encrypted(encodeGitHubAppCredentials({ appId: "123", installationId: "456", privateKey: "-----BEGIN PRIVATE KEY-----\nsecret\n-----END PRIVATE KEY-----" })), enabled: true }];
     const response = await get();
     const body = await response.json();
-    expect(body.sources[0]).toMatchObject({ authType: "app", appId: "123", installationId: "456", token: "" });
+    expect(body.sources[0]).toMatchObject({ authType: "app", appId: "123", installationId: "456", hasToken: false });
+    expect(body.sources[0]).not.toHaveProperty("token");
     expect(JSON.stringify(body)).not.toContain("PRIVATE KEY");
   });
 
@@ -156,11 +157,11 @@ describe("GET /api/sources", () => {
     sourceRows = [{ id: "gl-1", userId: "user-1", name: "GitLab", provider: "gitlab", url: "https://gitlab.example.com", username: "acme", token: encrypted(encodeGitHubAppCredentials({ appId: "123", installationId: "456", privateKey: "-----BEGIN PRIVATE KEY-----\nsecret\n-----END PRIVATE KEY-----" })), enabled: true }];
     const response = await get();
     const body = await response.json();
-    expect(body.sources[0]).toMatchObject({ provider: "gitlab", authType: "pat", token: "" });
+    expect(body.sources[0]).toMatchObject({ provider: "gitlab", authType: "pat", hasToken: false });
     expect(JSON.stringify(body)).not.toContain("PRIVATE KEY");
   });
 
-  test("lists sources with repository counts, lock state and decrypted tokens", async () => {
+  test("lists sources with repository counts and lock state, and never their tokens", async () => {
     sourceRows = [
       {
         id: "source-1",
@@ -198,7 +199,7 @@ describe("GET /api/sources", () => {
       name: "GitHub (octocat)",
       provider: "github",
       username: "octocat",
-      token: "ghp_secret",
+      hasToken: true,
       enabled: true,
       repositoryCount: 2,
       locked: true,
@@ -206,11 +207,13 @@ describe("GET /api/sources", () => {
     expect(data.sources[1]).toMatchObject({
       id: "source-2",
       provider: "gitlab",
-      token: "",
+      hasToken: false,
       enabled: false,
       repositoryCount: 0,
       locked: false,
     });
+    expect(JSON.stringify(data)).not.toContain("ghp_secret");
+    expect(JSON.stringify(data)).not.toContain("enc:");
   });
 });
 
@@ -220,7 +223,7 @@ describe("POST /api/sources", () => {
     expect(response.status).toBe(201);
     expect(sourceRows[0].token).toContain("enc:github-app:v1:");
     const body = await response.json();
-    expect(body.source).toMatchObject({ authType: "app", appId: "123", installationId: "456", token: "" });
+    expect(body.source).toMatchObject({ authType: "app", appId: "123", installationId: "456", hasToken: false });
     expect(JSON.stringify(body)).not.toContain("PRIVATE KEY");
   });
 
@@ -288,7 +291,7 @@ describe("POST /api/sources", () => {
     expect(sourceRows).toHaveLength(1);
   });
 
-  test("creates a source, echoes it decrypted", async () => {
+  test("creates a source and echoes it without the token", async () => {
     const response = await post({
       name: "Work GitLab",
       provider: "gitlab",
@@ -304,10 +307,11 @@ describe("POST /api/sources", () => {
       provider: "gitlab",
       url: "https://gitlab.example.com",
       username: "me",
-      token: "glpat-x",
+      hasToken: true,
       repositoryCount: 0,
       locked: false,
     });
+    expect(JSON.stringify(data)).not.toContain("glpat-x");
 
     expect(sourceRows).toHaveLength(1);
     expect(sourceRows[0].token).toBe(encrypted("glpat-x"));

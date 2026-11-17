@@ -11,6 +11,7 @@ import {
   type PushDestinationKind,
 } from '@/lib/destination-kinds';
 import { createPushTarget, PushTargetError } from '@/lib/push-engine/targets';
+import { SecretHostChangedError, hasValue, savedSecretFor, sameOrigin } from '@/lib/utils/stored-secrets';
 
 // Forgejo reports `15.0.0+gitea-1.22.0`; pure Gitea reports just `1.22.0`.
 // Forgejo < 15.0.0 has a known bug where pull-mirror credentials sent via
@@ -83,6 +84,31 @@ async function testPushTarget(
   }
 }
 
+/**
+ * The user's saved destination token and the address it was saved with.
+ * Imported lazily, like sources-api, so per-file module mocks keep working.
+ */
+async function loadSavedDestination(
+  userId: string
+): Promise<{ url: string; token: string | undefined } | null> {
+  const [{ db, configs }, { eq, sql }] = await Promise.all([
+    import('@/lib/db'),
+    import('drizzle-orm'),
+  ]);
+  const [row] = await db
+    .select({ giteaConfig: configs.giteaConfig })
+    .from(configs)
+    .where(eq(configs.userId, userId))
+    .orderBy(sql`${configs.isActive} DESC`, sql`${configs.updatedAt} DESC`)
+    .limit(1);
+  const giteaConfig = row?.giteaConfig as { url?: string; provider?: string; token?: string } | undefined;
+  if (!giteaConfig) return null;
+  return {
+    url: normalizeDestinationBaseUrl(giteaConfig.url, normalizeDestinationProviderKind(giteaConfig.provider)),
+    token: giteaConfig.token,
+  };
+}
+
 export const POST: APIRoute = async ({ request, locals }) => {
   // The route makes a server side request to a URL from the body, so it is
   // for signed in users only, like every other API route that reaches out.
@@ -91,8 +117,23 @@ export const POST: APIRoute = async ({ request, locals }) => {
 
   try {
     const body = await request.json();
-    const { url, token, username } = body;
+    const { url, username } = body;
+    let token: string | undefined = typeof body.token === 'string' ? body.token : undefined;
     const provider = normalizeDestinationProviderKind(body.provider);
+
+    // Tokens are write-only, so the form tests the saved token by leaving the
+    // field empty. It is only sent to the origin it was saved for.
+    if (!hasValue(token)) {
+      const saved = await loadSavedDestination(authResult.userId);
+      const nextUrl = normalizeDestinationBaseUrl(url, provider);
+      if (saved?.token) {
+        if (!sameOrigin(saved.url, nextUrl)) {
+          const label = `${DESTINATION_PROVIDER_LABELS[provider]} token`;
+          return json({ success: false, message: new SecretHostChangedError(label, saved.url, nextUrl).message }, 400);
+        }
+        token = savedSecretFor(saved.token, saved.url, nextUrl) ?? undefined;
+      }
+    }
 
     if (isPushDestinationKind(provider)) {
       const pushUrl = normalizeDestinationBaseUrl(url, provider);

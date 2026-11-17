@@ -128,8 +128,10 @@ describe("source and destination locks", () => {
     expect(source).toContain("loadConfigLocks(userId)");
     expect(source).toContain("evaluateConfigChange({");
     expect(source).toContain("status: 409");
-    // Every GET branch carries the locks so the page can disable the fields.
-    expect(count(source, "locks,\n")).toBeGreaterThanOrEqual(3);
+    // Every GET response goes through configResponse, which carries the
+    // locks so the page can disable the fields.
+    expect(count(source, "return configResponse(")).toBeGreaterThanOrEqual(2);
+    expect(source).toContain("      locks,\n      sources,\n");
   });
 
   test("environment variables cannot switch a locked host on boot", () => {

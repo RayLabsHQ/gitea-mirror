@@ -18,6 +18,8 @@ Pick **Read only** under **Access** for a key that only needs to look: it can ca
 
 Use a read only key for dashboards, monitoring and the [MCP server](../mcp/README.md) when you only want an assistant to answer questions. A key's access level cannot be changed after it is created; create a new key instead.
 
+Saved tokens and secrets never come back from the API, whatever the key: responses say whether one is saved (`hasToken`, or `hasSecret` for the webhook signing secret) and leave the value empty. To change one, send the new value; an empty value keeps the saved one.
+
 ## Send the key
 
 Put the key in the `x-api-key` header. Every endpoint that accepts a session cookie accepts the header instead.

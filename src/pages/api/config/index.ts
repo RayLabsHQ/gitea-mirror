@@ -4,12 +4,15 @@ import {
   isSourceProviderKind,
   isValidSourceUrl,
   normalizeSourceProviderKind,
+  normalizeSourceUrl,
 } from "@/lib/source-providers/kinds";
 import { evaluateConfigChange, loadConfigLocks } from "@/lib/config-locks";
 import {
   DESTINATION_PROVIDER_DEFAULT_URLS,
+  DESTINATION_PROVIDER_LABELS,
   isDestinationProviderKind,
   isPushDestinationKind,
+  normalizeDestinationBaseUrl,
   normalizeDestinationProviderKind,
 } from "@/lib/destination-kinds";
 import { db, configs, users } from "@/lib/db";
@@ -24,7 +27,14 @@ import {
   mapDbScheduleToUi,
   mapDbCleanupToUi 
 } from "@/lib/utils/config-mapper";
-import { encrypt, decrypt } from "@/lib/utils/encryption";
+import {
+  SecretHostChangedError,
+  hasValue,
+  mergeNotificationSecrets,
+  nextStoredSecret,
+  redactNotificationSecrets,
+  takeRemovedNotificationSecrets,
+} from "@/lib/utils/stored-secrets";
 import { createDefaultConfig } from "@/lib/utils/config-defaults";
 import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 import { blockedOutboundUrlReason } from "@/lib/utils/outbound-url";
@@ -67,9 +77,12 @@ export const POST: APIRoute = async ({ request, locals }) => {
       );
     }
 
+    // A secret sent as null is removed; take those out before validating.
+    const { config: rawNotificationConfig, removed: removedNotificationSecrets } =
+      takeRemovedNotificationSecrets(notificationConfig);
     let validatedNotificationConfig: any = undefined;
     if (notificationConfig !== undefined) {
-      const parsed = notificationConfigSchema.safeParse(notificationConfig);
+      const parsed = notificationConfigSchema.safeParse(rawNotificationConfig);
       if (!parsed.success) {
         return new Response(
           JSON.stringify({
@@ -215,27 +228,48 @@ export const POST: APIRoute = async ({ request, locals }) => {
       { githubConfig: existingGithub, giteaConfig: existingGitea }
     );
 
-    // Preserve tokens if fields are empty
+    // Tokens are write-only: GET never returns them, so an empty field keeps
+    // the saved token. A saved token only stays while the address keeps the
+    // same scheme, host and port (see stored-secrets).
+    let processedNotificationConfig: any = undefined;
     try {
-      // Decrypt existing tokens before preserving
-      if (!mappedGithubConfig.token && existingGithub?.token) {
-        mappedGithubConfig.token = decrypt(existingGithub.token);
+      mappedGithubConfig.token = nextStoredSecret({
+        label: `${SOURCE_PROVIDER_LABELS[sourceProvider]} token`,
+        incoming: mappedGithubConfig.token,
+        stored: existingGithub?.token,
+        bound: true,
+        storedUrl: normalizeSourceUrl(
+          existingGithub?.url,
+          normalizeSourceProviderKind(existingGithub?.provider)
+        ),
+        nextUrl: normalizeSourceUrl(mappedGithubConfig.url, sourceProvider),
+      });
+      mappedGiteaConfig.token = nextStoredSecret({
+        label: `${DESTINATION_PROVIDER_LABELS[destinationProvider]} token`,
+        incoming: mappedGiteaConfig.token,
+        stored: existingGitea?.token,
+        bound: true,
+        storedUrl: normalizeDestinationBaseUrl(
+          existingGitea?.url,
+          normalizeDestinationProviderKind(existingGitea?.provider)
+        ),
+        nextUrl: normalizeDestinationBaseUrl(mappedGiteaConfig.url, destinationProvider),
+      });
+      if (validatedNotificationConfig) {
+        processedNotificationConfig = mergeNotificationSecrets(
+          validatedNotificationConfig,
+          parseStoredJson(existingConfig?.notificationConfig),
+          removedNotificationSecrets
+        );
       }
-
-      if (!mappedGiteaConfig.token && existingGitea?.token) {
-        mappedGiteaConfig.token = decrypt(existingGitea.token);
+    } catch (error) {
+      if (error instanceof SecretHostChangedError) {
+        return new Response(
+          JSON.stringify({ success: false, message: error.message }),
+          { status: 400, headers: { "Content-Type": "application/json" } }
+        );
       }
-    } catch (tokenError) {
-      console.error("Failed to preserve tokens:", tokenError);
-    }
-    
-    // Encrypt tokens before saving
-    if (mappedGithubConfig.token) {
-      mappedGithubConfig.token = encrypt(mappedGithubConfig.token);
-    }
-    
-    if (mappedGiteaConfig.token) {
-      mappedGiteaConfig.token = encrypt(mappedGiteaConfig.token);
+      throw error;
     }
 
     // Map schedule and cleanup configs to database schema
@@ -244,40 +278,6 @@ export const POST: APIRoute = async ({ request, locals }) => {
       existingConfig ? existingConfig.scheduleConfig : undefined
     );
     const processedCleanupConfig = mapUiCleanupToDb(cleanupConfig);
-
-    // Process notification config if provided
-    let processedNotificationConfig: any = undefined;
-    if (validatedNotificationConfig) {
-      processedNotificationConfig = { ...validatedNotificationConfig };
-      // Encrypt ntfy token if present
-      if (processedNotificationConfig.ntfy?.token) {
-        processedNotificationConfig.ntfy = {
-          ...processedNotificationConfig.ntfy,
-          token: encrypt(processedNotificationConfig.ntfy.token),
-        };
-      }
-      // Encrypt apprise token if present
-      if (processedNotificationConfig.apprise?.token) {
-        processedNotificationConfig.apprise = {
-          ...processedNotificationConfig.apprise,
-          token: encrypt(processedNotificationConfig.apprise.token),
-        };
-      }
-      // Encrypt gotify token if present
-      if (processedNotificationConfig.gotify?.token) {
-        processedNotificationConfig.gotify = {
-          ...processedNotificationConfig.gotify,
-          token: encrypt(processedNotificationConfig.gotify.token),
-        };
-      }
-      // Encrypt webhook secret if present
-      if (processedNotificationConfig.webhook?.secret) {
-        processedNotificationConfig.webhook = {
-          ...processedNotificationConfig.webhook,
-          secret: encrypt(processedNotificationConfig.webhook.secret),
-        };
-      }
-    }
 
     if (existingConfig) {
       // Update path
@@ -384,9 +384,9 @@ export const GET: APIRoute = async ({ request, locals }) => {
 
     const locks = await loadConfigLocks(userId);
 
-    // Sources for the Sources card: per-source repository counts, lock state
-    // and decrypted tokens, following the same convention as the config
-    // tokens below. A failure must not take the Configuration page down.
+    // Sources for the Sources card: per-source repository counts and lock
+    // state. Like the config below, tokens are never returned, only whether
+    // one is saved. A failure must not take the Configuration page down.
     let sources: SourceApiItem[] = [];
     try {
       // Heal configs written outside the sources API (scripts, seeds):
@@ -403,150 +403,76 @@ export const GET: APIRoute = async ({ request, locals }) => {
     }
 
     if (config.length === 0) {
-      // Create default configuration for the user
       const defaultConfig = await createDefaultConfig({ userId });
-      
-      // Map the created config to UI format
-      const uiConfig = mapDbToUiConfig(defaultConfig);
-      const uiScheduleConfig = mapDbScheduleToUi(defaultConfig.scheduleConfig);
-      const uiCleanupConfig = mapDbCleanupToUi(defaultConfig.cleanupConfig);
-      
-      return new Response(
-        JSON.stringify({
-          ...defaultConfig,
-          ...uiConfig,
-          scheduleConfig: uiScheduleConfig,
-          cleanupConfig: uiCleanupConfig,
-          locks,
-          sources,
-        }),
-        {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }
-      );
+      return configResponse(defaultConfig, locks, sources);
     }
 
-    // Map database structure to UI structure
-    const dbConfig = config[0];
-    
-    // Decrypt tokens before sending to UI
-    try {
-      const githubConfig = typeof dbConfig.githubConfig === "string"
-        ? JSON.parse(dbConfig.githubConfig)
-        : dbConfig.githubConfig;
-      
-      const giteaConfig = typeof dbConfig.giteaConfig === "string"
-        ? JSON.parse(dbConfig.giteaConfig)
-        : dbConfig.giteaConfig;
-      
-      // Decrypt tokens
-      if (githubConfig.token) {
-        const token = decrypt(githubConfig.token);
-        githubConfig.token = token.startsWith("github-app:v1:") ? "" : token;
-      }
-      
-      if (giteaConfig.token) {
-        giteaConfig.token = decrypt(giteaConfig.token);
-      }
-      
-      // Create modified config with decrypted tokens
-      const decryptedConfig = {
-        ...dbConfig,
-        githubConfig,
-        giteaConfig
-      };
-
-      const uiConfig = mapDbToUiConfig(decryptedConfig);
-
-      // Map schedule and cleanup configs to UI format
-      const uiScheduleConfig = mapDbScheduleToUi(dbConfig.scheduleConfig);
-      const uiCleanupConfig = mapDbCleanupToUi(dbConfig.cleanupConfig);
-
-      // Decrypt notification config tokens
-      let notificationConfig = dbConfig.notificationConfig;
-      if (notificationConfig) {
-        notificationConfig = { ...notificationConfig };
-        if (notificationConfig.ntfy?.token) {
-          try {
-            notificationConfig.ntfy = { ...notificationConfig.ntfy, token: decrypt(notificationConfig.ntfy.token) };
-          } catch {
-            // Clear token on decryption failure to prevent double-encryption on next save
-            notificationConfig.ntfy = { ...notificationConfig.ntfy, token: "" };
-          }
-        }
-        if (notificationConfig.apprise?.token) {
-          try {
-            notificationConfig.apprise = { ...notificationConfig.apprise, token: decrypt(notificationConfig.apprise.token) };
-          } catch {
-            notificationConfig.apprise = { ...notificationConfig.apprise, token: "" };
-          }
-        }
-        if (notificationConfig.gotify?.token) {
-          try {
-            notificationConfig.gotify = { ...notificationConfig.gotify, token: decrypt(notificationConfig.gotify.token) };
-          } catch {
-            notificationConfig.gotify = { ...notificationConfig.gotify, token: "" };
-          }
-        }
-        if (notificationConfig.webhook?.secret) {
-          try {
-            notificationConfig.webhook = { ...notificationConfig.webhook, secret: decrypt(notificationConfig.webhook.secret) };
-          } catch {
-            notificationConfig.webhook = { ...notificationConfig.webhook, secret: "" };
-          }
-        }
-      }
-
-      return new Response(JSON.stringify({
-        ...dbConfig,
-        ...uiConfig,
-        scheduleConfig: {
-          ...uiScheduleConfig,
-          lastRun: dbConfig.scheduleConfig.lastRun,
-          nextRun: dbConfig.scheduleConfig.nextRun,
-        },
-        cleanupConfig: {
-          ...uiCleanupConfig,
-          lastRun: dbConfig.cleanupConfig.lastRun,
-          nextRun: dbConfig.cleanupConfig.nextRun,
-        },
-        notificationConfig,
-        locks,
-        sources,
-      }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    } catch (error) {
-      console.error("Failed to decrypt tokens:", error);
-      // Return config without decrypting tokens if there's an error
-      const uiConfig = mapDbToUiConfig(dbConfig);
-      const uiScheduleConfig = mapDbScheduleToUi(dbConfig.scheduleConfig);
-      const uiCleanupConfig = mapDbCleanupToUi(dbConfig.cleanupConfig);
-
-      return new Response(JSON.stringify({
-        ...dbConfig,
-        ...uiConfig,
-        scheduleConfig: {
-          ...uiScheduleConfig,
-          lastRun: dbConfig.scheduleConfig.lastRun,
-          nextRun: dbConfig.scheduleConfig.nextRun,
-        },
-        cleanupConfig: {
-          ...uiCleanupConfig,
-          lastRun: dbConfig.cleanupConfig.lastRun,
-          nextRun: dbConfig.cleanupConfig.nextRun,
-        },
-        notificationConfig: dbConfig.notificationConfig,
-        locks,
-        sources,
-      }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
+    return configResponse(config[0], locks, sources);
   } catch (error) {
     return createSecureErrorResponse(error, "config fetch", 500);
   }
 };
+
+/** A JSON column that older rows may hold as a string. */
+function parseStoredJson(value: unknown): Record<string, any> | undefined {
+  if (!value) return undefined;
+  if (typeof value === "string") {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return undefined;
+    }
+  }
+  return typeof value === "object" ? (value as Record<string, any>) : undefined;
+}
+
+/**
+ * The configuration as the browser sees it. Tokens and secrets are
+ * write-only: each comes back empty, with hasToken or hasSecret saying
+ * whether one is saved, so nothing that can read settings can copy them.
+ */
+function configResponse(
+  row: Record<string, any>,
+  locks: Awaited<ReturnType<typeof loadConfigLocks>>,
+  sources: SourceApiItem[]
+): Response {
+  const githubConfig = parseStoredJson(row.githubConfig) ?? {};
+  const giteaConfig = parseStoredJson(row.giteaConfig) ?? {};
+  const scheduleConfig = parseStoredJson(row.scheduleConfig) ?? {};
+  const cleanupConfig = parseStoredJson(row.cleanupConfig) ?? {};
+  const uiConfig = mapDbToUiConfig({ ...row, githubConfig, giteaConfig });
+  const notificationConfig = parseStoredJson(row.notificationConfig);
+
+  return new Response(
+    JSON.stringify({
+      ...row,
+      ...uiConfig,
+      githubConfig: {
+        ...uiConfig.githubConfig,
+        token: "",
+        hasToken: hasValue(githubConfig.token),
+      },
+      giteaConfig: {
+        ...uiConfig.giteaConfig,
+        token: "",
+        hasToken: hasValue(giteaConfig.token),
+      },
+      scheduleConfig: {
+        ...mapDbScheduleToUi(scheduleConfig as any),
+        lastRun: scheduleConfig.lastRun,
+        nextRun: scheduleConfig.nextRun,
+      },
+      cleanupConfig: {
+        ...mapDbCleanupToUi(cleanupConfig as any),
+        lastRun: cleanupConfig.lastRun,
+        nextRun: cleanupConfig.nextRun,
+      },
+      notificationConfig: notificationConfig
+        ? redactNotificationSecrets(notificationConfig)
+        : row.notificationConfig ?? null,
+      locks,
+      sources,
+    }),
+    { status: 200, headers: { "Content-Type": "application/json" } }
+  );
+}

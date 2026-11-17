@@ -17,15 +17,34 @@ let getAuthenticatedImpl: () => Promise<any> = () =>
     },
   });
 
+/** Tokens the route handed to the GitHub client, in order. */
+const clientTokens: string[] = [];
+
 if (isChild) mock.module("@/lib/github", () => {
   return {
-    createGitHubClient: mock(() => ({
-      users: {
-        getAuthenticated: mock(() => getAuthenticatedImpl()),
-      },
-    })),
+    createGitHubClient: mock((token: string) => {
+      clientTokens.push(token);
+      return {
+        users: {
+          getAuthenticated: mock(() => getAuthenticatedImpl()),
+        },
+      };
+    }),
   };
 });
+
+// Saved sources, tokens "encrypted" with a prefix.
+let sourceRows: any[] = [];
+if (isChild) {
+  const realSources = await import("@/lib/sources");
+  mock.module("@/lib/sources", () => ({
+    ...realSources,
+    listSources: mock(async (userId: string) => sourceRows.filter((row) => row.userId === userId)),
+    decryptSourceToken: mock((token: string | null | undefined) =>
+      typeof token === "string" && token.startsWith("enc:") ? token.slice(4) : token ?? ""
+    ),
+  }));
+}
 
 import { POST } from "./test-connection";
 
@@ -138,5 +157,52 @@ describe.skipIf(!isChild)("GitHub Test Connection API", () => {
     // It sanitizes error messages for security, so we expect the generic message
     expect(data.error).toBeDefined();
     expect(data.error).toBe("An internal server error occurred");
+  });
+
+  describe("a saved source", () => {
+    const send = (body: Record<string, unknown>) =>
+      POST({
+        request: new Request("http://localhost/api/github/test-connection", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+        locals: { user: { id: "user-1" } },
+      } as any);
+
+    beforeEach(() => {
+      clientTokens.length = 0;
+      sourceRows = [
+        { id: "s1", userId: "user-1", provider: "github", url: "", username: "testuser", token: "enc:ghp_saved" },
+        { id: "s2", userId: "user-2", provider: "github", url: "", username: "other", token: "enc:ghp_other" },
+      ];
+    });
+
+    test("is tested with its saved token when the field is empty", async () => {
+      const response = await send({ provider: "github", sourceId: "s1", token: "" });
+      expect(response.status).toBe(200);
+      expect(clientTokens).toEqual(["ghp_saved"]);
+    });
+
+    test("a typed token wins over the saved one", async () => {
+      const response = await send({ provider: "github", sourceId: "s1", token: "ghp_typed" });
+      expect(response.status).toBe(200);
+      expect(clientTokens).toEqual(["ghp_typed"]);
+    });
+
+    test("its saved token is not sent to another origin", async () => {
+      const response = await send({ provider: "gitea", url: "https://evil.example.net", sourceId: "s1", token: "" });
+      expect(response.status).toBe(400);
+      const data = await response.json();
+      expect(data.message).toBe("Enter a Gitea / Forgejo token for https://evil.example.net. The saved one is only sent to https://github.com.");
+      expect(clientTokens).toEqual([]);
+    });
+
+    test("another account's source is not found", async () => {
+      const response = await send({ provider: "github", sourceId: "s2", token: "" });
+      expect(response.status).toBe(400);
+      expect((await response.json()).message).toBe("GitHub token is required");
+      expect(clientTokens).toEqual([]);
+    });
   });
 });

@@ -195,8 +195,12 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
     }
   };
 
+  // The API never returns the token, only whether one is saved. An empty
+  // field tests and keeps the saved one.
+  const hasAnyToken = Boolean(config.token?.trim()) || Boolean(config.hasToken);
+
   const testConnection = async () => {
-    if (!config.token || (!isPushTarget && !config.url)) {
+    if (!hasAnyToken || (!isPushTarget && !config.url)) {
       toast.error(`${providerLabel} URL and token are required to test the connection`);
       return;
     }
@@ -249,7 +253,7 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
               variant="outline"
               size="sm"
               onClick={testConnection}
-              disabled={isLoading || !config.token || (!isPushTarget && !config.url)}
+              disabled={isLoading || !hasAnyToken || (!isPushTarget && !config.url)}
             >
               <PlugZap className="mr-1.5 h-3.5 w-3.5" />
               {isLoading ? "Testing..." : "Test"}
@@ -441,8 +445,12 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
               type="password"
               value={config.token}
               onChange={handleChange}
-              placeholder={`Your ${providerLabel} access token`}
-              required
+              placeholder={
+                config.hasToken
+                  ? "Saved. Leave empty to keep it"
+                  : `Your ${providerLabel} access token`
+              }
+              required={!config.hasToken}
             />
             <p className="text-[11px] text-muted-foreground/80">
               {isPushTarget
