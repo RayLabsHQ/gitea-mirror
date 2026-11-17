@@ -32,7 +32,7 @@ Install Gitea Mirror next to your Gitea instance ([Docker](/docs/quickstart/), [
 
 1. Create a GitHub personal access token with `repo` scope (read access to everything you are migrating).
 2. Create a Gitea access token with permission to create repositories and organizations.
-3. Enter both in the setup wizard. Tokens are encrypted at rest with AES-256-GCM.
+3. Enter both on the **Connections** tab of the **Configuration** page: GitHub under **Sources**, Gitea in the destination form. Tokens are encrypted at rest with AES-256-GCM.
 
 Pick a mirror strategy before importing anything, because it decides your Gitea namespace layout:
 

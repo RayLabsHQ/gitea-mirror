@@ -17,7 +17,7 @@ The result is the same appliance the [Proxmox LXC guide](/use-cases/proxmox-lxc-
 
 - Unraid with Docker enabled and the Community Applications plugin installed
 - A running Gitea instance (the official `gitea/gitea` container from CA works fine)
-- A GitHub personal access token with `repo` scope
+- A GitHub personal access token with the `repo` and `admin:org` scopes (`read:org` inside `admin:org` is enough to list your organizations)
 - A Gitea access token that can create repositories and organizations
 
 ## Step-by-step
@@ -34,15 +34,16 @@ Search **Gitea Mirror** in the Apps tab (template maintained by RayLabsHQ) and c
 
 The template exposes the environment variables that matter:
 
-- `BETTER_AUTH_SECRET`: session signing secret. Set a long random value.
+- `BETTER_AUTH_SECRET`: session signing secret. Set a long random value, or leave it empty and the container generates one and keeps it in the appdata folder.
 - `BETTER_AUTH_URL`: the URL you will actually browse to, e.g. `http://tower.local:4321`.
-- `ENCRYPTION_SECRET`: encrypts your GitHub and Gitea tokens at rest (AES-256-GCM). Set it once and do not rotate it casually, because stored tokens are only readable with it.
+
+`ENCRYPTION_SECRET`, which encrypts your GitHub and Gitea tokens at rest, is not in the template. The container generates it on first start and keeps it in the appdata folder, so back that folder up. To set your own, add it as a variable in the template; do not change it later, because stored tokens are only readable with it.
 
 Generate secrets with `openssl rand -hex 32` from the Unraid terminal.
 
 ### 3. First login
 
-Browse to `http://<unraid-ip>:4321`. The first account created becomes the admin. The setup wizard asks for your GitHub token and your Gitea URL and token.
+Browse to `http://<unraid-ip>:4321`. The first account created becomes the admin. Click **Configure GitHub** on the dashboard, add your GitHub token under **Sources**, and fill in your Gitea URL and token.
 
 One Unraid-specific note: if Gitea runs on the same box, use the LAN address (`http://<unraid-ip>:3000`) rather than `localhost`, because `localhost` inside the Gitea Mirror container is the container itself, not your Gitea.
 
@@ -75,4 +76,4 @@ Roughly the sum of your repositories' sizes, plus LFS objects where enabled, plu
 
 ### Can multiple family members or teammates use one instance?
 
-Yes, Gitea Mirror is multi-user. Each user connects their own GitHub and Gitea tokens, and each token is encrypted at rest.
+Yes, but the sign-up page closes after the first account. Add more users through SSO or header authentication. Each user connects their own GitHub and Gitea tokens, and each token is encrypted at rest. There is no page for managing users.

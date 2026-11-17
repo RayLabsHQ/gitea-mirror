@@ -44,7 +44,9 @@ Because the source and destination are the same kind of software, it is easy to 
 
 For Gitea and Forgejo sources the git side is complete: code, branches, tags, the wiki when enabled, LFS objects, scheduled sync, auto import of new repositories, cleanup of repositories deleted upstream, starred and private repositories, and add by URL.
 
-Issues, pull requests, labels, milestones and releases are still read from the GitHub API only, so those switches are disabled for a Gitea or Forgejo source. Force push detection is GitHub only as well. If issue history matters to you, keep that in mind when choosing which direction to mirror.
+Releases and their assets are mirrored too, read from the source instance with its token, or without one for a public repository.
+
+Issues, pull requests, labels and milestones are still read from the GitHub API only, so those switches are disabled for a Gitea or Forgejo source. Force push detection is GitHub only as well. If issue history matters to you, keep that in mind when choosing which direction to mirror.
 
 ## Forgejo as the destination
 

@@ -92,13 +92,13 @@ export function Installation() {
           id: "manual-bun"
         },
         {
-          title: "Clone and setup",
-          command: "git clone https://github.com/RayLabsHQ/gitea-mirror.git\ncd gitea-mirror\nbun run setup",
+          title: "Clone, set up and build",
+          command: "git clone https://github.com/RayLabsHQ/gitea-mirror.git\ncd gitea-mirror\nbun run setup\nbun run build",
           id: "manual-setup"
         },
         {
-          title: "Start the application",
-          command: "bun run dev",
+          title: "Set the secrets once, then start",
+          command: "printf 'BETTER_AUTH_SECRET=%s\\nENCRYPTION_SECRET=%s\\n' \"$(openssl rand -base64 32)\" \"$(openssl rand -base64 32)\" > .env\nbun run start",
           id: "manual-start"
         }
       ]

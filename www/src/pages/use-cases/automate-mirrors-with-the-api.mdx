@@ -66,15 +66,19 @@ The add call returns `409` when the repository is already tracked. Send `"force"
 
 ### 4. Watch the status
 
-`GET /api/github/repositories` lists every tracked repository whatever the source (the path kept its name for compatibility). Each entry carries `status`, `lastMirrored`, `errorMessage` and `mirroredLocation`. Status is one of `imported`, `mirroring`, `mirrored`, `failed`, `syncing`, `synced`, `skipped`, `deleted` or `archived`.
+`GET /api/github/repositories` lists every tracked repository whatever the source (the path kept its name for compatibility). Each entry carries `status`, `lastMirrored`, `errorMessage` and `mirroredLocation`. Status is one of `imported`, `mirroring`, `mirrored`, `failed`, `syncing`, `synced`, `skipped`, `ignored`, `pending-approval`, `deleting`, `deleted` or `archived`. `pending-approval` means force-push protection held the sync until someone approves or dismisses it, so treat it as a stopping point.
 
-A small polling loop after the mirror call:
+The mirror starts in the background after the call returns, so the first poll can still read `imported`. Wait for a final status instead of for "not mirroring":
 
 ```bash
-until [ "$(curl -sS "$BASE/api/github/repositories" -H "x-api-key: $KEY" \
-  | jq -r --arg id "$id" '.repositories[] | select(.id==$id) | .status')" != "mirroring" ]; do
+while true; do
+  status=$(curl -sS "$BASE/api/repositories/$id" -H "x-api-key: $KEY" | jq -r '.repository.status')
+  case "$status" in
+    mirrored|synced|failed|pending-approval|skipped|ignored) break ;;
+  esac
   sleep 10
 done
+echo "$status"
 ```
 
 For a liveness check without a key, `GET /api/health` answers what the Helm chart's probes use.

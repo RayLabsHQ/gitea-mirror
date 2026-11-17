@@ -46,10 +46,10 @@ Wait for the `Runtime server listening` line in the logs before moving on.
 1. Create a GitHub personal access token (classic) with `repo` enabled and, inside the `admin:org` section, check `read:org` so the mirror can list organization repositories—leave `write:org` and `admin:org` unchecked.
 2. Log in to Gitea and create an access token for an admin/owner account with `write:repository` and `write:organization` (the second scope lets the mirror create destination organizations).
 3. Visit `http://<host>:4321` and sign up—the first user becomes admin.
-4. Complete the setup wizard:
-   - Paste the GitHub PAT and Gitea URL/token.
-   - Choose which GitHub owners (user/org) to track.
-   - Leave the sync interval at the default (daily) to start; you can shorten it later.
+4. Click **Configure GitHub** on the dashboard, or open **Configuration** from the sidebar:
+   - On the **Connections** tab, add your GitHub account under **Sources** with **Add source**, then fill in the Gitea URL and token.
+   - Pick the organization structure for the destination.
+   - On the **Automation** tab, switch on **Automatic Syncing**. It runs daily at 22:00 unless you pick another time.
 
 ### 3. Stage your first backup job
 

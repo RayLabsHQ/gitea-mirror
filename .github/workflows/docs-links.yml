@@ -1,0 +1,40 @@
+name: Docs Links
+
+# Fails on broken links in the docs website and the README: relative .md
+# links the site cannot serve, site links to pages or headings that do not
+# exist, and README links to missing files. See scripts/check-docs-links.ts.
+on:
+  push:
+    branches: ['**']
+    paths:
+      - 'www/src/**'
+      - 'README.md'
+      - 'scripts/check-docs-links.ts'
+      - '.github/workflows/docs-links.yml'
+  pull_request:
+    branches: ['**']
+    paths:
+      - 'www/src/**'
+      - 'README.md'
+      - 'scripts/check-docs-links.ts'
+      - '.github/workflows/docs-links.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  links:
+    name: Check docs links
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: '1.3.13'
+
+      - name: Check links
+        run: bun scripts/check-docs-links.ts

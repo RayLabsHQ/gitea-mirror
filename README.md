@@ -14,6 +14,8 @@
 
 ```bash
 # Fastest way - using the simplified Docker setup
+git clone https://github.com/RayLabsHQ/gitea-mirror.git
+cd gitea-mirror
 docker compose -f docker-compose.alt.yml up -d
 
 # Access at http://localhost:4321
@@ -21,7 +23,7 @@ docker compose -f docker-compose.alt.yml up -d
 
 First user signup becomes admin. Configure GitHub and Gitea/Forgejo through the web interface!
 
-📖 **[Full documentation](https://gitea-mirror.raylabs.io/docs/)** - quickstart, deployment, configuration, notifications, SSO and more. Offline copies live in [`docs/`](docs/).
+📖 **[Full documentation](https://gitea-mirror.raylabs.io/docs/)** - quickstart, deployment, configuration, notifications, SSO and more.
 
 <p align="center">
   <img src=".github/assets/dashboard.png" alt="Dashboard" width="600" />
@@ -32,7 +34,7 @@ First user signup becomes admin. Configure GitHub and Gitea/Forgejo through the 
 
 - 🔁 Mirror public, private, and starred GitHub repos to Gitea/Forgejo
 - 🦊 **Multiple sources (GitLab and Gitea/Forgejo beta)** - Connect several sources at once: GitHub and GitHub Enterprise, GitLab, Gitea/Forgejo, and each repository keeps its source. gitlab.com, Codeberg and self hosted instances mirror code, tags, wiki and LFS; Gitea and Forgejo sources mirror releases with their assets too (issues and pull requests need a GitHub source). GitHub to Gitea is the supported default; every other source or destination is beta. See [docs/SOURCE_PROVIDERS.md](docs/SOURCE_PROVIDERS.md)
-- 🏛️ **GitHub Enterprise support** - Works with GHES and GHEC with data residency via `GH_API_URL`
+- 🏛️ **GitHub Enterprise support** - GHES through a source's Instance URL or `GH_API_URL`, GHEC with data residency through `GH_API_URL`
 - 🚀 **Forgejo, GitHub and GitLab destinations (beta)** - Forgejo works like Gitea. Pick GitHub or GitLab and the app keeps a bare clone of each repository and pushes its branches and tags there. Code only, and the target is overwritten on every sync. See [docs/PUSH_TARGETS.md](docs/PUSH_TARGETS.md)
 - 🏢 Mirror entire organizations with flexible strategies, including public organizations from GitHub, GitLab or Gitea/Forgejo with no source account configured
 - 🎯 Custom destination control for repos and organizations
@@ -200,10 +202,18 @@ Secrets auto-generate, database auto-initializes. See [NIX.md](NIX.md) for quick
 # Install Bun
 curl -fsSL https://bun.sh/install | bash
 
-# Setup and run
+# Get the source, install and build
+git clone https://github.com/RayLabsHQ/gitea-mirror.git
+cd gitea-mirror
 bun run setup
-bun run dev
+bun run build
+
+# Set the two secrets once and keep them, then start
+printf 'BETTER_AUTH_SECRET=%s\nENCRYPTION_SECRET=%s\n' "$(openssl rand -base64 32)" "$(openssl rand -base64 32)" > .env
+bun run start
 ```
+
+See [Bare metal with Bun](https://gitea-mirror.raylabs.io/docs/deployment/#bare-metal-with-bun) for running it under systemd.
 
 ## Usage
 
@@ -227,7 +237,7 @@ bun run dev
 
 ### Git LFS (Large File Storage)
 Mirror Git LFS objects along with your repositories:
-- Enable "Mirror LFS" option in Settings → Mirror Options
+- Enable "Git LFS objects" under Configuration → Connections → Mirror Content
 - Requires Gitea/Forgejo server with LFS enabled (`LFS_START_SERVER = true`)
 - Requires Git v2.1.2+ on the server
 
@@ -244,7 +254,7 @@ Releases have two limits and two filters. The release limit keeps only the newes
 
 All of it can be overridden per organization and per repository in the **Mirror options** dialog, and lowering the asset limit never deletes assets that were already uploaded. Enable **Remove old release assets** if you want each sync to delete the attachments of releases past that count instead.
 
-Enable in Settings → Mirror Options → Mirror metadata
+Enable them under Configuration → Connections → Mirror Content.
 
 ### Repository Management
 - **Ignore Status** - Mark repositories to skip from mirroring
@@ -260,7 +270,7 @@ Gitea Mirror provides powerful automatic synchronization features:
 #### Features (v3.4.0+)
 - **Auto-discovery**: Automatically discovers and imports new GitHub repositories
 - **Repository cleanup**: Removes repositories that no longer exist in GitHub
-- **Proper intervals**: Mirrors respect your configured sync intervals (not Gitea/Forgejo's default 24h)
+- **Proper intervals**: Mirrors respect your configured sync intervals (not Gitea/Forgejo's default 8h)
 - **Smart scheduling**: Only syncs repositories that need updating
 - **Auto-start on boot** (v3.5.3+): Automatically imports and mirrors all repositories when `SCHEDULE_ENABLED=true` or `GITEA_MIRROR_INTERVAL` is set - no manual clicks required!
 
@@ -283,7 +293,7 @@ SCHEDULE_INTERVAL=3600        # Check every hour (or use cron: "0 * * * *")
 
 # Option 2: Set mirror interval (also triggers auto-start)
 GITEA_MIRROR_INTERVAL=8h     # Every 8 hours
-# Other examples: 5m, 30m, 1h, 24h, 1d, 7d
+# Other examples: 30m, 1h, 24h, 168h (Gitea needs hours or minutes, not days, and at least 10m)
 
 # Advanced: Use cron expressions for specific times
 SCHEDULE_INTERVAL="0 2 * * *"  # Daily at 2 AM (optimize bandwidth usage)
@@ -451,7 +461,7 @@ The standard authentication method. First user to sign up becomes the admin.
 Enable users to sign in with external identity providers like Google, Azure AD, Okta, Authentik, or any OIDC-compliant service.
 
 **Configuration:**
-1. Navigate to Settings → Authentication & SSO
+1. Navigate to Configuration → Authentication
 2. Click "Add Provider"
 3. Enter your OIDC provider details:
    - Issuer URL (e.g., `https://accounts.google.com`)
@@ -500,7 +510,7 @@ proxy_set_header X-Authentik-Name $authentik_name;
 ```
 
 ### 4. OAuth Applications (Act as Identity Provider)
-Gitea Mirror can also act as an OIDC provider for other applications. Register OAuth applications in Settings → Authentication & SSO → OAuth Applications tab.
+Gitea Mirror can also act as an OIDC provider for other applications. The app has no page for this; register OAuth applications through the API (`POST /api/sso/applications`), see [Gitea Mirror as an OIDC provider](https://gitea-mirror.raylabs.io/docs/authentication/#gitea-mirror-as-an-oidc-provider).
 
 **Use cases:**
 - Allow other services to authenticate using Gitea Mirror accounts
@@ -508,7 +518,7 @@ Gitea Mirror can also act as an OIDC provider for other applications. Register O
 - Build integrations with your Gitea Mirror instance
 
 ### 5. API Keys (Scripts and CI)
-Create a personal API key under Settings → Authentication → API Keys and send it in the `x-api-key` header to call the app from scripts, CI pipelines or workflow tools. Keys act as the user who created them, can be given an expiry, and can be revoked at any time.
+Create a personal API key under Configuration → Authentication → API Keys and send it in the `x-api-key` header to call the app from scripts, CI pipelines or workflow tools. Keys act as the user who created them, can be given an expiry, and can be revoked at any time.
 
 ```bash
 curl -sS -X POST https://your-domain.com/api/sync/repository \

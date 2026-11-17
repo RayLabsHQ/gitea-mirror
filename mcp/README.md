@@ -31,12 +31,23 @@ claude mcp add --transport http gitea-mirror https://mirror.example.com/api/mcp 
 
 Add the server to the client's MCP config (`claude_desktop_config.json` for Claude Desktop, `~/.cursor/mcp.json` for Cursor):
 
+The bridge package, `gitea-mirror-mcp`, is not on npm yet. Until it is, build it from a checkout of this repository (needs Node.js and Bun):
+
+```bash
+git clone https://github.com/RayLabsHQ/gitea-mirror.git
+cd gitea-mirror/mcp
+npm ci
+npm run build
+```
+
+Then point the client at the built file:
+
 ```json
 {
   "mcpServers": {
     "gitea-mirror": {
-      "command": "npx",
-      "args": ["-y", "gitea-mirror-mcp"],
+      "command": "node",
+      "args": ["/path/to/gitea-mirror/mcp/dist/index.js"],
       "env": {
         "GITEA_MIRROR_URL": "https://mirror.example.com",
         "GITEA_MIRROR_API_KEY": "gm_..."
@@ -52,16 +63,6 @@ Add the server to the client's MCP config (`claude_desktop_config.json` for Clau
 | `GITEA_MIRROR_API_KEY` | The `gm_...` key. |
 
 A client that supports remote servers with custom headers can skip the package and use the URL directly, like Claude Code above.
-
-### From a checkout
-
-```bash
-cd mcp
-npm ci
-npm run build   # needs Bun
-```
-
-Then use `node /path/to/gitea-mirror/mcp/dist/index.js` as the command instead of `npx -y gitea-mirror-mcp`.
 
 ## Tools
 
