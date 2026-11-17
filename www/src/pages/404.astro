@@ -1,0 +1,39 @@
+---
+// Cloudflare Pages serves this with a 404 status for any path that has no
+// page. Without it, unknown paths got the homepage with a 200, which hid
+// broken links in the docs.
+import '../styles/global.css';
+import { Header } from '../components/Header';
+import Footer from '../components/Footer.astro';
+---
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Page not found · Gitea Mirror</title>
+    <meta name="robots" content="noindex" />
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+    <script is:inline>
+      const theme = localStorage.getItem('theme') ||
+        (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+      document.documentElement.classList.toggle('dark', theme === 'dark');
+    </script>
+  </head>
+  <body class="min-h-screen bg-background text-foreground antialiased">
+    <Header client:load />
+    <main class="mx-auto flex max-w-2xl flex-col items-start gap-6 px-4 pt-40 pb-32 sm:px-6">
+      <p class="text-sm font-semibold uppercase tracking-widest text-primary">404</p>
+      <h1 class="text-3xl font-bold tracking-tight sm:text-4xl">This page does not exist</h1>
+      <p class="text-muted-foreground">
+        The link may be old, or the page may have moved. The documentation starts here:
+      </p>
+      <div class="flex flex-wrap gap-3">
+        <a href="/docs/" class="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90">Documentation</a>
+        <a href="/docs/quickstart/" class="rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted">Quickstart</a>
+        <a href="/" class="rounded-md border px-4 py-2 text-sm font-medium hover:bg-muted">Home</a>
+      </div>
+    </main>
+    <Footer />
+  </body>
+</html>

@@ -10,7 +10,7 @@ description: Get Gitea Mirror running with Docker in a few minutes, or build it 
 
 Gitea Mirror ships as a prebuilt multi-architecture container image. The fastest path is to pull that image and configure everything else through the web interface after it starts. This page covers the Docker path first, then building from source, then running directly on Bun.
 
-This guide walks the supported path, GitHub to Gitea. GitLab and Gitea / Forgejo as sources, and Forgejo, GitHub and GitLab as destinations, are available as beta options in the same two dropdowns; see [Sources](./sources.md) and [Destinations](./destinations.md) once the app is running.
+This guide walks the supported path, GitHub to Gitea. GitLab and Gitea / Forgejo as sources, and Forgejo, GitHub and GitLab as destinations, are available as beta options on the same page; see [Sources](/docs/sources/) and [Destinations](/docs/destinations/) once the app is running.
 
 ## Requirements
 
@@ -19,6 +19,8 @@ Before you start, you need:
 - A GitHub personal access token with the `repo` and `admin:org` scopes.
 - A Gitea or Forgejo instance you can reach from wherever Gitea Mirror runs, plus an access token for it.
 - Docker with the Compose plugin, or Bun 1.2.9 or newer for a bare metal install.
+
+> **Note:** Gitea itself pulls the code from GitHub, so the Gitea server needs outbound access to GitHub, not just Gitea Mirror. A source on a private network address (a self-hosted GitLab or Forgejo on your LAN) is refused by Gitea with a 422 unless its `app.ini` has `ALLOW_LOCALNETWORKS = true` under `[migrations]`.
 
 You do not need any of the GitHub or Gitea details at container start time. Gitea Mirror comes up with an empty configuration and you fill it in through the Configuration page.
 
@@ -43,7 +45,7 @@ services:
       - NODE_ENV=production
       - HOST=0.0.0.0
       - PORT=4321
-      - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}
+      - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:-}
       - BETTER_AUTH_URL=${BETTER_AUTH_URL:-http://localhost:4321}
       - PUBLIC_BETTER_AUTH_URL=${PUBLIC_BETTER_AUTH_URL:-http://localhost:4321}
       - BETTER_AUTH_TRUSTED_ORIGINS=${BETTER_AUTH_TRUSTED_ORIGINS:-http://localhost:4321}
@@ -69,7 +71,7 @@ cd gitea-mirror
 docker compose -f docker-compose.alt.yml up -d
 ```
 
-`docker-compose.yml` is the full version. It builds from source by default and exposes every supported environment variable, which is useful when you want the whole configuration declared in one file rather than entered through the UI.
+`docker-compose.yml` is the full version. It lists most of the environment variables, which is useful when you want the whole configuration declared in one file rather than entered through the UI. It names the published image too, so Compose pulls it and only builds from the checkout when the pull fails or when you run `docker compose up --build`.
 
 ### Secrets
 
@@ -95,7 +97,7 @@ environment:
   - BETTER_AUTH_TRUSTED_ORIGINS=https://gitea-mirror.example.com
 ```
 
-These must be origins only, meaning scheme and host with no path. If you serve the app under a path prefix such as `https://git.example.com/mirror`, put the prefix in `BASE_URL=/mirror` and keep the three auth variables as the bare origin. See the [configuration guide](./configuration.md) for the full explanation.
+These must be origins only, meaning scheme and host with no path. If you serve the app under a path prefix such as `https://git.example.com/mirror`, put the prefix in `BASE_URL=/mirror` and keep the three auth variables as the bare origin. See the [configuration guide](/docs/configuration/) for the full explanation.
 
 ## Build from source with Docker
 
@@ -142,7 +144,7 @@ bun run start
 
 The dev server and the production server both listen on port 4321 by default. `bun run start` runs `scripts/runtime-server.ts`, which reads `HOST`, `PORT`, and `BASE_URL` from the environment.
 
-> **Note:** Outside Docker there is no entrypoint script generating secrets for you. Set `BETTER_AUTH_SECRET` and `ENCRYPTION_SECRET` in your environment or in a `.env` file before starting, otherwise sessions and token encryption fall back to insecure development defaults.
+> **Note:** Outside Docker and Nix nothing generates the secrets for you. Set `BETTER_AUTH_SECRET` and `ENCRYPTION_SECRET` in your environment or in a `.env` file before starting, and keep them the same across restarts. See [Bare metal with Bun](/docs/deployment/#bare-metal-with-bun).
 
 ## First run
 
@@ -150,9 +152,9 @@ Whichever install path you took, the first-run flow is the same:
 
 1. Open the app at `http://localhost:4321`, or at whatever URL you configured.
 2. Sign up. The first account created becomes the admin account.
-3. Go to the Configuration page and fill in the two connection cards on the Connections tab. Leave the Source dropdown on GitHub and the Destination dropdown on Gitea, enter the username and token for each, and use the Test buttons to confirm both sides authenticate.
-4. Choose a mirror strategy, which decides where repositories land in Gitea.
-5. Import your GitHub repositories, then mirror them. Once repositories are imported the source locks, and once one is mirrored the destination locks; changing either later asks for confirmation.
+3. Click **Configure GitHub** on the dashboard, or open **Configuration** from the sidebar. On the **Connections** tab, click **Add source** in the Sources card, keep GitHub, enter your username and token, click **Test**, and save. In the Gitea card next to it, enter the server URL, username and token, and click **Test**.
+4. Choose a mirror strategy in the **Organization Structure** card, which decides where repositories land in Gitea.
+5. Click **Import GitHub Data** at the top of the Configuration page, then open **Repositories** and click **Mirror All**. Once repositories are imported the source locks, and once one is mirrored the destination locks; changing either later asks for confirmation.
 6. Optionally, turn on scheduled syncing on the Automation tab so new commits and new repositories are picked up without manual action.
 
 ## Verifying the deployment
@@ -163,13 +165,13 @@ Gitea Mirror exposes a health endpoint at `/api/health` that reports application
 curl http://localhost:4321/api/health
 ```
 
-The container image also has a built-in `HEALTHCHECK` that polls this endpoint, so `docker ps` shows the container as healthy or unhealthy without any extra work on your side. See [Advanced topics](./advanced.md) for the full response shape.
+The container image also has a built-in `HEALTHCHECK` that polls this endpoint, so `docker ps` shows the container as healthy or unhealthy without any extra work on your side. See [Advanced topics](/docs/advanced/) for the full response shape.
 
 ## Where to go next
 
-- [Configuration](./configuration.md) covers the Configuration page tab by tab, plus environment-based pre-configuration.
-- [Sources](./sources.md) and [Destinations](./destinations.md) cover the hosts beyond GitHub and Gitea.
-- [API and API keys](./api.md) is for driving the app from scripts and CI.
-- [Environment variables](./environment-variables.md) is the complete reference.
-- [CA certificates](./ca-certificates.md) explains how to trust a self-signed or privately signed Gitea instance.
+- [Configuration](/docs/configuration/) covers the Configuration page tab by tab, plus environment-based pre-configuration.
+- [Sources](/docs/sources/) and [Destinations](/docs/destinations/) cover the hosts beyond GitHub and Gitea.
+- [API and API keys](/docs/api/) is for driving the app from scripts and CI.
+- [Environment variables](/docs/environment-variables/) is the complete reference.
+- [CA certificates](/docs/ca-certificates/) explains how to trust a self-signed or privately signed Gitea instance.
 - The [use-case guides](/use-cases/) cover platform-specific installs (Proxmox, Unraid, Helm) and deeper topics like [Git LFS](/use-cases/mirror-git-lfs-repositories/), [issue and PR mirroring](/use-cases/mirror-github-issues-pull-requests/), and a [full migration to Gitea](/use-cases/migrate-github-to-gitea/).

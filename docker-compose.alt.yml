@@ -13,9 +13,10 @@ services:
     volumes:
       - ./data:/app/data
     environment:
-      # === ABSOLUTELY REQUIRED ===
-      # This MUST be set and CANNOT be changed via UI
-      - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}  # Min 32 chars, required for sessions
+      # === SECRETS ===
+      # Signs sessions. Left empty, the container generates one and keeps it in ./data.
+      # To set your own: echo "BETTER_AUTH_SECRET=$(openssl rand -base64 32)" > .env
+      - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:-}
       - BETTER_AUTH_URL=${BETTER_AUTH_URL:-http://localhost:4321}
       - BETTER_AUTH_TRUSTED_ORIGINS=${BETTER_AUTH_TRUSTED_ORIGINS:-http://localhost:4321}
       # REVERSE PROXY: If accessing via a reverse proxy, set all three to your external URL:
@@ -32,10 +33,6 @@ services:
       - PORT=4321
       - BASE_URL=${BASE_URL:-/}
       - PUBLIC_BETTER_AUTH_URL=${PUBLIC_BETTER_AUTH_URL:-http://localhost:4321}
-      # Optional concurrency controls (defaults match in-app defaults)
-      # If you want perfect ordering of issues and PRs, set these at 1
-      - MIRROR_ISSUE_CONCURRENCY=${MIRROR_ISSUE_CONCURRENCY:-3}
-      - MIRROR_PULL_REQUEST_CONCURRENCY=${MIRROR_PULL_REQUEST_CONCURRENCY:-5}
       
     healthcheck:
       test:

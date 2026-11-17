@@ -27,7 +27,7 @@ Pick the host in the dropdown. The rest of the card adapts to it:
 - **Username** and **Personal access token** hold the account and token on the selected host.
 - The **Test** button in the card header makes a live authenticated call against the selected host, so you can confirm the token before importing anything.
 
-GitHub Enterprise Server and Enterprise Cloud with data residency are configured through the `GH_API_URL` environment variable rather than the Instance URL field, which only shows for the other two sources. See [Environment variables](./environment-variables.md#source).
+GitHub Enterprise Server and Enterprise Cloud with data residency are configured through the `GH_API_URL` environment variable rather than the Instance URL field, which only shows for the other two sources. See [Environment variables](/docs/environment-variables/#source).
 
 ## Git URL sources
 
@@ -44,7 +44,7 @@ What to expect:
 - Branches and tags are mirrored. There are no releases, issues, pull requests or wikis to read.
 - There is nothing to list, so there is no import, no auto import, no organizations and no starred repositories.
 - Cleanup never treats these repositories as deleted upstream.
-- Force push detection is not available. For protection against rewritten history, use the **Always Backup** snapshot strategy; see [Force-push protection](./force-push-protection.md).
+- Force push detection is not available. For protection against rewritten history, use the **Always Backup** snapshot strategy; see [Force-push protection](/docs/force-push-protection/).
 - Only http and https URLs work. SSH remotes are not supported.
 - The folder a repository sits in is used as its owner, so `https://git.example.org/team/project.git` is owned by `team`. A repository at the root of the host is owned by the host name.
 
@@ -82,7 +82,7 @@ The code itself is copied by the destination: Gitea and Forgejo pull from the so
 | Star lists | yes | no | no | no |
 | Force push detection | yes | no | no | no |
 
-The GitHub only rows read the GitHub API. With another source the corresponding switches in the mirror settings are disabled and say why. Releases are the exception: Gitea and Forgejo expose them through their own API, so a Gitea, Forgejo or Codeberg source mirrors releases and their assets with that instance's token, or anonymously for a public repository. Wiki and LFS also depend on the destination: they travel to Gitea and Forgejo, not to GitHub or GitLab. See [Destinations](./destinations.md).
+The GitHub only rows read the GitHub API. With another source the corresponding switches in the mirror settings are disabled and say why. Releases are the exception: Gitea and Forgejo expose them through their own API, so a Gitea, Forgejo or Codeberg source mirrors releases and their assets with that instance's token, or anonymously for a public repository. Wiki and LFS also depend on the destination: they travel to Gitea and Forgejo, not to GitHub or GitLab. See [Destinations](/docs/destinations/).
 
 ## Adding repositories
 
@@ -116,7 +116,7 @@ A save that tries to switch a locked source without that confirmation is refused
 | --- | --- | --- |
 | `SOURCE_PROVIDER` | `github` | `github`, `gitlab` or `gitea`. `gitea` also covers Forgejo and Codeberg. |
 | `SOURCE_URL` | per source | Base URL of the GitLab or Gitea / Forgejo instance. Ignored for GitHub. |
-| `GITLAB_PAGE_SIZE` | `100` | Projects per GitLab listing request, from 10 to 100. Lower it for a slow GitLab that times out at 100; see [Environment variables](./environment-variables.md#source). |
+| `GITLAB_PAGE_SIZE` | `100` | Projects per GitLab listing request, from 10 to 100. Lower it for a slow GitLab that times out at 100; see [Environment variables](/docs/environment-variables/#source). |
 | `GITHUB_USERNAME` | none | Username on the selected host. The name is kept for every source. |
 | `GITHUB_TOKEN` | none | Token for the selected host, with the scopes listed above. |
 | `GH_API_URL` | `https://api.github.com` | GitHub API base URL, for GitHub Enterprise. |
@@ -130,8 +130,9 @@ GITHUB_USERNAME=your-gitlab-username
 GITHUB_TOKEN=${GITLAB_TOKEN}
 ```
 
-The [environment variables reference](./environment-variables.md) has the complete list, and the [configuration guide](./configuration.md) explains how seeded values relate to the form.
+The [environment variables reference](/docs/environment-variables/) has the complete list, and the [configuration guide](/docs/configuration/) explains how seeded values relate to the form.
 
 ## Not yet
 
-Issues, merge requests and releases from GitLab and Gitea sources are not mirrored.
+- Issues, pull requests, merge requests, labels and milestones are read from GitHub only.
+- Releases from GitLab are not mirrored. Gitea, Forgejo and Codeberg sources do mirror releases.

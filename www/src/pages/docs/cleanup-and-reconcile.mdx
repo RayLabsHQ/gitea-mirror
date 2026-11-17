@@ -23,9 +23,9 @@ Cleanup looks for repositories that the database tracks but that no longer exist
 | Protected repositories | `CLEANUP_PROTECTED_REPOS` | none | Comma-separated repository names cleanup never touches. |
 | Batch size and pause | `CLEANUP_BATCH_SIZE`, `CLEANUP_PAUSE_BETWEEN_DELETES` | `10`, `2000` | Items per batch, and the pause between deletions in milliseconds. |
 
-The first three are on the card. The others are environment variables; see the [reference](./environment-variables.md#cleanup).
+The first three are on the card. The others are environment variables; see the [reference](/docs/environment-variables/#cleanup).
 
-Cleanup can also run on demand with `POST /api/cleanup/trigger`, see the [API page](./api.md#run-cleanup).
+Cleanup can also run on demand with `POST /api/cleanup/trigger`, see the [API page](/docs/api/#run-cleanup).
 
 ### What each action does
 
@@ -75,4 +75,4 @@ Only mirrors whose original URL points at the configured source count. The hosts
 - An adopted row records where the mirror already lives and keeps it there, even when the mirror strategy would put a new mirror elsewhere, so the next sync does not create a second copy.
 - Adoption uses the existing unique index on account and full name, so it cannot create duplicates.
 
-Reconcile works with Gitea and Forgejo destinations. It is not available for GitHub and GitLab, which have no server side mirror state to compare. The same comparison is available as `POST /api/cleanup/reconcile`; see the [API page](./api.md#reconcile-the-destination).
+Reconcile works with Gitea and Forgejo destinations. It is not available for GitHub and GitLab, which have no server side mirror state to compare. The same comparison is available as `POST /api/cleanup/reconcile`; see the [API page](/docs/api/#reconcile-the-destination).

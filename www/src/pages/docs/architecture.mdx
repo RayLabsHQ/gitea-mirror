@@ -10,7 +10,7 @@ Gitea Mirror is a single self-hosted process. It serves a web interface, talks t
 
 ## Stack
 
-The frontend is Astro 5 in server-side rendering mode, with React 19 islands for the interactive parts, Shadcn UI components, and Tailwind CSS 4.
+The frontend is Astro 7 in server-side rendering mode, with React 19 islands for the interactive parts, Shadcn UI components, and Tailwind CSS 4.
 
 The backend is Astro API routes served through the `@astrojs/node` adapter in standalone mode. Everything runs on the Bun runtime, which requires version 1.2.9 or newer.
 
@@ -100,7 +100,7 @@ src/
 
 Outside `src/`:
 
-- `drizzle/` holds the generated SQL migrations and their journal. Migrations run automatically on startup. Recent ones: 0015 added the source host columns on repositories, 0016 carried the Better Auth 1.7 schema, 0017 added API keys, and 0018 added the destination host columns on repositories with a backfill from each account's destination settings.
+- `drizzle/` holds the generated SQL migrations and their journal. Migrations run automatically on startup. Recent ones: 0018 added the destination host columns on repositories with a backfill from each account's destination settings, 0019 added the `sources` table for several sources per account, 0020 pinned organizations to a source, and 0021 added the storage size columns on repositories.
 - `scripts/` holds the runtime server, database management CLI, recovery and repair scripts, and the environment configuration loader entry point.
 - `helm/gitea-mirror/` is the Kubernetes Helm chart.
 - `www/` is the marketing and documentation site, a separate Astro project with its own dependencies.
@@ -136,13 +136,13 @@ A mirror operation runs in stages.
 
 Discovery queries the configured source for repositories matching the configured selection rules, filtered by visibility, fork status, archive status, collaborator affiliation, and organization allowlists and denylists. Each source has an adapter under `src/lib/source-providers/` that maps its API onto the same repository shape. Results are written to the `repositories` table.
 
-Destination resolution decides where each repository goes, based on the mirror strategy plus any per-repository or per-organization override. The four strategies are `preserve`, `single-org`, `flat-user`, and `mixed`, described in the [configuration guide](./configuration.md).
+Destination resolution decides where each repository goes, based on the mirror strategy plus any per-repository or per-organization override. The four strategies are `preserve`, `single-org`, `flat-user`, and `mixed`, described in the [configuration guide](/docs/configuration/).
 
 The dispatcher in `src/lib/mirror-dispatch.ts` then picks one of two paths by destination kind, and every entry point goes through it: the mirror, sync and retry endpoints, the scheduler's auto mirror and sync phases, boot recovery and the organization mirror loop.
 
 **Pull mirror path** (Gitea, Forgejo). Repository creation calls the migration API to create a pull mirror, creating the destination organization first if it does not exist. Organization creation is sequential by default to avoid races when many repositories target the same new organization. The destination fetches from the source itself on its mirror interval.
 
-**Push engine path** (GitHub, GitLab). The app keeps a bare clone per repository under the data directory, fetches it with prune, and pushes branches and tags to the target with force and prune. A target adapter creates, archives and deletes repositories through the host's API. A lock file per clone and a global concurrency limit keep the number of git processes bounded, and tokens reach git only through an inline credential helper fed from the child process environment. The [Destinations](./destinations.md) page describes the engine in detail.
+**Push engine path** (GitHub, GitLab). The app keeps a bare clone per repository under the data directory, fetches it with prune, and pushes branches and tags to the target with force and prune. A target adapter creates, archives and deletes repositories through the host's API. A lock file per clone and a global concurrency limit keep the number of git processes bounded, and tokens reach git only through an inline credential helper fed from the child process environment. The [Destinations](/docs/destinations/) page describes the engine in detail.
 
 Metadata mirroring, if enabled and the source is GitHub and the destination a pull mirror, follows separately. Issues are recreated with their comments, labels, assignees, and milestones. Releases are recreated with their assets, subject to the release and asset limits. Wiki content is cloned as a separate repository.
 

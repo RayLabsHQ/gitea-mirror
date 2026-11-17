@@ -57,7 +57,7 @@ The calls below cover the common automation cases. Response bodies show the fiel
 
 ### Health
 
-`GET /api/health` needs no key. It reports overall status, database connectivity and the recovery state, and is what the container health check polls. The full response is described in [Advanced topics](./advanced.md#health-endpoint).
+`GET /api/health` needs no key. It reports overall status, database connectivity and the recovery state, and is what the container health check polls. The full response is described in [Advanced topics](/docs/advanced/#health-endpoint).
 
 ### List tracked repositories
 
@@ -88,7 +88,7 @@ Despite the name it lists every repository the account tracks, whatever the conf
 }
 ```
 
-`status` is one of `imported`, `mirroring`, `mirrored`, `failed`, `syncing`, `synced`, `skipped`, `deleted`, `archived`.
+`status` is one of `imported`, `mirroring`, `mirrored`, `failed`, `syncing`, `synced`, `skipped`, `ignored`, `pending-approval`, `deleting`, `deleted`, `archived`. `ignored` means you chose to skip the repository, and `pending-approval` means force-push protection held a sync until you approve or dismiss it.
 
 `GET /api/repositories/{id}` returns one of them in the same shape as `{ "success": true, "repository": { ... } }`, or `404` when the id is not this account's. Use it to watch a single mirror without fetching the whole list.
 
@@ -126,7 +126,7 @@ Starts mirroring in the background and returns straight away. Poll `GET /api/rep
 | Status | Meaning |
 | --- | --- |
 | `200` | Job started. `repositories` lists what was queued. |
-| `400` | `repositoryIds` missing or empty, or no source token saved. |
+| `400` | `repositoryIds` missing or empty, or no destination (Gitea) token saved. |
 | `404` | None of the ids belong to this account. |
 
 `POST /api/job/sync-repo` takes the same body and re-syncs repositories that are already mirrored.
@@ -189,13 +189,13 @@ Sizes are bytes. `destinationSize` is Git and LFS together as Gitea or Forgejo r
 
 ### Run cleanup
 
-`POST /api/cleanup/trigger` runs the [repository cleanup](./cleanup-and-reconcile.md) now, with the account's saved cleanup settings, and returns how many orphaned repositories were found and processed and any errors. `GET /api/cleanup/trigger` returns the cleanup configuration and the last and next run times.
+`POST /api/cleanup/trigger` runs the [repository cleanup](/docs/cleanup-and-reconcile/) now, with the account's saved cleanup settings, and returns how many orphaned repositories were found and processed and any errors. `GET /api/cleanup/trigger` returns the cleanup configuration and the last and next run times.
 
 ### Reconcile the destination
 
 `POST /api/cleanup/reconcile`
 
-Compares what the destination (Gitea or Forgejo) holds with the repositories this account tracks. See [Cleanup and reconcile](./cleanup-and-reconcile.md#reconcile) for what the groups mean.
+Compares what the destination (Gitea or Forgejo) holds with the repositories this account tracks. See [Cleanup and reconcile](/docs/cleanup-and-reconcile/#reconcile) for what the groups mean.
 
 ```json
 { "dryRun": true, "adoptUntracked": false, "resetMissing": false }

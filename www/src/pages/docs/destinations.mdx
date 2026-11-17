@@ -21,14 +21,14 @@ GitHub to Gitea is the supported path. The other three carry a BETA pill in the 
 
 ## Gitea and Forgejo
 
-These are pull mirrors. For each repository the app calls the migrate API with the source clone URL and the source token, and the destination creates a mirror that it refreshes itself on the interval set on the card (the per-repository mirror interval, `GITEA_MIRROR_INTERVAL` in the environment). Everything beyond the git data, meaning issues, pull requests, labels, milestones, releases, wiki and LFS objects, is mirrored by the app through the destination's API, subject to what the [source](./sources.md) offers.
+These are pull mirrors. For each repository the app calls the migrate API with the source clone URL and the source token, and the destination creates a mirror that it refreshes itself on the interval set on the card (the per-repository mirror interval, `GITEA_MIRROR_INTERVAL` in the environment). Everything beyond the git data, meaning issues, pull requests, labels, milestones, releases, wiki and LFS objects, is mirrored by the app through the destination's API, subject to what the [source](/docs/sources/) offers.
 
 The card holds:
 
 - **Server URL** of the instance, used for all API and mirroring traffic.
 - **External URL**, optional, used for the links on the dashboard when your browser reaches the instance at a different address than the app does.
 - **Username** and **access token**. The username is the default owner for mirrors that the mirror strategy does not send elsewhere.
-- The organization settings: mirror strategy, default organization, organization visibility, and the mirror interval. See [Mirror strategies](./configuration.md#mirror-strategies).
+- The organization settings: mirror strategy, default organization, organization visibility, and the mirror interval. See [Mirror strategies](/docs/configuration/#mirror-strategies).
 
 Forgejo shares Gitea's API, so everything Gitea supports works there. One thing to know: Forgejo releases before 15.0.0 do not persist the credentials sent through the migrate API, so later syncs of private repositories fail with `terminal prompts disabled`. The card shows a warning when the Test button detects such a version. Upgrade Forgejo, then delete and re-mirror the affected repositories, or re-enter the source token once in each repository's mirror settings on Forgejo.
 
@@ -92,7 +92,7 @@ GitHub limits the size of a single push. When one push of all refs is refused, t
 
 ### Cleanup on push targets
 
-When the source deletes a repository, the [cleanup service](./cleanup-and-reconcile.md) applies the configured action to the target through its API: archive, or delete. Deleting on GitHub needs the `delete_repo` scope; without it the cleanup run fails with a message naming the scope and the repository stays. On gitlab.com and instances with delayed deletion, a deleted project is renamed and kept for the configured number of days before it disappears. The bare clone is removed with the row.
+When the source deletes a repository, the [cleanup service](/docs/cleanup-and-reconcile/) applies the configured action to the target through its API: archive, or delete. Deleting on GitHub needs the `delete_repo` scope; without it the cleanup run fails with a message naming the scope and the repository stays. On gitlab.com and instances with delayed deletion, a deleted project is renamed and kept for the configured number of days before it disappears. The bare clone is removed with the row.
 
 **Reconcile with destination** compares a Gitea or Forgejo server with the database. It is not available for push targets, which have no server side mirror state to reconcile.
 

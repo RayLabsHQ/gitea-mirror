@@ -15,12 +15,12 @@ Docker with the prebuilt image is the fastest way in.
 | Requirement | Detail |
 |---|---|
 | Port | `4321` by default, override with `PORT`. |
-| Data directory | Holds the SQLite database, generated secrets, and repository snapshots. Must persist across restarts. |
+| Data directory | Holds the SQLite database, generated secrets, repository snapshots and push clones. Must persist across restarts. |
 | `BETTER_AUTH_SECRET` | Signs session tokens. Use at least 32 characters. |
 | `ENCRYPTION_SECRET` | Encrypts GitHub, Gitea, and notification tokens at rest. |
 | Health endpoint | `GET /api/health`, used by container and Kubernetes probes. |
 
-Both secrets are generated automatically on first start if you do not provide them, and are written into the data directory as `.better_auth_secret` and `.encryption_secret`.
+The Docker image and the Nix package generate both secrets on first start if you do not provide them, and write them into the data directory as `.better_auth_secret` and `.encryption_secret`. A bare metal install with Bun generates nothing: set both yourself.
 
 > **Warning:** Losing the data directory loses those generated secrets. Session cookies stop working, and every stored GitHub and Gitea token becomes undecryptable, so you would have to re-enter them. Back the directory up, or set both secrets explicitly so they live somewhere you control.
 
@@ -44,17 +44,19 @@ services:
     volumes:
       - ./data:/app/data
     environment:
-      - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}
+      - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET:-}
       - BETTER_AUTH_URL=http://localhost:4321
       - PUBLIC_BETTER_AUTH_URL=http://localhost:4321
       - BETTER_AUTH_TRUSTED_ORIGINS=http://localhost:4321
 ```
 
-Create a `.env` file next to it:
+Create a `.env` file next to it with a random secret. Compose reads `.env` as plain text and does not run commands in it, so generate the value in your shell:
 
 ```bash
-BETTER_AUTH_SECRET=$(openssl rand -base64 32)
+echo "BETTER_AUTH_SECRET=$(openssl rand -base64 32)" > .env
 ```
+
+If you skip this, the container generates a secret and keeps it in `./data`.
 
 Then start it:
 
@@ -77,7 +79,7 @@ cd gitea-mirror
 # Quick start, prebuilt image, data in ./data
 docker compose -f docker-compose.alt.yml up -d
 
-# Full setup, builds from source, named volume, every env var wired up
+# Full setup, named volume, every env var wired up
 docker compose up -d
 ```
 
@@ -93,7 +95,6 @@ docker run -d \
   --restart unless-stopped \
   -p 4321:4321 \
   -v gitea-mirror-data:/app/data \
-  -e BETTER_AUTH_SECRET="$(openssl rand -base64 32)" \
   -e BETTER_AUTH_URL=https://mirror.example.com \
   -e PUBLIC_BETTER_AUTH_URL=https://mirror.example.com \
   ghcr.io/raylabshq/gitea-mirror:latest
@@ -224,9 +225,16 @@ Run this way, data lands in `~/.local/share/gitea-mirror` unless you override `D
 
 The flake exposes a NixOS module that runs Gitea Mirror as a hardened systemd service:
 
+Add the flake input, then import the module and enable the service. `services.gitea-mirror` does not exist until the module is imported.
+
 ```nix
+# flake.nix
+inputs.gitea-mirror.url = "github:RayLabsHQ/gitea-mirror";
+
+# configuration.nix (needs `inputs` passed through specialArgs)
+{ inputs, ... }:
 {
-  inputs.gitea-mirror.url = "github:RayLabsHQ/gitea-mirror";
+  imports = [ inputs.gitea-mirror.nixosModules.default ];
 
   services.gitea-mirror = {
     enable = true;
@@ -294,11 +302,19 @@ bun run setup
 # Build the production bundle
 bun run build
 
-# Run it
-BETTER_AUTH_SECRET="$(openssl rand -base64 32)" bun run start
+# Create the two secrets once and keep them
+cat > .env <<EOF
+BETTER_AUTH_SECRET=$(openssl rand -base64 32)
+ENCRYPTION_SECRET=$(openssl rand -base64 32)
+EOF
+
+# Run it (Bun loads .env from the working directory)
+bun run start
 ```
 
-The server listens on `http://localhost:4321`. Data goes to `data/gitea-mirror.db` relative to the working directory, following `DATABASE_URL`.
+Keep both secrets the same across restarts. A new `BETTER_AUTH_SECRET` signs everyone out, and a new `ENCRYPTION_SECRET` makes every stored token unreadable, so you would have to enter them again.
+
+The server listens on port 4321 on all interfaces. Data goes to `data/gitea-mirror.db` relative to the working directory, following `DATABASE_URL`.
 
 For development with hot reload, use `bun run dev` instead of building.
 
@@ -345,8 +361,10 @@ Everything that must survive a restart lives in one directory, `/app/data` in Do
 | `.better_auth_secret` | Generated session secret, if you did not supply one. |
 | `.encryption_secret` | Generated encryption secret, if you did not supply one. |
 | `repo-backups/` | Git bundle snapshots, when force-push protection is set to create them. |
+| `mirrors/` | Bare clones used to push to GitHub and GitLab destinations. Moved with `MIRROR_CLONE_DIR`. |
+| `tmp/release-assets/` | Release assets while they are copied to the destination. Each file is removed when its upload finishes. Files left by a crash are removed after a restart, once they are a day old. |
 
-Back up the whole directory. Snapshots in `repo-backups/` are the part that grows, so size the volume with your retention settings in mind.
+Back up the whole directory; `tmp/` can be left out. Snapshots in `repo-backups/` and clones in `mirrors/` are the parts that grow, so size the volume with your retention settings in mind. While a release is copied, `tmp/` needs room for its largest asset.
 
 ## Reverse proxy
 

@@ -15,7 +15,7 @@ If your homelab already runs a cluster (k3s, Talos, MicroK8s), Helm is the faste
 
 - Kubernetes 1.23+ with storage (Rook, Longhorn, local-path, etc.)
 - Helm 3.8+
-- GitHub PAT and Gitea API token ready (same scopes as the Docker playbook)
+- GitHub PAT and Gitea API token ready (same scopes as the [backup guide](/use-cases/backup-github-repositories/))
 - Namespace with outbound access to GitHub and your Gitea host
 
 ## Step-by-step
@@ -40,8 +40,12 @@ helm upgrade --install gitea-mirror oci://ghcr.io/raylabshq/charts/gitea-mirror 
   --set "gitea-mirror.github.username=<your-gh-username>" \
   --set "gitea-mirror.github.token=<your-gh-token>" \
   --set "gitea-mirror.gitea.url=https://gitea.example.com" \
-  --set "gitea-mirror.gitea.token=<your-gitea-token>"
+  --set "gitea-mirror.gitea.token=<your-gitea-token>" \
+  --set "gitea-mirror.core.betterAuthUrl=https://mirror.example.com" \
+  --set "gitea-mirror.core.betterAuthTrustedOrigins=https://mirror.example.com"
 ```
+
+Set `betterAuthUrl` and `betterAuthTrustedOrigins` to the URL you will open in the browser. Left at the default `http://localhost:4321`, sign-in only works through `kubectl port-forward`.
 
 **Using a values file:**
 
@@ -87,7 +91,7 @@ gitea-mirror:
     url: "https://git.lab.local"
 ```
 
-Helm renders a `Deployment`, `Service`, optional Ingress/Gateway resources, and—when persistence is enabled—a PVC mounted at `/app/data` for the SQLite database and mirrored repositories.
+Helm renders a `Deployment`, `Service`, optional Ingress/Gateway resources, and, when persistence is enabled, a PVC mounted at `/app/data` for the SQLite database, secrets and snapshots. The mirrored repositories themselves live on Gitea.
 
 ### 3. Verify the release
 
@@ -96,7 +100,7 @@ kubectl -n gitea-mirror get pods,svc,pvc
 kubectl -n gitea-mirror logs deploy/gitea-mirror --tail=100
 ```
 
-Watch for the `Runtime server listening` line in the logs. Once ready, browse to the ingress host (or userland port-forward with `kubectl port-forward svc/gitea-mirror 4321:4321`). Complete the first-run wizard just like the Docker playbook.
+Watch for the `Runtime server listening` line in the logs. Once ready, browse to the ingress host (or userland port-forward with `kubectl port-forward svc/gitea-mirror 4321:4321`). Create the first account, then click **Configure GitHub** and connect GitHub and Gitea as in the [quickstart](/docs/quickstart/).
 
 After the pod is healthy, open **Configuration → Connections** inside the UI to add GitHub owners, choose a destination strategy, and enable metadata/LFS mirroring.
 
