@@ -4,14 +4,23 @@ import { db } from "@/lib/db";
 import { getRecoveryStatus, hasJobsNeedingRecovery } from "@/lib/recovery";
 import { httpGet } from "@/lib/http-client";
 
-// Cache for the latest version to avoid frequent GitHub API calls
+// Cache for the latest version to avoid frequent GitHub API calls. Failures
+// are cached too: the health check runs every few seconds in Docker, and
+// retrying a failed lookup each time burns through GitHub's anonymous limit
+// of 60 requests an hour, which keeps the lookup failing.
 interface VersionCache {
   latestVersion: string;
-  timestamp: number;
+  expiresAt: number;
 }
 
 let versionCache: VersionCache | null = null;
 const CACHE_TTL = 3600000; // 1 hour in milliseconds
+const FAILURE_CACHE_TTL = 900000; // 15 minutes in milliseconds
+
+/** Clears the latest version cache. For tests only. */
+export function resetVersionCache(): void {
+  versionCache = null;
+}
 
 export const GET: APIRoute = async () => {
   try {
@@ -135,9 +144,10 @@ function compareVersions(v1: string, v2: string): number {
 /**
  * Check for the latest version from GitHub releases
  */
-async function checkLatestVersion(): Promise<string> {
-  // Return cached version if available and not expired
-  if (versionCache && (Date.now() - versionCache.timestamp) < CACHE_TTL) {
+export async function checkLatestVersion(): Promise<string> {
+  const now = Date.now();
+  // Return cached result (success or failure) if not expired
+  if (versionCache && now < versionCache.expiresAt) {
     return versionCache.latestVersion;
   }
 
@@ -151,16 +161,17 @@ async function checkLatestVersion(): Promise<string> {
     // Extract version from tag_name (remove 'v' prefix if present)
     const latestVersion = response.data.tag_name.replace(/^v/, '');
 
-    // Update cache
-    versionCache = {
-      latestVersion,
-      timestamp: Date.now()
-    };
-
+    versionCache = { latestVersion, expiresAt: now + CACHE_TTL };
     return latestVersion;
   } catch (error) {
     console.error('Failed to check for latest version:', error);
-    return 'unknown';
+    // Keep the last known version, and do not ask again until the failure
+    // window has passed.
+    versionCache = {
+      latestVersion: versionCache?.latestVersion ?? 'unknown',
+      expiresAt: now + FAILURE_CACHE_TTL,
+    };
+    return versionCache.latestVersion;
   }
 }
 

@@ -126,4 +126,4 @@ With Helm, pin the chart with `--version`. With Nix, use `github:RayLabsHQ/gitea
 
 ## Knowing when there is an update
 
-The running version is shown at the bottom of the sidebar, with a line underneath when a newer release is out. The same information is in `/api/health` as `version`, `latestVersion` and `updateAvailable`, which suits monitoring tools.
+The running version is shown at the bottom of the sidebar, with a line underneath when a newer release is out. The same information is in `/api/health` as `version`, `latestVersion` and `updateAvailable`, which suits monitoring tools. The app asks GitHub for the latest release at most once an hour, and waits 15 minutes before asking again after a failed check, keeping the last version it knew (`unknown` before the first success).
