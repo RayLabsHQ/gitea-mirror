@@ -243,6 +243,60 @@ const mockHttpGet = mock(async (url: string, headers?: any) => {
       headers: new Headers(),
     };
   }
+  // After a move, the recorded location of swap-repo holds a writable mirror
+  // of a different source, and the strategy's location holds its own mirror.
+  if (url.includes("/api/v1/repos/oldorg/swap-repo")) {
+    return {
+      data: {
+        id: 795,
+        name: "swap-repo",
+        mirror: true,
+        owner: { login: "oldorg" },
+        mirror_interval: "8h",
+        original_url: "https://github.com/someone-else/swap-repo.git",
+        private: false,
+        permissions: { admin: false, push: true, pull: true },
+      },
+      status: 200,
+      statusText: "OK",
+      headers: new Headers(),
+    };
+  }
+  if (url.includes("/api/v1/repos/starred/swap-repo")) {
+    return {
+      data: {
+        id: 796,
+        name: "swap-repo",
+        mirror: true,
+        owner: { login: "starred" },
+        mirror_interval: "8h",
+        original_url: "https://github.com/user/swap-repo.git",
+        private: false,
+        permissions: { admin: false, push: true, pull: true },
+      },
+      status: 200,
+      statusText: "OK",
+      headers: new Headers(),
+    };
+  }
+  // A mirror that was created while the server answered at another address.
+  if (url.includes("/api/v1/repos/starred/moved-host-repo")) {
+    return {
+      data: {
+        id: 794,
+        name: "moved-host-repo",
+        mirror: true,
+        owner: { login: "starred" },
+        mirror_interval: "8h",
+        original_url: "https://github.com/user/moved-host-repo.git",
+        private: false,
+        permissions: { admin: false, push: true, pull: true },
+      },
+      status: 200,
+      statusText: "OK",
+      headers: new Headers(),
+    };
+  }
   // Only reachable at the "archived-{name}" candidate — the base name
   // ("starred/broken-repo") deliberately falls through to the generic 404
   // below, simulating a repo that archiveGiteaRepo already renamed in Gitea.
@@ -694,6 +748,97 @@ describe("Enhanced Gitea Operations", () => {
       ).rejects.toThrow("Repository non-mirror-repo is not a mirror. Cannot sync.");
 
       expect(mockMirrorGitHubReleasesToGitea).not.toHaveBeenCalled();
+    });
+
+    describe("destination moved to a new address", () => {
+      const config: Partial<Config> = {
+        userId: "user123",
+        githubConfig: {
+          username: "testuser",
+          token: "github-token",
+          privateRepositories: false,
+          mirrorStarred: true,
+        },
+        giteaConfig: {
+          url: "https://gitea.example.com",
+          token: "encrypted-token",
+          defaultOwner: "testuser",
+          mirrorReleases: false,
+        },
+      };
+
+      const movedRow = (name: string): Repository => ({
+        id: "repo-moved",
+        name,
+        fullName: `user/${name}`,
+        owner: "user",
+        cloneUrl: `https://github.com/user/${name}.git`,
+        isPrivate: false,
+        isStarred: true,
+        status: repoStatusEnum.parse("failed"),
+        visibility: "public",
+        userId: "user123",
+        mirroredLocation: `starred/${name}`,
+        destinationProvider: "gitea",
+        destinationUrl: "https://gitea-old.example.com",
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      });
+
+      const deps = () => ({
+        getGiteaRepoOwnerAsync: mockGetGiteaRepoOwnerAsync,
+        mirrorGitHubReleasesToGitea: mockMirrorGitHubReleasesToGitea,
+        mirrorGitRepoIssuesToGitea: mockMirrorGitRepoIssuesToGitea,
+        mirrorGitRepoPullRequestsToGitea: mockMirrorGitRepoPullRequestsToGitea,
+        mirrorGitRepoLabelsToGitea: mockMirrorGitRepoLabelsToGitea,
+        mirrorGitRepoMilestonesToGitea: mockMirrorGitRepoMilestonesToGitea,
+        syncRepositoryMetadataToGitea: mockSyncRepositoryMetadataToGitea,
+      });
+
+      test("repoints the row and syncs when the configured server holds its mirror", async () => {
+        const repository = movedRow("moved-host-repo");
+        const result = await syncGiteaRepoEnhanced({ config, repository }, deps());
+
+        expect(result).toEqual({ success: true });
+        expect(dbUpdateSetCalls[0]).toMatchObject({
+          destinationProvider: "gitea",
+          destinationUrl: "https://gitea.example.com",
+        });
+        const mirrorSyncCalls = mockHttpPost.mock.calls.filter((call) =>
+          String(call[0]).includes("/mirror-sync")
+        );
+        expect(String(mirrorSyncCalls[0][0])).toContain("/api/v1/repos/starred/moved-host-repo/mirror-sync");
+      });
+
+      test("syncs the verified mirror, not a rejected one at the recorded location", async () => {
+        const repository = { ...movedRow("swap-repo"), mirroredLocation: "oldorg/swap-repo" };
+        const result = await syncGiteaRepoEnhanced({ config, repository }, deps());
+
+        expect(result).toEqual({ success: true });
+        expect(dbUpdateSetCalls[0]).toMatchObject({
+          destinationUrl: "https://gitea.example.com",
+          mirroredLocation: "starred/swap-repo",
+        });
+        const touched = [...mockHttpPost.mock.calls, ...mockHttpPatch.mock.calls].map((call) =>
+          String(call[0])
+        );
+        expect(touched.some((url) => url.includes("/api/v1/repos/starred/swap-repo/mirror-sync"))).toBe(true);
+        expect(touched.some((url) => url.includes("/repos/oldorg/swap-repo"))).toBe(false);
+      });
+
+      test("still refuses when the configured server cannot prove it holds the mirror", async () => {
+        // starred/test-repo is a mirror, but Gitea reports no original_url for it.
+        const repository = movedRow("test-repo");
+        await expect(syncGiteaRepoEnhanced({ config, repository }, deps())).rejects.toThrow(
+          "is mirrored to Gitea (https://gitea-old.example.com) but the configured destination is Gitea (https://gitea.example.com)"
+        );
+        expect(
+          dbUpdateSetCalls.some((call) => call.destinationUrl === "https://gitea.example.com")
+        ).toBe(false);
+        expect(
+          mockHttpPost.mock.calls.some((call) => String(call[0]).includes("/mirror-sync"))
+        ).toBe(false);
+      });
     });
 
     test("refuses to start when another run already owns the repository (#417)", async () => {

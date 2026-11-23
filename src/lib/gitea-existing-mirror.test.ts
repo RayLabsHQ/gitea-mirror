@@ -47,6 +47,8 @@ let existsBeforeMigrate = true;
 let existsAfterMigrate = true;
 let migrateError: Error | null = null;
 let readsAfterMigrate = 0;
+// Whether the destination lets the configured token push to the mirror.
+let pushAllowed = true;
 
 /** Whether the repository is on the destination at this point of the run. */
 const repoThere = () =>
@@ -149,6 +151,7 @@ if (isChild) {
         mirror: true,
         private: false,
         original_url: CLONE_URL,
+        permissions: { admin: false, push: pushAllowed, pull: true },
         empty: !importFinished,
         mirror_interval: importFinished ? "8h0m0s" : "",
       };
@@ -252,6 +255,7 @@ beforeEach(() => {
   existsAfterMigrate = true;
   migrateError = null;
   readsAfterMigrate = 0;
+  pushAllowed = true;
 });
 
 for (const path of paths) {
@@ -301,6 +305,66 @@ for (const path of paths) {
 
       expect(syncCalls).toHaveLength(0);
       expect(migrateCalls).toBe(0);
+    });
+  });
+}
+
+// The same server answering at a new address: the row still records the old
+// one, and the configured server proves it holds the row's mirror.
+for (const path of paths) {
+  describe.skipIf(!isChild)(`destination moved to a new address, ${path.name}`, () => {
+    const run = (overrides: Record<string, unknown>) => {
+      Object.assign(repository, overrides);
+      return path.run();
+    };
+    const restore = () =>
+      Object.assign(repository, { destinationUrl: "", status: "imported", mirroredLocation: "" });
+
+    test("repoints the row at the configured destination and syncs the mirror", async () => {
+      try {
+        await run({ destinationUrl: "https://gitea-old.test", status: "failed" });
+      } finally {
+        restore();
+      }
+
+      expect(rowWrites[0]).toMatchObject({
+        destinationProvider: "gitea",
+        destinationUrl: "https://gitea.test",
+      });
+      expect(migrateCalls).toBe(0);
+      expect(syncCalls).toHaveLength(1);
+      expect(syncCalls[0].args.repository.mirroredLocation).toBe(path.location);
+    });
+
+    test("refuses a mirror of the row's source the configured token cannot push to", async () => {
+      pushAllowed = false;
+      try {
+        await expect(
+          run({ destinationUrl: "https://gitea-old.test", status: "failed" })
+        ).rejects.toThrow("but the configured destination is Gitea (https://gitea.test)");
+      } finally {
+        restore();
+      }
+
+      expect(rowWrites.some((write) => write.destinationUrl === "https://gitea.test")).toBe(false);
+      expect(syncCalls).toHaveLength(0);
+    });
+
+    test("still refuses when the configured server has no mirror of the row", async () => {
+      repoGone = true;
+      try {
+        await expect(
+          run({ destinationUrl: "https://gitea-old.test", status: "failed" })
+        ).rejects.toThrow(
+          "is mirrored to Gitea (https://gitea-old.test) but the configured destination is Gitea (https://gitea.test)"
+        );
+      } finally {
+        restore();
+      }
+
+      expect(rowWrites.some((write) => write.destinationUrl === "https://gitea.test")).toBe(false);
+      expect(migrateCalls).toBe(0);
+      expect(syncCalls).toHaveLength(0);
     });
   });
 }
