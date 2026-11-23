@@ -1,4 +1,5 @@
-import { assertRepositoryMatchesConfiguredDestination, usesPushEngine } from "./destination-connection";
+import { usesPushEngine } from "./destination-connection";
+import { ensureRepositoryOnConfiguredDestination } from "./destination-relink";
 import {
   repoStatusEnum,
   type RepositoryVisibility,
@@ -956,13 +957,19 @@ export const mirrorGithubRepoToGitea = async ({
     if (usesPushEngine(config)) {
       throw new Error("The configured destination is a push target; the Gitea mirror path cannot serve it.");
     }
-    // Nor to a different destination than the one the row was mirrored to.
-    assertRepositoryMatchesConfiguredDestination({ repository, config });
-
     // The source this repository came from. The assert above refused rows
     // no connected source owns, so this practically always resolves; the
     // config fallback only keeps the types honest.
     const repoSource = findSourceForRepository(repository, sources);
+
+    // Nor to a different destination than the one the row was mirrored to,
+    // unless this server already holds the row's mirror (it moved address).
+    await ensureRepositoryOnConfiguredDestination({
+      repository,
+      config,
+      resolveOwner: () =>
+        getGiteaRepoOwnerAsync({ config, repository, sourceUsername: repoSource?.username }),
+    });
     const sourceConnection = repoSource
       ? sourceConnectionFromSource(repoSource, { userId: config.userId })
       : resolveSourceConnection(config);
@@ -1862,8 +1869,13 @@ export async function mirrorGitHubRepoToGiteaOrg({
     if (usesPushEngine(config)) {
       throw new Error("The configured destination is a push target; the Gitea mirror path cannot serve it.");
     }
-    // Nor to a different destination than the one the row was mirrored to.
-    assertRepositoryMatchesConfiguredDestination({ repository, config });
+    // Nor to a different destination than the one the row was mirrored to,
+    // unless this server already holds the row's mirror (it moved address).
+    await ensureRepositoryOnConfiguredDestination({
+      repository,
+      config,
+      resolveOwner: () => orgName,
+    });
 
     // The source this repository came from. The assert above refused rows
     // no connected source owns, so this practically always resolves; the

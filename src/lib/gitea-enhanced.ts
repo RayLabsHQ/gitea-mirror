@@ -26,7 +26,8 @@ import type { Repository } from "./db/schema";
 import type { Octokit } from "@octokit/rest";
 import { createGitHubClient, createPublicGitHubClient } from "./github";
 import { createMirrorJob } from "./helpers";
-import { assertRepositoryMatchesConfiguredDestination, usesPushEngine } from "./destination-connection";
+import { usesPushEngine } from "./destination-connection";
+import { ensureRepositoryOnConfiguredDestination } from "./destination-relink";
 import { decryptConfigTokens } from "./utils/config-encryption";
 import { httpPost, httpGet, httpPatch, HttpError } from "./http-client";
 import { db, repositories } from "./db";
@@ -95,6 +96,8 @@ export interface GiteaRepoInfo {
   // GitHub source (vs. a same-named mirror of a different source).
   original_url?: string;
   private: boolean;
+  // What the requesting token may do with the repository.
+  permissions?: { admin?: boolean; push?: boolean; pull?: boolean };
   // Current description/topics, so the per-sync metadata reconciliation can
   // skip writes that would not change anything.
   description?: string;
@@ -520,7 +523,14 @@ export async function syncGiteaRepoEnhanced({
     if (usesPushEngine(config)) {
       throw new Error("The configured destination is a push target; syncing goes through the push engine.");
     }
-    assertRepositoryMatchesConfiguredDestination({ repository, config });
+    // A row recorded on another address is synced only when this server
+    // already holds its mirror (the same server moved to a new URL).
+    await ensureRepositoryOnConfiguredDestination({
+      repository,
+      config,
+      resolveOwner: async () =>
+        (deps ?? (await import("./gitea"))).getGiteaRepoOwnerAsync({ config, repository }),
+    });
 
     console.log(`[Sync] Starting sync for repository ${repository.name}`);
 

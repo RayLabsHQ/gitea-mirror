@@ -108,6 +108,8 @@ Once anything has been mirrored the destination locks. The dropdown and the URL 
 
 Each repository row records the host it was mirrored to. A row mirrored to one host is refused on another until it is removed and mirrored again, so a token is never sent to the wrong server. Reconcile reports such rows as mirrored to a previous destination and leaves them alone. A `GITEA_URL` value that disagrees with a locked destination is ignored on boot with a warning.
 
+A row is let through, and repointed at the configured address, when the configured Gitea or Forgejo destination already has its mirror in place, as the second point above says. When a row recorded on another address is synced or mirrored, the app reads the repository at the row's recorded location and at the location the mirror strategy gives, and nowhere else. If one of them is a pull mirror whose original URL is the row's source, and the configured token can push to it, the row now points at the configured destination and the run goes on; the log says `[Destination] ... now points at the configured destination`. This is what lets mirrors follow a server that moved to a new address: each row is repointed the next time a scheduled or manual sync reaches it, without removing and mirroring it again. Any other row still gets the refusal above. If the configured destination cannot be read (wrong token, server down), the error says so instead. Push targets (GitHub and GitLab) are never repointed.
+
 ## Environment variables
 
 The `GITEA_*` names are kept for every destination kind, so an existing deployment only has to add `DESTINATION_PROVIDER`.
