@@ -187,7 +187,7 @@ Issues, pull requests, labels and milestones are read from the GitHub API and ne
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `AUTO_IMPORT_REPOS` | `true` | Discover and import newly created repositories on the source during scheduled syncs. Set to `false` to disable. |
+| `AUTO_IMPORT_REPOS` | `true` | Discover and import newly created repositories on the source during scheduled syncs, including the first run after startup. Set to `false` to disable. |
 | `AUTO_MIRROR_REPOS` | `false` | Mirror newly imported repositories automatically, without a manual "Mirror All". |
 | `SCHEDULE_ONLY_MIRROR_UPDATED` | `false` | Skip repositories mirrored within the last `SCHEDULE_UPDATE_INTERVAL`. It does not check the source for changes. |
 | `SCHEDULE_UPDATE_INTERVAL` | `86400000` | With `SCHEDULE_ONLY_MIRROR_UPDATED`, how recently a repository must have been mirrored to be skipped, in milliseconds. |
