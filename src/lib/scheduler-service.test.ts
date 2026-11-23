@@ -252,6 +252,14 @@ const mockCreateSourceProviderFromSource = mock(() => ({
 // suite only asserts that discovery hands the imported repositories over.
 const mockTriggerNewRepositoriesNotification = mock(async () => {});
 
+// A where() result that can also be awaited after .limit(n), as the boot
+// auto-start's "already mirrored?" check does.
+function withLimit(rows: any[]) {
+  return Object.assign(Promise.resolve(rows), {
+    limit: (n: number) => Promise.resolve(rows.slice(0, n)),
+  });
+}
+
 if (isChild) {
   mock.module("@/lib/db", () => {
     const mockDb = {
@@ -261,12 +269,12 @@ if (isChild) {
       select: (fields?: any) => ({
         from: (table: any) => ({
           where: (_cond: any) => {
-            if (table === configsTable) return Promise.resolve(configRows);
-            if (table === organizationsTable) return Promise.resolve(orgRows);
+            if (table === configsTable) return withLimit(configRows);
+            if (table === organizationsTable) return withLimit(orgRows);
             if (table === repositoriesTable) {
-              return Promise.resolve(fields ? repoRows : poolRows);
+              return withLimit(fields ? repoRows : poolRows);
             }
-            return Promise.resolve([]);
+            return withLimit([]);
           },
         }),
       }),
@@ -352,9 +360,9 @@ if (isChild) {
   }));
 }
 
-const { schedulerLoop } = isChild
+const { schedulerLoop, startSchedulerService, stopSchedulerService } = isChild
   ? await import("@/lib/scheduler-service")
-  : { schedulerLoop: undefined as any };
+  : { schedulerLoop: undefined as any, startSchedulerService: undefined as any, stopSchedulerService: undefined as any };
 
 function makeSchedulerConfig(): any {
   return {
@@ -745,5 +753,67 @@ describe.skipIf(!isChild)("Scheduler rate limit gate (#437)", () => {
     expect(mockSyncRepositoryOnDestination).toHaveBeenCalledTimes(2);
     expect(consoleLines.some((line) => line.includes("rate limited until"))).toBe(false);
     expect(consoleLines.some((line) => line.includes("Completed scheduled sync for user user-1"))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Boot auto-start and AUTO_IMPORT_REPOS (issue #532).
+//
+// With scheduling on, the first run after boot imported every repository
+// from the sources whatever the auto import switch said, so
+// AUTO_IMPORT_REPOS=false only held for the scheduled runs after it.
+// Auto-start runs once per process, so this is a single test.
+// ---------------------------------------------------------------------------
+describe.skipIf(!isChild)("Scheduler boot auto-start (#532)", () => {
+  test("the startup run imports only for users with auto import on", async () => {
+    const lines: string[] = [];
+    const originalLog = console.log;
+    const originalError = console.error;
+    const capture = (...args: unknown[]) => {
+      lines.push(args.map((arg) => (typeof arg === "string" ? arg : String(arg))).join(" "));
+    };
+    console.log = mock(capture) as any;
+    console.error = mock(capture) as any;
+
+    try {
+      sourceRows = [personalSource, { ...personalSource, id: "source-user-2", userId: "user-2" }];
+      orgRows = [];
+      repoRows = [];
+      poolRows = [];
+      configUpdates = [];
+      clearAllRateLimits();
+      personalRepoListings = [
+        makeGitRepo("own-alpha", { owner: "majmcccloud", organization: null, fullName: "majmcccloud/own-alpha" }),
+      ];
+      starredRepoListings = [];
+      configRows = [
+        {
+          ...makeSchedulerConfig(),
+          githubConfig: { token: "encrypted-token" },
+          scheduleConfig: { enabled: true, interval: "1h", autoImport: false },
+        },
+        {
+          ...makeSchedulerConfig(),
+          id: "config-2",
+          userId: "user-2",
+          githubConfig: { token: "encrypted-token" },
+        },
+      ];
+      mockCreateSourceProviderFromSource.mockClear();
+
+      await startSchedulerService();
+      stopSchedulerService();
+
+      expect(lines.some((line) => line.includes("Auto-starting for user user-1"))).toBe(true);
+      expect(lines.some((line) => line.includes("Skipping import - auto import is off for user user-1"))).toBe(true);
+      expect(lines.some((line) => line.includes("Step 1: Importing repositories from the configured sources for user user-2"))).toBe(true);
+
+      const listedUsers = mockCreateSourceProviderFromSource.mock.calls.map(([source]: any[]) => source.userId);
+      expect(listedUsers).toContain("user-2");
+      expect(listedUsers).not.toContain("user-1");
+    } finally {
+      console.log = originalLog;
+      console.error = originalError;
+    }
   });
 });

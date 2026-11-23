@@ -958,9 +958,16 @@ async function performInitialAutoStart(): Promise<void> {
       const rateLimit = createRateLimitWatcher(config.userId);
 
       try {
-        // Step 1: Import repositories from every enabled source
-        console.log(`[Scheduler] Step 1: Importing repositories from the configured sources for user ${config.userId}...`);
-        await importRepositoriesFromSources(config, config.userId, 'auto-start');
+        // Step 1: Import repositories from every enabled source, unless auto
+        // import is off (AUTO_IMPORT_REPOS=false). The scheduled sync checks
+        // the same switch; this run used to ignore it and import everything
+        // on every restart (#532).
+        if (config.scheduleConfig?.autoImport !== false) {
+          console.log(`[Scheduler] Step 1: Importing repositories from the configured sources for user ${config.userId}...`);
+          await importRepositoriesFromSources(config, config.userId, 'auto-start');
+        } else {
+          console.log(`[Scheduler] Step 1: Skipping import - auto import is off for user ${config.userId}`);
+        }
 
         // Check if we already have mirrored repositories (indicating this isn't first run)
         const mirroredRepos = await db

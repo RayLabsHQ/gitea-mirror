@@ -191,7 +191,7 @@ Existing mirrors are re-synced according to the configured interval, and optiona
 
 ### Auto-start
 
-Setting `SCHEDULE_ENABLED=true`, or any of `SCHEDULE_INTERVAL`, `GITEA_MIRROR_INTERVAL`, or `DELAY`, enables the scheduler. When enabled, the first run happens shortly after boot rather than waiting a full interval, so a fresh container populates itself without anyone clicking a button.
+Setting `SCHEDULE_ENABLED=true`, or any of `SCHEDULE_INTERVAL`, `GITEA_MIRROR_INTERVAL`, or `DELAY`, enables the scheduler. When enabled, the first run happens shortly after boot rather than waiting a full interval, so a fresh container populates itself without anyone clicking a button. Like the scheduled runs, it imports new repositories only when auto import is on, so `AUTO_IMPORT_REPOS=false` holds from the first run.
 
 ### Mirror intervals versus sync intervals
 
