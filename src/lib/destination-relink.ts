@@ -11,11 +11,13 @@
  * The rule here: a row is repointed when the configured destination already
  * holds, at the row's recorded location or at the location the mirror
  * strategy gives, a pull mirror of the row's source that the configured
- * token can push to. That is the lock dialog's "fails until they exist on
- * the new server". Only those two locations are probed (no server-wide
- * search, which would also see other accounts' mirrors), so a row that does
- * not match costs at most two lookups per run. Anything else keeps the
- * guard's refusal; push targets on either side are never repointed.
+ * token can push to. The row then records that location as well, so the
+ * sync acts on the verified repository. That is the lock dialog's "fails
+ * until they exist on the new server". Only those two locations are probed
+ * (no server-wide search, which would also see other accounts' mirrors), so
+ * a row that does not match costs at most two lookups per run. Anything
+ * else keeps the guard's refusal; push targets on either side are never
+ * repointed.
  */
 import type { Config } from "@/types/config";
 import type { Repository } from "@/lib/db/schema";
@@ -35,7 +37,12 @@ import {
 import { repositoryDestinationColumns } from "./repo-utils";
 import { isMirrorOfSource } from "./utils/mirror-source-match";
 
-type DestinationColumns = ReturnType<typeof repositoryDestinationColumns>;
+type RelinkColumns = ReturnType<typeof repositoryDestinationColumns> & { mirroredLocation: string };
+
+export interface RelinkLocation {
+  owner: string;
+  repoName: string;
+}
 
 export interface RelinkDependencies {
   /** Reads one repository on the configured destination; null when it does not exist. */
@@ -44,8 +51,8 @@ export interface RelinkDependencies {
     owner: string;
     repoName: string;
   }) => Promise<GiteaRepoInfo | null>;
-  /** Stores the new destination columns on the row. */
-  saveDestination?: (repositoryId: string, columns: DestinationColumns) => Promise<void>;
+  /** Stores the new destination columns and the verified location on the row. */
+  saveDestination?: (repositoryId: string, columns: RelinkColumns) => Promise<void>;
 }
 
 async function readRepoInfo(args: {
@@ -57,13 +64,13 @@ async function readRepoInfo(args: {
   return getGiteaRepoInfo(args);
 }
 
-// The destination columns only: this corrects where the row points and is
-// not activity, so updatedAt (which the in-flight claim reads) stays as is.
-async function saveDestinationColumns(repositoryId: string, columns: DestinationColumns): Promise<void> {
+// Where the row points, and nothing else: this is a correction, not
+// activity, so updatedAt (which the in-flight claim reads) stays as is.
+async function saveDestinationColumns(repositoryId: string, columns: RelinkColumns): Promise<void> {
   await db.update(repositories).set(columns).where(eq(repositories.id, repositoryId));
 }
 
-function parseLocation(location: string | null | undefined): { owner: string; repoName: string } | null {
+function parseLocation(location: string | null | undefined): RelinkLocation | null {
   const value = (location ?? "").trim();
   const slash = value.indexOf("/");
   if (slash <= 0 || slash === value.length - 1) return null;
@@ -86,10 +93,11 @@ function isWritableMirrorOfSource(info: GiteaRepoInfo | null, cloneUrl: string |
  * could not be asked.
  *
  * `resolveOwner` gives the owner the current strategy expects; it is only
- * called when the recorded URL differs. On a relink the row object is
- * updated in place, so later guards in the same run see the new URL.
+ * called when the recorded URL differs and the recorded location does not
+ * hold the mirror. On a relink the row object is updated in place, so later
+ * guards and lookups in the same run see the new URL and location.
  *
- * Returns true when the row was repointed.
+ * Returns the verified location when the row was repointed, null otherwise.
  */
 export async function ensureRepositoryOnConfiguredDestination(
   {
@@ -102,9 +110,9 @@ export async function ensureRepositoryOnConfiguredDestination(
     resolveOwner: () => Promise<string> | string;
   },
   deps: RelinkDependencies = {}
-): Promise<boolean> {
+): Promise<RelinkLocation | null> {
   const destination = resolveDestinationIdentity(config);
-  if (isRepositoryOnConfiguredDestination(repository, destination)) return false;
+  if (isRepositoryOnConfiguredDestination(repository, destination)) return null;
 
   const recorded = getRepositoryDestination(repository);
   const pullOnBothSides =
@@ -112,38 +120,45 @@ export async function ensureRepositoryOnConfiguredDestination(
 
   if (pullOnBothSides && repository.id && destination.url) {
     const getRepoInfo = deps.getRepoInfo ?? readRepoInfo;
-    const candidates: Array<{ owner: string; repoName: string }> = [];
-    const seen = new Set<string>();
-    const add = (candidate: { owner: string; repoName: string } | null) => {
-      if (!candidate) return;
-      const key = `${candidate.owner}/${candidate.repoName}`.toLowerCase();
-      if (seen.has(key)) return;
-      seen.add(key);
-      candidates.push(candidate);
-    };
-    add(parseLocation(repository.mirroredLocation));
-    add(parseLocation(`${(await resolveOwner()).trim()}/${repository.name}`));
-
+    const probed = new Set<string>();
     let lookupError: unknown = null;
-    for (const candidate of candidates) {
-      let info: GiteaRepoInfo | null;
+
+    // The recorded location first; the strategy owner is only resolved when
+    // that one does not hold the mirror.
+    const probe = async (candidate: RelinkLocation | null): Promise<RelinkLocation | null> => {
+      if (!candidate) return null;
+      const key = `${candidate.owner}/${candidate.repoName}`.toLowerCase();
+      if (probed.has(key)) return null;
+      probed.add(key);
       try {
-        info = await getRepoInfo({ config, owner: candidate.owner, repoName: candidate.repoName });
+        const info = await getRepoInfo({ config, owner: candidate.owner, repoName: candidate.repoName });
+        return isWritableMirrorOfSource(info, repository.cloneUrl) ? candidate : null;
       } catch (error) {
         lookupError = error;
-        continue;
+        return null;
       }
-      if (!isWritableMirrorOfSource(info, repository.cloneUrl)) continue;
+    };
 
-      const columns = repositoryDestinationColumns(destination);
+    const verified =
+      (await probe(parseLocation(repository.mirroredLocation))) ??
+      (await probe(parseLocation(`${(await resolveOwner()).trim()}/${repository.name}`)));
+
+    if (verified) {
+      // The verified location is recorded too, so the sync and the mirror
+      // paths, which try the recorded location first, act on this repository
+      // and never on one that was rejected above.
+      const columns: RelinkColumns = {
+        ...repositoryDestinationColumns(destination),
+        mirroredLocation: `${verified.owner}/${verified.repoName}`,
+      };
       await (deps.saveDestination ?? saveDestinationColumns)(repository.id, columns);
       Object.assign(repository, columns);
       console.log(
         `[Destination] ${repository.fullName} was recorded on ${describeDestination(recorded)}; ` +
           `${describeDestination(destination)} has a pull mirror of its source at ` +
-          `${candidate.owner}/${candidate.repoName}, so the row now points at the configured destination.`
+          `${columns.mirroredLocation}, so the row now points at the configured destination.`
       );
-      return true;
+      return verified;
     }
 
     // An unreachable server or a rejected token is not a reason to remove
@@ -158,5 +173,5 @@ export async function ensureRepositoryOnConfiguredDestination(
   }
 
   assertRepositoryMatchesConfiguredDestination({ repository, config });
-  return false;
+  return null;
 }

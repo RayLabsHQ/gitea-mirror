@@ -318,7 +318,7 @@ for (const path of paths) {
       return path.run();
     };
     const restore = () =>
-      Object.assign(repository, { destinationUrl: "", status: "imported" });
+      Object.assign(repository, { destinationUrl: "", status: "imported", mirroredLocation: "" });
 
     test("repoints the row at the configured destination and syncs the mirror", async () => {
       try {

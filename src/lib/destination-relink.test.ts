@@ -43,6 +43,16 @@ function mirrorAt(
   };
 }
 
+/** Counts strategy owner lookups. */
+function owner(name: string) {
+  const calls: string[] = [];
+  const resolve = () => {
+    calls.push(name);
+    return name;
+  };
+  return { resolve, calls };
+}
+
 /**
  * The configured destination, given as a map of `owner/name` to what the
  * API returns for it, or an Error to throw for that lookup.
@@ -74,24 +84,60 @@ describe("ensureRepositoryOnConfiguredDestination", () => {
       { repository: row({ destinationUrl: `${NEW_URL}/` }), config: config(), resolveOwner: () => "octo" },
       deps
     );
-    expect(relinked).toBe(false);
+    expect(relinked).toBeNull();
     expect(lookups).toEqual([]);
     expect(saved).toEqual([]);
   });
 
-  test("repoints a row whose writable mirror is at the recorded location", async () => {
-    const { deps, saved } = destination({ "octo/app": mirrorAt("octo", "app", CLONE_URL) });
+  test("repoints a row whose writable mirror is at the recorded location, without resolving the owner", async () => {
+    const { deps, lookups, saved } = destination({ "octo/app": mirrorAt("octo", "app", CLONE_URL) });
+    const strategy = owner("mirrors");
     const repository = row();
     const relinked = await ensureRepositoryOnConfiguredDestination(
-      { repository, config: config(), resolveOwner: () => "octo" },
+      { repository, config: config(), resolveOwner: strategy.resolve },
       deps
     );
-    expect(relinked).toBe(true);
-    // Only the destination columns: updatedAt is left for the in-flight claim.
+    expect(relinked).toEqual({ owner: "octo", repoName: "app" });
+    expect(lookups).toEqual(["octo/app"]);
+    expect(strategy.calls).toEqual([]);
+    // Where the row points and nothing else: updatedAt is left for the in-flight claim.
     expect(saved).toEqual([
-      { id: "repo-1", columns: { destinationProvider: "gitea", destinationUrl: NEW_URL } },
+      {
+        id: "repo-1",
+        columns: { destinationProvider: "gitea", destinationUrl: NEW_URL, mirroredLocation: "octo/app" },
+      },
     ]);
     expect(repository.destinationUrl).toBe(NEW_URL);
+  });
+
+  test("records the verified location when the recorded one holds a mirror it rejected", async () => {
+    const { deps, lookups, saved } = destination({
+      "octo/app": mirrorAt("octo", "app", "https://github.com/someone-else/app.git"),
+      "mirrors/app": mirrorAt("mirrors", "app", CLONE_URL),
+    });
+    const repository = row();
+    const relinked = await ensureRepositoryOnConfiguredDestination(
+      { repository, config: config(), resolveOwner: () => "mirrors" },
+      deps
+    );
+    expect(relinked).toEqual({ owner: "mirrors", repoName: "app" });
+    expect(lookups).toEqual(["octo/app", "mirrors/app"]);
+    expect(saved[0].columns).toMatchObject({ mirroredLocation: "mirrors/app" });
+    // The sync tries the recorded location first, so it now lands on the verified mirror.
+    expect(repository.mirroredLocation).toBe("mirrors/app");
+  });
+
+  test("refuses a mirror when the destination reports no permissions for the token", async () => {
+    const info = mirrorAt("octo", "app", CLONE_URL);
+    delete info.permissions;
+    const { deps, saved } = destination({ "octo/app": info });
+    await expect(
+      ensureRepositoryOnConfiguredDestination(
+        { repository: row(), config: config(), resolveOwner: () => "octo" },
+        deps
+      )
+    ).rejects.toThrow(REFUSAL);
+    expect(saved).toEqual([]);
   });
 
   test("repoints a row whose mirror is where the strategy puts it when no location was recorded", async () => {
@@ -100,7 +146,7 @@ describe("ensureRepositoryOnConfiguredDestination", () => {
       { repository: row({ mirroredLocation: "" }), config: config(), resolveOwner: () => "mirrors" },
       deps
     );
-    expect(relinked).toBe(true);
+    expect(relinked).toEqual({ owner: "mirrors", repoName: "app" });
     expect(lookups).toEqual(["mirrors/app"]);
     expect(saved).toHaveLength(1);
   });
@@ -195,7 +241,7 @@ describe("ensureRepositoryOnConfiguredDestination", () => {
       { repository: row(), config: config(), resolveOwner: () => "mirrors" },
       deps
     );
-    expect(relinked).toBe(true);
+    expect(relinked).toEqual({ owner: "mirrors", repoName: "app" });
     expect(saved).toHaveLength(1);
   });
 
