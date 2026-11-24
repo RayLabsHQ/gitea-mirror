@@ -39,6 +39,10 @@ services:
     ports:
       - "${PORT:-4321}:4321"
     user: ${PUID:-1000}:${PGID:-1000}
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     volumes:
       - ./data:/app/data
     environment:

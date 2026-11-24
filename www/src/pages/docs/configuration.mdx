@@ -159,6 +159,10 @@ services:
     restart: unless-stopped
     ports:
       - "4321:4321"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     volumes:
       - ./data:/app/data
     environment:

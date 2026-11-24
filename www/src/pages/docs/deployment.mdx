@@ -41,6 +41,10 @@ services:
     ports:
       - "4321:4321"
     user: "1000:1000"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     volumes:
       - ./data:/app/data
     environment:
@@ -93,10 +97,29 @@ docker run -d \
   --name gitea-mirror \
   --restart unless-stopped \
   -p 4321:4321 \
+  --cap-drop ALL \
+  --security-opt no-new-privileges=true \
   -v gitea-mirror-data:/app/data \
   -e BETTER_AUTH_URL=https://mirror.example.com \
   ghcr.io/raylabshq/gitea-mirror:latest
 ```
+
+### Dropping capabilities
+
+The examples above, and the compose files in the repository, drop all Linux capabilities and set `no-new-privileges`. The app runs as a regular user, so it never had any of the capabilities Docker grants by default, and the image has no setuid programs. Day to day this changes nothing; it limits what someone who broke into the container could do there.
+
+To add them to an existing compose file:
+
+```yaml
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+```
+
+With `docker run`, add `--cap-drop ALL --security-opt no-new-privileges=true`.
+
+They assume the container runs as a regular user, as it does by default. If you run it as root (`user: "0:0"`), dropping all capabilities also takes away root's ability to ignore file permissions, so either remove `cap_drop` or make sure the data directory belongs to root.
 
 ### Upgrading
 

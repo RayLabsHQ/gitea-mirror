@@ -50,6 +50,11 @@ services:
         - linux/arm64
     container_name: gitea-mirror-dev
     restart: unless-stopped
+    # The app runs as a regular user and needs no Linux capabilities
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     ports:
       - "4321:4321"
     volumes:
