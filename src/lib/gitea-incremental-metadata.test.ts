@@ -39,7 +39,7 @@ if (!isChild) {
 const { mirrorGitRepoIssuesToGitea, mirrorGitRepoPullRequestsToGitea } = isChild
   ? await import("@/lib/gitea")
   : ({} as typeof import("@/lib/gitea"));
-const { INCREMENTAL_SYNC_SAFETY_MARGIN_MS } = isChild
+const { metadataListingSince } = isChild
   ? await import("@/lib/metadata-state")
   : ({} as typeof import("@/lib/metadata-state"));
 
@@ -261,9 +261,7 @@ function recentCursor(): MetadataSyncCursor {
 }
 
 function expectedSince(cursor: MetadataSyncCursor) {
-  return new Date(
-    Date.parse(cursor.lastPassStartedAt) - INCREMENTAL_SYNC_SAFETY_MARGIN_MS
-  ).toISOString();
+  return metadataListingSince(Date.parse(cursor.lastPassStartedAt));
 }
 
 describe.skipIf(!isChild)("mirrorGitRepoIssuesToGitea incremental sync", () => {

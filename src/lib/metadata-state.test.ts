@@ -5,11 +5,13 @@
 import { describe, expect, test } from "bun:test";
 import {
   FULL_METADATA_PASS_INTERVAL_MS,
+  INCREMENTAL_SINCE_BUCKET_MS,
   INCREMENTAL_SYNC_SAFETY_MARGIN_MS,
   advanceMetadataSyncCursor,
   buildPassProgress,
   classifyPassItem,
   createDefaultMetadataState,
+  metadataListingSince,
   numberInRanges,
   parseRepositoryMetadataState,
   planMetadataPass,
@@ -87,9 +89,30 @@ describe("planMetadataPass", () => {
     );
     expect(plan).toEqual({
       mode: "incremental",
-      since: new Date(lastPass.getTime() - INCREMENTAL_SYNC_SAFETY_MARGIN_MS).toISOString(),
+      since: metadataListingSince(lastPass.getTime()),
     });
     expect(INCREMENTAL_SYNC_SAFETY_MARGIN_MS).toBeGreaterThanOrEqual(5 * 60 * 1000);
+  });
+
+  test("the incremental listing URL stays stable within a bucket", () => {
+    const cursorAt = (lastPassStartedAt: string) => ({
+      lastPassStartedAt,
+      lastFullPassStartedAt: new Date(now.getTime() - 3 * DAY).toISOString(),
+    });
+    // Two syncs inside the same hour ask for the same URL, so the second one
+    // is answered from the conditional request cache instead of a fresh call.
+    const early = planMetadataPass(cursorAt("2026-09-23T10:30:00.000Z"), now);
+    const late = planMetadataPass(cursorAt("2026-09-23T10:55:00.000Z"), now);
+    expect(early).toHaveProperty("since");
+    expect(late).toHaveProperty("since");
+    expect((early as { since: string }).since).toBe((late as { since: string }).since);
+
+    // A watermark from an earlier hour still moves the window back only.
+    const previousHour = planMetadataPass(cursorAt("2026-09-23T09:30:00.000Z"), now);
+    const since = Date.parse((previousHour as { since: string }).since);
+    expect(since).toBeLessThanOrEqual(Date.parse("2026-09-23T09:30:00.000Z") - INCREMENTAL_SYNC_SAFETY_MARGIN_MS);
+    expect(since).toBeLessThan(Date.parse((early as { since: string }).since));
+    expect(since % INCREMENTAL_SINCE_BUCKET_MS).toBe(0);
   });
 
   test("a full pass older than the interval forces a full pass", () => {
