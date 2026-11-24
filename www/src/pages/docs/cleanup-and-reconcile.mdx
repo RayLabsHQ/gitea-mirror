@@ -25,7 +25,7 @@ Cleanup looks for repositories that the database tracks but that no longer exist
 
 The first three are on the card. The others are environment variables; see the [reference](/docs/environment-variables/#cleanup).
 
-To check right away instead of waiting, click **Run now** on the card. If the action would change anything, it asks first. A dry run or the `skip` action runs without asking. When it finishes, it names the repositories whose source is gone and says what was done with them. The same run is available as `POST /api/cleanup/trigger`, see the [API page](/docs/api/#run-cleanup).
+To check right away instead of waiting, click **Run now** on the card. If the action would change anything, it asks first. A dry run or the `skip` action runs without asking. Its progress and the outcome show in the card's footer, and the info button next to the outcome lists the repositories whose source is gone and any errors. The same run is available as `POST /api/cleanup/trigger`, see the [API page](/docs/api/#run-cleanup).
 
 ### What each action does
 
@@ -63,7 +63,7 @@ How often it runs depends on the retention period:
 
 The card shows the last and next run. When you shorten the retention period, the next run moves forward to match the new schedule: going from 3 months to 1 day means a run within 6 hours, not a week later. Lengthening it never pushes back a run that is already due.
 
-**Run now** trims the log right away and says how many entries it removed. The next run is then counted from that moment. The same run is available as `POST /api/cleanup/maintenance`.
+**Run now**, at the bottom of the card, trims the log right away and says how many entries it removed. The next run is then counted from that moment. The same run is available as `POST /api/cleanup/maintenance`.
 
 ## Reconcile
 

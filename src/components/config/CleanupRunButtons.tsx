@@ -1,5 +1,5 @@
-import { useCallback, useState } from "react";
-import { CircleAlert, CircleCheck, LoaderCircle, Play, TriangleAlert, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { CircleAlert, CircleCheck, Info, LoaderCircle, Play, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -12,6 +12,7 @@ import {
 import { withBase } from "@/lib/base-path";
 import { cn } from "@/lib/utils";
 import type { DatabaseCleanupConfig } from "@/types/config";
+import { OptionRow } from "./settings-ui";
 
 const MAINTENANCE_API_PATH = withBase("/api/cleanup/maintenance");
 const REPOSITORY_CLEANUP_API_PATH = withBase("/api/cleanup/trigger");
@@ -19,18 +20,24 @@ const REPOSITORY_CLEANUP_API_PATH = withBase("/api/cleanup/trigger");
 /** A run that answers at once would only flash its progress, so it stays up this long. */
 const MIN_RUNNING_MS = 700;
 
-/** What a Run now shows under its card's settings (#547). */
+/** What the ⓘ next to a result opens. */
+export interface CleanupRunDetails {
+  title: string;
+  text?: string;
+  items?: string[];
+  itemsLabel?: string;
+  errors?: string[];
+}
+
+/**
+ * A Run now as the card shows it (#547). The result stays until the next run
+ * or a reload, so its details stay one click away.
+ */
 export type CleanupRunState =
   | { kind: "idle" }
-  | { kind: "running"; title: string; detail?: string }
-  | {
-      kind: "done";
-      tone: "success" | "warning";
-      title: string;
-      detail?: string;
-      items?: string[];
-    }
-  | { kind: "error"; title: string; detail?: string };
+  | { kind: "running"; text: string }
+  | { kind: "done"; tone: "success" | "warning"; text: string; details?: CleanupRunDetails }
+  | { kind: "error"; text: string; details: CleanupRunDetails };
 
 async function post<T>(path: string): Promise<T> {
   const started = Date.now();
@@ -67,10 +74,7 @@ export function useDatabaseMaintenanceRun(
 
   const run = useCallback(
     async (retentionLabel: string) => {
-      setState({
-        kind: "running",
-        title: `Removing activity older than ${retentionLabel}`,
-      });
+      setState({ kind: "running", text: `Removing activity older than ${retentionLabel}` });
       try {
         const result = await post<{
           eventsDeleted: number;
@@ -83,20 +87,24 @@ export function useDatabaseMaintenanceRun(
         setState({
           kind: "done",
           tone: "success",
-          title:
+          text:
             removed === 0
               ? `Nothing was older than ${retentionLabel}`
               : `Removed ${plural(result.mirrorJobsDeleted, "activity entry", "activity entries")} and ${plural(result.eventsDeleted, "event")}`,
-          detail: "The next run is counted from now.",
         });
       } catch (error) {
-        setState({ kind: "error", title: "Database maintenance failed", detail: errorText(error) });
+        const message = errorText(error);
+        setState({
+          kind: "error",
+          text: `Failed: ${message}`,
+          details: { title: "Database maintenance failed", errors: [message] },
+        });
       }
     },
     [onRecorded]
   );
 
-  return { state, run, dismiss: () => setState({ kind: "idle" }) };
+  return { state, run };
 }
 
 /** The state and the run for Repository Cleanup's Run now. */
@@ -104,11 +112,7 @@ export function useRepositoryCleanupRun() {
   const [state, setState] = useState<CleanupRunState>({ kind: "idle" });
 
   const run = useCallback(async () => {
-    setState({
-      kind: "running",
-      title: "Checking your sources for repositories that are gone",
-      detail: "With many repositories this can take a few minutes.",
-    });
+    setState({ kind: "running", text: "Checking your sources for repositories that are gone" });
     try {
       const { results } = await post<{
         results: {
@@ -122,121 +126,191 @@ export function useRepositoryCleanupRun() {
         };
       }>(REPOSITORY_CLEANUP_API_PATH);
       const found = plural(results.orphanedCount, "repository", "repositories");
+      const itemsLabel = "Repositories whose source is gone";
       if (results.orphanedCount === 0) {
-        setState({ kind: "done", tone: "success", title: "Every repository's source is still there" });
+        setState({ kind: "done", tone: "success", text: "Every repository's source is still there" });
       } else if (results.dryRun) {
         setState({
           kind: "done",
           tone: "success",
-          title: `Dry run: the source is gone for ${found}`,
-          detail: "Nothing was changed. Turn off Dry run to apply the action.",
-          items: results.repositories,
+          text: `Dry run: the source is gone for ${found}. Nothing was changed.`,
+          details: {
+            title: "Dry run",
+            text: "Nothing was changed. Turn off Dry run to apply the action.",
+            items: results.repositories,
+            itemsLabel,
+          },
         });
       } else {
         const done =
           results.action === "skip" ? "left as they are" : results.action === "archive" ? "archived" : "removed";
+        const failed = results.errorCount > 0 ? `, ${results.errorCount} failed` : "";
         setState({
           kind: "done",
           tone: results.errorCount > 0 ? "warning" : "success",
-          title: `The source is gone for ${found}: ${results.processedCount} ${done}`,
-          detail:
-            results.errorCount > 0
-              ? `${plural(results.errorCount, "failed")}: ${results.errors[0]}`
-              : undefined,
-          items: results.repositories,
+          text: `The source is gone for ${found}: ${results.processedCount} ${done}${failed}`,
+          details: {
+            title: "Repository cleanup",
+            items: results.repositories,
+            itemsLabel,
+            errors: results.errors,
+          },
         });
       }
     } catch (error) {
-      setState({ kind: "error", title: "Repository cleanup failed", detail: errorText(error) });
+      const message = errorText(error);
+      setState({
+        kind: "error",
+        text: `Failed: ${message}`,
+        details: { title: "Repository cleanup failed", errors: [message] },
+      });
     }
   }, []);
 
-  return { state, run, dismiss: () => setState({ kind: "idle" }) };
+  return { state, run };
 }
 
-const SHOWN_ITEMS = 5;
+/**
+ * One line of text. When it does not fit, it scrolls to its end and back;
+ * with reduced motion it is cut off with an ellipsis.
+ */
+function MarqueeText({ text, className }: { text: string; className?: string }) {
+  const outer = useRef<HTMLSpanElement>(null);
+  const [overflow, setOverflow] = useState(0);
+
+  useEffect(() => {
+    const element = outer.current;
+    if (!element) return;
+    const measure = () => {
+      const extra = element.scrollWidth - element.clientWidth;
+      setOverflow(extra > 1 ? extra : 0);
+    };
+    setOverflow(0);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [text]);
+
+  const style = overflow
+    ? ({
+        "--marquee-shift": `-${overflow + 12}px`,
+        "--marquee-duration": `${Math.max(4, overflow / 30 + 3)}s`,
+      } as CSSProperties)
+    : undefined;
+
+  return (
+    <span
+      ref={outer}
+      title={overflow ? text : undefined}
+      className={cn("block min-w-0 truncate", overflow && "cleanup-marquee-mask", className)}
+    >
+      <span className={overflow ? "cleanup-marquee" : undefined} style={style}>
+        {text}
+      </span>
+    </span>
+  );
+}
+
+function RunDetailsDialog({
+  details,
+  open,
+  onOpenChange,
+}: {
+  details: CleanupRunDetails;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-[520px]">
+        <DialogHeader>
+          <DialogTitle>{details.title}</DialogTitle>
+          {details.text && <DialogDescription>{details.text}</DialogDescription>}
+        </DialogHeader>
+        {details.errors && details.errors.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              {details.errors.length === 1 ? "Error" : `Errors (${details.errors.length})`}
+            </p>
+            <ul className="max-h-48 space-y-1.5 overflow-y-auto rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm">
+              {details.errors.map((error, index) => (
+                <li key={index} className="whitespace-pre-wrap break-words">
+                  {error}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {details.items && details.items.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              {details.itemsLabel ?? "Items"} ({details.items.length})
+            </p>
+            <ul className="max-h-64 space-y-1 overflow-y-auto rounded-md border border-border bg-muted/40 p-3 font-mono text-[13px]">
+              {details.items.map((item) => (
+                <li key={item} className="break-all">
+                  {item}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            Close
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 /**
- * Progress and outcome of a Run now, shown under the card's settings. Hidden
- * until the first run on this page.
+ * The status of a run in one line: a spinner while it runs, then the outcome
+ * with an ⓘ that opens the details when there are any. `idle` is what the
+ * line says before the first run.
  */
-export function CleanupRunStatus({
+function RunStatusLine({
   state,
-  onDismiss,
+  idle,
   className,
 }: {
   state: CleanupRunState;
-  onDismiss?: () => void;
+  idle: ReactNode;
   className?: string;
 }) {
-  if (state.kind === "idle") return null;
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  if (state.kind === "idle") return <>{idle}</>;
 
-  if (state.kind === "running") {
-    return (
-      <div
-        role="status"
-        aria-live="polite"
-        className={cn("space-y-2.5 rounded-lg border border-border bg-muted/40 px-4 py-3", className)}
-      >
-        <div className="flex items-center gap-2 text-sm font-medium">
-          <LoaderCircle className="h-4 w-4 shrink-0 animate-spin text-indigo-500" />
-          <span>{state.title}</span>
-        </div>
-        <div className="relative h-1.5 overflow-hidden rounded-full bg-indigo-500/15">
-          <div className="cleanup-progress-bar absolute inset-y-0 w-1/3 rounded-full bg-indigo-500" />
-        </div>
-        {state.detail && <p className="text-xs text-muted-foreground">{state.detail}</p>}
-      </div>
+  const details = state.kind === "running" ? undefined : state.details;
+  const icon =
+    state.kind === "running" ? (
+      <LoaderCircle className="h-3.5 w-3.5 shrink-0 animate-spin text-indigo-500" />
+    ) : state.kind === "error" ? (
+      <CircleAlert className="h-3.5 w-3.5 shrink-0 text-destructive" />
+    ) : state.tone === "warning" ? (
+      <TriangleAlert className="h-3.5 w-3.5 shrink-0 text-amber-500" />
+    ) : (
+      <CircleCheck className="h-3.5 w-3.5 shrink-0 text-emerald-500" />
     );
-  }
-
-  const tone = state.kind === "error" ? "error" : state.tone;
-  const Icon = tone === "success" ? CircleCheck : tone === "warning" ? TriangleAlert : CircleAlert;
-  const items = state.kind === "done" ? state.items ?? [] : [];
 
   return (
-    <div
-      role="status"
-      aria-live="polite"
-      className={cn(
-        "flex items-start gap-2.5 rounded-lg border px-4 py-3",
-        tone === "success" && "border-emerald-500/30 bg-emerald-500/5",
-        tone === "warning" && "border-amber-500/40 bg-amber-500/5",
-        tone === "error" && "border-destructive/40 bg-destructive/5",
-        className
-      )}
-    >
-      <Icon
-        className={cn(
-          "mt-0.5 h-4 w-4 shrink-0",
-          tone === "success" && "text-emerald-600 dark:text-emerald-400",
-          tone === "warning" && "text-amber-600 dark:text-amber-400",
-          tone === "error" && "text-destructive"
-        )}
-      />
-      <div className="min-w-0 flex-1 space-y-1">
-        <p className="text-sm font-medium">{state.title}</p>
-        {items.length > 0 && (
-          <ul className="space-y-0.5 text-xs text-muted-foreground">
-            {items.slice(0, SHOWN_ITEMS).map((name) => (
-              <li key={name} className="truncate font-mono">
-                {name}
-              </li>
-            ))}
-            {items.length > SHOWN_ITEMS && <li>and {items.length - SHOWN_ITEMS} more</li>}
-          </ul>
-        )}
-        {state.detail && <p className="text-xs text-muted-foreground">{state.detail}</p>}
-      </div>
-      {onDismiss && (
-        <button
-          type="button"
-          onClick={onDismiss}
-          aria-label="Dismiss"
-          className="rounded p-0.5 text-muted-foreground/70 hover:bg-muted hover:text-foreground"
-        >
-          <X className="h-3.5 w-3.5" />
-        </button>
+    <div role="status" aria-live="polite" className={cn("flex min-w-0 items-center gap-2", className)}>
+      {icon}
+      <MarqueeText text={state.kind === "running" ? `${state.text}…` : state.text} />
+      {details && (
+        <>
+          <button
+            type="button"
+            onClick={() => setDetailsOpen(true)}
+            aria-label="Show details"
+            className="shrink-0 rounded-full text-muted-foreground/70 transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <Info className="h-3.5 w-3.5" />
+          </button>
+          <RunDetailsDialog details={details} open={detailsOpen} onOpenChange={setDetailsOpen} />
+        </>
       )}
     </div>
   );
@@ -248,7 +322,7 @@ function RunNowButton({ running, onClick }: { running: boolean; onClick: () => v
       type="button"
       variant="outline"
       size="sm"
-      className="h-8 gap-1.5 text-xs"
+      className="h-8 shrink-0 gap-1.5 text-xs"
       onClick={onClick}
       disabled={running}
     >
@@ -258,15 +332,52 @@ function RunNowButton({ running, onClick }: { running: boolean; onClick: () => v
   );
 }
 
-/** Database Maintenance's Run now (#547). */
-export function RunDatabaseMaintenanceButton({
+/**
+ * Database Maintenance's Run now row (#547), laid out like the switch rows on
+ * the other cards. Its description turns into the run's status.
+ */
+export function DatabaseMaintenanceRunRow({
   state,
+  retentionLabel,
   onRun,
 }: {
   state: CleanupRunState;
+  retentionLabel: string;
   onRun: () => void;
 }) {
-  return <RunNowButton running={state.kind === "running"} onClick={onRun} />;
+  return (
+    <OptionRow
+      label="Run maintenance now"
+      subContent={
+        <RunStatusLine
+          state={state}
+          className="text-[13px] text-muted-foreground"
+          idle={
+            <p className="text-[13px] text-muted-foreground">
+              Removes activity older than {retentionLabel} right away
+            </p>
+          }
+        />
+      }
+      right={<RunNowButton running={state.kind === "running"} onClick={onRun} />}
+    />
+  );
+}
+
+/** Repository Cleanup's footer line: the schedule, or the run's status (#547). */
+export function RepositoryCleanupFooterStatus({ state }: { state: CleanupRunState }) {
+  return (
+    <RunStatusLine
+      state={state}
+      className="flex-1 text-xs text-muted-foreground"
+      idle={
+        <div className="flex min-w-0 items-center gap-2 text-xs text-muted-foreground/70">
+          <Info className="h-3.5 w-3.5 shrink-0" />
+          <span className="truncate">Checks every 6 hours and with each scheduled sync</span>
+        </div>
+      }
+    />
+  );
 }
 
 function describeAction(config: DatabaseCleanupConfig): string | null {

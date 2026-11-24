@@ -172,11 +172,46 @@
   animation: cleanup-progress 1.3s ease-in-out infinite;
 }
 
+/* One line of status text that does not fit scrolls to its end and back.
+   --marquee-shift is set to minus the overflow in px. */
+@keyframes cleanup-marquee {
+  0%,
+  15% {
+    transform: translateX(0);
+  }
+  85%,
+  100% {
+    transform: translateX(var(--marquee-shift, 0));
+  }
+}
+
+.cleanup-marquee {
+  display: inline-block;
+  animation: cleanup-marquee var(--marquee-duration, 8s) ease-in-out infinite alternate;
+}
+
+/* Soft edges so scrolling text fades out instead of being cut. */
+.cleanup-marquee-mask {
+  text-overflow: clip;
+  mask-image: linear-gradient(to right, transparent, black 10px, black calc(100% - 10px), transparent);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .cleanup-progress-bar {
     animation: none;
     left: 0;
     width: 100%;
     opacity: 0.6;
+  }
+
+  /* No scrolling: the text is cut off with an ellipsis instead. */
+  .cleanup-marquee {
+    display: inline;
+    animation: none;
+  }
+
+  .cleanup-marquee-mask {
+    text-overflow: ellipsis;
+    mask-image: none;
   }
 }

@@ -40,8 +40,8 @@ import {
 } from "./settings-ui";
 import { ReconcileDestinationButton } from "./ReconcileDialog";
 import {
-  CleanupRunStatus,
-  RunDatabaseMaintenanceButton,
+  DatabaseMaintenanceRunRow,
+  RepositoryCleanupFooterStatus,
   RunRepositoryCleanupButton,
   useDatabaseMaintenanceRun,
   useRepositoryCleanupRun,
@@ -176,8 +176,9 @@ export function AutomationSettings({
   // The next maintenance run is worked out by the server when the settings
   // are saved (#548), and the page shows it from the saved config.
 
-  // Run now on both cleanup cards (#547): the button and the progress panel
-  // under the card's settings share the run.
+  // Run now on both cleanup cards (#547). Database maintenance reports in its
+  // Run now row, repository cleanup in its footer line; the divider above each
+  // shows progress while a run is going.
   const maintenanceRun = useDatabaseMaintenanceRun(onCleanupRunRecorded);
   const repositoryRun = useRepositoryCleanupRun();
   const retentionLabel =
@@ -378,17 +379,7 @@ export function AutomationSettings({
           onEnabledChange={(checked) =>
             onCleanupChange({ ...cleanupConfig, enabled: checked })
           }
-          headerAction={
-            <>
-              {savingSpinner(isAutoSavingCleanup)}
-              {cleanupConfig.enabled && (
-                <RunDatabaseMaintenanceButton
-                  state={maintenanceRun.state}
-                  onRun={() => maintenanceRun.run(retentionLabel)}
-                />
-              )}
-            </>
-          }
+          headerAction={savingSpinner(isAutoSavingCleanup)}
           className="md:h-full"
           footer={
             <>
@@ -417,42 +408,55 @@ export function AutomationSettings({
           }
         >
           {cleanupConfig.enabled && (
-            <CardSection>
-              <SectionTitle>Data retention</SectionTitle>
-              <div className="flex items-center gap-3">
-                <Select
-                  value={cleanupConfig.retentionDays.toString()}
-                  onValueChange={(value) =>
-                    onCleanupChange({
-                      ...cleanupConfig,
-                      retentionDays: parseInt(value, 10),
-                    })
-                  }
-                >
-                  <SelectTrigger id="retention-period" className="w-40">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {retentionPeriods.map((option) => (
-                      <SelectItem
-                        key={option.value}
-                        value={option.value.toString()}
-                      >
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  Cleanup runs {cleanupFrequencyText(cleanupConfig.retentionDays)}
+            <>
+              <CardSection>
+                <SectionTitle>Data retention</SectionTitle>
+                <div className="flex items-center gap-3">
+                  <Select
+                    value={cleanupConfig.retentionDays.toString()}
+                    onValueChange={(value) =>
+                      onCleanupChange({
+                        ...cleanupConfig,
+                        retentionDays: parseInt(value, 10),
+                      })
+                    }
+                  >
+                    <SelectTrigger id="retention-period" className="w-40">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {retentionPeriods.map((option) => (
+                        <SelectItem
+                          key={option.value}
+                          value={option.value.toString()}
+                        >
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Cleanup runs {cleanupFrequencyText(cleanupConfig.retentionDays)}
+                  </p>
+                </div>
+                <p className="max-w-md text-[13px] leading-relaxed text-muted-foreground">
+                  Activity logs and events older than the retention period are
+                  removed. Cleanup frequency adapts to the period you pick.
                 </p>
+              </CardSection>
+              {/* Sits at the bottom of the card, above the footer, like the rows on
+                  the syncing card next to it. */}
+              <div className="mt-auto">
+                <CardDivider busy={maintenanceRun.state.kind === "running"} />
+                <CardSection>
+                  <DatabaseMaintenanceRunRow
+                    state={maintenanceRun.state}
+                    retentionLabel={retentionLabel}
+                    onRun={() => maintenanceRun.run(retentionLabel)}
+                  />
+                </CardSection>
               </div>
-              <CleanupRunStatus state={maintenanceRun.state} onDismiss={maintenanceRun.dismiss} />
-              <p className="max-w-md text-[13px] leading-relaxed text-muted-foreground">
-                Activity logs and events older than the retention period are
-                removed. Cleanup frequency adapts to the period you pick.
-              </p>
-            </CardSection>
+            </>
           )}
         </SettingsCard>
       </div>
@@ -466,13 +470,13 @@ export function AutomationSettings({
           onCleanupChange({ ...cleanupConfig, deleteIfNotInGitHub: checked })
         }
         headerAction={savingSpinner(isAutoSavingCleanup)}
+        footerBusy={repositoryRun.state.kind === "running"}
         footer={
-          <>
-            <StatusFooterItem
-              icon={Info}
-              label="Checks every 6 hours and with each scheduled sync"
-            />
-            <div className="flex flex-wrap items-center justify-end gap-2">
+          // On narrow screens the status line gets its own row above the
+          // buttons, so it is never squeezed out.
+          <div className="flex w-full min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+            <RepositoryCleanupFooterStatus state={repositoryRun.state} />
+            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
               {cleanupConfig.deleteIfNotInGitHub && (
                 <RunRepositoryCleanupButton
                   config={cleanupConfig}
@@ -482,7 +486,7 @@ export function AutomationSettings({
               )}
               <ReconcileDestinationButton />
             </div>
-          </>
+          </div>
         }
       >
         {cleanupConfig.deleteIfNotInGitHub && (
@@ -522,14 +526,6 @@ export function AutomationSettings({
                 }
               />
             </CardSection>
-            {repositoryRun.state.kind !== "idle" && (
-              <>
-                <CardDivider />
-                <CardSection>
-                  <CleanupRunStatus state={repositoryRun.state} onDismiss={repositoryRun.dismiss} />
-                </CardSection>
-              </>
-            )}
           </>
         )}
       </SettingsCard>
