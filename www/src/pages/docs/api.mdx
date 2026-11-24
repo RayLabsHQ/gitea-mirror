@@ -247,7 +247,9 @@ Sizes are bytes. `destinationSize` is Git and LFS together as Gitea or Forgejo r
 
 ### Run cleanup
 
-`POST /api/cleanup/trigger` runs the [repository cleanup](/docs/cleanup-and-reconcile/) now, with the account's saved cleanup settings, and returns how many orphaned repositories were found and processed and any errors. `GET /api/cleanup/trigger` returns the cleanup configuration and the last and next run times.
+`POST /api/cleanup/trigger` runs the [repository cleanup](/docs/cleanup-and-reconcile/) now, with the account's saved cleanup settings, and returns how many orphaned repositories were found and processed, their names, whether it was a dry run, and any errors. It answers 409 while a cleanup for the account is already running. `GET /api/cleanup/trigger` returns the cleanup configuration and the last and next run times.
+
+`POST /api/cleanup/maintenance` runs the [database maintenance](/docs/cleanup-and-reconcile/#database-maintenance) now and returns how many activity entries (`mirrorJobsDeleted`) and events (`eventsDeleted`) it removed, with the new `lastRun` and `nextRun`.
 
 ### Reconcile the destination
 
@@ -358,6 +360,7 @@ Every endpoint below takes the key the same way. Ids are the ones the list endpo
 | `GET /api/storage` | Sizes, see [above](#storage). |
 | `POST /api/storage/refresh` | Starts Refresh sizes. |
 | `POST /api/cleanup/trigger` | Runs repository cleanup now. `GET` returns its settings and run times. |
+| `POST /api/cleanup/maintenance` | Trims the activity log now, see [above](#run-cleanup). |
 | `POST /api/cleanup/reconcile` | Compares the destination with the database, see [above](#reconcile-the-destination). |
 | `POST /api/mcp` | Body: JSON-RPC. The [MCP server](/docs/mcp/). |
 

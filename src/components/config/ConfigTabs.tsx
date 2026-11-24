@@ -880,6 +880,13 @@ export function ConfigTabs() {
             }}
             isAutoSavingSchedule={isAutoSavingSchedule}
             isAutoSavingCleanup={isAutoSavingCleanup}
+            onCleanupRunRecorded={({ lastRun, nextRun }) => {
+              invalidateConfigCache();
+              setConfig(prev => ({
+                ...prev,
+                cleanupConfig: { ...prev.cleanupConfig, lastRun, nextRun },
+              }));
+            }}
           />
         </TabsContent>
 

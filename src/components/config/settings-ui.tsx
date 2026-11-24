@@ -22,6 +22,8 @@ interface SettingsCardProps {
   /** Custom element on the right side of the header (e.g. a Test button). */
   headerAction?: ReactNode;
   footer?: ReactNode;
+  /** The line above the footer shows progress, for a run reported in the footer. */
+  footerBusy?: boolean;
   className?: string;
   children: ReactNode;
 }
@@ -33,6 +35,7 @@ export function SettingsCard({
   onEnabledChange,
   headerAction,
   footer,
+  footerBusy,
   className,
   children,
 }: SettingsCardProps) {
@@ -64,7 +67,7 @@ export function SettingsCard({
       <div className="flex-1 flex flex-col">{children}</div>
       {footer && (
         <>
-          <div className="border-t border-border" />
+          <CardDivider busy={footerBusy} />
           <div className="flex items-center justify-between gap-4 px-6 py-3.5">
             {footer}
           </div>
@@ -337,9 +340,19 @@ export function StatusFooterItem({
   );
 }
 
-/** Divider between sections inside a SettingsCard. */
-export function CardDivider() {
-  return <div className="border-t border-border" />;
+/**
+ * Divider between sections inside a SettingsCard. While `busy`, the line
+ * itself becomes a progress bar: a short indigo segment slides along it.
+ */
+export function CardDivider({ busy }: { busy?: boolean } = {}) {
+  if (!busy) return <div className="border-t border-border" />;
+  return (
+    <div className="relative border-t border-border" role="progressbar" aria-label="Running">
+      <div className="absolute inset-x-0 -top-px h-0.5 overflow-hidden bg-indigo-500/15">
+        <div className="cleanup-progress-bar absolute inset-y-0 w-1/3 rounded-full bg-indigo-500" />
+      </div>
+    </div>
+  );
 }
 
 /** Standard padded section body inside a SettingsCard. */

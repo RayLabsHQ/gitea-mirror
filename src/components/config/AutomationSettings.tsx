@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from "react";
+import { useMemo } from "react";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -39,6 +39,14 @@ import {
   CardSection,
 } from "./settings-ui";
 import { ReconcileDestinationButton } from "./ReconcileDialog";
+import {
+  DatabaseMaintenanceRunRow,
+  RepositoryCleanupFooterStatus,
+  RunRepositoryCleanupButton,
+  useDatabaseMaintenanceRun,
+  useRepositoryCleanupRun,
+} from "./CleanupRunButtons";
+import { cleanupFrequencyText } from "@/lib/utils/cleanup-schedule";
 
 interface AutomationSettingsProps {
   scheduleConfig: ScheduleConfig;
@@ -47,6 +55,8 @@ interface AutomationSettingsProps {
   onCleanupChange: (config: DatabaseCleanupConfig) => void;
   isAutoSavingSchedule?: boolean;
   isAutoSavingCleanup?: boolean;
+  /** A Run now finished; shows its last and next run without saving the settings. */
+  onCleanupRunRecorded?: (times: { lastRun: Date; nextRun: Date }) => void;
 }
 
 const clockFrequencies = [
@@ -86,24 +96,6 @@ function formatIntervalSeconds(interval: number | string | undefined): string {
   return `every ${seconds} seconds`;
 }
 
-function getCleanupInterval(retentionSeconds: number): number {
-  const days = retentionSeconds / 86400;
-  if (days <= 1) return 21600; // 6 hours
-  if (days <= 3) return 43200; // 12 hours
-  if (days <= 7) return 86400; // 24 hours
-  if (days <= 30) return 172800; // 48 hours
-  return 604800; // 1 week
-}
-
-function getCleanupFrequencyText(retentionSeconds: number): string {
-  const days = retentionSeconds / 86400;
-  if (days <= 1) return "every 6 hours";
-  if (days <= 3) return "every 12 hours";
-  if (days <= 7) return "daily";
-  if (days <= 30) return "every 2 days";
-  return "weekly";
-}
-
 const orphanActions = [
   {
     value: "skip" as const,
@@ -135,6 +127,7 @@ export function AutomationSettings({
   onCleanupChange,
   isAutoSavingSchedule,
   isAutoSavingCleanup,
+  onCleanupRunRecorded,
 }: AutomationSettingsProps) {
   // Re-render timestamps when the user changes the 12h/24h preference.
   useTimeFormat();
@@ -180,14 +173,17 @@ export function AutomationSettings({
       timezone: browserTimezone,
     });
 
-  // Update nextRun for cleanup when settings change
-  useEffect(() => {
-    if (cleanupConfig.enabled && !cleanupConfig.nextRun) {
-      const cleanupInterval = getCleanupInterval(cleanupConfig.retentionDays);
-      const nextRun = new Date(Date.now() + cleanupInterval * 1000);
-      onCleanupChange({ ...cleanupConfig, nextRun });
-    }
-  }, [cleanupConfig.enabled, cleanupConfig.retentionDays]);
+  // The next maintenance run is worked out by the server when the settings
+  // are saved (#548), and the page shows it from the saved config.
+
+  // Run now on both cleanup cards (#547). Database maintenance reports in its
+  // Run now row, repository cleanup in its footer line; the divider above each
+  // shows progress while a run is going.
+  const maintenanceRun = useDatabaseMaintenanceRun(onCleanupRunRecorded);
+  const repositoryRun = useRepositoryCleanupRun();
+  const retentionLabel =
+    retentionPeriods.find((option) => option.value === cleanupConfig.retentionDays)?.label ??
+    `${Math.round(cleanupConfig.retentionDays / 86400)} days`;
 
   const savingSpinner = (saving?: boolean) =>
     saving ? (
@@ -412,41 +408,55 @@ export function AutomationSettings({
           }
         >
           {cleanupConfig.enabled && (
-            <CardSection>
-              <SectionTitle>Data retention</SectionTitle>
-              <div className="flex items-center gap-3">
-                <Select
-                  value={cleanupConfig.retentionDays.toString()}
-                  onValueChange={(value) =>
-                    onCleanupChange({
-                      ...cleanupConfig,
-                      retentionDays: parseInt(value, 10),
-                    })
-                  }
-                >
-                  <SelectTrigger id="retention-period" className="w-40">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {retentionPeriods.map((option) => (
-                      <SelectItem
-                        key={option.value}
-                        value={option.value.toString()}
-                      >
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground">
-                  Cleanup runs {getCleanupFrequencyText(cleanupConfig.retentionDays)}
+            <>
+              <CardSection>
+                <SectionTitle>Data retention</SectionTitle>
+                <div className="flex items-center gap-3">
+                  <Select
+                    value={cleanupConfig.retentionDays.toString()}
+                    onValueChange={(value) =>
+                      onCleanupChange({
+                        ...cleanupConfig,
+                        retentionDays: parseInt(value, 10),
+                      })
+                    }
+                  >
+                    <SelectTrigger id="retention-period" className="w-40">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {retentionPeriods.map((option) => (
+                        <SelectItem
+                          key={option.value}
+                          value={option.value.toString()}
+                        >
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Cleanup runs {cleanupFrequencyText(cleanupConfig.retentionDays)}
+                  </p>
+                </div>
+                <p className="max-w-md text-[13px] leading-relaxed text-muted-foreground">
+                  Activity logs and events older than the retention period are
+                  removed. Cleanup frequency adapts to the period you pick.
                 </p>
+              </CardSection>
+              {/* Sits at the bottom of the card, above the footer, like the rows on
+                  the syncing card next to it. */}
+              <div className="mt-auto">
+                <CardDivider busy={maintenanceRun.state.kind === "running"} />
+                <CardSection>
+                  <DatabaseMaintenanceRunRow
+                    state={maintenanceRun.state}
+                    retentionLabel={retentionLabel}
+                    onRun={() => maintenanceRun.run(retentionLabel)}
+                  />
+                </CardSection>
               </div>
-              <p className="max-w-md text-[13px] leading-relaxed text-muted-foreground">
-                Activity logs and events older than the retention period are
-                removed. Cleanup frequency adapts to the period you pick.
-              </p>
-            </CardSection>
+            </>
           )}
         </SettingsCard>
       </div>
@@ -460,14 +470,23 @@ export function AutomationSettings({
           onCleanupChange({ ...cleanupConfig, deleteIfNotInGitHub: checked })
         }
         headerAction={savingSpinner(isAutoSavingCleanup)}
+        footerBusy={repositoryRun.state.kind === "running"}
         footer={
-          <>
-            <StatusFooterItem
-              icon={Info}
-              label="Runs as part of each scheduled sync"
-            />
-            <ReconcileDestinationButton />
-          </>
+          // On narrow screens the status line gets its own row above the
+          // buttons, so it is never squeezed out.
+          <div className="flex w-full min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+            <RepositoryCleanupFooterStatus state={repositoryRun.state} />
+            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+              {cleanupConfig.deleteIfNotInGitHub && (
+                <RunRepositoryCleanupButton
+                  config={cleanupConfig}
+                  state={repositoryRun.state}
+                  onRun={repositoryRun.run}
+                />
+              )}
+              <ReconcileDestinationButton />
+            </div>
+          </div>
         }
       >
         {cleanupConfig.deleteIfNotInGitHub && (

@@ -6,6 +6,7 @@
 
 import { db, configs, events, mirrorJobs } from "@/lib/db";
 import { eq, lt, and } from "drizzle-orm";
+import { cleanupIntervalHours } from "@/lib/utils/cleanup-schedule";
 
 interface CleanupResult {
   userId: string;
@@ -15,25 +16,11 @@ interface CleanupResult {
 }
 
 /**
- * Calculate cleanup interval in hours based on retention period
- * For shorter retention periods, run more frequently
- * For longer retention periods, run less frequently
- * @param retentionSeconds - Retention period in seconds
+ * Hours between runs for a retention period in seconds. Kept as an export for
+ * existing callers; the rule lives in cleanup-schedule.ts.
  */
 export function calculateCleanupInterval(retentionSeconds: number): number {
-  const retentionDays = retentionSeconds / (24 * 60 * 60); // Convert seconds to days
-
-  if (retentionDays <= 1) {
-    return 6; // Every 6 hours for 1 day retention
-  } else if (retentionDays <= 3) {
-    return 12; // Every 12 hours for 1-3 days retention
-  } else if (retentionDays <= 7) {
-    return 24; // Daily for 4-7 days retention
-  } else if (retentionDays <= 30) {
-    return 48; // Every 2 days for 8-30 days retention
-  } else {
-    return 168; // Weekly for 30+ days retention
-  }
+  return cleanupIntervalHours(retentionSeconds);
 }
 
 /**
@@ -53,7 +40,7 @@ async function cleanupForUser(userId: string, retentionSeconds: number): Promise
     let mirrorJobsDeleted = 0;
 
     // Clean up old events
-    await db
+    const deletedEvents: any = await db
       .delete(events)
       .where(
         and(
@@ -61,10 +48,10 @@ async function cleanupForUser(userId: string, retentionSeconds: number): Promise
           lt(events.createdAt, cutoffDate)
         )
       );
-    eventsDeleted = 0; // SQLite delete doesn't return count
+    eventsDeleted = Number(deletedEvents?.changes ?? 0);
 
     // Clean up old mirror jobs (only completed ones)
-    await db
+    const deletedJobs: any = await db
       .delete(mirrorJobs)
       .where(
         and(
@@ -73,7 +60,7 @@ async function cleanupForUser(userId: string, retentionSeconds: number): Promise
           lt(mirrorJobs.timestamp, cutoffDate)
         )
       );
-    mirrorJobsDeleted = 0; // SQLite delete doesn't return count
+    mirrorJobsDeleted = Number(deletedJobs?.changes ?? 0);
 
     console.log(`Cleanup completed for user ${userId}: ${eventsDeleted} events, ${mirrorJobsDeleted} jobs deleted`);
 
@@ -94,34 +81,54 @@ async function cleanupForUser(userId: string, retentionSeconds: number): Promise
 }
 
 /**
- * Update the cleanup configuration with last run time and calculate next run
+ * Record a run on the config row: the last run is now and the next one is a
+ * full interval away.
  */
-async function updateCleanupConfig(userId: string, cleanupConfig: any) {
+async function updateCleanupConfig(configId: string, userId: string, cleanupConfig: any) {
+  const now = new Date();
+  const retentionSeconds = cleanupConfig.retentionDays || 604800; // Default 7 days in seconds
+  const intervalHours = calculateCleanupInterval(retentionSeconds);
+  const nextRun = new Date(now.getTime() + intervalHours * 60 * 60 * 1000);
   try {
-    const now = new Date();
-    const retentionSeconds = cleanupConfig.retentionDays || 604800; // Default 7 days in seconds
-    const cleanupIntervalHours = calculateCleanupInterval(retentionSeconds);
-    const nextRun = new Date(now.getTime() + cleanupIntervalHours * 60 * 60 * 1000);
-
-    const updatedConfig = {
-      ...cleanupConfig,
-      lastRun: now,
-      nextRun: nextRun,
-    };
-
     await db
       .update(configs)
       .set({
-        cleanupConfig: updatedConfig,
+        cleanupConfig: { ...cleanupConfig, lastRun: now, nextRun },
         updatedAt: now,
       })
-      .where(eq(configs.userId, userId));
+      .where(eq(configs.id, configId));
 
     const retentionDays = retentionSeconds / (24 * 60 * 60);
-    console.log(`Updated cleanup config for user ${userId}, next run: ${nextRun.toISOString()} (${cleanupIntervalHours}h interval for ${retentionDays}d retention)`);
+    console.log(`Updated cleanup config for user ${userId}, next run: ${nextRun.toISOString()} (${intervalHours}h interval for ${retentionDays}d retention)`);
   } catch (error) {
     console.error(`Error updating cleanup config for user ${userId}:`, error);
   }
+  return { lastRun: now, nextRun };
+}
+
+/**
+ * Run database maintenance for one user right away, from the Run now button
+ * (#547). It uses the saved retention period, and the next scheduled run
+ * moves to a full interval from now.
+ */
+export async function runDatabaseCleanupNow(
+  userId: string
+): Promise<CleanupResult & { lastRun: Date; nextRun: Date }> {
+  const [config] = await db
+    .select()
+    .from(configs)
+    .where(and(eq(configs.userId, userId), eq(configs.isActive, true)))
+    .limit(1);
+  if (!config) {
+    throw new Error("No active configuration found for user");
+  }
+  const cleanupConfig: any = config.cleanupConfig || {};
+  const result = await cleanupForUser(userId, cleanupConfig.retentionDays || 604800);
+  if (result.error) {
+    throw new Error(result.error);
+  }
+  const times = await updateCleanupConfig(config.id, userId, cleanupConfig);
+  return { ...result, ...times };
 }
 
 /**
@@ -158,7 +165,7 @@ export async function runAutomaticCleanup(): Promise<CleanupResult[]> {
           results.push(result);
 
           // Update the cleanup config with new run times
-          await updateCleanupConfig(config.userId, cleanupConfig);
+          await updateCleanupConfig(config.id, config.userId, cleanupConfig);
         } else {
           console.log(`Skipping cleanup for user ${config.userId}, next run: ${nextRun.toISOString()}`);
         }

@@ -1,33 +1,23 @@
 import type { APIRoute } from 'astro';
 import { auth } from '@/lib/auth';
 import { createSecureErrorResponse } from '@/lib/utils';
-import { triggerRepositoryCleanup } from '@/lib/repository-cleanup-service';
+import { RepositoryCleanupBusyError, triggerRepositoryCleanup } from '@/lib/repository-cleanup-service';
+import { requireAuthenticatedUserId } from '@/lib/auth-guards';
 
 /**
- * Manually trigger repository cleanup for the current user
- * This can be called when repositories are updated or when immediate cleanup is needed
+ * Run repository cleanup for the current user now: the Run now button on the
+ * Repository Cleanup card (#547). It checks the sources for repositories that
+ * are gone and applies the configured action, or only logs it in dry run.
  */
-export const POST: APIRoute = async ({ request }) => {
+export const POST: APIRoute = async (context) => {
   try {
-    // Get user session
-    const session = await auth.api.getSession({
-      headers: request.headers,
-    });
+    const authResult = await requireAuthenticatedUserId(context);
+    if ("response" in authResult) return authResult.response;
+    const userId = authResult.userId;
 
-    if (!session?.user?.id) {
-      return new Response(
-        JSON.stringify({ error: 'Unauthorized' }),
-        {
-          status: 401,
-          headers: { 'Content-Type': 'application/json' },
-        }
-      );
-    }
+    console.log(`[Cleanup API] Manual cleanup triggered for user ${userId}`);
 
-    console.log(`[Cleanup API] Manual cleanup triggered for user ${session.user.id}`);
-
-    // Trigger immediate cleanup for this user
-    const results = await triggerRepositoryCleanup(session.user.id);
+    const results = await triggerRepositoryCleanup(userId);
 
     console.log(`[Cleanup API] Cleanup completed: ${results.processedCount}/${results.orphanedCount} repositories processed, ${results.errors.length} errors`);
 
@@ -40,6 +30,9 @@ export const POST: APIRoute = async ({ request }) => {
           processedCount: results.processedCount,
           errorCount: results.errors.length,
           errors: results.errors,
+          repositories: results.repositories,
+          dryRun: results.dryRun,
+          action: results.action,
         },
       }),
       {
@@ -48,6 +41,12 @@ export const POST: APIRoute = async ({ request }) => {
       }
     );
   } catch (error) {
+    if (error instanceof RepositoryCleanupBusyError) {
+      return new Response(
+        JSON.stringify({ success: false, error: error.message }),
+        { status: 409, headers: { 'Content-Type': 'application/json' } }
+      );
+    }
     console.error('[Cleanup API] Error during manual cleanup:', error);
     return createSecureErrorResponse(error, 'manual cleanup', 500);
   }

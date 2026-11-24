@@ -526,20 +526,73 @@ async function handleOrphanedRepository(
 /**
  * Run repository cleanup for a single configuration
  */
-async function runRepositoryCleanup(config: any): Promise<{
+/** What a repository cleanup run did, for logs and the Run now button. */
+export interface RepositoryCleanupResult {
   orphanedCount: number;
   processedCount: number;
   errors: string[];
-}> {
+  /** Full names of the repositories whose source is gone. */
+  repositories: string[];
+  /** Planned actions were only logged. */
+  dryRun: boolean;
+  action: "skip" | "archive" | "delete";
+}
+
+/** Users with a repository cleanup in progress (#547). */
+const usersCleaning = new Set<string>();
+
+/** A Run now click while a run for the same user is still going. */
+export class RepositoryCleanupBusyError extends Error {
+  constructor() {
+    super("Repository cleanup is already running");
+    this.name = "RepositoryCleanupBusyError";
+  }
+}
+
+/**
+ * Run repository cleanup for one configuration, at most once at a time per
+ * user, so a Run now click cannot overlap the background run. The background
+ * loop skips a busy user; Run now reports it.
+ */
+async function runRepositoryCleanup(
+  config: any,
+  whenBusy: 'skip' | 'throw' = 'skip'
+): Promise<RepositoryCleanupResult> {
+  const userId = config.userId;
+  if (usersCleaning.has(userId)) {
+    if (whenBusy === 'throw') throw new RepositoryCleanupBusyError();
+    console.log(`[Repository Cleanup] Cleanup for user ${userId} is already running, skipping`);
+    const cleanupConfig = config.cleanupConfig || {};
+    return {
+      orphanedCount: 0,
+      processedCount: 0,
+      errors: [],
+      repositories: [],
+      dryRun: cleanupConfig.dryRun ?? false,
+      action: cleanupConfig.orphanedRepoAction || 'archive',
+    };
+  }
+  usersCleaning.add(userId);
+  try {
+    return await runRepositoryCleanupUnlocked(config);
+  } finally {
+    usersCleaning.delete(userId);
+  }
+}
+
+async function runRepositoryCleanupUnlocked(config: any): Promise<RepositoryCleanupResult> {
   const userId = config.userId;
   const cleanupConfig = config.cleanupConfig || {};
   
   console.log(`[Repository Cleanup] Starting repository cleanup for user ${userId}`);
   
-  const results = {
+  const results: RepositoryCleanupResult = {
     orphanedCount: 0,
     processedCount: 0,
     errors: [] as string[],
+    repositories: [],
+    dryRun: cleanupConfig.dryRun ?? false,
+    action: cleanupConfig.orphanedRepoAction || 'archive',
   };
   
   try {
@@ -566,6 +619,7 @@ async function runRepositoryCleanup(config: any): Promise<{
     // Identify orphaned repositories
     const orphanedRepos = await identifyOrphanedRepositories(config);
     results.orphanedCount = orphanedRepos.length;
+    results.repositories = orphanedRepos.map((repo: any) => repo.fullName);
     
     if (orphanedRepos.length === 0) {
       console.log(`[Repository Cleanup] No orphaned repositories found for user ${userId}`);
@@ -609,17 +663,10 @@ async function runRepositoryCleanup(config: any): Promise<{
       }
     }
     
-    // Update cleanup timestamps
-    const currentTime = new Date();
-    await db.update(configs).set({
-      cleanupConfig: {
-        ...cleanupConfig,
-        lastRun: currentTime,
-        nextRun: new Date(currentTime.getTime() + 24 * 60 * 60 * 1000), // Next run in 24 hours
-      },
-      updatedAt: currentTime,
-    }).where(eq(configs.id, config.id));
-    
+    // No timestamps are written here: cleanupConfig.lastRun and nextRun belong
+    // to database maintenance, and writing them moved its next run to 24 hours
+    // out whenever an orphan was found (#548).
+
     console.log(`[Repository Cleanup] Completed cleanup for user ${userId}: ${results.processedCount}/${results.orphanedCount} processed`);
   } catch (error) {
     console.error(`[Repository Cleanup] Error during cleanup for user ${userId}:`, error);
@@ -722,11 +769,7 @@ export { identifyOrphanedRepositories, handleOrphanedRepository };
 /**
  * Manually trigger repository cleanup for a specific user
  */
-export async function triggerRepositoryCleanup(userId: string): Promise<{
-  orphanedCount: number;
-  processedCount: number;
-  errors: string[];
-}> {
+export async function triggerRepositoryCleanup(userId: string): Promise<RepositoryCleanupResult> {
   const [config] = await db
     .select()
     .from(configs)
@@ -740,5 +783,5 @@ export async function triggerRepositoryCleanup(userId: string): Promise<{
     throw new Error('No active configuration found for user');
   }
   
-  return runRepositoryCleanup(config);
+  return runRepositoryCleanup(config, 'throw');
 }

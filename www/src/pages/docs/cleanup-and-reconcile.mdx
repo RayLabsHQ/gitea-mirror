@@ -16,7 +16,7 @@ Cleanup looks for repositories that the database tracks but that no longer exist
 
 | Setting | Environment variable | Default | Meaning |
 | --- | --- | --- | --- |
-| Enabled | `CLEANUP_ENABLED` | off | Runs as part of each scheduled sync. |
+| Enabled | `CLEANUP_DELETE_IF_NOT_IN_GITHUB` | on | The card's switch. Checks every 6 hours and with each scheduled sync. |
 | Action | `CLEANUP_ORPHANED_REPO_ACTION` | `archive` | `skip` leaves the mirror untouched, `archive` keeps it read only with an archived prefix, `delete` removes it. |
 | Dry run | `CLEANUP_DRY_RUN` | off | Log the planned actions without changing anything. |
 | Delete from destination | `CLEANUP_DELETE_FROM_GITEA` | `false` | Apply the action on the destination too. Off means only the database is updated. |
@@ -25,7 +25,7 @@ Cleanup looks for repositories that the database tracks but that no longer exist
 
 The first three are on the card. The others are environment variables; see the [reference](/docs/environment-variables/#cleanup).
 
-Cleanup can also run on demand with `POST /api/cleanup/trigger`, see the [API page](/docs/api/#run-cleanup).
+To check right away instead of waiting, click **Run now** on the card. If the action would change anything, it asks first. A dry run or the `skip` action runs without asking. Its progress and the outcome show in the card's footer, and the info button next to the outcome lists the repositories whose source is gone and any errors. The same run is available as `POST /api/cleanup/trigger`, see the [API page](/docs/api/#run-cleanup).
 
 ### What each action does
 
@@ -47,7 +47,23 @@ Cleanup is careful about what it calls an orphan, because the cost of a false po
 - If the source API cannot be reached at all, or answers 403 or 404 for the account itself, the whole run is skipped.
 - Repositories imported from a previous source, and rows mirrored to a previous destination, are not touched.
 
-The **Database Maintenance** card above cleanup is a different thing: it trims the activity log after the configured retention period (`CLEANUP_RETENTION_DAYS`) and has nothing to do with repositories.
+## Database maintenance
+
+The **Database Maintenance** card above cleanup is a different thing: it trims the activity log and has nothing to do with repositories. Entries older than the retention period (`CLEANUP_RETENTION_DAYS`) are removed. Jobs that are still running are kept.
+
+How often it runs depends on the retention period:
+
+| Retention | Runs |
+| --- | --- |
+| 1 day | every 6 hours |
+| 3 days | every 12 hours |
+| 1 week | daily |
+| 2 weeks, 1 month | every 2 days |
+| 2 or 3 months | weekly |
+
+The card shows the last and next run. When you shorten the retention period, the next run moves forward to match the new schedule: going from 3 months to 1 day means a run within 6 hours, not a week later. Lengthening it never pushes back a run that is already due.
+
+**Run now**, at the bottom of the card, trims the log right away and says how many entries it removed. The next run is then counted from that moment. The same run is available as `POST /api/cleanup/maintenance`.
 
 ## Reconcile
 

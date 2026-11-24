@@ -277,7 +277,10 @@ export const POST: APIRoute = async ({ request, locals }) => {
       scheduleConfig,
       existingConfig ? existingConfig.scheduleConfig : undefined
     );
-    const processedCleanupConfig = mapUiCleanupToDb(cleanupConfig);
+    const processedCleanupConfig = mapUiCleanupToDb(
+      cleanupConfig,
+      existingConfig ? existingConfig.cleanupConfig : undefined
+    );
 
     if (existingConfig) {
       // Update path
