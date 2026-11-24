@@ -98,6 +98,24 @@ docker run -d \
   ghcr.io/raylabshq/gitea-mirror:latest
 ```
 
+### Dropping capabilities
+
+The app runs as a regular user, so it already has none of the Linux capabilities Docker grants by default, and the image has no setuid programs. It works with all capabilities dropped and with `no-new-privileges`, if your environment requires them:
+
+```yaml
+services:
+  gitea-mirror:
+    # ...
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+```
+
+With `docker run`, add `--cap-drop ALL --security-opt no-new-privileges=true`.
+
+Day to day this changes nothing. It only limits what someone who broke into the container could do there. It assumes the container runs as a regular user, as it does by default: run it as root (`user: "0:0"`) and dropping all capabilities also takes away root's ability to ignore file permissions, so the data directory has to belong to root.
+
 ### Upgrading
 
 ```bash
