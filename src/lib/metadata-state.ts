@@ -103,6 +103,28 @@ export interface RepositoryMetadataState {
 export const INCREMENTAL_SYNC_SAFETY_MARGIN_MS = 10 * 60 * 1000;
 
 /**
+ * Bucket width for the incremental `since` value. The listing URL carries the
+ * timestamp, so a value that moves on every sync is a new URL every sync and
+ * the conditional request cache never gets to answer 304. Rounding it down
+ * keeps the URL fixed for the whole bucket: the first listing of the hour pays
+ * and the rest are free. The wider window only re-lists items the mirror has
+ * already handled, which is idempotent.
+ */
+export const INCREMENTAL_SINCE_BUCKET_MS = 60 * 60 * 1000;
+
+/**
+ * The `since` value for an incremental pass: the watermark minus the safety
+ * margin, rounded down to the bucket. It never sits after the watermark, so
+ * nothing that changed since the last pass is left out.
+ */
+export function metadataListingSince(watermarkMs: number): string {
+  const sinceMs = watermarkMs - INCREMENTAL_SYNC_SAFETY_MARGIN_MS;
+  return new Date(
+    Math.floor(sinceMs / INCREMENTAL_SINCE_BUCKET_MS) * INCREMENTAL_SINCE_BUCKET_MS
+  ).toISOString();
+}
+
+/**
  * A full pass still runs when the last one is older than this. It
  * catches what `since` cannot see, such as a label renamed on GitHub
  * (which does not touch the issues that carry it) or an issue removed
@@ -191,7 +213,7 @@ export function planMetadataPass(
   }
   return {
     mode: "incremental",
-    since: new Date(lastPassMs - INCREMENTAL_SYNC_SAFETY_MARGIN_MS).toISOString(),
+    since: metadataListingSince(lastPassMs),
   };
 }
 
