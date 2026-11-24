@@ -50,7 +50,7 @@ Opened from a repository, that dialog also lists the releases Gitea already hold
 
 This tab controls scheduled mirroring and cleanup.
 
-Scheduled syncing runs on an interval or a cron schedule. When enabled it re-syncs existing mirrors, and optionally discovers newly created GitHub repositories and mirrors them without any manual action. Two separate switches govern that: auto-import decides whether new repositories are discovered and added to the database, and auto-mirror decides whether they are then actually mirrored to Gitea.
+Scheduled syncing runs on an interval or a cron schedule. When enabled it re-syncs existing mirrors, and optionally discovers newly created GitHub repositories and mirrors them without any manual action. Two switches on the schedule card govern that: **Auto-import new repositories** decides whether new repositories are discovered and added to the database, and **Auto-mirror new repositories** decides whether they are then actually mirrored to Gitea. With auto-import off, syncs only update the repositories you already have, and the import button at the top of the page brings in new ones when you want them.
 
 The same tab holds repository cleanup, which handles repositories that have disappeared from the source. The action for an orphaned repository is one of `skip`, `archive`, or `delete`, and `archive` is the default because it preserves the mirrored data. There is a dry-run mode that logs what would happen without touching anything. The card's **Reconcile with destination** button compares a Gitea or Forgejo server with the database and offers to adopt mirrors the app does not know about or reset rows whose mirror is gone. Both are described on the [Cleanup and reconcile](/docs/cleanup-and-reconcile/) page.
 
@@ -108,7 +108,7 @@ Environment variables serve two distinct purposes, and it is worth keeping them 
 
 The first group is read directly by the running process at startup and has no equivalent in the UI: the port, the host, the session secret, the encryption secret, and the public URLs. These must be set as environment variables.
 
-The second group seeds the database configuration. On startup, if any of `GITHUB_USERNAME`, `GITHUB_TOKEN`, `GITEA_URL`, `GITEA_USERNAME`, or `GITEA_TOKEN` is set, Gitea Mirror loads the whole environment configuration and writes it into the first user's config row. If no user exists yet, it does nothing and tries again on the next start.
+The second group seeds the database configuration. On startup, if any of `GITHUB_USERNAME`, `GITHUB_TOKEN`, `GITEA_URL`, `GITEA_USERNAME`, or `GITEA_TOKEN` is set, Gitea Mirror loads the whole environment configuration and writes it into the first user's config row. If no user exists yet, it does nothing and tries again on the next start. `ENVIRONMENT_SEEDING=true` loads it without any of those five, so tokens can stay in the UI, and `ENVIRONMENT_SEEDING=false` turns it off. See [How environment configuration is applied](/docs/environment-variables/#how-environment-configuration-is-applied).
 
 > **Note:** A variable that is set overwrites the matching field in the database on every start. If you set `GITEA_ORGANIZATION` in your compose file and then change the organization through the UI, the next restart puts the environment value back. Variables you leave unset do not touch what the UI saved. Either manage a setting through the UI or through the environment, not both.
 

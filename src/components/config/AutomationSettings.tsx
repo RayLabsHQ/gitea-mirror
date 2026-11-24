@@ -353,6 +353,15 @@ export function AutomationSettings({
               <CardDivider />
               <CardSection>
                 <SwitchRow
+                  label="Auto-import new repositories"
+                  description="Look for new repos on your sources during each sync"
+                  info="When off, syncs only update the repos you already have. Use the Import button at the top of this page when you want new ones. AUTO_IMPORT_REPOS, when set, replaces this on every restart."
+                  checked={scheduleConfig.autoImport !== false}
+                  onCheckedChange={(checked) =>
+                    onScheduleChange({ ...scheduleConfig, autoImport: checked })
+                  }
+                />
+                <SwitchRow
                   label="Auto-mirror new repositories"
                   description="Mirror repos discovered during sync automatically"
                   info="When off, newly discovered repos are imported for browsing and wait for a manual mirror click. Starred repos have their own toggle in GitHub settings."

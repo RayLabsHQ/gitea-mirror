@@ -102,6 +102,33 @@ test("mapDbScheduleToUi - reports interval mode for a plain interval instead of 
   expect(mapped.timezone).toBe("UTC");
 });
 
+test("autoImport round-trips UI -> DB -> UI (#541)", () => {
+  const existing = scheduleConfigSchema.parse({});
+  expect(existing.autoImport).toBe(true);
+
+  const off = mapUiScheduleToDb({ enabled: true, autoImport: false }, existing);
+  expect(off.autoImport).toBe(false);
+  expect(mapDbScheduleToUi(off).autoImport).toBe(false);
+
+  const on = mapUiScheduleToDb({ enabled: true, autoImport: true }, off);
+  expect(on.autoImport).toBe(true);
+  expect(mapDbScheduleToUi(on).autoImport).toBe(true);
+});
+
+test("a schedule save without autoImport keeps the stored value", () => {
+  // AUTO_IMPORT_REPOS=false stored by the env loader must survive saving the
+  // schedule from a client that does not send the switch.
+  const stored = scheduleConfigSchema.parse({ autoImport: false });
+  expect(mapUiScheduleToDb({ enabled: true }, stored).autoImport).toBe(false);
+});
+
+test("a stored schedule without autoImport reads as on, like the scheduler", () => {
+  const legacy = { ...scheduleConfigSchema.parse({}) } as Record<string, unknown>;
+  delete legacy.autoImport;
+  expect(mapDbScheduleToUi(legacy as any).autoImport).toBe(true);
+  expect(mapDbScheduleToUi(undefined as any).autoImport).toBe(true);
+});
+
 test("includeCollaboratorRepos round-trips through UI -> DB -> UI when true", () => {
   const ui = buildMinimalUiConfigs({ includeCollaboratorRepos: true });
   const db = mapUiToDbConfig(

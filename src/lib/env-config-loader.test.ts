@@ -63,6 +63,7 @@ const TOUCHED = [
   "MIRROR_STRATEGY",
   "PRESERVE_ORG_STRUCTURE",
   "GITEA_ORGANIZATION",
+  "ENVIRONMENT_SEEDING",
 ];
 
 if (isolated) {
@@ -209,6 +210,68 @@ if (isolated) {
       process.env.MIRROR_STRATEGY = "flat-user";
       await initializeConfigFromEnv!();
       expect((await stored()).githubConfig.mirrorStrategy).toBe("flat-user");
+    });
+  });
+
+  describe("ENVIRONMENT_SEEDING (#541)", () => {
+    beforeEach(async () => {
+      sqlite.run("DELETE FROM sources");
+      sqlite.run("DELETE FROM configs");
+      sqlite.run("DELETE FROM users");
+      sqlite.run("INSERT INTO users (id, email) VALUES ('user-1', 'one@example.com')");
+      for (const key of TOUCHED) delete process.env[key];
+      await createDefaultConfig!({ userId: "user-1" });
+    });
+
+    test("without a connection variable, nothing is copied by default", async () => {
+      process.env.AUTO_IMPORT_REPOS = "false";
+
+      await initializeConfigFromEnv!();
+
+      expect((await stored()).scheduleConfig.autoImport).not.toBe(false);
+    });
+
+    test("true copies settings without a connection variable and keeps the stored connection", async () => {
+      const before = await stored();
+      process.env.ENVIRONMENT_SEEDING = "TRUE";
+      process.env.AUTO_IMPORT_REPOS = "false";
+
+      await initializeConfigFromEnv!();
+
+      const row = await stored();
+      expect(row.scheduleConfig.autoImport).toBe(false);
+      expect(row.githubConfig.owner).toBe(before.githubConfig.owner);
+      expect(row.githubConfig.token).toBe(before.githubConfig.token);
+      expect(row.giteaConfig.url).toBe(before.giteaConfig.url);
+      expect(row.giteaConfig.token).toBe(before.giteaConfig.token);
+      expect(row.giteaConfig.defaultOwner).toBe(before.giteaConfig.defaultOwner);
+      const sources = await db.select().from(schema.sources).where(eq(schema.sources.userId, "user-1"));
+      expect(sources).toHaveLength(0);
+    });
+
+    test("false copies nothing, even with the connection variables set", async () => {
+      Object.assign(process.env, CREDENTIALS);
+      process.env.ENVIRONMENT_SEEDING = "false";
+      process.env.AUTO_IMPORT_REPOS = "false";
+
+      await initializeConfigFromEnv!();
+
+      const row = await stored();
+      expect(row.scheduleConfig.autoImport).not.toBe(false);
+      expect(row.githubConfig.owner).not.toBe("octocat");
+      expect(row.giteaConfig.defaultOwner).not.toBe("mirror");
+    });
+
+    test("any other value is ignored and the connection variables decide", async () => {
+      process.env.ENVIRONMENT_SEEDING = "1";
+      process.env.AUTO_IMPORT_REPOS = "false";
+
+      await initializeConfigFromEnv!();
+      expect((await stored()).scheduleConfig.autoImport).not.toBe(false);
+
+      Object.assign(process.env, CREDENTIALS);
+      await initializeConfigFromEnv!();
+      expect((await stored()).scheduleConfig.autoImport).toBe(false);
     });
   });
 }
