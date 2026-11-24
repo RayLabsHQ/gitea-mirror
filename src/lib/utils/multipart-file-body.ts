@@ -8,17 +8,35 @@
  * out, so an upload holds about one chunk whatever the file's size. The body is
  * sent chunked; a Content-Length set by hand next to a stream body came out
  * wrong in Bun.
+ *
+ * The file is read through a handle opened here, and the caller closes it with
+ * `close()` once the request is over, however it ended (#539). When the server
+ * answers before it has read the whole body (a 413 from a proxy's size limit,
+ * an auth error), Bun stops reading the request body and never cancels it. The
+ * Bun.file stream used before stayed open for the life of the process, so
+ * removing the file afterwards freed no disk space.
  */
+import { open } from "node:fs/promises";
+
+/** How much of the file one read takes. */
+const CHUNK_BYTES = 256 * 1024;
+
+export interface MultipartFileBody {
+  body: ReadableStream<Uint8Array>;
+  contentType: string;
+  /** Closes the file. Safe to call more than once. */
+  close: () => Promise<void>;
+}
 
 /** How browsers escape a name in Content-Disposition (the HTML form encoding). */
 function escapeQuoted(value: string): string {
   return value.replace(/"/g, "%22").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
 }
 
-export function multipartFileBody(
+export async function multipartFileBody(
   filePath: string,
   { field, fileName }: { field: string; fileName: string }
-): { body: ReadableStream<Uint8Array>; contentType: string } {
+): Promise<MultipartFileBody> {
   const boundary = `----gitea-mirror-${crypto.randomUUID().replace(/-/g, "")}`;
   const encoder = new TextEncoder();
   const head = encoder.encode(
@@ -28,30 +46,49 @@ export function multipartFileBody(
   );
   const tail = encoder.encode(`\r\n--${boundary}--\r\n`);
 
-  let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
+  const file = await open(filePath, "r");
+  let reading: Promise<unknown> | undefined;
+  let closing: Promise<void> | undefined;
+  // The close waits for a read in progress: in Bun (1.3.14) a FileHandle
+  // closed during a read reports success and keeps its descriptor for good.
+  // That happens when a dropped connection cancels the body mid-read.
+  const close = () =>
+    (closing ??= (async () => {
+      await reading?.catch(() => {});
+      await file.close().catch(() => {});
+    })());
+  const closedError = () => new Error("The upload's file was closed before the body was sent");
+
+  let sentHead = false;
   const body = new ReadableStream<Uint8Array>(
     {
       async pull(controller) {
-        if (!reader) {
-          reader = Bun.file(filePath).stream().getReader();
+        if (!sentHead) {
+          sentHead = true;
           controller.enqueue(head);
           return;
         }
-        const { done, value } = await reader.read();
-        if (!done) {
-          controller.enqueue(value);
+        if (closing) throw closedError();
+        const chunk = new Uint8Array(CHUNK_BYTES);
+        const read = file.read(chunk, 0, CHUNK_BYTES, null);
+        reading = read;
+        const { bytesRead } = await read;
+        if (closing) throw closedError();
+        if (bytesRead > 0) {
+          controller.enqueue(bytesRead === CHUNK_BYTES ? chunk : chunk.subarray(0, bytesRead));
           return;
         }
+        await close();
         controller.enqueue(tail);
         controller.close();
       },
-      async cancel(reason) {
-        await reader?.cancel(reason);
+      async cancel() {
+        await close();
       },
     },
     // Read the file only as fast as the request sends it.
     { highWaterMark: 0 }
   );
 
-  return { body, contentType: `multipart/form-data; boundary=${boundary}` };
+  return { body, contentType: `multipart/form-data; boundary=${boundary}`, close };
 }

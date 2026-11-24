@@ -52,7 +52,7 @@ import {
   type BoundedDownload,
   type DownloadLimits,
 } from "./utils/bounded-download";
-import { multipartFileBody } from "./utils/multipart-file-body";
+import { multipartFileBody, type MultipartFileBody } from "./utils/multipart-file-body";
 import { createReleaseAssetDir } from "./utils/release-asset-files";
 import { rm } from "node:fs/promises";
 import path from "node:path";
@@ -4090,6 +4090,7 @@ export async function reconcileReleaseAssets({
     // The asset goes through a file of its own, so its size never decides how
     // much memory a sync takes (#523).
     let tempDir: string | undefined;
+    let upload: MultipartFileBody | undefined;
     try {
       tempDir = await createReleaseAssetDir();
       const filePath = path.join(tempDir, "asset");
@@ -4117,7 +4118,7 @@ export async function reconcileReleaseAssets({
       }
 
       // Gitea and Forgejo take the name from the query, as they always have.
-      const upload = multipartFileBody(filePath, { field: "attachment", fileName: asset.name });
+      upload = await multipartFileBody(filePath, { field: "attachment", fileName: asset.name });
       const uploadResponse = await doFetch(
         `${assetsUrl}?name=${encodeURIComponent(asset.name)}`,
         {
@@ -4162,6 +4163,11 @@ export async function reconcileReleaseAssets({
       );
       failed++;
     } finally {
+      // Close the file before removing it. A removed file keeps its disk space
+      // while anything still has it open, and a destination that answers
+      // before reading the whole upload (a proxy's 413) leaves the request
+      // body unread: Bun never cancels it, so only this close ends it (#539).
+      await upload?.close();
       if (tempDir) {
         await rm(tempDir, { recursive: true, force: true }).catch(() => {});
       }

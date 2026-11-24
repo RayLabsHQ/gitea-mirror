@@ -77,6 +77,12 @@ The dashboard gets live updates over a long-lived server-sent events stream (`/a
 - **Snapshots** in `repo-backups/` grow with every force-push snapshot. Lower the retention in the force-push protection settings, or switch the strategy. See [Force-push protection](/docs/force-push-protection/).
 - **Building from source** before 3.41.0 could run out of memory when `data/repo-backups` was large, because the CSS build scanned it. Update.
 
+## The disk fills up, but the data directory looks small
+
+Versions 3.53.1 and 3.54.0 kept a release asset's temporary file open after removing it when the destination answered before reading the whole upload, so its space was only freed when the app restarted. `df` shows the disk filling up while `du` finds far less. Update to fix it; a restart frees the space in the meantime.
+
+An upload refused that way usually means a reverse proxy in front of Gitea or Forgejo limits the size of a request. The log shows `Failed to upload asset <name>: 413` for those. Raise the limit, such as `client_max_body_size` in nginx, above the largest asset you mirror.
+
 ## An update did not take effect
 
 `docker compose up -d` reuses the image you already have. Pull first:
