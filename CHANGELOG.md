@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - An SSO sign-in is no longer linked to a local account from another domain. When the identity provider said the email was verified, the sign-in was linked to the local account with that email whatever the provider's Email Domain, so someone who could get that email at the provider could take over the account. Linking now only happens for emails in the provider's domain, as the docs already said
 
 ### Changed
+- The compose files and the Docker examples in the docs drop all Linux capabilities and set `no-new-privileges` (#544, thanks @zwimer). The app runs as a regular user and never had any of the capabilities Docker grants by default, so nothing changes day to day; it limits what someone who broke into the container could do. If you run the container as root, remove `cap_drop` or make sure the data directory belongs to root
 - The Dashboard's Repositories and Recent Activity lists run down to the bottom of the screen instead of stopping at eight rows, so a tall screen shows more and a short one fewer, up to 50. They follow the window as it is resized. On narrow screens, where the two lists stack, they still show eight
 - Pages keep what they last showed in this browser tab. Going back to the Dashboard, Repositories, Organizations, Storage or Activity Log shows that data at once and refreshes it in the background, instead of starting from a skeleton and waiting for the whole list again. Nothing is written to browser storage; a reload or a new tab starts fresh
 

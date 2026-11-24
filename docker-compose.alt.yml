@@ -10,6 +10,11 @@ services:
     ports:
       - "${PORT:-4321}:4321"
     user: ${PUID:-1000}:${PGID:-1000}
+    # The app runs as a regular user and needs no Linux capabilities
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     volumes:
       - ./data:/app/data
     environment:
