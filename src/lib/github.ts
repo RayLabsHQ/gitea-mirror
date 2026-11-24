@@ -327,8 +327,18 @@ export function createGitHubClient(
  * x-ratelimit-reset. There is no userId, so the handlers only log and
  * schedule retries. Never pass an empty token to createGitHubClient
  * instead — Octokit treats `auth: ""` as an invalid credential header.
+ *
+ * `conditionalRequestScope` turns on the ETag cache for clients that do
+ * authenticate every request, which today means the GitHub App installation
+ * client built in github-app-client.ts. An anonymous `304` still counts
+ * against the 60 req/hr budget, so tokenless sources would only save
+ * bandwidth, not requests.
  */
-export function createPublicGitHubClient(apiBaseUrl?: string, userId?: string): Octokit {
+export function createPublicGitHubClient(
+  apiBaseUrl?: string,
+  userId?: string,
+  conditionalRequestScope?: string,
+): Octokit {
   // Same base URL resolution as createGitHubClient: an explicit apiBaseUrl
   // (a GitHub Enterprise source's /api/v3) replaces the env default;
   // otherwise support GH_API_URL (preferred) or GITHUB_API_URL (may conflict
@@ -352,6 +362,12 @@ export function createPublicGitHubClient(apiBaseUrl?: string, userId?: string): 
     },
     throttle: githubThrottleOptions(userId),
   });
+
+  // Installed before the gate so a closed gate is answered before the cache,
+  // the same order createGitHubClient uses.
+  if (conditionalRequestScope) {
+    applyConditionalRequests(octokit, { scope: conditionalRequestScope });
+  }
 
   // Anonymous clients share one gate key, so one exhausted 60 req/hr budget
   // pauses every tokenless source together.
