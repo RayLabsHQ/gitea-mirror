@@ -21,7 +21,10 @@
  */
 
 import { describe, expect, it } from "bun:test";
+import { readdir, realpath } from "node:fs/promises";
 import { reconcileReleaseAssets, buildReleaseTargetLockKey } from "@/lib/gitea";
+import { releaseAssetFilesRoot } from "@/lib/utils/release-asset-files";
+import { openFileCount } from "@/tests/open-files";
 import { withKeyedLock } from "@/lib/utils/keyed-mutex";
 import type { Config } from "@/types/config";
 
@@ -295,6 +298,21 @@ describe("reconcileReleaseAssets", () => {
     expect(destination.deletes()).toHaveLength(0);
     expect(destination.posts()).toHaveLength(1);
     expect(result).toEqual({ uploaded: 1, failed: 0, skipped: 0 });
+  });
+
+  // #539: a destination that answers before reading the upload (a proxy's
+  // 413 for its size limit) left the temp file open after it was removed, so
+  // its disk space was not freed until the process exited. The fake answers
+  // without reading the body, like such a proxy.
+  it("closes and removes the temp file when an upload is refused unread", async () => {
+    const destination = createFakeDestination({ uploadStatus: 413 });
+
+    const result = await reconcile(destination.fetchImpl, [githubAsset("big.bin", 4)]);
+
+    expect(result).toEqual({ uploaded: 0, failed: 1, skipped: 0 });
+    const root = await realpath(releaseAssetFilesRoot());
+    expect(openFileCount(root)).toBe(0);
+    expect(await readdir(root)).toEqual([]);
   });
 
   it("does nothing at all for a release with no assets", async () => {
