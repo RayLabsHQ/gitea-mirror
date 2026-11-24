@@ -3521,7 +3521,10 @@ export const mirrorGitRepoIssuesToGitea = async ({
         });
       }
 
-      if (includeComments) {
+      // The listing already carries the comment count, so an issue GitHub
+      // reports with none needs no per-issue request. `!== 0` keeps the call
+      // for responses that omit the field, where the count is unknown.
+      if (includeComments && issue.comments !== 0) {
         // Clone comments
         const comments = await octokit.paginate(
           octokit.rest.issues.listComments,

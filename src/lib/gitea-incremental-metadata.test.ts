@@ -326,6 +326,23 @@ describe.skipIf(!isChild)("mirrorGitRepoIssuesToGitea incremental sync", () => {
     expect(cursor!.lastFullPassStartedAt).toBe(previous.lastFullPassStartedAt);
   });
 
+  it("skips the comment listing for an issue GitHub reports with none", async () => {
+    fakeGitea([]);
+    const github = fakeOctokit({
+      issueListing: [ghIssue(1, { comments: 0 }), ghIssue(2, { comments: 3 })],
+    });
+
+    await mirrorGitRepoIssuesToGitea({
+      config,
+      octokit: github.octokit,
+      repository,
+      giteaOwner: DEST_OWNER,
+      giteaRepoName: DEST_REPO,
+    });
+
+    expect(github.callsTo("issues.listComments").map((c) => c.params.issue_number)).toEqual([2]);
+  });
+
   it("creates new issues from an incremental listing in creation order", async () => {
     const gitea = fakeGitea([{ number: 11, title: "[GH-ISSUE #1] Issue 1" }]);
     // GitHub returns them by updated_at: #5 changed before #4.
