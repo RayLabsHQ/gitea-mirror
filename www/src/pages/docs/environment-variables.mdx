@@ -16,6 +16,12 @@ Variables fall into two groups.
 
 **Seeded variables** are copied into the database. On startup, if any of `GITHUB_USERNAME`, `GITHUB_TOKEN`, `GITEA_URL`, `GITEA_USERNAME`, or `GITEA_TOKEN` is set, Gitea Mirror parses the whole environment configuration and writes it to the first user's configuration row. If no user account exists yet, nothing is written and it tries again on the next start.
 
+To keep your tokens on the Configuration page and still set a few things through the environment, such as `AUTO_IMPORT_REPOS`, set `ENVIRONMENT_SEEDING=true`.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `ENVIRONMENT_SEEDING` | none | `true` copies seeded variables even when none of the five variables above is set. `false` never copies them, even when those are set. Unset, or any other value, keeps the rule above. |
+
 > **Warning:** A seeded variable that is set is written again on every startup, so it wins over changes you make in the UI. A variable you leave unset (or empty) is not written, and the value saved on the Configuration page stays. Manage a given setting either through the environment or through the UI, not both. `docker-compose.yml` sets most of these variables with a default, so with that file they are always set: remove a line to manage that setting in the UI.
 
 > **Note:** A true/false variable is true when set to `true` (in any case) and false for any other value. `AUTO_IMPORT_REPOS` is the reverse: only `false` turns it off. The defaults listed below apply on a first start, when nothing is stored yet.
@@ -187,8 +193,8 @@ Issues, pull requests, labels and milestones are read from the GitHub API and ne
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `AUTO_IMPORT_REPOS` | `true` | Discover and import newly created repositories on the source during scheduled syncs, including the first run after startup. Set to `false` to disable. |
-| `AUTO_MIRROR_REPOS` | `false` | Mirror newly imported repositories automatically, without a manual "Mirror All". |
+| `AUTO_IMPORT_REPOS` | `true` | Discover and import newly created repositories on the source during scheduled syncs, including the first run after startup. Set to `false` to disable. Same as the **Auto-import new repositories** switch on the Automation tab. |
+| `AUTO_MIRROR_REPOS` | `false` | Mirror newly imported repositories automatically, without a manual "Mirror All". Same as the **Auto-mirror new repositories** switch on the Automation tab. |
 | `SCHEDULE_ONLY_MIRROR_UPDATED` | `false` | Skip repositories mirrored within the last `SCHEDULE_UPDATE_INTERVAL`. It does not check the source for changes. |
 | `SCHEDULE_UPDATE_INTERVAL` | `86400000` | With `SCHEDULE_ONLY_MIRROR_UPDATED`, how recently a repository must have been mirrored to be skipped, in milliseconds. |
 | `SCHEDULE_SKIP_RECENTLY_MIRRORED` | `true` | Skip repositories mirrored very recently. |

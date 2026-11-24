@@ -344,6 +344,7 @@ export function mapUiScheduleToDb(uiSchedule: any, existing?: DbScheduleConfig):
     enabled: !!uiSchedule.enabled,
     interval: intervalExpression,
     timezone,
+    autoImport: typeof uiSchedule.autoImport === "boolean" ? uiSchedule.autoImport : base.autoImport,
     autoMirror: typeof uiSchedule.autoMirror === "boolean" ? uiSchedule.autoMirror : base.autoMirror,
     nextRun: scheduleChanged ? undefined : base.nextRun,
   } as DbScheduleConfig;
@@ -363,6 +364,7 @@ export function mapDbScheduleToUi(dbSchedule: DbScheduleConfig): any {
       clockFrequencyHours: 24,
       startTime: "22:00",
       timezone: "UTC",
+      autoImport: true,
       autoMirror: false,
       lastRun: null,
       nextRun: null,
@@ -396,6 +398,8 @@ export function mapDbScheduleToUi(dbSchedule: DbScheduleConfig): any {
     clockFrequencyHours: parsedClockSchedule?.frequencyHours ?? 24,
     startTime: parsedClockSchedule?.startTime ?? "22:00",
     timezone: normalizeTimezone(dbSchedule.timezone || "UTC"),
+    // The scheduler imports unless this is exactly false, so unset reads as on.
+    autoImport: dbSchedule.autoImport !== false,
     autoMirror: dbSchedule.autoMirror ?? false,
     lastRun: dbSchedule.lastRun || null,
     nextRun: dbSchedule.nextRun || null,

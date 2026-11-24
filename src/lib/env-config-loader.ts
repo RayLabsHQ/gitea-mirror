@@ -130,6 +130,26 @@ function envFlagAny(...names: string[]): boolean | undefined {
 }
 
 /**
+ * ENVIRONMENT_SEEDING decides whether the environment is copied into the
+ * database at all (#541). "true" copies it even when no connection variable
+ * is set, so tokens can stay on the Configuration page while settings such as
+ * AUTO_IMPORT_REPOS come from the environment. "false" never copies it.
+ * Unset keeps the old rule (see hasEnvConfig). Any other value is treated as
+ * unset with a warning, so a typo such as "1" cannot switch seeding off.
+ */
+function environmentSeeding(): boolean | undefined {
+  const raw = process.env.ENVIRONMENT_SEEDING?.trim();
+  if (!raw) return undefined;
+  const value = raw.toLowerCase();
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  console.warn(
+    `[ENV Config Loader] Ignoring ENVIRONMENT_SEEDING="${raw}": use true or false`
+  );
+  return undefined;
+}
+
+/**
  * Parse environment variables into configuration object
  */
 function parseEnvConfig(): EnvConfig {
@@ -289,9 +309,15 @@ function hasEnvConfig(envConfig: EnvConfig): boolean {
 export async function initializeConfigFromEnv(): Promise<void> {
   try {
     const envConfig = parseEnvConfig();
+    const seeding = environmentSeeding();
 
-    // Skip if no environment config is provided
-    if (!hasEnvConfig(envConfig)) {
+    if (seeding === false) {
+      console.log('[ENV Config Loader] ENVIRONMENT_SEEDING=false, skipping initialization');
+      return;
+    }
+
+    // Without ENVIRONMENT_SEEDING=true, a connection variable has to be set.
+    if (seeding !== true && !hasEnvConfig(envConfig)) {
       console.log('[ENV Config Loader] No environment configuration found, skipping initialization');
       return;
     }

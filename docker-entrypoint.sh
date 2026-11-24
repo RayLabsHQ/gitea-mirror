@@ -141,13 +141,21 @@ fi
 echo "Checking for environment configuration..."
 
 # Only run the env config script if relevant env vars are set
-# This avoids spawning a heavy Bun process on memory-constrained systems
+# This avoids spawning a heavy Bun process on memory-constrained systems.
+# ENVIRONMENT_SEEDING=true runs it without a connection variable and
+# ENVIRONMENT_SEEDING=false never runs it (the loader applies the same rule).
 HAS_ENV_CONFIG=false
-if [ -n "$GITHUB_USERNAME" ] || [ -n "$GITHUB_TOKEN" ] || [ -n "$GITEA_URL" ] || [ -n "$GITEA_USERNAME" ] || [ -n "$GITEA_TOKEN" ]; then
+SEEDING=$(printf '%s' "${ENVIRONMENT_SEEDING:-}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')
+if [ "$SEEDING" = "false" ]; then
+  HAS_ENV_CONFIG=skip
+elif [ "$SEEDING" = "true" ] || [ -n "$GITHUB_USERNAME" ] || [ -n "$GITHUB_TOKEN" ] || [ -n "$GITEA_URL" ] || [ -n "$GITEA_USERNAME" ] || [ -n "$GITEA_TOKEN" ]; then
   HAS_ENV_CONFIG=true
 fi
 
-if [ "$HAS_ENV_CONFIG" = "true" ]; then
+if [ "$HAS_ENV_CONFIG" = "skip" ]; then
+  echo "ENVIRONMENT_SEEDING=false, skipping env config initialization."
+  ENV_CONFIG_EXIT_CODE=0
+elif [ "$HAS_ENV_CONFIG" = "true" ]; then
   if [ -f "dist/scripts/startup-env-config.js" ]; then
     echo "Loading configuration from environment variables..."
     bun dist/scripts/startup-env-config.js || ENV_CONFIG_EXIT_CODE=$?
