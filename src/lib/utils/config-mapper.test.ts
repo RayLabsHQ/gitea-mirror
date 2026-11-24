@@ -4,6 +4,7 @@ import {
   mapDbToUiConfig,
   mapUiScheduleToDb,
   mapUiToDbConfig,
+  mapUiCleanupToDb,
 } from "./config-mapper";
 import { githubConfigSchema, scheduleConfigSchema } from "@/lib/db/schema";
 import type {
@@ -376,5 +377,42 @@ describe("source provider round trip", () => {
     const { githubConfig } = mapDbToUiConfigForSource({ githubConfig: { owner: "octo", token: "" } });
     expect(githubConfig.provider).toBe("github");
     expect(githubConfig.url).toBe("");
+  });
+});
+
+describe("mapUiCleanupToDb run times (#548)", () => {
+  const DAY = 86400;
+  const now = new Date("2026-11-24T12:00:00Z");
+  const lastRun = new Date("2026-11-24T06:00:00Z");
+  const weekAway = new Date("2026-12-01T12:00:00Z");
+  const stored = {
+    enabled: true,
+    retentionDays: 90 * DAY,
+    deleteIfNotInGitHub: true,
+    orphanedRepoAction: "archive" as const,
+    dryRun: false,
+    lastRun,
+    nextRun: weekAway,
+  };
+
+  test("a shorter retention period moves the next run forward", () => {
+    const saved = mapUiCleanupToDb({ ...stored, retentionDays: 1 * DAY }, stored as any, now);
+    expect(saved.nextRun).toEqual(new Date("2026-11-24T18:00:00Z"));
+    expect(saved.lastRun).toEqual(lastRun);
+  });
+
+  test("times sent by the page are ignored when a row is stored", () => {
+    const saved = mapUiCleanupToDb(
+      { ...stored, lastRun: new Date("2020-01-01T00:00:00Z"), nextRun: new Date("2020-01-02T00:00:00Z") },
+      stored as any,
+      now
+    );
+    expect(saved.lastRun).toEqual(lastRun);
+    expect(saved.nextRun).toEqual(weekAway);
+  });
+
+  test("a first save schedules the next run", () => {
+    const saved = mapUiCleanupToDb({ enabled: true, retentionDays: 7 * DAY }, undefined, now);
+    expect(saved.nextRun).toEqual(new Date("2026-11-25T12:00:00Z"));
   });
 });

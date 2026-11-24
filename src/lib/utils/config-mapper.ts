@@ -26,6 +26,7 @@ import {
   DEFAULT_RELEASE_TYPE,
 } from "@/lib/utils/mirror-overrides";
 import { buildClockCronExpression, normalizeTimezone, parseClockCronExpression } from "@/lib/utils/schedule-utils";
+import { nextCleanupRun } from "@/lib/utils/cleanup-schedule";
 
 // Use the actual database schema types
 type DbGitHubConfig = z.infer<typeof githubConfigSchema>;
@@ -409,7 +410,17 @@ export function mapDbScheduleToUi(dbSchedule: DbScheduleConfig): any {
 /**
  * Maps UI cleanup config to database schema
  */
-export function mapUiCleanupToDb(uiCleanup: any): DbCleanupConfig {
+/**
+ * Maps the UI cleanup settings to the stored shape. The last and next run are
+ * owned by the server: the last run comes from the stored row, and the next run
+ * is worked out from the stored one and the new settings (#548), so a page left
+ * open across a run cannot write back stale times.
+ */
+export function mapUiCleanupToDb(
+  uiCleanup: any,
+  existing?: Partial<DbCleanupConfig> | null,
+  now: Date = new Date()
+): DbCleanupConfig {
   const parsedRetention =
     typeof uiCleanup.retentionDays === "string"
       ? parseInt(uiCleanup.retentionDays, 10)
@@ -428,9 +439,15 @@ export function mapUiCleanupToDb(uiCleanup: any): DbCleanupConfig {
     orphanedRepoAction: (uiCleanup.orphanedRepoAction as DbCleanupConfig["orphanedRepoAction"]) || "archive",
     batchSize: uiCleanup.batchSize ?? 10,
     pauseBetweenDeletes: uiCleanup.pauseBetweenDeletes ?? 2000,
-    lastRun: uiCleanup.lastRun ?? null,
-    nextRun: uiCleanup.nextRun ?? null,
-  };
+    lastRun: existing ? existing.lastRun ?? null : uiCleanup.lastRun ?? null,
+    nextRun:
+      nextCleanupRun({
+        enabled: Boolean(uiCleanup.enabled),
+        retentionSeconds,
+        previous: existing ?? undefined,
+        now,
+      }) ?? null,
+  } as DbCleanupConfig;
 }
 
 /**

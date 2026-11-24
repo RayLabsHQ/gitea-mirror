@@ -156,3 +156,27 @@
     opacity: 0.5;
   }
 }
+
+/* Run now progress on the cleanup cards: a bar that slides while a run is
+   going, since the server answers once at the end. */
+@keyframes cleanup-progress {
+  from {
+    left: -35%;
+  }
+  to {
+    left: 100%;
+  }
+}
+
+.cleanup-progress-bar {
+  animation: cleanup-progress 1.3s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cleanup-progress-bar {
+    animation: none;
+    left: 0;
+    width: 100%;
+    opacity: 0.6;
+  }
+}
