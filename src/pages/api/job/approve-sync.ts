@@ -9,6 +9,7 @@ import { createPreSyncBundleBackup } from "@/lib/repo-backup";
 import { decryptConfigTokens } from "@/lib/utils/config-encryption";
 import type { Config } from "@/types/config";
 import { createMirrorJob } from "@/lib/helpers";
+import { runInBackground } from "@/lib/utils/background-task";
 
 interface ApproveSyncRequest {
   repositoryIds: string[];
@@ -154,7 +155,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     }
 
     // Process in background
-    setTimeout(async () => {
+    runInBackground("Approve sync", async () => {
       for (const repo of claimedRepos) {
         try {
           const { getGiteaRepoOwnerAsync } = await import("@/lib/gitea");
@@ -214,7 +215,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
           );
         }
       }
-    }, 0);
+    });
 
     return new Response(
       JSON.stringify({

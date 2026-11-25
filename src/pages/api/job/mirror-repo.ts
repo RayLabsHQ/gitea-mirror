@@ -17,6 +17,7 @@ import { getGiteaRepoOwnerAsync } from "@/lib/gitea";
 import { mirrorRepositoryToDestination } from "@/lib/mirror-dispatch";
 import { createGitHubClient, createPublicGitHubClient } from "@/lib/github";
 import { processWithResilience } from "@/lib/utils/concurrency";
+import { runInBackground } from "@/lib/utils/background-task";
 import { createSecureErrorResponse } from "@/lib/utils";
 import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 
@@ -86,7 +87,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     }
 
     // Start async mirroring in background with parallel processing and resilience
-    setTimeout(async () => {
+    runInBackground("Mirror", async () => {
       // Only GitHub sources need an API client while mirroring (metadata).
       // Other hosts get code-only mirrors through Gitea. The selected
       // repositories can come from different sources, so the client is
@@ -192,7 +193,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       );
 
       console.log("All repository mirroring tasks completed");
-    }, 0);
+    });
 
     const responsePayload: MirrorRepoResponse = {
       success: true,
