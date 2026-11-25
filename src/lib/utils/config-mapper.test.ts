@@ -5,6 +5,7 @@ import {
   mapUiScheduleToDb,
   mapUiToDbConfig,
   mapUiCleanupToDb,
+  mapDbCleanupToUi,
 } from "./config-mapper";
 import { githubConfigSchema, scheduleConfigSchema } from "@/lib/db/schema";
 import type {
@@ -414,5 +415,33 @@ describe("mapUiCleanupToDb run times (#548)", () => {
   test("a first save schedules the next run", () => {
     const saved = mapUiCleanupToDb({ enabled: true, retentionDays: 7 * DAY }, undefined, now);
     expect(saved.nextRun).toEqual(new Date("2026-11-25T12:00:00Z"));
+  });
+});
+
+describe("Apply to the destination too (#558)", () => {
+  const base = {
+    enabled: true,
+    retentionDays: 7 * 86400,
+    deleteIfNotInGitHub: true,
+    orphanedRepoAction: "archive" as const,
+    dryRun: false,
+  };
+
+  test("the switch round-trips UI -> DB -> UI when on", () => {
+    const saved = mapUiCleanupToDb({ ...base, deleteFromGitea: true });
+    expect(saved.deleteFromGitea).toBe(true);
+    expect(mapDbCleanupToUi(saved).deleteFromGitea).toBe(true);
+  });
+
+  test("turning it off is saved", () => {
+    const stored = mapUiCleanupToDb({ ...base, deleteFromGitea: true });
+    const saved = mapUiCleanupToDb({ ...base, deleteFromGitea: false }, stored);
+    expect(saved.deleteFromGitea).toBe(false);
+    expect(mapDbCleanupToUi(saved).deleteFromGitea).toBe(false);
+  });
+
+  test("a stored row without the field reads as off, like the cleanup service", () => {
+    const { deleteFromGitea: _omit, ...row } = mapUiCleanupToDb(base);
+    expect(mapDbCleanupToUi(row as any).deleteFromGitea).toBe(false);
   });
 });
