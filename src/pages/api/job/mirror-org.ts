@@ -19,6 +19,7 @@ import { repoStatusEnum } from "@/types/Repository";
 import { type MembershipRole } from "@/types/organizations";
 import { createSecureErrorResponse } from "@/lib/utils";
 import { processWithResilience } from "@/lib/utils/concurrency";
+import { runInBackground } from "@/lib/utils/background-task";
 import { v4 as uuidv4 } from "uuid";
 import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 
@@ -88,7 +89,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     }
 
     // Fire async mirroring without blocking response, using parallel processing with resilience
-    setTimeout(async () => {
+    runInBackground("Org mirror", async () => {
       if (!config.giteaConfig?.token) {
         throw new Error("Destination token is missing in config.");
       }
@@ -177,7 +178,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       );
 
       console.log("All organization mirroring tasks completed");
-    }, 0);
+    });
 
     const responsePayload: MirrorOrgResponse = {
       success: true,

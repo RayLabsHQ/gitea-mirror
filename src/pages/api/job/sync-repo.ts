@@ -6,6 +6,7 @@ import { repositoryVisibilityEnum, repoStatusEnum } from "@/types/Repository";
 import { syncRepositoryOnDestination } from "@/lib/mirror-dispatch";
 import type { SyncRepoResponse } from "@/types/sync";
 import { processWithResilience } from "@/lib/utils/concurrency";
+import { runInBackground } from "@/lib/utils/background-task";
 import { createSecureErrorResponse } from "@/lib/utils";
 import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 
@@ -78,7 +79,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
     }
 
     // Start async mirroring in background with parallel processing and resilience
-    setTimeout(async () => {
+    runInBackground("Sync", async () => {
       // Define the concurrency limit - adjust based on API rate limits
       const CONCURRENCY_LIMIT = 5;
 
@@ -133,7 +134,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       );
 
       console.log("All repository syncing tasks completed");
-    }, 0);
+    });
 
     const responsePayload: SyncRepoResponse = {
       success: true,

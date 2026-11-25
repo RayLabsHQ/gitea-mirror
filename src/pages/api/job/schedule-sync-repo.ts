@@ -10,6 +10,7 @@ import type {
   ScheduleSyncRepoResponse,
 } from "@/types/sync";
 import { createSecureErrorResponse } from "@/lib/utils";
+import { runInBackground } from "@/lib/utils/background-task";
 import { getNextScheduledRun, normalizeTimezone } from "@/lib/utils/schedule-utils";
 import { requireAuthenticatedUserId } from "@/lib/auth-guards";
 
@@ -98,7 +99,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
       .where(eq(configs.userId, userId));
 
     // Start async sync in background
-    setTimeout(async () => {
+    runInBackground("Schedule sync", async () => {
       for (const repo of repos) {
         try {
           // Only check Gitea presence if the repo failed previously
@@ -131,7 +132,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
           console.error(`Sync failed for repo ${repo.name}:`, error);
         }
       }
-    }, 0);
+    });
 
     const resPayload: ScheduleSyncRepoResponse = {
       success: true,
