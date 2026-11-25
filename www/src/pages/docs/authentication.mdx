@@ -64,7 +64,7 @@ SSO lets users authenticate against an external identity provider such as Google
 
 Only the instance owner, the first account created on the instance, can add, change or remove providers, and they see every provider. A provider applies to every account: anyone whose email is in its Domain can sign in through it, and an existing account with that email is linked to it. Other accounts see the panel as managed by the owner, and the provider API answers them with 403.
 
-Earlier versions let any account add a provider. If another account added one on your instance, it shows a warning in the panel and nobody can sign in with it until you edit and save it. Accounts with a sign-in linked through such a provider were signed out once by the upgrade, and their API keys were turned off: they stay in the list as inactive, so check for any you do not recognize and create new ones. Delete any provider you do not recognize.
+Earlier versions let any account add a provider. If another account added one on your instance, it shows a warning in the panel and nobody can sign in with it until you edit and save it. Accounts with a sign-in linked through such a provider, or through one that had already been deleted, were signed out once by the upgrade, and their API keys were turned off: they stay in the list as inactive, so check for any you do not recognize and create new ones. Delete any provider you do not recognize.
 
 Use OIDC. The dialog also has a SAML 2.0 tab, but SAML sign-in does not work in the current release, see [SAML 2.0 providers](#saml-20-providers).
 

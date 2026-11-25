@@ -9,16 +9,19 @@
 UPDATE `sso_providers` SET `domain_verified` = 0 WHERE `user_id` IS NOT (SELECT `id` FROM `users` ORDER BY `created_at` ASC, rowid ASC LIMIT 1);
 --> statement-breakpoint
 -- Refusing new sign-ins does not end access someone already got through such
--- a provider. For every account that has a sign-in linked through one: end
--- its sessions, delete its OAuth tokens, and turn off its API keys. Keys are
+-- a provider. For every account that has a sign-in linked through one, or
+-- through a provider that no longer exists (deleting it does not remove the
+-- link, the sessions or the keys made with it): end its sessions, delete its
+-- OAuth tokens, and turn off its API keys. Accounts only hold password
+-- ('credential') and SSO links; header auth creates no account rows. Keys are
 -- turned off rather than deleted so the list still shows them, including any
 -- the owner of the account does not recognize; new ones can be created. They
 -- sign in again with a password, or through the provider once the owner has
 -- saved it.
-DELETE FROM `sessions` WHERE `user_id` IN (SELECT `a`.`user_id` FROM `accounts` `a` JOIN `sso_providers` `p` ON `p`.`provider_id` = `a`.`provider_id` WHERE `p`.`domain_verified` = 0);
+DELETE FROM `sessions` WHERE `user_id` IN (SELECT `user_id` FROM `accounts` WHERE `provider_id` <> 'credential' AND `provider_id` NOT IN (SELECT `provider_id` FROM `sso_providers` WHERE `domain_verified` = 1));
 --> statement-breakpoint
-DELETE FROM `oauth_access_tokens` WHERE `user_id` IN (SELECT `a`.`user_id` FROM `accounts` `a` JOIN `sso_providers` `p` ON `p`.`provider_id` = `a`.`provider_id` WHERE `p`.`domain_verified` = 0);
+DELETE FROM `oauth_access_tokens` WHERE `user_id` IN (SELECT `user_id` FROM `accounts` WHERE `provider_id` <> 'credential' AND `provider_id` NOT IN (SELECT `provider_id` FROM `sso_providers` WHERE `domain_verified` = 1));
 --> statement-breakpoint
-DELETE FROM `oauth_refresh_tokens` WHERE `user_id` IN (SELECT `a`.`user_id` FROM `accounts` `a` JOIN `sso_providers` `p` ON `p`.`provider_id` = `a`.`provider_id` WHERE `p`.`domain_verified` = 0);
+DELETE FROM `oauth_refresh_tokens` WHERE `user_id` IN (SELECT `user_id` FROM `accounts` WHERE `provider_id` <> 'credential' AND `provider_id` NOT IN (SELECT `provider_id` FROM `sso_providers` WHERE `domain_verified` = 1));
 --> statement-breakpoint
-UPDATE `api_keys` SET `enabled` = 0 WHERE `reference_id` IN (SELECT `a`.`user_id` FROM `accounts` `a` JOIN `sso_providers` `p` ON `p`.`provider_id` = `a`.`provider_id` WHERE `p`.`domain_verified` = 0);
+UPDATE `api_keys` SET `enabled` = 0 WHERE `reference_id` IN (SELECT `user_id` FROM `accounts` WHERE `provider_id` <> 'credential' AND `provider_id` NOT IN (SELECT `provider_id` FROM `sso_providers` WHERE `domain_verified` = 1));

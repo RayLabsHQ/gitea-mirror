@@ -1024,6 +1024,7 @@ function seedPre0022Database(db: any) {
   db.run("INSERT INTO users (id, email, username, name, created_at) VALUES ('u-member', 'member@example.com', 'member', 'Member', 1790000500)");
   db.run("INSERT INTO users (id, email, username, name, created_at) VALUES ('z-owner', 'owner@example.com', 'owner', 'Owner', 1790000000)");
   db.run("INSERT INTO users (id, email, username, name, created_at) VALUES ('a-same-second', 'same@example.com', 'same', 'Same', 1790000000)");
+  db.run("INSERT INTO users (id, email, username, name, created_at) VALUES ('u-gone', 'gone@example.com', 'gone', 'Gone', 1790000600)");
   const insertProvider = (id: string, userId: string) =>
     db.run(
       "INSERT INTO sso_providers (id, issuer, domain, oidc_config, user_id, provider_id, created_at, updated_at) " +
@@ -1036,6 +1037,11 @@ function seedPre0022Database(db: any) {
   // session from it; the member has a session too, with no SSO link.
   db.run("INSERT INTO accounts (id, account_id, provider_id, user_id, created_at, updated_at) VALUES ('acc-linked', 'sub-1', 'p-member-idp', 'z-owner', 1790002000, 1790002000)");
   db.run("INSERT INTO accounts (id, account_id, provider_id, user_id, created_at, updated_at) VALUES ('acc-owner-own', 'sub-2', 'p-owner-idp', 'z-owner', 1790002000, 1790002000)");
+  // u-gone signed in through a provider that was deleted before the upgrade,
+  // and also has a password; the member only has a password.
+  db.run("INSERT INTO accounts (id, account_id, provider_id, user_id, created_at, updated_at) VALUES ('acc-gone', 'sub-3', 'deleted-idp', 'u-gone', 1790002000, 1790002000)");
+  db.run("INSERT INTO accounts (id, account_id, provider_id, user_id, created_at, updated_at) VALUES ('acc-gone-pw', 'u-gone', 'credential', 'u-gone', 1790002000, 1790002000)");
+  db.run("INSERT INTO accounts (id, account_id, provider_id, user_id, created_at, updated_at) VALUES ('acc-member-pw', 'u-member', 'credential', 'u-member', 1790002000, 1790002000)");
   const insertSession = (id: string, userId: string) =>
     db.run(
       "INSERT INTO sessions (id, token, user_id, expires_at, created_at, updated_at) " +
@@ -1043,7 +1049,8 @@ function seedPre0022Database(db: any) {
     );
   insertSession("s-owner", "z-owner");
   insertSession("s-member", "u-member");
-  for (const [id, userId] of [["k-owner", "z-owner"], ["k-member", "u-member"]]) {
+  insertSession("s-gone", "u-gone");
+  for (const [id, userId] of [["k-owner", "z-owner"], ["k-member", "u-member"], ["k-gone", "u-gone"]]) {
     db.run(
       "INSERT INTO api_keys (id, key, reference_id, enabled, created_at, updated_at) " +
         `VALUES ('${id}', 'hash-${id}', '${userId}', 1, 1790002000, 1790002000)`,
@@ -1076,7 +1083,7 @@ function verify0022Migration(db: any) {
   );
   const keys = db.query("SELECT id, enabled FROM api_keys ORDER BY id").all();
   assert(
-    JSON.stringify(keys) === JSON.stringify([{ id: "k-member", enabled: 1 }, { id: "k-owner", enabled: 0 }]),
+    JSON.stringify(keys) === JSON.stringify([{ id: "k-gone", enabled: 0 }, { id: "k-member", enabled: 1 }, { id: "k-owner", enabled: 0 }]),
     `Expected only the linked account's API keys to be turned off, got ${JSON.stringify(keys)}`,
   );
   for (const table of ["oauth_access_tokens", "oauth_refresh_tokens"]) {
