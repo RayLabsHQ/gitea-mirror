@@ -12,6 +12,7 @@ import { withBase } from "./base-path";
 import { headerAuthPlugin } from "./auth-header-plugin";
 import { apiKeyGuardPlugin } from "./auth-api-key-guard";
 import { signupGuardPlugin } from "./auth-signup-guard";
+import { ownerGuardPlugin } from "./auth-owner-guard";
 
 /**
  * Extracts the origins implied by registered SSO identity providers.
@@ -438,6 +439,15 @@ export const auth = betterAuth({
           .where(eq(ssoProviders.providerId, providerId))
           .limit(1);
         return row?.domain ?? null;
+      },
+    }),
+
+    // Only the instance owner (the first account) manages SSO providers,
+    // also through the SSO plugin's own endpoints. See auth-owner-guard.ts.
+    ownerGuardPlugin({
+      isOwner: async (userId) => {
+        const { isInstanceOwner } = await import("./instance-owner");
+        return isInstanceOwner(userId);
       },
     }),
 

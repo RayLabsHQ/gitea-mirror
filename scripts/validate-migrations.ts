@@ -1011,7 +1011,40 @@ const latestUpgradeFixtures: Record<string, UpgradeFixture> = {
     seed: seedPre0021Database,
     verify: verify0021Migration,
   },
+  "0022_sso_provider_owner_trust": {
+    seed: seedPre0022Database,
+    verify: verify0022Migration,
+  },
 };
+
+function seedPre0022Database(db: any) {
+  // The owner is the account created first. An earlier created_at wins over
+  // insertion order; within the same second (created_at has whole seconds
+  // only) the row inserted first wins, even when its id sorts later.
+  db.run("INSERT INTO users (id, email, username, name, created_at) VALUES ('u-member', 'member@example.com', 'member', 'Member', 1790000500)");
+  db.run("INSERT INTO users (id, email, username, name, created_at) VALUES ('z-owner', 'owner@example.com', 'owner', 'Owner', 1790000000)");
+  db.run("INSERT INTO users (id, email, username, name, created_at) VALUES ('a-same-second', 'same@example.com', 'same', 'Same', 1790000000)");
+  const insertProvider = (id: string, userId: string) =>
+    db.run(
+      "INSERT INTO sso_providers (id, issuer, domain, oidc_config, user_id, provider_id, created_at, updated_at) " +
+        `VALUES ('${id}', 'https://idp.example.com', 'example.com', '{}', '${userId}', '${id}-idp', 1790001000, 1790001000)`,
+    );
+  insertProvider("p-owner", "z-owner");
+  insertProvider("p-member", "u-member");
+  insertProvider("p-same-second", "a-same-second");
+}
+
+function verify0022Migration(db: any) {
+  const rows = db.query("SELECT id, domain_verified FROM sso_providers ORDER BY id").all() as { id: string; domain_verified: number }[];
+  assert(
+    JSON.stringify(rows) === JSON.stringify([
+      { id: "p-member", domain_verified: 0 },
+      { id: "p-owner", domain_verified: 1 },
+      { id: "p-same-second", domain_verified: 0 },
+    ]),
+    `Expected only the owner's provider to stay trusted, got ${JSON.stringify(rows)}`,
+  );
+}
 
 function seedPre0021Database(db: any) {
   // Migrations 0000-0020 have run: repositories have no storage columns yet.
