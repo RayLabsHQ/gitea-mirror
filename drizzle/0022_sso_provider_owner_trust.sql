@@ -8,8 +8,17 @@
 -- so ties go to the row inserted first (rowid).
 UPDATE `sso_providers` SET `domain_verified` = 0 WHERE `user_id` IS NOT (SELECT `id` FROM `users` ORDER BY `created_at` ASC, rowid ASC LIMIT 1);
 --> statement-breakpoint
--- Refusing new sign-ins does not end a session someone already got through
--- such a provider. Sign out every account that has a sign-in linked through
--- one; they sign in again with a password, or through the provider once the
--- owner has saved it.
+-- Refusing new sign-ins does not end access someone already got through such
+-- a provider. For every account that has a sign-in linked through one: end
+-- its sessions, delete its OAuth tokens, and turn off its API keys. Keys are
+-- turned off rather than deleted so the list still shows them, including any
+-- the owner of the account does not recognize; new ones can be created. They
+-- sign in again with a password, or through the provider once the owner has
+-- saved it.
 DELETE FROM `sessions` WHERE `user_id` IN (SELECT `a`.`user_id` FROM `accounts` `a` JOIN `sso_providers` `p` ON `p`.`provider_id` = `a`.`provider_id` WHERE `p`.`domain_verified` = 0);
+--> statement-breakpoint
+DELETE FROM `oauth_access_tokens` WHERE `user_id` IN (SELECT `a`.`user_id` FROM `accounts` `a` JOIN `sso_providers` `p` ON `p`.`provider_id` = `a`.`provider_id` WHERE `p`.`domain_verified` = 0);
+--> statement-breakpoint
+DELETE FROM `oauth_refresh_tokens` WHERE `user_id` IN (SELECT `a`.`user_id` FROM `accounts` `a` JOIN `sso_providers` `p` ON `p`.`provider_id` = `a`.`provider_id` WHERE `p`.`domain_verified` = 0);
+--> statement-breakpoint
+UPDATE `api_keys` SET `enabled` = 0 WHERE `reference_id` IN (SELECT `a`.`user_id` FROM `accounts` `a` JOIN `sso_providers` `p` ON `p`.`provider_id` = `a`.`provider_id` WHERE `p`.`domain_verified` = 0);

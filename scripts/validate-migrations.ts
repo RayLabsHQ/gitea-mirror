@@ -1043,6 +1043,20 @@ function seedPre0022Database(db: any) {
     );
   insertSession("s-owner", "z-owner");
   insertSession("s-member", "u-member");
+  for (const [id, userId] of [["k-owner", "z-owner"], ["k-member", "u-member"]]) {
+    db.run(
+      "INSERT INTO api_keys (id, key, reference_id, enabled, created_at, updated_at) " +
+        `VALUES ('${id}', 'hash-${id}', '${userId}', 1, 1790002000, 1790002000)`,
+    );
+    db.run(
+      "INSERT INTO oauth_access_tokens (id, token, client_id, user_id, scopes) " +
+        `VALUES ('at-${id}', 'at-tok-${id}', 'client', '${userId}', '[]')`,
+    );
+    db.run(
+      "INSERT INTO oauth_refresh_tokens (id, token, client_id, user_id, scopes) " +
+        `VALUES ('rt-${id}', 'rt-tok-${id}', 'client', '${userId}', '[]')`,
+    );
+  }
 }
 
 function verify0022Migration(db: any) {
@@ -1060,6 +1074,18 @@ function verify0022Migration(db: any) {
     JSON.stringify(sessions) === JSON.stringify([{ id: "s-member" }]),
     `Expected sessions of accounts linked through an untrusted provider to be revoked, got ${JSON.stringify(sessions)}`,
   );
+  const keys = db.query("SELECT id, enabled FROM api_keys ORDER BY id").all();
+  assert(
+    JSON.stringify(keys) === JSON.stringify([{ id: "k-member", enabled: 1 }, { id: "k-owner", enabled: 0 }]),
+    `Expected only the linked account's API keys to be turned off, got ${JSON.stringify(keys)}`,
+  );
+  for (const table of ["oauth_access_tokens", "oauth_refresh_tokens"]) {
+    const left = db.query(`SELECT user_id FROM ${table}`).all();
+    assert(
+      JSON.stringify(left) === JSON.stringify([{ user_id: "u-member" }]),
+      `Expected only the linked account's ${table} to be deleted, got ${JSON.stringify(left)}`,
+    );
+  }
 }
 
 function seedPre0021Database(db: any) {
