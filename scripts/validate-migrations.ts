@@ -1032,6 +1032,17 @@ function seedPre0022Database(db: any) {
   insertProvider("p-owner", "z-owner");
   insertProvider("p-member", "u-member");
   insertProvider("p-same-second", "a-same-second");
+  // The owner's account was linked through the member's provider and has a
+  // session from it; the member has a session too, with no SSO link.
+  db.run("INSERT INTO accounts (id, account_id, provider_id, user_id, created_at, updated_at) VALUES ('acc-linked', 'sub-1', 'p-member-idp', 'z-owner', 1790002000, 1790002000)");
+  db.run("INSERT INTO accounts (id, account_id, provider_id, user_id, created_at, updated_at) VALUES ('acc-owner-own', 'sub-2', 'p-owner-idp', 'z-owner', 1790002000, 1790002000)");
+  const insertSession = (id: string, userId: string) =>
+    db.run(
+      "INSERT INTO sessions (id, token, user_id, expires_at, created_at, updated_at) " +
+        `VALUES ('${id}', 'tok-${id}', '${userId}', 1890000000, 1790002000, 1790002000)`,
+    );
+  insertSession("s-owner", "z-owner");
+  insertSession("s-member", "u-member");
 }
 
 function verify0022Migration(db: any) {
@@ -1043,6 +1054,11 @@ function verify0022Migration(db: any) {
       { id: "p-same-second", domain_verified: 0 },
     ]),
     `Expected only the owner's provider to stay trusted, got ${JSON.stringify(rows)}`,
+  );
+  const sessions = db.query("SELECT id FROM sessions ORDER BY id").all() as { id: string }[];
+  assert(
+    JSON.stringify(sessions) === JSON.stringify([{ id: "s-member" }]),
+    `Expected sessions of accounts linked through an untrusted provider to be revoked, got ${JSON.stringify(sessions)}`,
   );
 }
 
