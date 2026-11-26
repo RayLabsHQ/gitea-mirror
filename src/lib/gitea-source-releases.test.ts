@@ -143,6 +143,11 @@ interface Recorded {
 interface DestinationOptions {
   /** Releases the source reports, newest first. */
   sourceReleases: Array<Record<string, unknown>>;
+  /**
+   * Serve the source listing page by page (`limit` and `page`, with
+   * X-Total-Count) instead of every release on every page.
+   */
+  sourcePaged?: boolean;
   /** Release already on the destination, matched by tag. */
   existingRelease?: { id: number; name: string; body: string; tag_name: string };
   /** Tags the destination already has. Defaults to every source tag. */
@@ -187,7 +192,19 @@ function fakeWorld(options: DestinationOptions) {
 
     // The source lists its releases.
     if (url.startsWith(`${SOURCE_URL}/api/v1/`)) {
-      return json(options.sourceReleases);
+      if (!options.sourcePaged) return json(options.sourceReleases);
+      const params = new URL(url).searchParams;
+      const size = Number(params.get("limit") ?? "30");
+      const page = Number(params.get("page") ?? "1");
+      return new Response(
+        JSON.stringify(options.sourceReleases.slice((page - 1) * size, page * size)),
+        {
+          headers: {
+            "content-type": "application/json",
+            "x-total-count": String(options.sourceReleases.length),
+          },
+        }
+      );
     }
 
     // Downloading an asset from the source host.
@@ -286,6 +303,7 @@ function fakeWorld(options: DestinationOptions) {
         .filter((r) => r.method === "POST" && r.url === `${DEST_API}/releases`)
         .map((r) => String(JSON.parse(r.body ?? "{}").tag_name)),
     uploads: () => requests.filter((r) => r.method === "POST" && r.url.includes("/assets?name=")),
+    sourceListings: () => requests.filter((r) => r.url.startsWith(`${SOURCE_URL}/api/v1/`)),
     downloads: () =>
       requests.filter(
         (r) =>
@@ -322,6 +340,7 @@ function mirrorFromGitea(
     releaseType?: "all" | "stable";
     releaseIncludeTags?: string[];
     releaseExcludeTags?: string[];
+    prereleaseLimit?: number | null;
   } = {}
 ) {
   return mirrorGiteaSourceReleasesToGitea({
@@ -332,6 +351,7 @@ function mirrorFromGitea(
     giteaRepoName: DEST_REPO,
     releaseLimit: overrides.releaseLimit ?? 10,
     releaseAssetLimit: null,
+    prereleaseLimit: overrides.prereleaseLimit,
     releaseType: overrides.releaseType,
     releaseIncludeTags: overrides.releaseIncludeTags,
     releaseExcludeTags: overrides.releaseExcludeTags,
@@ -570,6 +590,249 @@ describe.skipIf(!isChild)("release type filter", () => {
     await mirrorFromGitea(giteaConnection("source-token"));
 
     expect(world.deletes()).toHaveLength(0);
+  });
+});
+
+describe.skipIf(!isChild)("pre-release limit (#560)", () => {
+  /** A nightly build every day: `count` pre-releases, newest first, from b<start> down. */
+  const nightlies = (start: number, count: number) =>
+    Array.from({ length: count }, (_, index) =>
+      giteaRelease(`b${start - index}`, { prerelease: true })
+    );
+
+  it("keeps the newest pre-releases and gives the other places to stable releases", async () => {
+    const world = fakeWorld({
+      sourceReleases: [
+        ...nightlies(9000, 4),
+        giteaRelease("v2.0.0"),
+        ...nightlies(8000, 3),
+        giteaRelease("v1.0.0"),
+      ],
+    });
+
+    await mirrorFromGitea(giteaConnection("source-token"), { releaseLimit: 4, prereleaseLimit: 2 });
+
+    expect(world.createdTags()).toEqual(["b9000", "b8999", "v2.0.0", "v1.0.0"]);
+  });
+
+  it("0 mirrors stable releases only", async () => {
+    const world = fakeWorld({
+      sourceReleases: [...nightlies(9000, 3), giteaRelease("v2.0.0"), giteaRelease("v1.0.0")],
+    });
+
+    await mirrorFromGitea(giteaConnection("source-token"), { releaseLimit: 5, prereleaseLimit: 0 });
+
+    expect(world.createdTags()).toEqual(["v2.0.0", "v1.0.0"]);
+  });
+
+  it("looks past hundreds of nightly builds for the stable releases, and stops there", async () => {
+    // The stable releases sit on the fifth page of 50; a sixth page exists.
+    const world = fakeWorld({
+      sourcePaged: true,
+      sourceReleases: [
+        ...nightlies(9000, 220),
+        giteaRelease("v2.0.0"),
+        giteaRelease("v1.0.0"),
+        ...nightlies(8000, 100),
+      ],
+    });
+
+    await mirrorFromGitea(giteaConnection("source-token"), { releaseLimit: 3, prereleaseLimit: 1 });
+
+    expect(world.createdTags()).toEqual(["b9000", "v2.0.0", "v1.0.0"]);
+    expect(world.sourceListings().map((r) => new URL(r.url).searchParams.get("page"))).toEqual([
+      "1",
+      "2",
+      "3",
+      "4",
+      "5",
+    ]);
+  });
+
+  it("reads a single page when the first page already fills the limit", async () => {
+    const world = fakeWorld({
+      sourcePaged: true,
+      sourceReleases: [
+        giteaRelease("b2", { prerelease: true }),
+        giteaRelease("v3.0.0"),
+        giteaRelease("v2.0.0"),
+        ...nightlies(1000, 200),
+      ],
+    });
+
+    await mirrorFromGitea(giteaConnection("source-token"), { releaseLimit: 3, prereleaseLimit: 1 });
+
+    expect(world.createdTags()).toEqual(["b2", "v3.0.0", "v2.0.0"]);
+    expect(world.sourceListings()).toHaveLength(1);
+  });
+
+  it("removes destination pre-releases past the limit, newest by the source's order kept", async () => {
+    const world = fakeWorld({
+      sourceReleases: [...nightlies(9000, 3), giteaRelease("v2.0.0")],
+      destinationReleases: [
+        // Created on the destination in an order that disagrees with the
+        // source: b8999 looks newest by date but the source ranks it second.
+        { id: 31, tag_name: "b9000", created_at: "2026-01-01T00:00:00Z", prerelease: true },
+        { id: 32, tag_name: "b8999", created_at: "2026-03-01T00:00:00Z", prerelease: true },
+        { id: 33, tag_name: "b8998", created_at: "2026-02-01T00:00:00Z", prerelease: true },
+        // Gone from the source: ranks after everything it still lists.
+        { id: 34, tag_name: "b7000", created_at: "2026-04-01T00:00:00Z", prerelease: true },
+        { id: 35, tag_name: "v2.0.0", created_at: "2025-12-01T00:00:00Z", prerelease: false },
+      ],
+    });
+
+    await mirrorFromGitea(giteaConnection("source-token"), { releaseLimit: 10, prereleaseLimit: 2 });
+
+    expect(world.deletes().map((r) => r.url).sort()).toEqual([
+      `${DEST_API}/releases/33`,
+      `${DEST_API}/releases/34`,
+    ]);
+  });
+
+  it("keeps a destination release whose pre-release flag is unknown", async () => {
+    const world = fakeWorld({
+      sourceReleases: [giteaRelease("v2.0.0")],
+      destinationReleases: [
+        destinationRelease("b1", 41, null),
+        destinationRelease("b0", 42, true),
+      ],
+    });
+
+    await mirrorFromGitea(giteaConnection("source-token"), { prereleaseLimit: 0 });
+
+    expect(world.deletes().map((r) => r.url)).toEqual([`${DEST_API}/releases/42`]);
+  });
+
+  it("changes nothing when only stable releases are mirrored", async () => {
+    const world = fakeWorld({
+      sourceReleases: [giteaRelease("b1", { prerelease: true }), giteaRelease("v2.0.0")],
+      destinationReleases: [destinationRelease("v1.0.0", 51, false)],
+    });
+
+    await mirrorFromGitea(giteaConnection("source-token"), {
+      releaseType: "stable",
+      prereleaseLimit: 3,
+    });
+
+    expect(world.createdTags()).toEqual(["v2.0.0"]);
+    expect(world.deletes()).toHaveLength(0);
+  });
+
+  it("stable only finds a stable release behind hundreds of pre-releases (#538)", async () => {
+    // llama.cpp: every build is a pre-release, about 195 on top of v1.0.0.
+    const world = fakeWorld({
+      sourcePaged: true,
+      sourceReleases: [...nightlies(9000, 195), giteaRelease("v1.0.0"), ...nightlies(8000, 300)],
+    });
+
+    await mirrorFromGitea(giteaConnection("source-token"), { releaseLimit: 1, releaseType: "stable" });
+
+    expect(world.createdTags()).toEqual(["v1.0.0"]);
+    // Four pages of 50 reach it, and the listing stops there.
+    expect(world.sourceListings()).toHaveLength(4);
+  });
+
+  it("tag patterns alone keep the 100 release window, and stop once the limit is filled", async () => {
+    const world = fakeWorld({
+      sourcePaged: true,
+      sourceReleases: [giteaRelease("v3.0.0"), giteaRelease("v2.0.0"), ...nightlies(9000, 300)],
+    });
+
+    await mirrorFromGitea(giteaConnection("source-token"), {
+      releaseLimit: 2,
+      releaseIncludeTags: ["v*"],
+    });
+
+    expect(world.createdTags()).toEqual(["v3.0.0", "v2.0.0"]);
+    expect(world.sourceListings()).toHaveLength(1);
+
+    const sparse = fakeWorld({
+      sourcePaged: true,
+      sourceReleases: [giteaRelease("v3.0.0"), ...nightlies(9000, 300)],
+    });
+    await mirrorFromGitea(giteaConnection("source-token"), {
+      releaseLimit: 2,
+      releaseIncludeTags: ["v*"],
+    });
+    // Never filled: two pages of 50, the 100 release window, and no more.
+    expect(sparse.sourceListings()).toHaveLength(2);
+  });
+
+  it("without a limit, pre-releases count like any other release, as before", async () => {
+    const world = fakeWorld({
+      sourceReleases: [...nightlies(9000, 3), giteaRelease("v2.0.0")],
+      destinationReleases: [destinationRelease("b8000", 61, true)],
+    });
+
+    await mirrorFromGitea(giteaConnection("source-token"), { releaseLimit: 3 });
+
+    expect(world.createdTags()).toEqual(["b9000", "b8999", "b8998"]);
+    expect(world.sourceListings()[0]?.url).toContain("limit=3&page=1");
+    // The destination's own pre-release is not removed for being one.
+    expect(world.deletes()).toHaveLength(0);
+  });
+
+  it("reads the limit from the stored config when the caller passes none", async () => {
+    const world = fakeWorld({
+      sourceReleases: [...nightlies(9000, 3), giteaRelease("v2.0.0")],
+    });
+
+    await mirrorGiteaSourceReleasesToGitea({
+      config: {
+        ...config,
+        giteaConfig: { ...(config.giteaConfig as object), prereleaseLimit: 1 },
+      } as Partial<Config>,
+      repository,
+      connection: giteaConnection("source-token"),
+      giteaOwner: DEST_OWNER,
+      giteaRepoName: DEST_REPO,
+      releaseLimit: 2,
+      releaseAssetLimit: null,
+    });
+
+    expect(world.createdTags()).toEqual(["b9000", "v2.0.0"]);
+  });
+
+  it("stops the GitHub listing at the first page that fills the limit", async () => {
+    fakeWorld({ sourceReleases: [], destinationTags: ["b3", "b2", "v1.0.0", "v0.9.0"] });
+    const pagesAsked: Array<{ page: number; per_page: number }> = [];
+    const pages: Record<number, Array<Record<string, unknown>>> = {
+      1: [giteaRelease("b3", { prerelease: true }), giteaRelease("b2", { prerelease: true })],
+      2: [giteaRelease("v1.0.0"), giteaRelease("v0.9.0")],
+      3: [giteaRelease("v0.8.0")],
+    };
+    // Two releases a page, so the stable ones arrive on page 2.
+    const octokit = {
+      rest: {
+        repos: {
+          listReleases: async ({ page, per_page }: { page: number; per_page: number }) => {
+            pagesAsked.push({ page, per_page });
+            const data = (pages[page] ?? []).concat(
+              Array.from({ length: per_page - (pages[page]?.length ?? 0) }, (_, index) =>
+                page < 3 ? giteaRelease(`filler-${page}-${index}`, { prerelease: true }) : null
+              ).filter(Boolean) as Array<Record<string, unknown>>
+            );
+            return { data };
+          },
+        },
+      },
+    } as any;
+
+    await mirrorGitHubReleasesToGitea({
+      config,
+      octokit,
+      repository,
+      giteaOwner: DEST_OWNER,
+      giteaRepoName: DEST_REPO,
+      releaseLimit: 3,
+      releaseAssetLimit: null,
+      prereleaseLimit: 1,
+    });
+
+    expect(pagesAsked).toEqual([
+      { page: 1, per_page: 100 },
+      { page: 2, per_page: 100 },
+    ]);
   });
 });
 

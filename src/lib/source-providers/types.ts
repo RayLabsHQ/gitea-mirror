@@ -137,7 +137,13 @@ export interface SourceProvider {
    * Gitea/Forgejo). GitLab is code only, so it leaves this out and
    * `sourceKindSupportsReleases` keeps the release switch off for it.
    */
-  listReleases?(owner: string, repo: string, limit: number): Promise<SourceRelease[]>;
+  listReleases?(
+    owner: string,
+    repo: string,
+    limit: number,
+    /** Stop after the first page at which this returns true for the releases so far. */
+    enough?: (releasesSoFar: SourceRelease[]) => boolean
+  ): Promise<SourceRelease[]>;
 
   /** Verify the token and return the account it belongs to. */
   testConnection(): Promise<SourceAccount>;

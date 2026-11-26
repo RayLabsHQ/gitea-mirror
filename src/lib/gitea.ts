@@ -73,6 +73,7 @@ import {
 import {
   compileReleaseTagPattern,
   compileReleaseTagPatterns,
+  normalizePrereleaseLimit,
   normalizeReleaseAssetLimit,
   normalizeReleaseLimit,
   normalizeReleaseTagPatterns,
@@ -81,6 +82,7 @@ import {
   releaseMatchesTagFilters,
   releaseMatchesType,
   releaseScanLimit,
+  selectReleases,
   resolveMirrorOptionsForRepository,
   resolveOrganizationSkipForks,
   type ResolvedMirrorOptions,
@@ -114,6 +116,7 @@ export async function mirrorRepositoryReleases({
   giteaRepoName,
   releaseLimit,
   releaseAssetLimit,
+  prereleaseLimit,
   releaseType,
   releaseIncludeTags,
   releaseExcludeTags,
@@ -129,6 +132,7 @@ export async function mirrorRepositoryReleases({
   giteaRepoName: string;
   releaseLimit?: number;
   releaseAssetLimit?: number | null;
+  prereleaseLimit?: number | null;
   releaseType?: ReleaseType;
   releaseIncludeTags?: string[];
   releaseExcludeTags?: string[];
@@ -149,6 +153,7 @@ export async function mirrorRepositoryReleases({
       giteaRepoName,
       releaseLimit,
       releaseAssetLimit,
+      prereleaseLimit,
       releaseType,
       releaseIncludeTags,
       releaseExcludeTags,
@@ -165,6 +170,7 @@ export async function mirrorRepositoryReleases({
       giteaRepoName,
       releaseLimit,
       releaseAssetLimit,
+      prereleaseLimit,
       releaseType,
       releaseIncludeTags,
       releaseExcludeTags,
@@ -1349,6 +1355,7 @@ export const mirrorGithubRepoToGitea = async ({
           giteaRepoName: targetRepoName,
           releaseLimit: mirrorOptions.releaseLimit,
           releaseAssetLimit: mirrorOptions.releaseAssetLimit,
+          prereleaseLimit: mirrorOptions.prereleaseLimit,
           releaseType: mirrorOptions.releaseType,
           releaseIncludeTags: mirrorOptions.releaseIncludeTags,
           releaseExcludeTags: mirrorOptions.releaseExcludeTags,
@@ -2167,6 +2174,7 @@ export async function mirrorGitHubRepoToGiteaOrg({
           giteaRepoName: targetRepoName,
           releaseLimit: mirrorOptions.releaseLimit,
           releaseAssetLimit: mirrorOptions.releaseAssetLimit,
+          prereleaseLimit: mirrorOptions.prereleaseLimit,
           releaseType: mirrorOptions.releaseType,
           releaseIncludeTags: mirrorOptions.releaseIncludeTags,
           releaseExcludeTags: mirrorOptions.releaseExcludeTags,
@@ -4280,8 +4288,17 @@ type ReleaseSourceAdapter = {
    * Always a credential for the host the assets live on, never for another.
    */
   downloadAuthorization: string | null;
-  /** The newest `limit` releases of the source repository, newest first. */
-  listReleases: (owner: string, repo: string, limit: number) => Promise<SourceRelease[]>;
+  /**
+   * The newest `limit` releases of the source repository, newest first. When
+   * `enough` is given, the listing also stops after the first page at which
+   * it returns true for the releases listed so far.
+   */
+  listReleases: (
+    owner: string,
+    repo: string,
+    limit: number,
+    enough?: (releasesSoFar: SourceRelease[]) => boolean
+  ) => Promise<SourceRelease[]>;
 };
 
 type MirrorReleasesParams = {
@@ -4308,6 +4325,12 @@ type MirrorReleasesParams = {
    * none, `undefined` means resolve it here like the release limit.
    */
   releaseAssetLimit?: number | null;
+  /**
+   * Already-resolved pre-release limit (#560): at most N of the mirrored
+   * releases may be pre-releases. `null` means no separate limit, 0 means
+   * none, `undefined` means resolve it here like the release limit.
+   */
+  prereleaseLimit?: number | null;
   /**
    * Already-resolved release type: `all` mirrors every release, `stable` only
    * the ones the source does not flag as a pre-release. `undefined` means
@@ -4416,11 +4439,9 @@ export async function mirrorGitHubReleasesToGitea(params: MirrorReleasesParams) 
     source: {
       label: SOURCE_PROVIDER_LABELS.github,
       downloadAuthorization: githubToken ? `token ${githubToken}` : null,
-      listReleases: async (owner, repo, limit) => {
+      listReleases: async (owner, repo, limit, enough) => {
         // GitHub API max per page is 100; paginate until we reach the limit.
-        const releases: Awaited<
-          ReturnType<typeof octokit.rest.repos.listReleases>
-        >["data"] = [];
+        const releases: SourceRelease[] = [];
         let page = 1;
         const perPage = Math.min(100, limit);
 
@@ -4436,35 +4457,41 @@ export async function mirrorGitHubReleasesToGitea(params: MirrorReleasesParams) 
             break;
           }
 
-          releases.push(...response.data);
+          releases.push(...response.data.map(toSourceRelease));
 
-          if (response.data.length < perPage) {
+          if (response.data.length < perPage || enough?.(releases)) {
             break;
           }
 
           page++;
         }
 
-        return releases.slice(0, limit).map((release) => ({
-          tag_name: release.tag_name,
-          name: release.name,
-          body: release.body,
-          draft: release.draft,
-          prerelease: release.prerelease,
-          created_at: release.created_at,
-          published_at: release.published_at,
-          assets: (release.assets ?? []).map((asset) => ({
-            name: asset.name,
-            size: asset.size,
-            browser_download_url: asset.browser_download_url,
-            // Private only: this URL costs a REST request per download, and a
-            // public repository's browser URL works and costs none.
-            ...(rest.repository.isPrivate ? { api_url: asset.url } : {}),
-          })),
-        }));
+        return releases.slice(0, limit);
       },
     },
   });
+
+  function toSourceRelease(
+    release: Awaited<ReturnType<typeof octokit.rest.repos.listReleases>>["data"][number]
+  ): SourceRelease {
+    return {
+      tag_name: release.tag_name,
+      name: release.name,
+      body: release.body,
+      draft: release.draft,
+      prerelease: release.prerelease,
+      created_at: release.created_at,
+      published_at: release.published_at,
+      assets: (release.assets ?? []).map((asset) => ({
+        name: asset.name,
+        size: asset.size,
+        browser_download_url: asset.browser_download_url,
+        // Private only: this URL costs a REST request per download, and a
+        // public repository's browser URL works and costs none.
+        ...(rest.repository.isPrivate ? { api_url: asset.url } : {}),
+      })),
+    };
+  }
 }
 
 /**
@@ -4486,7 +4513,7 @@ export async function mirrorGiteaSourceReleasesToGitea(
     source: {
       label: SOURCE_PROVIDER_LABELS.gitea,
       downloadAuthorization: token ? `token ${token}` : null,
-      listReleases: (owner, repo, limit) => provider.listReleases(owner, repo, limit),
+      listReleases: (owner, repo, limit, enough) => provider.listReleases(owner, repo, limit, enough),
     },
   });
 }
@@ -4499,6 +4526,7 @@ async function mirrorSourceReleasesToGiteaLocked({
   giteaRepoName,
   releaseLimit: releaseLimitOverride,
   releaseAssetLimit: releaseAssetLimitOverride,
+  prereleaseLimit: prereleaseLimitOverride,
   releaseType: releaseTypeOverride,
   releaseIncludeTags: releaseIncludeTagsOverride,
   releaseExcludeTags: releaseExcludeTagsOverride,
@@ -4584,33 +4612,51 @@ async function mirrorSourceReleasesToGiteaLocked({
 
   const includeTagPatterns = compileReleaseTagPatterns(releaseIncludeTags);
   const excludeTagPatterns = compileReleaseTagPatterns(releaseExcludeTags);
+  // At most this many of the mirrored releases may be pre-releases (#560).
+  // Stable only already leaves every pre-release out, so it has no effect there.
+  const resolvedPrereleaseLimit =
+    prereleaseLimitOverride !== undefined
+      ? (normalizePrereleaseLimit(prereleaseLimitOverride) ?? null)
+      : (await resolveOptions()).prereleaseLimit;
+  const prereleaseLimit = releaseType === "all" ? resolvedPrereleaseLimit : null;
+
   const hasTypeFilter = releaseType !== "all";
   const hasTagFilter =
     includeTagPatterns.length > 0 || excludeTagPatterns.length > 0;
-  const hasReleaseFilter = hasTypeFilter || hasTagFilter;
+  const hasPrereleaseLimit = prereleaseLimit !== null;
+  const hasReleaseFilter = hasTypeFilter || hasTagFilter || hasPrereleaseLimit;
+
+  const matchesFilters = (release: SourceRelease) =>
+    releaseMatchesType(release, releaseType) &&
+    releaseMatchesTagFilters(release.tag_name, includeTagPatterns, excludeTagPatterns);
 
   // The source lists its own newest releases; everything below this point is
   // the same reconciliation whichever host they came from. With a filter
   // active the mirror looks further back first, so "the newest 10" means the
   // newest 10 matching releases rather than whatever survives of the newest 10.
-  const scanLimit = releaseScanLimit(releaseLimit, releaseType, hasTagFilter);
-  const fetchedReleases = await source.listReleases(sourceOwner, sourceRepo, scanLimit);
-  const matchingReleases = fetchedReleases.filter(
-    (release) =>
-      releaseMatchesType(release, releaseType) &&
-      releaseMatchesTagFilters(
-        release.tag_name,
-        includeTagPatterns,
-        excludeTagPatterns
-      )
+  // Stable only and a pre-release limit look much further back, for the
+  // stable releases behind a run of nightly builds (#538), so a filtered
+  // listing stops at the first page that fills the limit.
+  const scanLimit = releaseScanLimit(releaseLimit, releaseType, hasTagFilter, prereleaseLimit);
+  const fetchedReleases = await source.listReleases(
+    sourceOwner,
+    sourceRepo,
+    scanLimit,
+    hasReleaseFilter
+      ? (soFar) =>
+          selectReleases(soFar.filter(matchesFilters), releaseLimit, prereleaseLimit).length >=
+          releaseLimit
+      : undefined
   );
-  const limitedReleases = matchingReleases.slice(0, releaseLimit);
+  const matchingReleases = fetchedReleases.filter(matchesFilters);
+  const limitedReleases = selectReleases(matchingReleases, releaseLimit, prereleaseLimit);
   const filteredOutCount = fetchedReleases.length - matchingReleases.length;
 
   // Only the patterns that actually compiled are named in the log, so a broken
   // one cannot look like it is doing something.
   const filterDescriptions: string[] = [];
   if (hasTypeFilter) filterDescriptions.push(`only ${releaseType} releases`);
+  if (hasPrereleaseLimit) filterDescriptions.push(`at most ${prereleaseLimit} pre-releases`);
   const usableIncludeTags = usableTagPatterns(releaseIncludeTags);
   const usableExcludeTags = usableTagPatterns(releaseExcludeTags);
   if (usableIncludeTags.length > 0) {
@@ -4891,7 +4937,8 @@ async function mirrorSourceReleasesToGiteaLocked({
     };
 
     // Releases the filters exclude are no longer mirror candidates, so they leave
-    // the destination the same way releases past the limit do. A release the
+    // the destination the same way releases past the limit do. (A pre-release
+    // limit alone excludes nothing here; it has its own step below.) A release the
     // destination did not report a pre-release flag for is kept: guessing which
     // kind it was risks deleting the wrong one. Tag patterns need no such caveat -
     // they are judged on the tag name, which every release has.
@@ -4921,6 +4968,35 @@ async function mirrorSourceReleasesToGiteaLocked({
         retainedReleases = allGiteaReleases.filter(
           (rel) => !excludedIds.has(rel.id)
         );
+      }
+    }
+
+    // Pre-releases past the limit leave the destination too, newest kept. They
+    // are ranked by the source's own newest-first order, so a release created
+    // on the destination later than a newer one cannot take its place; one
+    // the source no longer lists ranks after those, by date. A release the
+    // destination did not report a pre-release flag for is kept, as above.
+    if (prereleaseLimit !== null) {
+      const sourceRank = new Map(fetchedReleases.map((rel, index) => [rel.tag_name, index]));
+      const prereleases = retainedReleases
+        .filter((rel) => rel.prerelease === true)
+        .sort((a, b) => {
+          const rankA = sourceRank.get(a.tag_name) ?? Number.POSITIVE_INFINITY;
+          const rankB = sourceRank.get(b.tag_name) ?? Number.POSITIVE_INFINITY;
+          if (rankA !== rankB) return rankA - rankB;
+          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+        });
+      const overLimit = prereleases.slice(prereleaseLimit);
+
+      if (overLimit.length > 0) {
+        console.log(
+          `[Releases] Enforcing pre-release limit (${prereleaseLimit}): removing ${overLimit.length} older pre-release(s)`
+        );
+        for (const rel of overLimit) {
+          await deleteGiteaRelease(rel, "excess pre-release");
+        }
+        const overLimitIds = new Set(overLimit.map((rel) => rel.id));
+        retainedReleases = retainedReleases.filter((rel) => !overLimitIds.has(rel.id));
       }
     }
 

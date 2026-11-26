@@ -64,6 +64,7 @@ const TOUCHED = [
   "PRESERVE_ORG_STRUCTURE",
   "GITEA_ORGANIZATION",
   "ENVIRONMENT_SEEDING",
+  "RELEASE_PRERELEASE_LIMIT",
 ];
 
 if (isolated) {
@@ -210,6 +211,23 @@ if (isolated) {
       process.env.MIRROR_STRATEGY = "flat-user";
       await initializeConfigFromEnv!();
       expect((await stored()).githubConfig.mirrorStrategy).toBe("flat-user");
+    });
+
+    test("RELEASE_PRERELEASE_LIMIT stores 0 as a value, and unset keeps what is stored (#560)", async () => {
+      await initializeConfigFromEnv!();
+      expect((await stored()).giteaConfig.prereleaseLimit).toBeNull();
+
+      process.env.RELEASE_PRERELEASE_LIMIT = "0";
+      await initializeConfigFromEnv!();
+      expect((await stored()).giteaConfig.prereleaseLimit).toBe(0);
+
+      delete process.env.RELEASE_PRERELEASE_LIMIT;
+      await initializeConfigFromEnv!();
+      expect((await stored()).giteaConfig.prereleaseLimit).toBe(0);
+
+      process.env.RELEASE_PRERELEASE_LIMIT = "3";
+      await initializeConfigFromEnv!();
+      expect((await stored()).giteaConfig.prereleaseLimit).toBe(3);
     });
   });
 

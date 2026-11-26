@@ -20,6 +20,7 @@ import { parseInterval } from "@/lib/utils/duration-parser";
 import {
   DEFAULT_ISSUE_STATE,
   normalizeIssueState,
+  normalizePrereleaseLimit,
   normalizeReleaseAssetLimit,
   normalizeReleaseTagPatterns,
   normalizeReleaseType,
@@ -179,6 +180,8 @@ export function mapUiToDbConfig(
     // null is a real value here ("assets for every mirrored release"), so
     // it is stored as such rather than dropped.
     releaseAssetLimit: normalizeReleaseAssetLimit(mirrorOptions.releaseAssetLimit) ?? null,
+    // Same for the pre-release limit: null means no separate limit.
+    prereleaseLimit: normalizePrereleaseLimit(mirrorOptions.prereleaseLimit) ?? null,
     // Opt-in pruning: only ever a plain boolean, so an absent switch stores the
     // safe default (never delete what the destination already has).
     pruneOldReleaseAssets: mirrorOptions.pruneOldReleaseAssets === true,
@@ -265,6 +268,7 @@ export function mapDbToUiConfig(dbConfig: any): {
     mirrorReleases: dbConfig.giteaConfig?.mirrorReleases || false,
     releaseLimit: dbConfig.giteaConfig?.releaseLimit || 10,
     releaseAssetLimit: normalizeReleaseAssetLimit(dbConfig.giteaConfig?.releaseAssetLimit) ?? null,
+    prereleaseLimit: normalizePrereleaseLimit(dbConfig.giteaConfig?.prereleaseLimit) ?? null,
     pruneOldReleaseAssets: dbConfig.giteaConfig?.pruneOldReleaseAssets === true,
     releaseType: normalizeReleaseType(dbConfig.giteaConfig?.releaseType) ?? DEFAULT_RELEASE_TYPE,
     releaseIncludeTags: normalizeReleaseTagPatterns(dbConfig.giteaConfig?.releaseIncludeTags) ?? [],

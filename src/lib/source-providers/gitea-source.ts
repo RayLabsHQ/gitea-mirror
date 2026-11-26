@@ -247,7 +247,9 @@ export class GiteaSourceProvider implements SourceProvider {
     path: string,
     params: Record<string, string | number | boolean | undefined> = {},
     /** Stop once this many items are collected. Absent means every page. */
-    maxItems?: number
+    maxItems?: number,
+    /** Also stop after the first page at which this returns true. */
+    enough?: (itemsSoFar: T[]) => boolean
   ): Promise<T[]> {
     const items: T[] = [];
     for (let page = 1; page <= MAX_PAGES; page += 1) {
@@ -264,6 +266,7 @@ export class GiteaSourceProvider implements SourceProvider {
       if (!Array.isArray(data) || data.length === 0) break;
       items.push(...data);
       if (maxItems !== undefined && items.length >= maxItems) break;
+      if (enough?.(items)) break;
 
       const header = response.headers.get("x-total-count");
       const total = header === null ? Number.NaN : Number(header);
@@ -456,17 +459,24 @@ export class GiteaSourceProvider implements SourceProvider {
    * limit/page pagination as every other list endpoint. Public repositories
    * answer without a token, so a tokenless source can mirror releases too.
    */
-  async listReleases(owner: string, repo: string, limit: number): Promise<SourceRelease[]> {
+  async listReleases(
+    owner: string,
+    repo: string,
+    limit: number,
+    enough?: (releasesSoFar: SourceRelease[]) => boolean
+  ): Promise<SourceRelease[]> {
     const max = Math.max(1, Math.floor(limit) || 1);
+    const toSourceReleases = (releases: GiteaRelease[]) =>
+      releases
+        .map((release) => mapGiteaRelease(release, this.connection.url))
+        .filter((release) => release.tag_name.length > 0);
     const releases = await this.paginate<GiteaRelease>(
       `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/releases`,
       {},
-      max
+      max,
+      enough ? (soFar) => enough(toSourceReleases(soFar)) : undefined
     );
-    return releases
-      .slice(0, max)
-      .map((release) => mapGiteaRelease(release, this.connection.url))
-      .filter((release) => release.tag_name.length > 0);
+    return toSourceReleases(releases.slice(0, max));
   }
 
   async testConnection(): Promise<SourceAccount> {

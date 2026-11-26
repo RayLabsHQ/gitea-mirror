@@ -1093,21 +1093,53 @@ export function GitHubMirrorSettings({
               checked={mirrorOptions.releaseType !== "stable"}
               onCheckedChange={(checked) => handleMirrorChange('releaseType', checked ? "all" : "stable")}
               subContent={
-                <div className="flex items-center gap-2 pt-0.5">
-                  <Button
-                    type="button"
-                    variant="link"
-                    size="sm"
-                    className="h-auto p-0 text-[13px] font-normal"
-                    onClick={() => setTagRulesOpen(true)}
-                  >
-                    Custom tag rules...
-                  </Button>
-                  {tagPatternCount > 0 && (
-                    <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
-                      {tagPatternCount} {tagPatternCount === 1 ? "pattern" : "patterns"}
-                    </span>
+                <div className="space-y-1.5 pt-0.5">
+                  {/* How many of the kept releases may be pre-releases, so
+                      nightly builds leave room for stable ones (#560). Empty
+                      means pre-releases count like any other release. */}
+                  {mirrorOptions.releaseType !== "stable" && (
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      <label htmlFor="prerelease-limit">At most</label>
+                      <input
+                        id="prerelease-limit"
+                        type="number"
+                        min="0"
+                        placeholder="any"
+                        title="Leave empty to count pre-releases like any other release, or 0 for none"
+                        value={mirrorOptions.prereleaseLimit ?? ''}
+                        onChange={(e) => {
+                          const raw = e.target.value.trim();
+                          if (raw === '') {
+                            handleMirrorChange('prereleaseLimit', null);
+                            return;
+                          }
+                          const value = parseInt(raw, 10);
+                          handleMirrorChange(
+                            'prereleaseLimit',
+                            Number.isFinite(value) ? Math.max(0, value) : null
+                          );
+                        }}
+                        className="w-16 rounded border border-input bg-background px-2 py-1 text-xs text-foreground"
+                      />
+                      <span>pre-releases among the latest {mirrorOptions.releaseLimit || 10}</span>
+                    </div>
                   )}
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      variant="link"
+                      size="sm"
+                      className="h-auto p-0 text-[13px] font-normal"
+                      onClick={() => setTagRulesOpen(true)}
+                    >
+                      Custom tag rules...
+                    </Button>
+                    {tagPatternCount > 0 && (
+                      <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">
+                        {tagPatternCount} {tagPatternCount === 1 ? "pattern" : "patterns"}
+                      </span>
+                    )}
+                  </div>
                 </div>
               }
             />
