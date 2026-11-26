@@ -155,8 +155,8 @@ Whichever install path you took, the first-run flow is the same:
 1. Open the app at `http://localhost:4321`, or at whatever URL you configured.
 2. Sign up. The first account created becomes the admin account.
 3. Click **Configure GitHub** on the dashboard, or open **Configuration** from the sidebar. On the **Connections** tab, click **Add source** in the Sources card, keep GitHub, enter your username and token, click **Test**, and save. In the Gitea card next to it, enter the server URL, username and token, and click **Test**.
-4. Choose a mirror strategy in the **Organization Structure** card, which decides where repositories land in Gitea.
-5. Click **Import GitHub Data** at the top of the Configuration page, then open **Repositories** and click **Mirror All**. Once repositories are imported the source locks, and once one is mirrored the destination locks; changing either later asks for confirmation.
+4. Choose a mirror strategy in the **Organization Structure** card on the Mirroring tab, which decides where repositories land in Gitea.
+5. Click **Import repositories** at the bottom of the Sources card, then open **Repositories** and click **Mirror All**. Once repositories are imported the source locks, and once one is mirrored the destination locks; changing either later asks for confirmation.
 6. Optionally, turn on scheduled syncing on the Automation tab so new commits and new repositories are picked up without manual action.
 
 ## Verifying the deployment

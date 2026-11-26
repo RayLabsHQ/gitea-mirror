@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -58,6 +58,8 @@ interface AutomationSettingsProps {
   isAutoSavingCleanup?: boolean;
   /** A Run now finished; shows its last and next run without saving the settings. */
   onCleanupRunRecorded?: (times: { lastRun: Date; nextRun: Date }) => void;
+  /** Shown beside the sync cards: what a sync does when the source rewrote history. */
+  syncCompanion?: ReactNode;
 }
 
 const clockFrequencies = [
@@ -145,6 +147,7 @@ export function AutomationSettings({
   isAutoSavingSchedule,
   isAutoSavingCleanup,
   onCleanupRunRecorded,
+  syncCompanion,
 }: AutomationSettingsProps) {
   // Re-render timestamps when the user changes the 12h/24h preference.
   useTimeFormat();
@@ -209,118 +212,243 @@ export function AutomationSettings({
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="grid grid-cols-1 items-stretch gap-6 md:grid-cols-2">
-        {/* Automatic Syncing */}
-        <SettingsCard
-          icon={RefreshCw}
-          title="Automatic Syncing"
-          enabled={scheduleConfig.enabled}
-          onEnabledChange={(checked) =>
-            onScheduleChange({
-              ...scheduleConfig,
-              enabled: checked,
-              timezone: checked ? browserTimezone : scheduleConfig.timezone,
-              startTime: scheduleConfig.startTime || "22:00",
-              clockFrequencyHours: scheduleConfig.clockFrequencyHours || 24,
-              scheduleMode: "clock",
-            })
-          }
-          headerAction={savingSpinner(isAutoSavingSchedule)}
-          footer={
-            <>
-              <StatusFooterItem
-                icon={History}
-                label="Last sync"
-                value={
-                  scheduleConfig.lastRun
-                    ? formatDate(scheduleConfig.lastRun)
-                    : "Never"
-                }
-              />
-              {scheduleConfig.enabled ? (
+      {/* Each card keeps its own height: a column per side instead of rows
+          that stretch a short card to match its neighbour. */}
+      <div className="grid grid-cols-1 items-start gap-6 md:grid-cols-2">
+        <div className="flex flex-col gap-6">
+          {/* Automatic Syncing */}
+          <SettingsCard
+            icon={RefreshCw}
+            title="Automatic Syncing"
+            enabled={scheduleConfig.enabled}
+            onEnabledChange={(checked) =>
+              onScheduleChange({
+                ...scheduleConfig,
+                enabled: checked,
+                timezone: checked ? browserTimezone : scheduleConfig.timezone,
+                startTime: scheduleConfig.startTime || "22:00",
+                clockFrequencyHours: scheduleConfig.clockFrequencyHours || 24,
+                scheduleMode: "clock",
+              })
+            }
+            headerAction={savingSpinner(isAutoSavingSchedule)}
+            footer={
+              <>
                 <StatusFooterItem
-                  icon={Calendar}
-                  label="Next sync"
+                  icon={History}
+                  label="Last sync"
                   value={
-                    scheduleConfig.nextRun
-                      ? formatDate(scheduleConfig.nextRun)
-                      : nextScheduledRun
-                        ? formatDate(nextScheduledRun)
-                        : "Calculating..."
+                    scheduleConfig.lastRun
+                      ? formatDate(scheduleConfig.lastRun)
+                      : "Never"
                   }
-                  valueClassName="text-indigo-500"
                 />
-              ) : (
-                <span className="text-xs text-muted-foreground/70">
-                  Enable syncing to schedule updates
-                </span>
-              )}
-            </>
-          }
-        >
-          {scheduleConfig.enabled && (
-            <>
-              <CardSection>
-                <SectionTitle
-                  action={
-                    timezoneDiffers ? (
-                      <button
-                        type="button"
-                        onClick={switchToBrowserTimezone}
-                        title={`Switch the schedule to ${browserTimezone}`}
-                        className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-[11px] text-muted-foreground hover:bg-muted/70 hover:text-foreground"
-                      >
-                        <Globe className="h-3 w-3" />
-                        {effectiveTimezone}
-                        <span className="text-muted-foreground/60">· use {browserTimezone}</span>
-                      </button>
-                    ) : (
-                      <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-[11px] text-muted-foreground">
-                        <Globe className="h-3 w-3" />
-                        {effectiveTimezone}
-                      </span>
-                    )
-                  }
-                >
-                  Schedule
-                </SectionTitle>
-
-                {isIntervalSchedule && (
-                  <p className="flex items-start gap-2 rounded-md border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
-                    <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                    <span>
-                      Syncing {formatIntervalSeconds(scheduleConfig.interval)}, counted from the last run.
-                      {" "}This interval comes from SCHEDULE_INTERVAL or GITEA_MIRROR_INTERVAL, which is applied again on every restart while it is set, or from an older version.
-                      {" "}Pick a frequency or start time to switch to a clock schedule.
-                    </span>
-                  </p>
+                {scheduleConfig.enabled ? (
+                  <StatusFooterItem
+                    icon={Calendar}
+                    label="Next sync"
+                    value={
+                      scheduleConfig.nextRun
+                        ? formatDate(scheduleConfig.nextRun)
+                        : nextScheduledRun
+                          ? formatDate(nextScheduledRun)
+                          : "Calculating..."
+                    }
+                    valueClassName="text-indigo-500"
+                  />
+                ) : (
+                  <span className="text-xs text-muted-foreground/70">
+                    Enable syncing to schedule updates
+                  </span>
                 )}
+              </>
+            }
+          >
+            {scheduleConfig.enabled && (
+              <>
+                <CardSection>
+                  <SectionTitle
+                    action={
+                      timezoneDiffers ? (
+                        <button
+                          type="button"
+                          onClick={switchToBrowserTimezone}
+                          title={`Switch the schedule to ${browserTimezone}`}
+                          className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-[11px] text-muted-foreground hover:bg-muted/70 hover:text-foreground"
+                        >
+                          <Globe className="h-3 w-3" />
+                          {effectiveTimezone}
+                          <span className="text-muted-foreground/60">· use {browserTimezone}</span>
+                        </button>
+                      ) : (
+                        <span className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-[11px] text-muted-foreground">
+                          <Globe className="h-3 w-3" />
+                          {effectiveTimezone}
+                        </span>
+                      )
+                    }
+                  >
+                    Schedule
+                  </SectionTitle>
 
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <div className="space-y-1.5">
-                    <Label
-                      htmlFor="clock-frequency"
-                      className="text-xs font-medium text-muted-foreground"
-                    >
-                      Frequency
-                    </Label>
+                  {isIntervalSchedule && (
+                    <p className="flex items-start gap-2 rounded-md border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
+                      <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      <span>
+                        Syncing {formatIntervalSeconds(scheduleConfig.interval)}, counted from the last run.
+                        {" "}This interval comes from SCHEDULE_INTERVAL or GITEA_MIRROR_INTERVAL, which is applied again on every restart while it is set, or from an older version.
+                        {" "}Pick a frequency or start time to switch to a clock schedule.
+                      </span>
+                    </p>
+                  )}
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label
+                        htmlFor="clock-frequency"
+                        className="text-xs font-medium text-muted-foreground"
+                      >
+                        Frequency
+                      </Label>
+                      <Select
+                        value={isIntervalSchedule ? "" : String(scheduleConfig.clockFrequencyHours || 24)}
+                        onValueChange={(value) =>
+                          onScheduleChange({
+                            ...scheduleConfig,
+                            scheduleMode: "clock",
+                            clockFrequencyHours: parseInt(value, 10),
+                            startTime: scheduleConfig.startTime || "22:00",
+                            timezone: effectiveTimezone,
+                          })
+                        }
+                      >
+                        <SelectTrigger id="clock-frequency" className="w-full">
+                          <SelectValue placeholder="Choose a frequency" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {clockFrequencies.map((option) => (
+                            <SelectItem
+                              key={option.value}
+                              value={option.value.toString()}
+                            >
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <Label
+                        htmlFor="clock-start-time"
+                        className="text-xs font-medium text-muted-foreground"
+                      >
+                        Start time
+                      </Label>
+                      <div className="relative">
+                        <div className="text-muted-foreground pointer-events-none absolute inset-y-0 left-0 flex items-center justify-center pl-3">
+                          <Clock className="size-4" />
+                        </div>
+                        <Input
+                          id="clock-start-time"
+                          type="time"
+                          value={isIntervalSchedule ? "" : scheduleConfig.startTime || "22:00"}
+                          onChange={(event) =>
+                            onScheduleChange({
+                              ...scheduleConfig,
+                              scheduleMode: "clock",
+                              startTime: event.target.value,
+                              clockFrequencyHours:
+                                scheduleConfig.clockFrequencyHours || 24,
+                              timezone: effectiveTimezone,
+                            })
+                          }
+                          className="appearance-none pl-9 dark:bg-input/30 [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </CardSection>
+                <CardDivider />
+                <CardSection>
+                  <SwitchRow
+                    label="Auto-import new repositories"
+                    description="Look for new repos on your sources during each sync"
+                    info="When off, syncs only update the repos you already have. Use the Import button at the top of this page when you want new ones. AUTO_IMPORT_REPOS, when set, replaces this on every restart."
+                    checked={scheduleConfig.autoImport !== false}
+                    onCheckedChange={(checked) =>
+                      onScheduleChange({ ...scheduleConfig, autoImport: checked })
+                    }
+                  />
+                  <SwitchRow
+                    label="Auto-mirror new repositories"
+                    description="Mirror repos discovered during sync automatically"
+                    info="When off, newly discovered repos are imported for browsing and wait for a manual mirror click. Starred repos have their own toggle in GitHub settings."
+                    checked={scheduleConfig.autoMirror ?? false}
+                    onCheckedChange={(checked) =>
+                      onScheduleChange({ ...scheduleConfig, autoMirror: checked })
+                    }
+                  />
+                </CardSection>
+              </>
+            )}
+          </SettingsCard>
+
+          {/* Database Maintenance */}
+          <SettingsCard
+            icon={Database}
+            title="Database Maintenance"
+            enabled={cleanupConfig.enabled}
+            onEnabledChange={(checked) =>
+              onCleanupChange({ ...cleanupConfig, enabled: checked })
+            }
+            headerAction={savingSpinner(isAutoSavingCleanup)}
+            className="md:h-full"
+            footer={
+              <>
+                <StatusFooterItem
+                  icon={History}
+                  label="Last run"
+                  value={
+                    cleanupConfig.lastRun
+                      ? formatDate(cleanupConfig.lastRun)
+                      : "Never"
+                  }
+                />
+                {cleanupConfig.enabled && cleanupConfig.nextRun ? (
+                  <StatusFooterItem
+                    icon={Calendar}
+                    label="Next run"
+                    value={formatDate(cleanupConfig.nextRun)}
+                    valueClassName="text-indigo-500"
+                  />
+                ) : (
+                  <span className="text-xs text-muted-foreground/70">
+                    Old activity logs are removed automatically
+                  </span>
+                )}
+              </>
+            }
+          >
+            {cleanupConfig.enabled && (
+              <>
+                <CardSection>
+                  <SectionTitle>Data retention</SectionTitle>
+                  <div className="flex items-center gap-3">
                     <Select
-                      value={isIntervalSchedule ? "" : String(scheduleConfig.clockFrequencyHours || 24)}
+                      value={cleanupConfig.retentionDays.toString()}
                       onValueChange={(value) =>
-                        onScheduleChange({
-                          ...scheduleConfig,
-                          scheduleMode: "clock",
-                          clockFrequencyHours: parseInt(value, 10),
-                          startTime: scheduleConfig.startTime || "22:00",
-                          timezone: effectiveTimezone,
+                        onCleanupChange({
+                          ...cleanupConfig,
+                          retentionDays: parseInt(value, 10),
                         })
                       }
                     >
-                      <SelectTrigger id="clock-frequency" className="w-full">
-                        <SelectValue placeholder="Choose a frequency" />
+                      <SelectTrigger id="retention-period" className="w-40">
+                        <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {clockFrequencies.map((option) => (
+                        {retentionPeriods.map((option) => (
                           <SelectItem
                             key={option.value}
                             value={option.value.toString()}
@@ -330,154 +458,35 @@ export function AutomationSettings({
                         ))}
                       </SelectContent>
                     </Select>
+                    <p className="text-xs text-muted-foreground">
+                      Log cleanup runs {cleanupFrequencyText(cleanupConfig.retentionDays)}
+                    </p>
                   </div>
-
-                  <div className="space-y-1.5">
-                    <Label
-                      htmlFor="clock-start-time"
-                      className="text-xs font-medium text-muted-foreground"
-                    >
-                      Start time
-                    </Label>
-                    <div className="relative">
-                      <div className="text-muted-foreground pointer-events-none absolute inset-y-0 left-0 flex items-center justify-center pl-3">
-                        <Clock className="size-4" />
-                      </div>
-                      <Input
-                        id="clock-start-time"
-                        type="time"
-                        value={isIntervalSchedule ? "" : scheduleConfig.startTime || "22:00"}
-                        onChange={(event) =>
-                          onScheduleChange({
-                            ...scheduleConfig,
-                            scheduleMode: "clock",
-                            startTime: event.target.value,
-                            clockFrequencyHours:
-                              scheduleConfig.clockFrequencyHours || 24,
-                            timezone: effectiveTimezone,
-                          })
-                        }
-                        className="appearance-none pl-9 dark:bg-input/30 [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </CardSection>
-              <CardDivider />
-              <CardSection>
-                <SwitchRow
-                  label="Auto-import new repositories"
-                  description="Look for new repos on your sources during each sync"
-                  info="When off, syncs only update the repos you already have. Use the Import button at the top of this page when you want new ones. AUTO_IMPORT_REPOS, when set, replaces this on every restart."
-                  checked={scheduleConfig.autoImport !== false}
-                  onCheckedChange={(checked) =>
-                    onScheduleChange({ ...scheduleConfig, autoImport: checked })
-                  }
-                />
-                <SwitchRow
-                  label="Auto-mirror new repositories"
-                  description="Mirror repos discovered during sync automatically"
-                  info="When off, newly discovered repos are imported for browsing and wait for a manual mirror click. Starred repos have their own toggle in GitHub settings."
-                  checked={scheduleConfig.autoMirror ?? false}
-                  onCheckedChange={(checked) =>
-                    onScheduleChange({ ...scheduleConfig, autoMirror: checked })
-                  }
-                />
-              </CardSection>
-            </>
-          )}
-        </SettingsCard>
-
-        {/* Database Maintenance */}
-        <SettingsCard
-          icon={Database}
-          title="Database Maintenance"
-          enabled={cleanupConfig.enabled}
-          onEnabledChange={(checked) =>
-            onCleanupChange({ ...cleanupConfig, enabled: checked })
-          }
-          headerAction={savingSpinner(isAutoSavingCleanup)}
-          className="md:h-full"
-          footer={
-            <>
-              <StatusFooterItem
-                icon={History}
-                label="Last run"
-                value={
-                  cleanupConfig.lastRun
-                    ? formatDate(cleanupConfig.lastRun)
-                    : "Never"
-                }
-              />
-              {cleanupConfig.enabled && cleanupConfig.nextRun ? (
-                <StatusFooterItem
-                  icon={Calendar}
-                  label="Next run"
-                  value={formatDate(cleanupConfig.nextRun)}
-                  valueClassName="text-indigo-500"
-                />
-              ) : (
-                <span className="text-xs text-muted-foreground/70">
-                  Old activity logs are removed automatically
-                </span>
-              )}
-            </>
-          }
-        >
-          {cleanupConfig.enabled && (
-            <>
-              <CardSection>
-                <SectionTitle>Data retention</SectionTitle>
-                <div className="flex items-center gap-3">
-                  <Select
-                    value={cleanupConfig.retentionDays.toString()}
-                    onValueChange={(value) =>
-                      onCleanupChange({
-                        ...cleanupConfig,
-                        retentionDays: parseInt(value, 10),
-                      })
-                    }
-                  >
-                    <SelectTrigger id="retention-period" className="w-40">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {retentionPeriods.map((option) => (
-                        <SelectItem
-                          key={option.value}
-                          value={option.value.toString()}
-                        >
-                          {option.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">
-                    Log cleanup runs {cleanupFrequencyText(cleanupConfig.retentionDays)}
+                  <p className="max-w-md text-[13px] leading-relaxed text-muted-foreground">
+                    Activity logs and events older than the retention period are
+                    removed. How often this runs adapts to the period you pick.
+                    Repositories are not touched here, see Repository Cleanup
+                    below.
                   </p>
-                </div>
-                <p className="max-w-md text-[13px] leading-relaxed text-muted-foreground">
-                  Activity logs and events older than the retention period are
-                  removed. How often this runs adapts to the period you pick.
-                  Repositories are not touched here, see Repository Cleanup
-                  below.
-                </p>
-              </CardSection>
-              {/* Sits at the bottom of the card, above the footer, like the rows on
-                  the syncing card next to it. */}
-              <div className="mt-auto">
-                <CardDivider busy={maintenanceRun.state.kind === "running"} />
-                <CardSection>
-                  <DatabaseMaintenanceRunRow
-                    state={maintenanceRun.state}
-                    retentionLabel={retentionLabel}
-                    onRun={() => maintenanceRun.run(retentionLabel)}
-                  />
                 </CardSection>
-              </div>
-            </>
-          )}
-        </SettingsCard>
+                {/* Sits at the bottom of the card, above the footer, like the rows on
+                    the syncing card next to it. */}
+                <div className="mt-auto">
+                  <CardDivider busy={maintenanceRun.state.kind === "running"} />
+                  <CardSection>
+                    <DatabaseMaintenanceRunRow
+                      state={maintenanceRun.state}
+                      retentionLabel={retentionLabel}
+                      onRun={() => maintenanceRun.run(retentionLabel)}
+                    />
+                  </CardSection>
+                </div>
+              </>
+            )}
+          </SettingsCard>
+        </div>
+
+        {syncCompanion}
       </div>
 
       {/* Repository Cleanup */}

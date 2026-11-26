@@ -79,7 +79,7 @@ The app also auto-detects the origin from the incoming `X-Forwarded-Host` and `X
 
 ## Single sign-on
 
-SSO lets users authenticate against an external identity provider such as Google, Okta, Authentik, or Azure AD. Providers are managed under **Configuration > Authentication**, in the **Identity Providers** panel: click **Add provider**.
+SSO lets users authenticate against an external identity provider such as Google, Okta, Authentik, or Azure AD. Providers are managed under **Configuration > Access**, in the **Identity Providers** panel: click **Add provider**.
 
 Only the instance owner, the first account created on the instance, can add, change or remove providers, and they see every provider. A provider applies to every account: anyone whose email is in its Domain can sign in through it, and an existing account with that email is linked to it. Other accounts see the panel as managed by the owner, and the provider API answers them with 403.
 
@@ -257,7 +257,7 @@ Beyond stripping headers:
 
 ### Confirming it is active
 
-On the **Configuration > Authentication** page, the **Header Authentication** switch is on when the feature is live. It only shows the state; the environment variables control it. You can also check the API:
+On the **Configuration > Access** page, the **Header Authentication** switch is on when the feature is live. It only shows the state; the environment variables control it. You can also check the API:
 
 ```bash
 curl https://your-domain.com/api/auth/header-status

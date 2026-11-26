@@ -31,7 +31,6 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { invalidateConfigCache } from '@/hooks/useConfigStatus';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { withBase } from '@/lib/base-path';
-import { SOURCE_PROVIDER_LABELS } from '@/lib/source-providers/kinds';
 
 type ConfigState = {
   githubConfig: GitHubConfig;
@@ -175,11 +174,6 @@ export function ConfigTabs() {
   // Removed the problematic useEffect that was causing circular dependencies
   // The lastRun and nextRun should be managed by the backend and fetched via API
 
-  const sourceLabel = SOURCE_PROVIDER_LABELS[config.githubConfig.provider ?? 'github'];
-  // "Import Git URL Data" would promise a listing a plain git host does not have.
-  const importLabel =
-    config.githubConfig.provider === 'git' ? 'Import Data' : `Import ${sourceLabel} Data`;
-
   const handleImportGitHubData = async () => {
     if (!user?.id) return;
     setIsSyncing(true);
@@ -190,7 +184,7 @@ export function ConfigTabs() {
       );
       if (result.success) {
         toast.success(
-          `${sourceLabel} data imported successfully! Head to the Repositories page to start mirroring.`,
+          'Repositories imported. Head to the Repositories page to start mirroring.',
         );
         if (result.failedOrgs && result.failedOrgs.length > 0) {
           toast.warning(
@@ -204,16 +198,12 @@ export function ConfigTabs() {
         }
       } else {
         toast.error(
-          `Failed to import ${sourceLabel} data: ${
-            result.message || 'Unknown error'
-          }`,
+          `Import failed: ${result.message || 'Unknown error'}`,
         );
       }
     } catch (error) {
       toast.error(
-        `Error importing ${sourceLabel} data: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
+        `Import failed: ${error instanceof Error ? error.message : String(error)}`,
       );
     } finally {
       setIsSyncing(false);
@@ -722,6 +712,111 @@ export function ConfigTabs() {
     );
   }
 
+  const githubFormProps = {
+    config: config.githubConfig,
+    setConfig: (update: React.SetStateAction<typeof config.githubConfig>) =>
+      setConfig(prev => ({
+        ...prev,
+        githubConfig:
+          typeof update === 'function'
+            ? update(prev.githubConfig)
+            : update,
+      })),
+    mirrorOptions: config.mirrorOptions,
+    setMirrorOptions: (update: React.SetStateAction<typeof config.mirrorOptions>) =>
+      setConfig(prev => ({
+        ...prev,
+        mirrorOptions:
+          typeof update === 'function'
+            ? update(prev.mirrorOptions)
+            : update,
+      })),
+    advancedOptions: config.advancedOptions,
+    setAdvancedOptions: (update: React.SetStateAction<typeof config.advancedOptions>) =>
+      setConfig(prev => ({
+        ...prev,
+        advancedOptions:
+          typeof update === 'function'
+            ? update(prev.advancedOptions)
+            : update,
+      })),
+    giteaConfig: config.giteaConfig,
+    setGiteaConfig: (update: React.SetStateAction<typeof config.giteaConfig>) =>
+      setConfig(prev => ({
+        ...prev,
+        giteaConfig:
+          typeof update === 'function'
+            ? update(prev.giteaConfig)
+            : update,
+      })),
+    onAutoSave: autoSaveGitHubConfig,
+    onMirrorOptionsAutoSave: autoSaveMirrorOptions,
+    onAdvancedOptionsAutoSave: autoSaveAdvancedOptions,
+    onGiteaAutoSave: autoSaveGiteaConfig,
+    isAutoSaving: isAutoSavingGitHub,
+    sourceLock: locks?.source,
+  };
+  const giteaFormProps = {
+    config: config.giteaConfig,
+    setConfig: (update: React.SetStateAction<typeof config.giteaConfig>) =>
+      setConfig(prev => ({
+        ...prev,
+        giteaConfig:
+          typeof update === 'function'
+            ? update(prev.giteaConfig)
+            : update,
+      })),
+    onAutoSave: autoSaveGiteaConfig,
+    isAutoSaving: isAutoSavingGitea,
+    githubUsername: config.githubConfig.username,
+    destinationLock: locks?.destination,
+  };
+
+  // Mirror Content: what travels with the code.
+  const mirrorContent = (
+    <GitHubMirrorSettings
+      part="content"
+      githubConfig={config.githubConfig}
+      sources={sources}
+      destinationProvider={config.giteaConfig.provider}
+      mirrorOptions={config.mirrorOptions}
+      advancedOptions={config.advancedOptions}
+      onGitHubConfigChange={newConfig => {
+        setConfig(prev => ({ ...prev, githubConfig: newConfig }));
+        autoSaveGitHubConfig(newConfig);
+      }}
+      onMirrorOptionsChange={newOptions => {
+        setConfig(prev => ({ ...prev, mirrorOptions: newOptions }));
+        autoSaveMirrorOptions(newOptions);
+      }}
+      onAdvancedOptionsChange={newOptions => {
+        setConfig(prev => ({ ...prev, advancedOptions: newOptions }));
+        autoSaveAdvancedOptions(newOptions);
+      }}
+    />
+  );
+
+  // Every enabled source is imported, so the button names none of them.
+  const importButton = (
+    <Button
+      type="button"
+      size="sm"
+      onClick={handleImportGitHubData}
+      disabled={isSyncing || !isGitHubConfigValid()}
+      title={
+        !isGitHubConfigValid()
+          ? 'Connect a source with a token first'
+          : isSyncing
+          ? 'Import in progress'
+          : 'Read the repositories every source can list'
+      }
+      className="bg-indigo-500 text-white hover:bg-indigo-600 disabled:bg-muted disabled:text-muted-foreground"
+    >
+      <RefreshCw className={`mr-1.5 h-3.5 w-3.5${isSyncing ? ' animate-spin' : ''}`} />
+      {isSyncing ? 'Importing...' : 'Import repositories'}
+    </Button>
+  );
+
   return isLoading ? (
     <div className="space-y-6">
       <ConfigCardSkeleton />
@@ -751,140 +846,40 @@ export function ConfigTabs() {
             mirroring.
           </p>
         </div>
-        <div className="flex gap-x-4 w-full md:w-auto">
-          <Button
-            onClick={handleImportGitHubData}
-            disabled={isSyncing || !isGitHubConfigValid()}
-            title={
-              !isGitHubConfigValid()
-                ? 'Connect a source with a token first'
-                : isSyncing
-                ? 'Import in progress'
-                : importLabel
-            }
-            className="w-full bg-indigo-500 text-white hover:bg-indigo-600 disabled:bg-muted disabled:text-muted-foreground md:w-auto"
-          >
-            {isSyncing ? (
-              <>
-                <RefreshCw className="h-4 w-4 animate-spin mr-1" />
-                {importLabel}
-              </>
-            ) : (
-              <>
-                <RefreshCw className="h-4 w-4 mr-1" />
-                {importLabel}
-              </>
-            )}
-          </Button>
-        </div>
       </div>
 
       {/* Content section - Tabs layout */}
       <Tabs defaultValue="connections" className="space-y-4">
-        <TabsList className="grid h-auto w-full grid-cols-2 gap-1 sm:grid-cols-4">
+        <TabsList className="grid h-auto w-full grid-cols-3 gap-1 sm:grid-cols-5">
           <TabsTrigger value="connections">Connections</TabsTrigger>
+          <TabsTrigger value="mirroring">Mirroring</TabsTrigger>
           <TabsTrigger value="automation">Automation</TabsTrigger>
           <TabsTrigger value="notifications">Notifications</TabsTrigger>
-          <TabsTrigger value="sso">Authentication</TabsTrigger>
+          <TabsTrigger value="sso">Access</TabsTrigger>
         </TabsList>
 
         <TabsContent value="connections" className="space-y-6">
-          {(() => {
-            const githubFormProps = {
-              config: config.githubConfig,
-              setConfig: (update: React.SetStateAction<typeof config.githubConfig>) =>
-                setConfig(prev => ({
-                  ...prev,
-                  githubConfig:
-                    typeof update === 'function'
-                      ? update(prev.githubConfig)
-                      : update,
-                })),
-              mirrorOptions: config.mirrorOptions,
-              setMirrorOptions: (update: React.SetStateAction<typeof config.mirrorOptions>) =>
-                setConfig(prev => ({
-                  ...prev,
-                  mirrorOptions:
-                    typeof update === 'function'
-                      ? update(prev.mirrorOptions)
-                      : update,
-                })),
-              advancedOptions: config.advancedOptions,
-              setAdvancedOptions: (update: React.SetStateAction<typeof config.advancedOptions>) =>
-                setConfig(prev => ({
-                  ...prev,
-                  advancedOptions:
-                    typeof update === 'function'
-                      ? update(prev.advancedOptions)
-                      : update,
-                })),
-              giteaConfig: config.giteaConfig,
-              setGiteaConfig: (update: React.SetStateAction<typeof config.giteaConfig>) =>
-                setConfig(prev => ({
-                  ...prev,
-                  giteaConfig:
-                    typeof update === 'function'
-                      ? update(prev.giteaConfig)
-                      : update,
-                })),
-              onAutoSave: autoSaveGitHubConfig,
-              onMirrorOptionsAutoSave: autoSaveMirrorOptions,
-              onAdvancedOptionsAutoSave: autoSaveAdvancedOptions,
-              onGiteaAutoSave: autoSaveGiteaConfig,
-              isAutoSaving: isAutoSavingGitHub,
-              sourceLock: locks?.source,
-            };
-            const giteaFormProps = {
-              config: config.giteaConfig,
-              setConfig: (update: React.SetStateAction<typeof config.giteaConfig>) =>
-                setConfig(prev => ({
-                  ...prev,
-                  giteaConfig:
-                    typeof update === 'function'
-                      ? update(prev.giteaConfig)
-                      : update,
-                })),
-              onAutoSave: autoSaveGiteaConfig,
-              isAutoSaving: isAutoSavingGitea,
-              githubUsername: config.githubConfig.username,
-              destinationLock: locks?.destination,
-            };
-            return (
-              <>
-                {/* Connection cards share a stretched row so they stay equal height */}
-                <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-                  <SourcesCard sources={sources} onRefresh={loadConfig} />
-                  <GiteaConfigForm {...giteaFormProps} part="connection" />
-                </div>
-                <div className="grid grid-cols-1 gap-6 md:grid-cols-2 md:items-start">
-                  <GitHubConfigForm {...githubFormProps} part="settings" />
-                  <div className="flex flex-col gap-6">
-                    <GiteaConfigForm {...giteaFormProps} part="organization" />
-                    <GitHubMirrorSettings
-                      part="content"
-                      githubConfig={config.githubConfig}
-                      sources={sources}
-                      destinationProvider={config.giteaConfig.provider}
-                      mirrorOptions={config.mirrorOptions}
-                      advancedOptions={config.advancedOptions}
-                      onGitHubConfigChange={newConfig => {
-                        setConfig(prev => ({ ...prev, githubConfig: newConfig }));
-                        autoSaveGitHubConfig(newConfig);
-                      }}
-                      onMirrorOptionsChange={newOptions => {
-                        setConfig(prev => ({ ...prev, mirrorOptions: newOptions }));
-                        autoSaveMirrorOptions(newOptions);
-                      }}
-                      onAdvancedOptionsChange={newOptions => {
-                        setConfig(prev => ({ ...prev, advancedOptions: newOptions }));
-                        autoSaveAdvancedOptions(newOptions);
-                      }}
-                    />
-                  </div>
-                </div>
-              </>
-            );
-          })()}
+          {/* Natural heights: one source should not stretch to the destination card. */}
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2 md:items-start">
+            <SourcesCard
+              sources={sources}
+              onRefresh={loadConfig}
+              // A Git URL source has nothing to list, so it gives the import nothing to do.
+              importAction={sources.some(source => source.provider !== 'git') ? importButton : undefined}
+            />
+            <GiteaConfigForm {...giteaFormProps} part="connection" />
+          </div>
+        </TabsContent>
+
+        <TabsContent value="mirroring" className="space-y-6">
+          {/* What is mirrored on the left, where it goes on the right. */}
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2 md:items-start">
+            <div className="flex flex-col gap-6">
+              <GitHubConfigForm {...githubFormProps} part="selection" />
+              {mirrorContent}
+            </div>
+            <GiteaConfigForm {...giteaFormProps} part="organization" />
+          </div>
         </TabsContent>
 
         <TabsContent value="automation" className="space-y-4">
@@ -908,6 +903,7 @@ export function ConfigTabs() {
                 cleanupConfig: { ...prev.cleanupConfig, lastRun, nextRun },
               }));
             }}
+            syncCompanion={<GitHubConfigForm {...githubFormProps} part="protection" />}
           />
         </TabsContent>
 

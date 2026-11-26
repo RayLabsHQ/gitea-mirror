@@ -12,17 +12,19 @@ Start with the web interface. Reach for environment variables when you want a de
 
 ## The Configuration page
 
-![The Configuration page showing the Connections tab](/assets/configuration.png)
+![The Configuration page showing the Connections tab, with the Sources card and the destination card](/assets/configuration.png)
 
-The Configuration page is organized into four tabs.
+The Configuration page is organized into five tabs: **Connections**, **Mirroring**, **Automation**, **Notifications** and **Access**. Settings save as soon as you change them. Adding or editing a source, an SSO provider or an API key happens in its own editor, saved with its own button.
 
 ### Connections
 
 This is where the two ends of the mirror are set up: the **Sources** card for where repositories come from, and the destination card next to it.
 
-**The Sources card** lists the hosts repositories are pulled from, and you can add more than one. **Add source** opens an editor: pick the host (GitHub, GitLab, Gitea / Forgejo or Git URL; all but GitHub carry a BETA pill), the instance URL for a self-hosted instance, the username, and a personal access token, with the scopes it needs listed next to the token field. A GitHub source can use a GitHub App installation instead of a token. Git URL is for hosts that can only be cloned and asks for the host instead. The repository selection options (private, public, archived, forks, repositories where you are only a collaborator, and starred repositories) are in the **Repository Selection** card below. The [Sources](/docs/sources/) page covers each host.
+**The Sources card** lists the hosts repositories are pulled from, and you can add more than one. **Add source** opens an editor: pick the host (GitHub, GitLab, Gitea / Forgejo or Git URL; all but GitHub carry a BETA pill), the instance URL for a self-hosted instance, the username, and a personal access token, with the scopes it needs listed next to the token field. A GitHub source can use a GitHub App installation instead of a token. Git URL is for hosts that can only be cloned and asks for the host instead. The repository selection options (private, public, archived, forks, repositories where you are only a collaborator, and starred repositories) are in the **Repository Selection** card on the Mirroring tab. The [Sources](/docs/sources/) page covers each host.
 
-**The destination card** starts with the **Destination** dropdown: Gitea, Forgejo, GitHub or GitLab. Gitea is the default; the other three carry a BETA pill. For Gitea and Forgejo the card holds the server URL, an optional external URL, an access token and the username that acts as default owner. For GitHub and GitLab it holds the instance URL, the account and a token, and a notice explains that those targets are overwritten on every sync. The card also carries the organization settings: the mirror strategy, default organization, organization visibility, and the per-repository mirror interval that Gitea itself uses to re-pull from the source. The [Destinations](/docs/destinations/) page covers each host.
+Once a source is connected, **Import repositories** at the bottom of the Sources card reads what every source can list and adds it to the Repositories page, ready to mirror. It does not mirror anything by itself. A Git URL source has nothing to list, so with only Git URL sources the button is hidden and repositories are added one at a time from the Repositories page.
+
+**The destination card** starts with the **Destination** dropdown: Gitea, Forgejo, GitHub or GitLab. Gitea is the default; the other three carry a BETA pill. For Gitea and Forgejo the card holds the server URL, an optional external URL, an access token and the username that acts as default owner. For GitHub and GitLab it holds the instance URL, the account and a token, and a notice explains that those targets are overwritten on every sync. Where mirrors land on the destination is set on the Mirroring tab. How often Gitea itself re-pulls each mirror is not on the page: it is `GITEA_MIRROR_INTERVAL` in the environment, 8 hours by default. The [Destinations](/docs/destinations/) page covers each host.
 
 GitHub to Gitea is the supported path. Every other source and destination is beta: tested end to end against real hosts, with less time in the field.
 
@@ -32,9 +34,11 @@ Both cards have a **Test** button that performs a live authenticated call, so yo
 
 If your Gitea instance is reachable at one URL from the Gitea Mirror process and at a different URL from your browser, for example an internal service name versus a public hostname, set the external URL as well. Dashboard links use the external URL while all API and mirroring traffic keeps using the primary URL.
 
-### Mirror settings
+### Mirroring
 
-Below the connection cards, the mirror settings decide what travels with the code: issues, pull requests, labels, milestones, security advisories, releases, wiki and LFS objects, plus the force push protection strategy. Switches that the current source or destination cannot serve are disabled and say why. LFS also needs LFS turned on in Gitea or Forgejo itself: `LFS_START_SERVER = true` in the `[server]` section of `app.ini`.
+This tab decides what is mirrored and where it goes. On the left, **Repository Selection** picks which repositories are imported, and **Mirror Content** picks what travels with the code. On the right, **Organization Structure** holds the mirror strategy, the destination organization, where starred repositories go and the visibility of new organizations, described under [Mirror strategies](#mirror-strategies) below.
+
+**Mirror Content** covers issues, pull requests, labels, milestones, security advisories, releases, wiki and LFS objects. Switches that the current source or destination cannot serve are disabled and say why. LFS also needs LFS turned on in Gitea or Forgejo itself: `LFS_START_SERVER = true` in the `[server]` section of `app.ini`.
 
 **Security advisories**, under **Metadata to mirror**, copies each published GitHub security advisory of a repository to its mirror. Gitea and Forgejo have no advisories of their own, so each one becomes an issue labeled `security-advisory` and titled with its id, for example `[GHSA-8jhw-6pjj-8723] Email verification links can redirect users to any website`, with the severity, CVE, affected and patched versions, credits and the advisory's text. The issue is updated when the advisory changes and closed if it is withdrawn. Draft advisories are never copied. It needs a GitHub source, costs one request per repository and sync, and is off by default.
 
@@ -52,9 +56,9 @@ Opened from a repository, that dialog also lists the releases Gitea already hold
 
 ### Automation
 
-This tab controls scheduled mirroring and cleanup.
+This tab controls scheduled mirroring, what a sync does when the source rewrote history, and cleanup. **Automatic Syncing** and **Database Maintenance** sit on the left, **Destructive Update Protection** on the right (see [Force-push protection](/docs/force-push-protection/)), and **Repository Cleanup** below them.
 
-Scheduled syncing runs on an interval or a cron schedule. When enabled it re-syncs existing mirrors, and optionally discovers newly created GitHub repositories and mirrors them without any manual action. Two switches on the schedule card govern that: **Auto-import new repositories** decides whether new repositories are discovered and added to the database, and **Auto-mirror new repositories** decides whether they are then actually mirrored to Gitea. With auto-import off, syncs only update the repositories you already have, and the import button at the top of the page brings in new ones when you want them.
+Scheduled syncing runs on an interval or a cron schedule. When enabled it re-syncs existing mirrors, and optionally discovers newly created GitHub repositories and mirrors them without any manual action. Two switches on the schedule card govern that: **Auto-import new repositories** decides whether new repositories are discovered and added to the database, and **Auto-mirror new repositories** decides whether they are then actually mirrored to Gitea. With auto-import off, syncs only update the repositories you already have, and **Import repositories** on the Sources card brings in new ones when you want them.
 
 The same tab holds repository cleanup, which handles repositories that have disappeared from the source. The action for an orphaned repository is one of `skip`, `archive`, or `delete`, and `archive` is the default because it preserves the mirrored data. There is a dry-run mode that logs what would happen without touching anything, and a **Run now** button that checks right away instead of at the next check. The card's **Reconcile with destination** button compares a Gitea or Forgejo server with the database and offers to adopt mirrors the app does not know about or reset rows whose mirror is gone. Both are described on the [Cleanup and reconcile](/docs/cleanup-and-reconcile/) page.
 
@@ -64,9 +68,9 @@ Gitea Mirror can send a notification on sync failure, on sync success, and when 
 
 The generic webhook sends a JSON POST containing `title`, `message`, `type`, and `timestamp` fields, which makes it straightforward to wire into anything that accepts an inbound hook.
 
-### Authentication
+### Access
 
-This tab configures how people sign in. Email and password authentication is always available. On top of that you can register OIDC or SSO providers, and enable header authentication for deployments sitting behind a reverse proxy that already handles identity, such as Authentik or Authelia.
+This tab configures how people sign in, and the API keys scripts use. Email and password authentication is always available. On top of that you can register OIDC or SSO providers, and enable header authentication for deployments sitting behind a reverse proxy that already handles identity, such as Authentik or Authelia.
 
 Header authentication reads the username, email, and display name from configurable request headers. It can optionally auto-provision accounts on first sight of a new user, restricted to an allowlist of email domains.
 
@@ -76,7 +80,7 @@ The **API Keys** card on the same tab creates keys for scripts and CI pipelines.
 
 ## Mirror strategies
 
-The mirror strategy decides where each repository lands on the destination. There are four, and they are set on the destination card. The examples below say Gitea and organization; on GitLab the equivalent is a group, and the GitHub target uses organizations that must already exist.
+The mirror strategy decides where each repository lands on the destination. There are four, and they are set in the **Organization Structure** card on the Mirroring tab. The examples below say Gitea and organization; on GitLab the equivalent is a group, and the GitHub target uses organizations that must already exist.
 
 ### preserve
 

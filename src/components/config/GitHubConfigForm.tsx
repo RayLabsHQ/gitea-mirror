@@ -72,9 +72,10 @@ interface GitHubConfigFormProps {
   isAutoSaving?: boolean;
   /** Set once repositories were imported: the source can only change with confirmation. */
   sourceLock?: ConfigLockState["source"];
-  /** Which card group to render: the connection card, or the settings stack
-   *  (repository selection + destructive update protection). */
-  part?: "connection" | "settings";
+  /** Which card to render: the connection card, Repository Selection (the
+   *  Mirroring tab), Destructive Update Protection (the Automation tab), or
+   *  both of the last two stacked. */
+  part?: "connection" | "selection" | "protection" | "settings";
 }
 
 const backupStrategies = [
@@ -447,146 +448,154 @@ export function GitHubConfigForm({
     );
   }
 
-  return (
-    <div className="flex flex-col gap-6">
-      <GitHubMirrorSettings
-        part="selection"
-        githubConfig={config}
-        mirrorOptions={mirrorOptions}
-        advancedOptions={advancedOptions}
-        onGitHubConfigChange={(newConfig) => {
-          setConfig(newConfig);
-          if (onAutoSave) onAutoSave(newConfig);
-        }}
-        onMirrorOptionsChange={(newOptions) => {
-          setMirrorOptions(newOptions);
-          if (onMirrorOptionsAutoSave) onMirrorOptionsAutoSave(newOptions);
-        }}
-        onAdvancedOptionsChange={(newOptions) => {
-          setAdvancedOptions(newOptions);
-          if (onAdvancedOptionsAutoSave) onAdvancedOptionsAutoSave(newOptions);
-        }}
-      />
+  const selection = (
+    <GitHubMirrorSettings
+      part="selection"
+      githubConfig={config}
+      mirrorOptions={mirrorOptions}
+      advancedOptions={advancedOptions}
+      onGitHubConfigChange={(newConfig) => {
+        setConfig(newConfig);
+        if (onAutoSave) onAutoSave(newConfig);
+      }}
+      onMirrorOptionsChange={(newOptions) => {
+        setMirrorOptions(newOptions);
+        if (onMirrorOptionsAutoSave) onMirrorOptionsAutoSave(newOptions);
+      }}
+      onAdvancedOptionsChange={(newOptions) => {
+        setAdvancedOptions(newOptions);
+        if (onAdvancedOptionsAutoSave) onAdvancedOptionsAutoSave(newOptions);
+      }}
+    />
+  );
 
-      {/* Destructive Update Protection */}
-      {giteaConfig && setGiteaConfig && (
-        <SettingsCard
-          icon={ShieldAlert}
-          title="Destructive Update Protection"
-          footer={
-            <StatusFooterItem
-              icon={ShieldCheck}
-              label="Applies to Always Backup and Smart modes"
-            />
-          }
-        >
-          <CardSection>
-            <SectionTitle>How to handle force-pushes on GitHub</SectionTitle>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              {backupStrategies.map((opt) => (
-                <OptionTile
-                  key={opt.value}
-                  icon={opt.icon}
-                  label={opt.label}
-                  description={opt.description}
-                  info={opt.info}
-                  selected={backupStrategy === opt.value}
-                  onSelect={() =>
-                    updateGitea({
-                      ...giteaConfig,
-                      backupStrategy: opt.value as BackupStrategy,
-                    })
-                  }
-                />
-              ))}
-            </div>
-          </CardSection>
+  const protection =
+    giteaConfig && setGiteaConfig ? (
+      <SettingsCard
+        icon={ShieldAlert}
+        title="Destructive Update Protection"
+        footer={
+          <StatusFooterItem
+            icon={ShieldCheck}
+            label="Applies to Always Backup and Smart modes"
+          />
+        }
+      >
+        <CardSection>
+          <SectionTitle>How to handle force-pushes on GitHub</SectionTitle>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {backupStrategies.map((opt) => (
+              <OptionTile
+                key={opt.value}
+                icon={opt.icon}
+                label={opt.label}
+                description={opt.description}
+                info={opt.info}
+                selected={backupStrategy === opt.value}
+                onSelect={() =>
+                  updateGitea({
+                    ...giteaConfig,
+                    backupStrategy: opt.value as BackupStrategy,
+                  })
+                }
+              />
+            ))}
+          </div>
+        </CardSection>
 
-          {backupStrategy !== "disabled" && (
-            <>
-              <CardDivider />
-              <CardSection>
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                  <div className="space-y-1.5">
-                    <Label
-                      htmlFor="backup-retention"
-                      className="text-xs font-medium text-muted-foreground"
-                    >
-                      Snapshot retention count
-                    </Label>
-                    <Input
-                      id="backup-retention"
-                      name="backupRetentionCount"
-                      type="number"
-                      min={1}
-                      value={giteaConfig.backupRetentionCount ?? 5}
-                      onChange={(e) =>
-                        updateGitea({
-                          ...giteaConfig,
-                          backupRetentionCount: Math.max(1, Number.parseInt(e.target.value, 10) || 5),
-                        })
-                      }
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label
-                      htmlFor="backup-retention-days"
-                      className="text-xs font-medium text-muted-foreground"
-                    >
-                      Snapshot retention days
-                    </Label>
-                    <Input
-                      id="backup-retention-days"
-                      name="backupRetentionDays"
-                      type="number"
-                      min={0}
-                      value={giteaConfig.backupRetentionDays ?? 30}
-                      onChange={(e) =>
-                        updateGitea({
-                          ...giteaConfig,
-                          backupRetentionDays: Math.max(0, Number.parseInt(e.target.value, 10) || 0),
-                        })
-                      }
-                    />
-                    <p className="text-[11px] text-muted-foreground/80">
-                      0 = no time-based limit
-                    </p>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label
-                      htmlFor="backup-directory"
-                      className="text-xs font-medium text-muted-foreground"
-                    >
-                      Snapshot directory
-                    </Label>
-                    <Input
-                      id="backup-directory"
-                      name="backupDirectory"
-                      type="text"
-                      value={giteaConfig.backupDirectory || "data/repo-backups"}
-                      onChange={(e) =>
-                        updateGitea({ ...giteaConfig, backupDirectory: e.target.value })
-                      }
-                      placeholder="data/repo-backups"
-                    />
-                  </div>
-                </div>
-
-                {(backupStrategy === "always" || backupStrategy === "on-force-push") && (
-                  <SwitchRow
-                    label="Block sync when snapshot fails"
-                    description="Recommended so a failed backup never lets a destructive sync through"
-                    checked={Boolean(giteaConfig.blockSyncOnBackupFailure)}
-                    onCheckedChange={(checked) =>
-                      updateGitea({ ...giteaConfig, blockSyncOnBackupFailure: checked })
+        {backupStrategy !== "disabled" && (
+          <>
+            <CardDivider />
+            <CardSection>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+                <div className="space-y-1.5">
+                  <Label
+                    htmlFor="backup-retention"
+                    className="text-xs font-medium text-muted-foreground"
+                  >
+                    Snapshot retention count
+                  </Label>
+                  <Input
+                    id="backup-retention"
+                    name="backupRetentionCount"
+                    type="number"
+                    min={1}
+                    value={giteaConfig.backupRetentionCount ?? 5}
+                    onChange={(e) =>
+                      updateGitea({
+                        ...giteaConfig,
+                        backupRetentionCount: Math.max(1, Number.parseInt(e.target.value, 10) || 5),
+                      })
                     }
                   />
-                )}
-              </CardSection>
-            </>
-          )}
-        </SettingsCard>
-      )}
+                </div>
+                <div className="space-y-1.5">
+                  <Label
+                    htmlFor="backup-retention-days"
+                    className="text-xs font-medium text-muted-foreground"
+                  >
+                    Snapshot retention days
+                  </Label>
+                  <Input
+                    id="backup-retention-days"
+                    name="backupRetentionDays"
+                    type="number"
+                    min={0}
+                    value={giteaConfig.backupRetentionDays ?? 30}
+                    onChange={(e) =>
+                      updateGitea({
+                        ...giteaConfig,
+                        backupRetentionDays: Math.max(0, Number.parseInt(e.target.value, 10) || 0),
+                      })
+                    }
+                  />
+                  <p className="text-[11px] text-muted-foreground/80">
+                    0 = no time-based limit
+                  </p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label
+                    htmlFor="backup-directory"
+                    className="text-xs font-medium text-muted-foreground"
+                  >
+                    Snapshot directory
+                  </Label>
+                  <Input
+                    id="backup-directory"
+                    name="backupDirectory"
+                    type="text"
+                    value={giteaConfig.backupDirectory || "data/repo-backups"}
+                    onChange={(e) =>
+                      updateGitea({ ...giteaConfig, backupDirectory: e.target.value })
+                    }
+                    placeholder="data/repo-backups"
+                  />
+                </div>
+              </div>
+
+              {(backupStrategy === "always" || backupStrategy === "on-force-push") && (
+                <SwitchRow
+                  label="Block sync when snapshot fails"
+                  description="Recommended so a failed backup never lets a destructive sync through"
+                  checked={Boolean(giteaConfig.blockSyncOnBackupFailure)}
+                  onCheckedChange={(checked) =>
+                    updateGitea({ ...giteaConfig, blockSyncOnBackupFailure: checked })
+                  }
+                />
+              )}
+            </CardSection>
+          </>
+        )}
+      </SettingsCard>
+    ) : null;
+
+  if (part === "selection") return selection;
+  if (part === "protection") return protection;
+
+  return (
+    <div className="flex flex-col gap-6">
+      {selection}
+      {protection}
     </div>
   );
 }
