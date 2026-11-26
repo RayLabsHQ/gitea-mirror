@@ -7,6 +7,7 @@
     <a href="https://github.com/RayLabsHQ/gitea-mirror/actions/workflows/astro-build-test.yml"><img src="https://img.shields.io/github/actions/workflow/status/RayLabsHQ/gitea-mirror/astro-build-test.yml?branch=main" alt="build"/></a>
     <a href="https://github.com/RayLabsHQ/gitea-mirror/pkgs/container/gitea-mirror"><img src="https://img.shields.io/badge/ghcr.io-container-blue?logo=github" alt="container"/></a>
     <a href="https://github.com/RayLabsHQ/gitea-mirror/blob/main/LICENSE"><img src="https://img.shields.io/github/license/RayLabsHQ/gitea-mirror" alt="license"/></a>
+    <a href="https://raylabs.io"><img src="https://img.shields.io/badge/made%20by-RayLabs-black" alt="made by RayLabs"/></a>
   </p>
 </p>
 
@@ -100,3 +101,7 @@ GNU Affero General Public License v3.0 (AGPL-3.0), see [LICENSE](LICENSE).
 
 - 🐛 [Report an issue](https://github.com/RayLabsHQ/gitea-mirror/issues)
 - 💬 [Discussions](https://github.com/RayLabsHQ/gitea-mirror/discussions)
+
+## About
+
+Gitea Mirror is made by [RayLabs](https://raylabs.io), a small software company that builds apps and open source tools. See what else we make at [raylabs.io](https://raylabs.io).
