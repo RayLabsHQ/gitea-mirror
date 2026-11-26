@@ -14,7 +14,7 @@ The web interface talks to a set of JSON endpoints under `/api`. With an API key
 2. In the **API Keys** card click **Create key**, give it a name that tells you where it is used, and pick an expiry (never, 30 days, 90 days or a year) and an access level (full access or read only).
 3. Copy the key. It is shown once; afterwards only its first characters are visible in the list.
 
-![The API Keys card with one key created](/assets/api-keys.png)
+![The API Keys card on the Access tab with two keys created](/assets/api-keys.png)
 
 Keys start with `gm_` and belong to the user who created them. A full access key carries the same rights as that user's session. Revoke a key from the same list at any time. Keys are stored hashed. They are not rate limited by the app, so a runaway script is stopped by revoking its key.
 

@@ -22,7 +22,7 @@ Shell scripts and `git clone --mirror` jobs work until they don’t—usually wh
 ### 1. Enable automatic syncing
 
 1. Go to **Configuration → Automation**.
-2. Toggle **Automatic syncing** on and choose an interval that matches your recovery point objective (start with `30 minutes` for active teams, stretch to `12 hours` for archives). Frequent checks are cheap: [unchanged repositories cost almost no API budget](/use-cases/github-api-rate-limits/).
+2. Toggle **Automatic syncing** on and choose an interval that matches your recovery point objective (start with **Every hour** for active teams, stretch to **Every 12 hours** for archives). Frequent checks are cheap: [unchanged repositories cost almost no API budget](/use-cases/github-api-rate-limits/).
 3. Confirm the scheduler is running by checking the **Last sync** and **Next sync** timestamps in the Automation card.
 
 ### 2. Keep the repository list current
@@ -33,7 +33,7 @@ Shell scripts and `git clone --mirror` jobs work until they don’t—usually wh
 
 ### 3. Configure repository cleanup (optional)
 
-- Still on **Configuration → Automation**, enable **Handle orphaned repositories automatically**.
+- Still on **Configuration → Automation**, turn on the **Repository Cleanup** card.
 - Leave the action on **Archive** to keep a read-only backup when a GitHub repo disappears, or switch to **Delete** if you require a strict mirror.
 - Disable **Dry run** after your first test so the cleanup service can act on what it finds.
 
