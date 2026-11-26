@@ -35,7 +35,7 @@ Stars are a personal library—but they vanish when creators delete repos or you
 <figure class="mt-8 flex flex-col items-center">
   <img
     src="/assets/organisation.png"
-    alt="Organization view in Gitea Mirror highlighting starred GitHub repositories grouped in a dedicated Gitea org."
+    alt="Organizations page in Gitea Mirror listing each GitHub organization with its repositories, source and mirror status."
     class="w-full max-w-5xl rounded-xl border border-muted shadow-sm"
     loading="lazy"
   />
@@ -48,7 +48,7 @@ Stars are a personal library—but they vanish when creators delete repos or you
 
 - Enable **Automatic syncing** in **Configuration → Automation** and pick an interval around `1h` so new stars appear quickly.
 - Leave the scheduler running—auto-discovery pulls in new stars on each pass without additional configuration.
-- If you want unstarred projects archived or removed, enable **Handle orphaned repositories automatically** and choose **Archive** (recommended) or **Delete** for strict mirroring.
+- If you want unstarred projects archived or removed, turn on the **Repository Cleanup** card and choose **Archive** (recommended) or **Delete** for strict mirroring.
 
 ### 4. Showcase the library
 
@@ -82,7 +82,7 @@ Yes. Use the starred content selector to choose code-only or include issues, rel
 
 ### What happens when I unstar a repository?
 
-Enable Handle orphaned repositories automatically and choose Archive (recommended) to preserve history read-only, or Delete for a strict mirror.
+Turn on the Repository Cleanup card on the Automation tab and choose Archive (recommended) to preserve history read-only, or Delete for a strict mirror.
 
 ### Can others browse my collection safely?
 

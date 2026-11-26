@@ -65,14 +65,14 @@ For broader coverage, switch the organization strategy to **Preserve Structure**
 
 Open **Configuration → Automation** in the web UI.
 
-- Enable **Automatic syncing** and pick an interval that matches how fresh you want the mirror (start with `60 minutes`, shorten for active repos).
+- Enable **Automatic syncing** and pick an interval that matches how fresh you want the mirror (**Every hour** for active repositories, **Daily** is enough for archives).
 - Leave the scheduler enabled—auto-discovery ships with it, so new GitHub repositories and stars are pulled in on the next pass.
-- If you want the mirror to tidy up when GitHub repos disappear, enable **Handle orphaned repositories** and keep the action on **Archive** so history stays intact.
+- If you want the mirror to tidy up when GitHub repos disappear, turn on the **Repository Cleanup** card and keep the action on **Archive** so history stays intact.
 
 <figure class="mt-8 flex flex-col items-center">
   <img
-    src="/assets/configuration.png"
-    alt="Automation tab in Gitea Mirror showing the automatic syncing controls for GitHub backups."
+    src="/assets/automation.png"
+    alt="The Automation tab in Gitea Mirror with Automatic Syncing, Database Maintenance and Destructive Update Protection."
     class="w-full max-w-5xl rounded-xl border border-muted shadow-sm"
     loading="lazy"
   />

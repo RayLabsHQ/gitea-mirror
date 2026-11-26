@@ -37,7 +37,7 @@ In **Configuration → Mirroring**, open **Mirror Content**:
 <figure class="mt-8 flex flex-col items-center">
   <img
     src="/assets/repositories.png"
-    alt="Repositories dashboard in Gitea Mirror showing archived GitHub projects synced into Gitea."
+    alt="Repositories page in Gitea Mirror listing GitHub projects with their destination organization, last mirror time and status."
     class="w-full max-w-5xl rounded-xl border border-muted shadow-sm"
     loading="lazy"
   />
@@ -49,7 +49,7 @@ In **Configuration → Mirroring**, open **Mirror Content**:
 ### 3. Choose retention & cadence
 
 - In **Configuration → Automation**, enable **Automatic syncing** and set the interval (`1h` keeps fast-moving repos current; `12h` is usually enough for archives).
-- Turn on **Handle orphaned repositories automatically** and leave the action on **Archive** so anything deleted upstream is preserved locally but marked read-only.
+- Turn on the **Repository Cleanup** card and leave the action on **Archive** so anything deleted upstream is preserved locally but marked read-only.
 - Bump the **Latest releases** limit or run an occasional manual sync from the **Repositories** table when you need older release assets.
 
 ### 4. Record provenance
@@ -90,7 +90,7 @@ Yes. Enable Repository metadata and Releases & tags from **Configuration → Mir
 
 ### What happens if a GitHub repo is deleted or goes private?
 
-Turn on Handle orphaned repositories automatically and use Archive to keep a read-only copy locally. Delete enforces a strict mirror, removing the repo.
+Turn on the Repository Cleanup card on the Automation tab and use Archive to keep a read-only copy locally. Delete enforces a strict mirror, removing the repo.
 
 ### How much storage will I need long-term?
 
