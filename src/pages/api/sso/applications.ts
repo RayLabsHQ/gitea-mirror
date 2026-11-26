@@ -6,6 +6,7 @@ import { db, oauthAccessTokens, oauthClients, oauthConsents, oauthRefreshTokens 
 import { oauthClientResources } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { isInstanceOwner, ownerOnlyResponse } from "@/lib/instance-owner";
+import { applicationTypeOf, redirectUriProblem, type ApplicationType } from "@/lib/oauth-redirect-rules";
 
 // Backward-compatible OAuth application management API, for the instance
 // owner only (anyone signed in may look up one application by clientId).
@@ -35,27 +36,16 @@ function parseRedirectUris(value: unknown): string[] {
   return [];
 }
 
-// The plugin's redirect address rule (SafeUrlSchema in @better-auth/core),
-// for changes written here without going through the plugin: no
-// javascript:, data: or vbscript:, no fragment, and https unless the host is
-// this machine.
-const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
-
-export function redirectUriProblem(value: string): string | null {
-  let url: URL;
-  try {
-    url = new URL(value);
-  } catch {
-    return `${value} is not a valid URL`;
-  }
-  if (["javascript:", "data:", "vbscript:"].includes(url.protocol)) {
-    return `${value} cannot use the ${url.protocol} scheme`;
-  }
-  if (value.includes("#")) return `${value} must not contain a fragment (#)`;
-  if (url.protocol === "http:" && !LOOPBACK_HOSTS.has(url.hostname)) {
-    return `${value} must use https (http is only allowed for localhost)`;
-  }
-  return null;
+/**
+ * The plugin refuses bad input by throwing an APIError (400 with an
+ * error_description). Pass that on instead of a 500 that hides the reason.
+ */
+function authApiErrorResponse(error: unknown): Response | null {
+  const candidate = error as { name?: string; statusCode?: number; body?: { error_description?: string; message?: string } } | null;
+  if (candidate?.name !== "APIError" || typeof candidate.statusCode !== "number") return null;
+  if (candidate.statusCode < 400 || candidate.statusCode >= 500) return null;
+  const reason = candidate.body?.error_description || candidate.body?.message || "The request was refused";
+  return jsonError(candidate.statusCode, reason);
 }
 
 function jsonError(status: number, error: string): Response {
@@ -117,7 +107,9 @@ export async function POST(context: APIContext) {
     if (!(await isInstanceOwner(user.id))) return ownerOnlyResponse();
 
     const body = await context.request.json();
-    const { name, redirectURLs, type = "web", metadata } = body;
+    const { name, redirectURLs, type } = body;
+    // Anything but "native" has always meant a web application here.
+    const applicationType: ApplicationType = type === "native" ? "native" : "web";
 
     // Validate required fields
     if (!name || !redirectURLs || redirectURLs.length === 0) {
@@ -136,6 +128,10 @@ export async function POST(context: APIContext) {
           .split(",")
           .map((s) => s.trim())
           .filter(Boolean);
+    for (const uri of redirect_uris) {
+      const problem = redirectUriProblem(String(uri), applicationType);
+      if (problem) return jsonError(400, problem);
+    }
 
     // Delegate to the OAuth provider plugin so the client_id / client_secret
     // are generated and the secret is stored using the plugin's hashing.
@@ -145,7 +141,7 @@ export async function POST(context: APIContext) {
         client_name: name,
         redirect_uris,
         // 1.7 renamed the registration field and narrowed it to web or native.
-        application_type: type === "native" ? "native" : "web",
+        application_type: applicationType,
       },
     });
 
@@ -156,7 +152,7 @@ export async function POST(context: APIContext) {
       headers: { "Content-Type": "application/json" },
     });
   } catch (error) {
-    return createSecureErrorResponse(error, "SSO applications API");
+    return authApiErrorResponse(error) ?? createSecureErrorResponse(error, "SSO applications API");
   }
 }
 
@@ -196,8 +192,14 @@ export async function PUT(context: APIContext) {
         .map((uri: unknown) => String(uri).trim())
         .filter(Boolean);
       if (uris.length === 0) return jsonError(400, "At least one redirect URL is required");
+      // An application registered before better-auth 1.7 can hold a URL the
+      // current rules refuse (http://localhost on a web app, say). It keeps
+      // working, so editing the application must not force it out.
+      const stored = new Set(parseRedirectUris(existing.redirectUris));
+      const applicationType = applicationTypeOf(existing);
       for (const uri of uris) {
-        const problem = redirectUriProblem(uri);
+        if (stored.has(uri)) continue;
+        const problem = redirectUriProblem(uri, applicationType);
         if (problem) return jsonError(400, problem);
       }
       updates.redirectUris = JSON.stringify(uris);
