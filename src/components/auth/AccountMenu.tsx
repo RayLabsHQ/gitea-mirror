@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { KeyRound, LogOut, Mail } from "lucide-react";
+import { KeyRound, LogOut, Mail, ShieldCheck } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { authClient } from "@/lib/auth-client";
 import { withBase } from "@/lib/base-path";
@@ -16,12 +16,15 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ChangePasswordDialog } from "./ChangePasswordDialog";
 import { ChangeEmailDialog } from "./ChangeEmailDialog";
+import { TwoFactorDialog } from "./TwoFactorDialog";
+import { Switch } from "@/components/ui/switch";
 
 export function AccountMenu() {
   const { user, logout, refreshUser } = useAuth();
   const [hasPassword, setHasPassword] = useState<boolean | null>(null);
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [emailOpen, setEmailOpen] = useState(false);
+  const [twoFactorOpen, setTwoFactorOpen] = useState(false);
 
   useEffect(() => {
     if (!user) {
@@ -102,6 +105,31 @@ export function AccountMenu() {
               Change password
             </DropdownMenuItem>
           )}
+          {/* 2FA only guards the password login, so it needs a password (#552).
+              Off, the item offers the setup (a QR code each time); on, it
+              shows a switch, and flipping it asks for the password to turn
+              2FA off. The switch only shows the state; the item opens the
+              dialog. */}
+          {hasPassword && (
+            <DropdownMenuItem
+              onSelect={() => setTwoFactorOpen(true)}
+              className="cursor-pointer"
+              aria-label={user.twoFactorEnabled ? "2FA is on. Turn off" : "Set up 2FA"}
+            >
+              <ShieldCheck className="h-4 w-4 mr-2" />
+              2FA
+              {user.twoFactorEnabled ? (
+                <Switch
+                  checked
+                  tabIndex={-1}
+                  aria-hidden="true"
+                  className="ml-auto pointer-events-none"
+                />
+              ) : (
+                <span className="ml-auto rounded-md border px-1.5 py-0.5 text-xs font-medium leading-none">Set up</span>
+              )}
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem
             onSelect={() => setEmailOpen(true)}
             className="cursor-pointer"
@@ -121,6 +149,14 @@ export function AccountMenu() {
         <ChangePasswordDialog
           open={passwordOpen}
           onOpenChange={setPasswordOpen}
+        />
+      )}
+      {hasPassword && (
+        <TwoFactorDialog
+          open={twoFactorOpen}
+          onOpenChange={setTwoFactorOpen}
+          enabled={user.twoFactorEnabled === true}
+          onChanged={refreshUser}
         />
       )}
       <ChangeEmailDialog

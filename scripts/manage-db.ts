@@ -4,7 +4,8 @@ import { Database } from "bun:sqlite";
 import { drizzle } from "drizzle-orm/bun-sqlite";
 import { migrate } from "drizzle-orm/bun-sqlite/migrator";
 import { v4 as uuidv4 } from "uuid";
-import { users, configs, repositories, organizations, mirrorJobs, events, accounts, sessions } from "../src/lib/db/schema";
+import { users, configs, repositories, organizations, mirrorJobs, events, accounts, sessions, twoFactors } from "../src/lib/db/schema";
+import { disableTwoFactorForEmail } from "../src/lib/two-factor-admin";
 import { and, eq } from "drizzle-orm";
 import { hashPassword } from "better-auth/crypto";
 
@@ -120,6 +121,7 @@ async function resetUsers() {
     await db.delete(repositories);
     await db.delete(organizations);
     await db.delete(configs);
+    await db.delete(twoFactors);
     await db.delete(users);
 
     console.log("✅ All user accounts and related data have been removed");
@@ -282,6 +284,52 @@ async function resetPassword() {
 }
 
 /**
+ * Turn two-factor authentication off for one user (#552), for someone who
+ * lost both the authenticator app and the backup codes.
+ */
+async function disableTwoFactor() {
+  const emailArg = args.find((arg) => arg.startsWith("--email="));
+  const email = emailArg?.split("=")[1]?.trim();
+
+  if (!email) {
+    console.log("❌ Missing required argument");
+    console.log("Usage:");
+    console.log("  bun run disable-2fa -- --email=user@example.com");
+    process.exit(1);
+  }
+
+  if (!fs.existsSync(dbPath)) {
+    console.log("❌ Database does not exist");
+    process.exit(1);
+  }
+
+  const sqlite = new Database(dbPath);
+  const db = drizzle({ client: sqlite });
+
+  try {
+    const result = await disableTwoFactorForEmail(db, email);
+    if (!result.found) {
+      console.log(`❌ No user found for email: ${email}`);
+      sqlite.close();
+      process.exit(1);
+    }
+    console.log(
+      result.wasEnabled
+        ? `✅ Two-factor authentication turned off for ${email}. They can log in with their password and set it up again.`
+        : `✅ Two-factor authentication was already off for ${email}.`
+    );
+    if (result.trustedDevicesCleared > 0) {
+      console.log(`🔒 Forgot ${result.trustedDevicesCleared} trusted device(s)`);
+    }
+    sqlite.close();
+  } catch (error) {
+    console.error("❌ Error turning off two-factor authentication:", error);
+    sqlite.close();
+    process.exit(1);
+  }
+}
+
+/**
  * Auto mode - check and initialize if needed
  */
 async function autoMode() {
@@ -314,6 +362,9 @@ switch (command) {
   case "reset-password":
     await resetPassword();
     break;
+  case "disable-2fa":
+    await disableTwoFactor();
+    break;
   case "auto":
     await autoMode();
     break;
@@ -324,6 +375,7 @@ switch (command) {
     console.log("  fix          - Fix database location issues");
     console.log("  reset-users  - Remove all users and related data");
     console.log("  reset-password - Reset one user's password and clear sessions");
+    console.log("  disable-2fa  - Turn off two-factor authentication for one user");
     console.log("  cleanup      - Remove all database files");
     console.log("  auto         - Auto initialize if needed");
     process.exit(1);

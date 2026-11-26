@@ -12,6 +12,7 @@ import { Separator } from '@/components/ui/separator';
 import { toast, Toaster } from 'sonner';
 import { showErrorToast } from '@/lib/utils';
 import { Loader2, Mail, Globe, Eye, EyeOff } from 'lucide-react';
+import { TwoFactorChallenge } from './TwoFactorChallenge';
 import { withBase } from '@/lib/base-path';
 import {
   DEFAULT_AUTH_METHOD,
@@ -26,6 +27,8 @@ export function LoginForm() {
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [ssoEmail, setSsoEmail] = useState('');
+  // The password was accepted and the account wants a code next (#552).
+  const [twoFactorPending, setTwoFactorPending] = useState(false);
   const { login } = useAuth();
   const { authMethods, isLoading: isLoadingMethods } = useAuthMethods();
   const [activeTab, setActiveTab] = useState<AuthMethod>(DEFAULT_AUTH_METHOD);
@@ -65,18 +68,30 @@ export function LoginForm() {
     }
 
     try {
-      await login(email, password);
+      const { twoFactorRequired, redirecting } = await login(email, password);
       setLastAuthMethod('email');
-      toast.success('Login successful!');
-      // Small delay before redirecting to see the success message
-      setTimeout(() => {
-        window.location.href = withBase('/');
-      }, 1000);
+      if (twoFactorRequired) {
+        setTwoFactorPending(true);
+        return;
+      }
+      finishLogin(redirecting);
     } catch (error) {
       showErrorToast(error, toast);
     } finally {
       setIsLoading(false);
     }
+  }
+
+  function finishLogin(redirecting: boolean) {
+    toast.success('Login successful!');
+    // An app signing in through Gitea Mirror (OIDC) gets the browser back:
+    // Better Auth's client is already going to its callback or the consent
+    // page, and a redirect to the dashboard would cut that off.
+    if (redirecting) return;
+    // Small delay before redirecting to see the success message
+    setTimeout(() => {
+      window.location.href = withBase('/');
+    }, 1000);
   }
 
   async function handleSSOLogin(domain?: string, providerId?: string) {
@@ -129,11 +144,18 @@ export function LoginForm() {
           </div>
           <CardTitle className="text-2xl">Gitea Mirror</CardTitle>
           <CardDescription>
-            Log in to manage your GitHub to Gitea mirroring
+            {twoFactorPending
+              ? 'One more step to log in'
+              : 'Log in to manage your GitHub to Gitea mirroring'}
           </CardDescription>
         </CardHeader>
         
-        {isLoadingMethods ? (
+        {twoFactorPending ? (
+          <TwoFactorChallenge
+            onVerified={finishLogin}
+            onCancel={() => setTwoFactorPending(false)}
+          />
+        ) : isLoadingMethods ? (
           <CardContent>
             <div className="flex justify-center py-8">
               <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -326,11 +348,13 @@ export function LoginForm() {
           </>
         )}
         
-        <div className="px-6 pb-6 text-center">
-          <p className="text-sm text-muted-foreground">
-            Don't have an account? Contact your administrator.
-          </p>
-        </div>
+        {!twoFactorPending && (
+          <div className="px-6 pb-6 text-center">
+            <p className="text-sm text-muted-foreground">
+              Don't have an account? Contact your administrator.
+            </p>
+          </div>
+        )}
       </Card>
       <Toaster />
     </>
