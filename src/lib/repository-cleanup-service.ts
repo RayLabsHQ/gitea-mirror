@@ -16,7 +16,7 @@ import { createGiteaClient, deleteGiteaRepo, archiveGiteaRepo, getGiteaRepoOwner
 import { usesPushEngine } from '@/lib/destination-connection';
 import { getDecryptedGiteaToken } from '@/lib/utils/config-encryption';
 import { publishEvent } from '@/lib/events';
-import { triggerRepositoryCleanupNotification } from '@/lib/notification-service';
+import { triggerRepositoryCleanupNotification, triggerSourceMissingNotification } from '@/lib/notification-service';
 import { isMirrorableGitHubRepo } from '@/lib/repo-eligibility';
 
 let cleanupInterval: NodeJS.Timeout | null = null;
@@ -103,7 +103,32 @@ export function splitFullName(
   return { owner: segments.slice(0, -1).join('/'), name: segments[segments.length - 1] };
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** The configured wait in whole days (#549); anything unusable means none. */
+export function cleanupGraceDays(cleanupConfig: { orphanedRepoGraceDays?: unknown } | null | undefined): number {
+  const days = Number(cleanupConfig?.orphanedRepoGraceDays);
+  return Number.isFinite(days) && days > 0 ? Math.floor(days) : 0;
+}
+
+/** When a repository whose source went missing at `missingSince` is acted on. */
+export function cleanupDueAt(missingSince: Date, graceDays: number): Date {
+  return new Date(missingSince.getTime() + graceDays * DAY_MS);
+}
+
+/** What one pass over the sources found. */
+interface OrphanScan {
+  /** Rows whose source is confirmed gone. */
+  orphaned: any[];
+  /** Rows that carry a source-missing time but whose source was found again. */
+  seenAgain: any[];
+}
+
 async function identifyOrphanedRepositories(config: any): Promise<any[]> {
+  return (await scanForOrphanedRepositories(config)).orphaned;
+}
+
+async function scanForOrphanedRepositories(config: any): Promise<OrphanScan> {
   const userId = config.userId;
 
   try {
@@ -136,6 +161,11 @@ async function identifyOrphanedRepositories(config: any): Promise<any[]> {
     });
 
     const orphanedById = new Map<string, any>();
+    // Only a clean sighting clears the wait (#549); an error proves nothing.
+    const seenAgainById = new Map<string, any>();
+    const markSeen = (repo: any) => {
+      if (repo.sourceMissingSince) seenAgainById.set(repo.id, repo);
+    };
 
     for (const source of sources) {
       // A plain git host has no listing to be missing from, so nothing on it
@@ -229,6 +259,7 @@ async function identifyOrphanedRepositories(config: any): Promise<any[]> {
           // not yet a confirmed orphan.
           return true;
         }
+        markSeen(repo);
 
         if (!isMirrorableGitHubRepo(githubRepo)) {
           console.log(`[Repository Cleanup] Preserving ${repo.fullName} - repository is disabled on the source`);
@@ -264,14 +295,14 @@ async function identifyOrphanedRepositories(config: any): Promise<any[]> {
               );
               // Still starred => the bulk star fetch missed it. Fail safe: do
               // not treat as orphaned. A clean "not starred" confirms it.
-              return { repo, directCheckConfirmsGone: !stillStarred };
+              return { repo, directCheckConfirmsGone: !stillStarred, seen: stillStarred };
             } catch (starError: any) {
               console.warn(
                 `[Repository Cleanup] Direct star-check for ${repo.fullName} failed with a non-404 error; skipping this cycle to be safe: ${
                   starError instanceof Error ? starError.message : String(starError)
                 }`
               );
-              return { repo, directCheckConfirmsGone: false };
+              return { repo, directCheckConfirmsGone: false, seen: false };
             }
           }
 
@@ -282,14 +313,14 @@ async function identifyOrphanedRepositories(config: any): Promise<any[]> {
             );
             // Present => the bulk fetch missed it (e.g. an org-allowlist edge
             // case). Fail safe: not orphaned. A clean 404 (null) confirms it.
-            return { repo, directCheckConfirmsGone: upstream === null };
+            return { repo, directCheckConfirmsGone: upstream === null, seen: upstream !== null };
           } catch (repoError: any) {
             console.warn(
               `[Repository Cleanup] Direct existence check for ${repo.fullName} failed with a non-404 error; skipping this cycle to be safe: ${
                 repoError instanceof Error ? repoError.message : String(repoError)
               }`
             );
-            return { repo, directCheckConfirmsGone: false };
+            return { repo, directCheckConfirmsGone: false, seen: false };
           }
         })
       );
@@ -305,7 +336,8 @@ async function identifyOrphanedRepositories(config: any): Promise<any[]> {
           return;
         }
 
-        const { repo, directCheckConfirmsGone } = outcome.value;
+        const { repo, directCheckConfirmsGone, seen } = outcome.value;
+        if (seen) markSeen(repo);
         const isOrphaned = resolveOrphanVerdict({
           fullNameFoundInBulkList: false,
           directCheckConfirmsGone,
@@ -327,11 +359,11 @@ async function identifyOrphanedRepositories(config: any): Promise<any[]> {
       console.log(`[Repository Cleanup] Found ${orphanedRepos.length} orphaned repositories for user ${userId}`);
     }
 
-    return orphanedRepos;
+    return { orphaned: orphanedRepos, seenAgain: Array.from(seenAgainById.values()) };
   } catch (error) {
     console.error(`[Repository Cleanup] Error identifying orphaned repositories for user ${userId}:`, error);
     // Return empty array on error to prevent accidental deletions
-    return [];
+    return { orphaned: [], seenAgain: [] };
   }
 }
 
@@ -545,6 +577,8 @@ export interface RepositoryCleanupResult {
   repositories: string[];
   /** Full names of the repositories this run archived or removed. */
   handled: string[];
+  /** Repositories whose source is gone but whose wait is not over (#549). */
+  waiting: Array<{ fullName: string; actOn: string }>;
   /** Planned actions were only logged. */
   dryRun: boolean;
   action: "skip" | "archive" | "delete";
@@ -581,6 +615,7 @@ async function runRepositoryCleanup(
       errors: [],
       repositories: [],
       handled: [],
+      waiting: [],
       dryRun: cleanupConfig.dryRun ?? false,
       action: cleanupConfig.orphanedRepoAction || 'archive',
     };
@@ -605,9 +640,13 @@ async function runRepositoryCleanupUnlocked(config: any): Promise<RepositoryClea
     errors: [] as string[],
     repositories: [],
     handled: [],
+    waiting: [],
     dryRun: cleanupConfig.dryRun ?? false,
     action: cleanupConfig.orphanedRepoAction || 'archive',
   };
+  const graceDays = cleanupGraceDays(cleanupConfig);
+  /** Found gone for the first time in this run and now waiting. */
+  const noticed: Array<{ fullName: string; actOn: string }> = [];
   
   try {
     // Check if repository cleanup is enabled - either through the main toggle or the specific feature
@@ -631,7 +670,9 @@ async function runRepositoryCleanupUnlocked(config: any): Promise<RepositoryClea
     }
     
     // Identify orphaned repositories
-    const orphanedRepos = await identifyOrphanedRepositories(config);
+    const scan = await scanForOrphanedRepositories(config);
+    await clearSourceMissing(scan.seenAgain);
+    const orphanedRepos = scan.orphaned;
     results.orphanedCount = orphanedRepos.length;
     results.repositories = orphanedRepos.map((repo: any) => repo.fullName);
     
@@ -650,17 +691,52 @@ async function runRepositoryCleanupUnlocked(config: any): Promise<RepositoryClea
     const dryRun = cleanupConfig.dryRun ?? false;
     const batchSize = cleanupConfig.batchSize || 10;
     const pauseBetweenDeletes = cleanupConfig.pauseBetweenDeletes || 2000;
+
+    // The wait (#549): the first run that finds a source gone records when,
+    // and the action waits until the source has been gone for graceDays. The
+    // time is recorded in a dry run too, so a dry run shows the real dates.
+    // Whole seconds, as stored, so every run reports the same date.
+    const now = new Date(Math.floor(Date.now() / 1000) * 1000);
+    const due: any[] = [];
+    for (const repo of orphanedRepos) {
+      // Skip protected repositories
+      if (protectedRepos.has(repo.name) || protectedRepos.has(repo.fullName)) {
+        console.log(`[Repository Cleanup] Skipping protected repository ${repo.fullName}`);
+        continue;
+      }
+
+      const firstSeen = !repo.sourceMissingSince;
+      const missingSince = firstSeen ? now : new Date(repo.sourceMissingSince);
+      if (firstSeen) {
+        await db
+          .update(repositories)
+          .set({ sourceMissingSince: now })
+          .where(eq(repositories.id, repo.id));
+      }
+
+      const actOn = cleanupDueAt(missingSince, graceDays);
+      if (actOn.getTime() <= now.getTime()) {
+        due.push(repo);
+        continue;
+      }
+      console.log(
+        `[Repository Cleanup] The source of ${repo.fullName} is gone since ${missingSince.toISOString()}; waiting until ${actOn.toISOString()} (${graceDays} day wait) before the '${action}' action`
+      );
+      const entry = { fullName: repo.fullName, actOn: actOn.toISOString() };
+      results.waiting.push(entry);
+      if (firstSeen) noticed.push(entry);
+    }
+
+    // The heads-up goes out only when something will happen at the end of the
+    // wait, like the cleanup notification itself.
+    if (dryRun || action === 'skip') {
+      noticed.length = 0;
+    }
     
-    for (let i = 0; i < orphanedRepos.length; i += batchSize) {
-      const batch = orphanedRepos.slice(i, i + batchSize);
+    for (let i = 0; i < due.length; i += batchSize) {
+      const batch = due.slice(i, i + batchSize);
       
       for (const repo of batch) {
-        // Skip protected repositories
-        if (protectedRepos.has(repo.name) || protectedRepos.has(repo.fullName)) {
-          console.log(`[Repository Cleanup] Skipping protected repository ${repo.fullName}`);
-          continue;
-        }
-        
         try {
           const outcome = await handleOrphanedRepository(config, repo, action, dryRun);
           results.processedCount++;
@@ -674,7 +750,7 @@ async function runRepositoryCleanupUnlocked(config: any): Promise<RepositoryClea
         }
         
         // Pause between operations to avoid rate limiting
-        if (i < orphanedRepos.length - 1) {
+        if (i < due.length - 1) {
           await new Promise(resolve => setTimeout(resolve, pauseBetweenDeletes));
         }
       }
@@ -690,16 +766,41 @@ async function runRepositoryCleanupUnlocked(config: any): Promise<RepositoryClea
     results.errors.push(`General cleanup error: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
 
-  // One notification for the whole run (#554). Never throws.
+  const destinationChanged = planOrphanedRepoAction(results.action, cleanupConfig.deleteFromGitea === true).gitea !== 'none';
+
+  // A heads-up for sources found gone in this run that are now waiting
+  // (#549), then one notification for what the run did (#554). Never throw.
+  await triggerSourceMissingNotification({
+    userId,
+    action: results.action,
+    destinationChanged,
+    graceDays,
+    repositories: noticed,
+  });
   await triggerRepositoryCleanupNotification({
     userId,
     action: results.action,
-    destinationChanged: planOrphanedRepoAction(results.action, cleanupConfig.deleteFromGitea === true).gitea !== 'none',
+    destinationChanged,
     repositoryNames: results.handled,
     failures: results.errors,
   });
 
   return results;
+}
+
+/**
+ * Forget the source-missing time of rows whose source was found again, so a
+ * later disappearance starts a new wait.
+ */
+async function clearSourceMissing(rows: any[]): Promise<void> {
+  if (rows.length === 0) return;
+  for (const row of rows) {
+    console.log(`[Repository Cleanup] The source of ${row.fullName} is back; its cleanup wait is reset`);
+  }
+  await db
+    .update(repositories)
+    .set({ sourceMissingSince: null })
+    .where(inArray(repositories.id, rows.map((row) => row.id)));
 }
 
 /**
@@ -791,6 +892,15 @@ export function isRepositoryCleanupServiceRunning(): boolean {
 
 // Export functions for use by scheduler
 export { identifyOrphanedRepositories, handleOrphanedRepository };
+
+/**
+ * Repository cleanup as part of a scheduled sync: the same run as the
+ * background check and Run now (protected repositories, the wait and the
+ * notifications included), skipped when one is already going for the user.
+ */
+export function runRepositoryCleanupForConfig(config: any): Promise<RepositoryCleanupResult> {
+  return runRepositoryCleanup(config, 'skip');
+}
 
 /**
  * Manually trigger repository cleanup for a specific user

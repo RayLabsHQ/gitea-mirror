@@ -169,6 +169,13 @@
       "when": 1795652110452,
       "tag": "0023_mirror_job_resume_attempts",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "6",
+      "when": 1795659326010,
+      "tag": "0024_repository_source_missing_since",
+      "breakpoints": true
     }
   ]
 }

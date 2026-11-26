@@ -444,6 +444,7 @@ export function mapUiCleanupToDb(
     protectedRepos: uiCleanup.protectedRepos ?? [],
     dryRun: uiCleanup.dryRun ?? false,
     orphanedRepoAction: (uiCleanup.orphanedRepoAction as DbCleanupConfig["orphanedRepoAction"]) || "archive",
+    orphanedRepoGraceDays: normalizeGraceDays(uiCleanup.orphanedRepoGraceDays),
     batchSize: uiCleanup.batchSize ?? 10,
     pauseBetweenDeletes: uiCleanup.pauseBetweenDeletes ?? 2000,
     lastRun: existing ? existing.lastRun ?? null : uiCleanup.lastRun ?? null,
@@ -455,6 +456,12 @@ export function mapUiCleanupToDb(
         now,
       }) ?? null,
   } as DbCleanupConfig;
+}
+
+/** Whole days, never negative; anything unusable means no wait. */
+function normalizeGraceDays(value: unknown): number {
+  const days = typeof value === "string" ? parseInt(value, 10) : Number(value);
+  return Number.isFinite(days) && days > 0 ? Math.floor(days) : 0;
 }
 
 /**
@@ -479,6 +486,7 @@ export function mapDbCleanupToUi(dbCleanup: DbCleanupConfig): any {
     protectedRepos: dbCleanup.protectedRepos ?? [],
     dryRun: dbCleanup.dryRun ?? false,
     orphanedRepoAction: dbCleanup.orphanedRepoAction ?? "archive",
+    orphanedRepoGraceDays: normalizeGraceDays(dbCleanup.orphanedRepoGraceDays),
     batchSize: dbCleanup.batchSize ?? 10,
     pauseBetweenDeletes: dbCleanup.pauseBetweenDeletes ?? 2000,
     lastRun: dbCleanup.lastRun ?? null,

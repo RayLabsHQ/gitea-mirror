@@ -29,13 +29,15 @@ The **Notification Events** card controls which events produce a notification.
 | Sync errors | A mirror job ends with status `failed`, the release filters remove every release of a destination, or Gitea has not run a sync it accepted for over an hour (at most one such alert every six hours) | On |
 | Sync success | A mirror job ends with status `mirrored` or `synced` | Off |
 | New repositories discovered | New repositories are found and imported, by the scheduled auto import, the import that runs at startup when scheduling is on, or a sync of an organization. Three switches below it pick which ones count: in your account, in an organization, and starred. All three are on by default | Off |
-| Repository cleanup | [Repository cleanup](/docs/cleanup-and-reconcile/) archives or removes repositories whose source is gone, or fails to. A dry run and the `skip` action change nothing and send nothing | Off |
+| Repository cleanup | [Repository cleanup](/docs/cleanup-and-reconcile/) archives or removes repositories whose source is gone, or fails to, or starts [waiting](/docs/cleanup-and-reconcile/#waiting-before-acting) before it does. A dry run and the `skip` action change nothing and send nothing | Off |
 
 Only terminal job statuses trigger sync notifications. Jobs that are still queued or in progress produce nothing.
 
 New repositories arrive as one notification per group instead of one per repository: one for your account, one per organization, and one for all starred repositories. Each lists up to 10 names, then "and N more".
 
 A cleanup run sends one notification for everything it did, for example "Repository Cleanup: 2 repositories archived", listing up to 10 names, followed by any repository it could not handle. It says whether the destination was changed or only gitea-mirror's own list, which depends on **Apply to the destination too**. A repository is reported once: the next run leaves an archived repository alone.
+
+With **Wait before acting** set, the run that first finds a source gone sends a heads-up instead, for example "Repository Cleanup: source gone for 1 repository", saying on which day the repository will be archived or removed if its source is still gone. It is sent once per disappearance, with the same switch and the same `repo_cleanup` type.
 
 Errors are always escalated by the provider that supports priorities, regardless of the default priority you configure. For ntfy that means `high`, for Gotify it means priority `8`.
 

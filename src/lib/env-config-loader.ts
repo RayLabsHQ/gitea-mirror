@@ -107,6 +107,7 @@ interface EnvConfig {
     protectedRepos?: string[];
     dryRun?: boolean;
     orphanedRepoAction?: 'skip' | 'archive' | 'delete';
+    orphanedRepoGraceDays?: number;
     batchSize?: number;
     pauseBetweenDeletes?: number;
   };
@@ -123,6 +124,18 @@ function envFlag(name: string): boolean | undefined {
   const raw = process.env[name]?.trim();
   if (!raw) return undefined;
   return raw.toLowerCase() === 'true';
+}
+
+/** A whole number of zero or more. Unset, empty or unusable is undefined, with a warning for the latter. */
+function envNonNegativeInt(name: string): number | undefined {
+  const raw = process.env[name]?.trim();
+  if (!raw) return undefined;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 0) {
+    console.warn(`[ENV Config Loader] Ignoring ${name}=${raw}: expected a whole number of 0 or more`);
+    return undefined;
+  }
+  return value;
 }
 
 /** True when any of the variables is "true", undefined when none is set. */
@@ -289,6 +302,7 @@ function parseEnvConfig(): EnvConfig {
       protectedRepos,
       dryRun: envFlag('CLEANUP_DRY_RUN'),
       orphanedRepoAction: process.env.CLEANUP_ORPHANED_REPO_ACTION as 'skip' | 'archive' | 'delete',
+      orphanedRepoGraceDays: envNonNegativeInt('CLEANUP_ORPHANED_REPO_GRACE_DAYS'),
       batchSize: process.env.CLEANUP_BATCH_SIZE ? parseInt(process.env.CLEANUP_BATCH_SIZE, 10) : undefined,
       pauseBetweenDeletes: process.env.CLEANUP_PAUSE_BETWEEN_DELETES ? parseInt(process.env.CLEANUP_PAUSE_BETWEEN_DELETES, 10) : undefined,
     },
@@ -562,6 +576,7 @@ export async function initializeConfigFromEnv(): Promise<void> {
       protectedRepos: envConfig.cleanup.protectedRepos ?? existingConfig?.[0]?.cleanupConfig?.protectedRepos ?? [],
       dryRun: envConfig.cleanup.dryRun ?? existingConfig?.[0]?.cleanupConfig?.dryRun ?? true,
       orphanedRepoAction: envConfig.cleanup.orphanedRepoAction || existingConfig?.[0]?.cleanupConfig?.orphanedRepoAction || 'archive',
+      orphanedRepoGraceDays: envConfig.cleanup.orphanedRepoGraceDays ?? existingConfig?.[0]?.cleanupConfig?.orphanedRepoGraceDays ?? 0,
       batchSize: envConfig.cleanup.batchSize ?? existingConfig?.[0]?.cleanupConfig?.batchSize ?? 10,
       pauseBetweenDeletes: envConfig.cleanup.pauseBetweenDeletes ?? existingConfig?.[0]?.cleanupConfig?.pauseBetweenDeletes ?? 2000,
       lastRun: existingConfig?.[0]?.cleanupConfig?.lastRun || undefined,

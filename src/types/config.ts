@@ -66,6 +66,8 @@ export interface DatabaseCleanupConfig {
   retentionDays: number; // Actually stores seconds, but keeping the name for compatibility
   deleteIfNotInGitHub: boolean;
   orphanedRepoAction: "skip" | "archive" | "delete";
+  /** Days a source must stay gone before the action is applied (#549). */
+  orphanedRepoGraceDays?: number;
   dryRun: boolean;
   deleteFromGitea?: boolean;
   protectedRepos?: string[];

@@ -247,7 +247,7 @@ Sizes are bytes. `destinationSize` is Git and LFS together as Gitea or Forgejo r
 
 ### Run cleanup
 
-`POST /api/cleanup/trigger` runs the [repository cleanup](/docs/cleanup-and-reconcile/) now, with the account's saved cleanup settings, and returns how many orphaned repositories were found and processed, their names, whether it was a dry run, and any errors. It answers 409 while a cleanup for the account is already running. `GET /api/cleanup/trigger` returns the cleanup configuration and the last and next run times.
+`POST /api/cleanup/trigger` runs the [repository cleanup](/docs/cleanup-and-reconcile/) now, with the account's saved cleanup settings, and returns how many orphaned repositories were found and processed, their names, the ones still inside the [wait before acting](/docs/cleanup-and-reconcile/#waiting-before-acting) with the time each will be acted on (`waiting`), whether it was a dry run, and any errors. It answers 409 while a cleanup for the account is already running. `GET /api/cleanup/trigger` returns the cleanup configuration and the last and next run times.
 
 `POST /api/cleanup/maintenance` runs the [database maintenance](/docs/cleanup-and-reconcile/#database-maintenance) now and returns how many activity entries (`mirrorJobsDeleted`) and events (`eventsDeleted`) it removed, with the new `lastRun` and `nextRun`.
 

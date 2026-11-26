@@ -1019,7 +1019,40 @@ const latestUpgradeFixtures: Record<string, UpgradeFixture> = {
     seed: seedPre0023Database,
     verify: verify0023Migration,
   },
+  "0024_repository_source_missing_since": {
+    seed: seedPre0024Database,
+    verify: verify0024Migration,
+  },
 };
+
+function seedPre0024Database(db: any) {
+  // A repository from before the cleanup wait (#549): its source was never
+  // recorded as missing, so a wait must start fresh for it.
+  db.run("INSERT INTO users (id, email, username, name) VALUES ('u-sm24', 'sm24@example.com', 'sm24', 'Missing Twenty-Four')");
+  db.run(
+    "INSERT INTO configs (id, user_id, name, is_active, github_config, gitea_config, schedule_config, cleanup_config) " +
+      "VALUES ('cfg-sm24', 'u-sm24', 'Default', 1, '{\"provider\":\"github\",\"owner\":\"octocat\",\"token\":\"gh-token\",\"type\":\"personal\"}', '{}', '{}', '{}')",
+  );
+  db.run(
+    "INSERT INTO repositories (id, user_id, config_id, name, full_name, normalized_full_name, url, clone_url, owner, default_branch, status, mirrored_location) " +
+      "VALUES ('repo-sm24', 'u-sm24', 'cfg-sm24', 'app', 'octocat/app', 'octocat/app', 'https://github.com/octocat/app', 'https://github.com/octocat/app.git', 'octocat', 'main', 'mirrored', 'mirror/app')",
+  );
+}
+
+function verify0024Migration(db: any) {
+  const columns = db.query("PRAGMA table_info(repositories)").all() as TableInfoRow[];
+  const column = columns.find((c) => c.name === "source_missing_since");
+  assert(column, "Expected repositories.source_missing_since to exist after migration");
+  assert(column.notnull === 0, "Expected repositories.source_missing_since to be nullable");
+  assert(column.dflt_value === null, `Expected repositories.source_missing_since to have no default, got ${column.dflt_value}`);
+  const row = db.query("SELECT source_missing_since, status FROM repositories WHERE id = 'repo-sm24'").get() as
+    | { source_missing_since: number | null; status: string }
+    | null;
+  assert(
+    row?.source_missing_since === null && row.status === "mirrored",
+    `Expected the existing repository to keep its status with no missing time, got ${JSON.stringify(row)}`,
+  );
+}
 
 function seedPre0023Database(db: any) {
   // A job left in progress by the version before: it must be resumable.

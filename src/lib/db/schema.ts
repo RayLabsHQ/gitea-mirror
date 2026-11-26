@@ -247,6 +247,9 @@ export const cleanupConfigSchema = z.object({
   orphanedRepoAction: z
     .enum(["skip", "archive", "delete"])
     .default("archive"),
+  // Days a source must stay gone before the action is applied (#549). 0 acts
+  // on the first check that finds it gone.
+  orphanedRepoGraceDays: z.number().int().min(0).default(0),
   batchSize: z.number().default(10),
   pauseBetweenDeletes: z.number().default(2000),
   lastRun: z.coerce.date().optional(),
@@ -682,6 +685,9 @@ export const repositories = sqliteTable("repositories", {
 
   status: text("status").notNull().default("imported"),
   lastMirrored: integer("last_mirrored", { mode: "timestamp" }),
+  // When repository cleanup first found the source gone; cleared when it is
+  // seen again. The cleanup wait counts from here (#549).
+  sourceMissingSince: integer("source_missing_since", { mode: "timestamp" }),
   errorMessage: text("error_message"),
   
   destinationOrg: text("destination_org"),

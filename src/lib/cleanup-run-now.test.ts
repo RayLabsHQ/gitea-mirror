@@ -1,7 +1,7 @@
 /**
  * Run now for database maintenance and repository cleanup (#547), the
  * repository cleanup no longer moving database maintenance's next run (#548),
- * and the cleanup notification (#554).
+ * the cleanup notification (#554) and the wait before acting (#549).
  *
  * Runs against the real schema in an in-memory SQLite database that replaces
  * @/lib/db through mock.module, with the source host faked, so the file runs
@@ -78,7 +78,7 @@ if (isolated) {
 const { runDatabaseCleanupNow, runAutomaticCleanup } = isolated
   ? await import("@/lib/cleanup-service")
   : ({} as Partial<typeof import("@/lib/cleanup-service")>);
-const { triggerRepositoryCleanup, RepositoryCleanupBusyError } = isolated
+const { triggerRepositoryCleanup, RepositoryCleanupBusyError, runRepositoryCleanupForConfig } = isolated
   ? await import("@/lib/repository-cleanup-service")
   : ({} as Partial<typeof import("@/lib/repository-cleanup-service")>);
 
@@ -334,6 +334,204 @@ if (isolated) {
       await seed({}, older);
       await triggerRepositoryCleanup!("user-1");
       expect(sent).toHaveLength(0);
+    });
+  });
+
+  describe("wait before acting (#549)", () => {
+    const missingSince = async (id = "repo-gone") => {
+      const [row] = await db.select().from(schema.repositories).where(eq(schema.repositories.id, id));
+      return row?.sourceMissingSince ?? null;
+    };
+    const status = async (id = "repo-gone") => {
+      const [row] = await db.select().from(schema.repositories).where(eq(schema.repositories.id, id));
+      return row?.status;
+    };
+    /** Move the recorded time back, as if the source went missing days ago. */
+    const backdate = (days: number, id = "repo-gone") => {
+      const seconds = Math.floor((Date.now() - days * DAY_MS) / 1000);
+      sqlite.run(`UPDATE repositories SET source_missing_since = ${seconds} WHERE id = '${id}'`);
+    };
+    const seed = async (cleanup: Record<string, unknown> = {}, notification: Record<string, unknown> = NOTIFY_ON_CLEANUP) => {
+      listRepositories = async () => [];
+      sent.length = 0;
+      for (const table of ["events", "mirror_jobs", "repositories", "configs", "users"]) {
+        sqlite.run(`DELETE FROM ${table}`);
+      }
+      await seedUser("user-1", {
+        enabled: true,
+        deleteIfNotInGitHub: true,
+        deleteFromGitea: true,
+        orphanedRepoAction: "archive",
+        orphanedRepoGraceDays: 7,
+        dryRun: true,
+        pauseBetweenDeletes: 0,
+        ...cleanup,
+      }, notification);
+      await db.insert(schema.repositories).values({
+        id: "repo-gone",
+        userId: "user-1",
+        configId: "config-user-1",
+        sourceId: "src-1",
+        name: "gone",
+        fullName: "octo/gone",
+        normalizedFullName: "octo/gone",
+        url: "https://github.com/octo/gone",
+        cloneUrl: "https://github.com/octo/gone.git",
+        owner: "octo",
+        defaultBranch: "main",
+        status: "mirrored",
+      } as any);
+    };
+
+    test("the first run records when the source went missing and waits, with one heads-up", async () => {
+      // A real action, so the heads-up names it; dry run is checked separately.
+      await seed({ dryRun: false, deleteFromGitea: false });
+      const before = Date.now();
+
+      const result = await triggerRepositoryCleanup!("user-1");
+
+      expect(result.orphanedCount).toBe(1);
+      expect(result.handled).toEqual([]);
+      expect(result.processedCount).toBe(0);
+      expect(result.waiting).toHaveLength(1);
+      expect(result.waiting[0].fullName).toBe("octo/gone");
+      const since = await missingSince();
+      expect(since).toBeInstanceOf(Date);
+      expect(since!.getTime()).toBeGreaterThanOrEqual(Math.floor(before / 1000) * 1000);
+      expect(new Date(result.waiting[0].actOn).getTime()).toBe(since!.getTime() + 7 * DAY_MS);
+      expect(await status()).toBe("mirrored");
+
+      expect(sent).toHaveLength(1);
+      expect(sent[0].type).toBe("repo_cleanup");
+      expect(sent[0].title).toBe("Repository Cleanup: source gone for 1 repository");
+      expect(sent[0].message).toContain(
+        `If it is still gone on ${result.waiting[0].actOn.slice(0, 10)} (7 days from now), the repository will be marked archived in gitea-mirror.`
+      );
+      expect(sent[0].message).toContain("The copies on the destination will not be changed.");
+      expect(sent[0].message).toContain("- octo/gone");
+
+      // The next run keeps the first time and does not repeat the heads-up.
+      const again = await triggerRepositoryCleanup!("user-1");
+      expect(again.waiting.map((entry) => entry.actOn)).toEqual(result.waiting.map((entry) => entry.actOn));
+      expect((await missingSince())!.getTime()).toBe(since!.getTime());
+      expect(sent).toHaveLength(1);
+    });
+
+    test("once the source has been gone long enough the action runs and is reported", async () => {
+      await seed({ dryRun: false, deleteFromGitea: false });
+      await triggerRepositoryCleanup!("user-1");
+      backdate(8);
+      sent.length = 0;
+
+      const result = await triggerRepositoryCleanup!("user-1");
+
+      expect(result.handled).toEqual(["octo/gone"]);
+      expect(result.waiting).toEqual([]);
+      expect(await status()).toBe("archived");
+      expect(sent).toHaveLength(1);
+      expect(sent[0].title).toBe("Repository Cleanup: 1 repository archived");
+    });
+
+    test("a source that comes back during the wait resets it", async () => {
+      await seed({ dryRun: false });
+      await triggerRepositoryCleanup!("user-1");
+      backdate(6);
+
+      listRepositories = async () => [{ fullName: "octo/gone", name: "gone", owner: "octo" }];
+      const back = await triggerRepositoryCleanup!("user-1");
+      expect(back.orphanedCount).toBe(0);
+      expect(await missingSince()).toBeNull();
+
+      // Gone again: the wait starts over instead of acting on the old time.
+      listRepositories = async () => [];
+      sent.length = 0;
+      const gone = await triggerRepositoryCleanup!("user-1");
+      expect(gone.handled).toEqual([]);
+      expect(gone.waiting).toHaveLength(1);
+      expect(await status()).toBe("mirrored");
+      expect(sent).toHaveLength(1);
+      expect(sent[0].title).toBe("Repository Cleanup: source gone for 1 repository");
+    });
+
+    test("a failed lookup neither starts nor resets the wait", async () => {
+      await seed({ dryRun: false });
+      await triggerRepositoryCleanup!("user-1");
+      backdate(6);
+      const since = await missingSince();
+
+      listRepositories = async () => {
+        throw Object.assign(new Error("Bad gateway"), { status: 502 });
+      };
+      const result = await triggerRepositoryCleanup!("user-1");
+      expect(result.orphanedCount).toBe(0);
+      expect((await missingSince())!.getTime()).toBe(since!.getTime());
+    });
+
+    test("no wait acts on the first run, without a heads-up", async () => {
+      await seed({ dryRun: false, orphanedRepoGraceDays: 0, deleteFromGitea: false });
+
+      const result = await triggerRepositoryCleanup!("user-1");
+
+      expect(result.handled).toEqual(["octo/gone"]);
+      expect(result.waiting).toEqual([]);
+      expect(sent.map((event) => event.title)).toEqual(["Repository Cleanup: 1 repository archived"]);
+    });
+
+    test("a dry run records the time and lists the date, but sends nothing", async () => {
+      await seed({ dryRun: true });
+
+      const result = await triggerRepositoryCleanup!("user-1");
+
+      expect(result.waiting).toHaveLength(1);
+      expect(await missingSince()).toBeInstanceOf(Date);
+      expect(sent).toHaveLength(0);
+
+      // Past the wait, a dry run still changes nothing.
+      backdate(8);
+      const later = await triggerRepositoryCleanup!("user-1");
+      expect(later.waiting).toEqual([]);
+      expect(later.handled).toEqual([]);
+      expect(await status()).toBe("mirrored");
+    });
+
+    test("the skip action and protected repositories get no heads-up", async () => {
+      await seed({ dryRun: false, orphanedRepoAction: "skip" });
+      await triggerRepositoryCleanup!("user-1");
+      expect(sent).toHaveLength(0);
+
+      await seed({ dryRun: false, protectedRepos: ["octo/gone"] });
+      const result = await triggerRepositoryCleanup!("user-1");
+      expect(result.waiting).toEqual([]);
+      expect(await missingSince()).toBeNull();
+      expect(sent).toHaveLength(0);
+    });
+
+    test("the scheduled sync's cleanup waits too", async () => {
+      await seed({ dryRun: false, deleteFromGitea: false });
+      const [config] = await db.select().from(schema.configs).where(eq(schema.configs.userId, "user-1"));
+
+      const result = await runRepositoryCleanupForConfig!(config);
+
+      expect(result.waiting).toHaveLength(1);
+      expect(await status()).toBe("mirrored");
+      expect(sent.map((event) => event.title)).toEqual(["Repository Cleanup: source gone for 1 repository"]);
+
+      backdate(8);
+      const later = await runRepositoryCleanupForConfig!(config);
+      expect(later.handled).toEqual(["octo/gone"]);
+      expect(await status()).toBe("archived");
+    });
+
+    test("the scheduled sync's cleanup leaves protected repositories alone", async () => {
+      // It used to call the action for every orphan directly, skipping this list.
+      await seed({ dryRun: false, orphanedRepoGraceDays: 0, protectedRepos: ["octo/gone"] });
+      const [config] = await db.select().from(schema.configs).where(eq(schema.configs.userId, "user-1"));
+
+      const result = await runRepositoryCleanupForConfig!(config);
+
+      expect(result.orphanedCount).toBe(1);
+      expect(result.handled).toEqual([]);
+      expect(await status()).toBe("mirrored");
     });
   });
 }

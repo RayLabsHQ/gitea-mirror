@@ -31,6 +31,7 @@ export const POST: APIRoute = async (context) => {
           errorCount: results.errors.length,
           errors: results.errors,
           repositories: results.repositories,
+          waiting: results.waiting,
           dryRun: results.dryRun,
           action: results.action,
         },

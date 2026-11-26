@@ -446,6 +446,33 @@ describe("Apply to the destination too (#558)", () => {
   });
 });
 
+describe("wait before acting (#549)", () => {
+  const base = {
+    enabled: true,
+    retentionDays: 7 * 86400,
+    deleteIfNotInGitHub: true,
+    orphanedRepoAction: "archive" as const,
+    dryRun: false,
+  };
+
+  test("the days round-trip UI -> DB -> UI", () => {
+    const saved = mapUiCleanupToDb({ ...base, orphanedRepoGraceDays: 7 });
+    expect(saved.orphanedRepoGraceDays).toBe(7);
+    expect(mapDbCleanupToUi(saved).orphanedRepoGraceDays).toBe(7);
+  });
+
+  test("unusable values save as no wait", () => {
+    expect(mapUiCleanupToDb({ ...base, orphanedRepoGraceDays: -3 }).orphanedRepoGraceDays).toBe(0);
+    expect(mapUiCleanupToDb({ ...base, orphanedRepoGraceDays: "abc" as any }).orphanedRepoGraceDays).toBe(0);
+    expect(mapUiCleanupToDb({ ...base, orphanedRepoGraceDays: 2.7 }).orphanedRepoGraceDays).toBe(2);
+  });
+
+  test("a stored row without the field reads as no wait", () => {
+    const { orphanedRepoGraceDays: _omit, ...row } = mapUiCleanupToDb(base);
+    expect(mapDbCleanupToUi(row as any).orphanedRepoGraceDays).toBe(0);
+  });
+});
+
 describe("pre-release limit (#560)", () => {
   const roundTrip = (prereleaseLimit: number | null | undefined) => {
     const ui = buildMinimalUiConfigs();
