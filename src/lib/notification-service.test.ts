@@ -18,7 +18,7 @@ mock.module("@/lib/utils/encryption", () => ({
 }));
 
 // Import after mocks are set up — db is already mocked via setup.bun.ts
-import { sendNotification, testNotification, buildNewRepositoriesNotificationEvent, buildAllReleasesRemovedNotificationEvent, triggerAllReleasesRemovedNotification, buildMirrorSyncStalledNotificationEvent, claimMirrorSyncStalledNotification, resetMirrorSyncStalledNotifications, triggerMirrorSyncStalledNotification, MIRROR_SYNC_STALLED_NOTIFICATION_INTERVAL_MS, isNewRepositoryGroupEnabled, MAX_LISTED_NEW_REPOSITORIES, STARRED_GROUP_LABEL } from "./notification-service";
+import { sendNotification, testNotification, buildNewRepositoriesNotificationEvent, buildAllReleasesRemovedNotificationEvent, triggerAllReleasesRemovedNotification, buildMirrorSyncStalledNotificationEvent, claimMirrorSyncStalledNotification, resetMirrorSyncStalledNotifications, triggerMirrorSyncStalledNotification, MIRROR_SYNC_STALLED_NOTIFICATION_INTERVAL_MS, isNewRepositoryGroupEnabled, MAX_LISTED_NEW_REPOSITORIES, STARRED_GROUP_LABEL, buildRepositoryCleanupNotificationEvent, isCleanupNotificationEnabled, triggerRepositoryCleanupNotification } from "./notification-service";
 import type { NotificationConfig } from "@/types/config";
 
 describe("sendNotification", () => {
@@ -611,5 +611,121 @@ describe("triggerMirrorSyncStalledNotification", () => {
     // Nothing was sent, so the slot is still free for a user who turns
     // notifications on later.
     expect(claimMirrorSyncStalledNotification("user-1")).toBe(true);
+  });
+});
+
+describe("buildRepositoryCleanupNotificationEvent (#554)", () => {
+  test("archived on the destination", () => {
+    const event = buildRepositoryCleanupNotificationEvent({
+      action: "archive",
+      destinationChanged: true,
+      repositoryNames: ["octo/gone", "octo/also-gone"],
+      failures: [],
+    });
+
+    expect(event.type).toBe("repo_cleanup");
+    expect(event.title).toBe("Repository Cleanup: 2 repositories archived");
+    expect(event.message).toBe(
+      "2 repositories archived on the destination because the source is gone.\n- octo/gone\n- octo/also-gone",
+    );
+  });
+
+  test("says when only gitea-mirror's records changed", () => {
+    const archived = buildRepositoryCleanupNotificationEvent({
+      action: "archive",
+      destinationChanged: false,
+      repositoryNames: ["octo/gone"],
+      failures: [],
+    });
+    expect(archived.title).toBe("Repository Cleanup: 1 repository archived");
+    expect(archived.message).toStartWith(
+      "1 repository marked archived in gitea-mirror because the source is gone. The copies on the destination were not changed.",
+    );
+
+    const removed = buildRepositoryCleanupNotificationEvent({
+      action: "delete",
+      destinationChanged: false,
+      repositoryNames: ["octo/gone"],
+      failures: [],
+    });
+    expect(removed.title).toBe("Repository Cleanup: 1 repository deleted");
+    expect(removed.message).toContain("removed from gitea-mirror because the source is gone. The copies on the destination were not changed.");
+  });
+
+  test("deleted from the destination, with failures listed after", () => {
+    const event = buildRepositoryCleanupNotificationEvent({
+      action: "delete",
+      destinationChanged: true,
+      repositoryNames: ["octo/gone"],
+      failures: ["Failed to delete octo/stuck: 403 Forbidden"],
+    });
+
+    expect(event.message).toBe(
+      "1 repository deleted from the destination because the source is gone.\n- octo/gone\nCleanup failed for:\n- Failed to delete octo/stuck: 403 Forbidden",
+    );
+  });
+
+  test("only failures", () => {
+    const event = buildRepositoryCleanupNotificationEvent({
+      action: "archive",
+      destinationChanged: true,
+      repositoryNames: [],
+      failures: ["Failed to archive octo/stuck: timeout"],
+    });
+
+    expect(event.title).toBe("Repository Cleanup Failed");
+    expect(event.message).toBe("Cleanup failed for:\n- Failed to archive octo/stuck: timeout");
+  });
+
+  test("lists at most 10 names", () => {
+    const names = Array.from({ length: MAX_LISTED_NEW_REPOSITORIES + 3 }, (_, i) => `octo/repo-${i}`);
+    const event = buildRepositoryCleanupNotificationEvent({
+      action: "archive",
+      destinationChanged: true,
+      repositoryNames: names,
+      failures: [],
+    });
+
+    expect(event.title).toBe(`Repository Cleanup: ${names.length} repositories archived`);
+    expect(event.message).toContain(`- octo/repo-${MAX_LISTED_NEW_REPOSITORIES - 1}\n- and 3 more`);
+    expect(event.message).not.toContain(`octo/repo-${MAX_LISTED_NEW_REPOSITORIES}\n`);
+  });
+});
+
+describe("isCleanupNotificationEnabled (#554)", () => {
+  test("needs notifications on and the switch on", () => {
+    expect(isCleanupNotificationEnabled({ enabled: true, notifyOnCleanup: true })).toBe(true);
+    expect(isCleanupNotificationEnabled({ enabled: false, notifyOnCleanup: true })).toBe(false);
+    expect(isCleanupNotificationEnabled({ enabled: true, notifyOnCleanup: false })).toBe(false);
+  });
+
+  test("a stored config from before the switch counts as off", () => {
+    expect(isCleanupNotificationEnabled({ enabled: true })).toBe(false);
+  });
+});
+
+describe("triggerRepositoryCleanupNotification (#554)", () => {
+  test("stays silent when the run changed nothing and nothing failed", async () => {
+    await triggerRepositoryCleanupNotification({
+      userId: "user-1",
+      action: "archive",
+      destinationChanged: true,
+      repositoryNames: [],
+      failures: [],
+    });
+
+    expect(mockFetch).toHaveBeenCalledTimes(0);
+  });
+
+  test("never throws when the user has no notification config", async () => {
+    await triggerRepositoryCleanupNotification({
+      userId: "user-1",
+      action: "archive",
+      destinationChanged: true,
+      repositoryNames: ["octo/gone"],
+      failures: [],
+    });
+
+    expect(mockFetch).toHaveBeenCalledTimes(0);
   });
 });

@@ -1,6 +1,7 @@
 /**
- * Run now for database maintenance and repository cleanup (#547), and the
- * repository cleanup no longer moving database maintenance's next run (#548).
+ * Run now for database maintenance and repository cleanup (#547), the
+ * repository cleanup no longer moving database maintenance's next run (#548),
+ * and the cleanup notification (#554).
  *
  * Runs against the real schema in an in-memory SQLite database that replaces
  * @/lib/db through mock.module, with the source host faked, so the file runs
@@ -47,6 +48,9 @@ const provider = {
   isRepositoryStarred: async () => false,
 };
 
+/** Notifications that reached the webhook provider. */
+const sent: { title: string; message: string; type: string }[] = [];
+
 if (isolated) {
   process.env.ENCRYPTION_SECRET ??= "cleanup-run-now-test-secret-0123456789";
   applyMigrations();
@@ -63,6 +67,12 @@ if (isolated) {
     ...realSources,
     listSources: async () => [{ id: "src-1", name: "GitHub", provider: "github", enabled: true }],
   }));
+  // Only the transport is faked: the config lookup, the switch and the text are real.
+  mock.module("@/lib/providers/webhook", () => ({
+    sendWebhookNotification: async (_config: unknown, event: any) => {
+      sent.push(event);
+    },
+  }));
 }
 
 const { runDatabaseCleanupNow, runAutomaticCleanup } = isolated
@@ -77,7 +87,7 @@ async function cleanupConfig(userId = "user-1") {
   return row.cleanupConfig as any;
 }
 
-async function seedUser(userId: string, cleanup: Record<string, unknown>) {
+async function seedUser(userId: string, cleanup: Record<string, unknown>, notification?: Record<string, unknown>) {
   sqlite.run(`INSERT INTO users (id, email) VALUES ('${userId}', '${userId}@example.com')`);
   await db.insert(schema.configs).values({
     id: `config-${userId}`,
@@ -88,8 +98,19 @@ async function seedUser(userId: string, cleanup: Record<string, unknown>) {
     giteaConfig: { url: "https://gitea.example.com", defaultOwner: "mirror" } as any,
     scheduleConfig: { enabled: false } as any,
     cleanupConfig: cleanup as any,
+    ...(notification ? { notificationConfig: notification as any } : {}),
   });
 }
+
+const NOTIFY_ON_CLEANUP = {
+  enabled: true,
+  provider: "webhook",
+  notifyOnSyncError: true,
+  notifyOnSyncSuccess: false,
+  notifyOnNewRepo: false,
+  notifyOnCleanup: true,
+  webhook: { enabled: true, url: "https://hooks.example.com/gitea-mirror" },
+};
 
 if (isolated) {
   describe("database maintenance Run now", () => {
@@ -228,6 +249,91 @@ if (isolated) {
       // Once it finished, Run now works again.
       listRepositories = async () => [];
       await expect(triggerRepositoryCleanup!("user-1")).resolves.toMatchObject({ orphanedCount: 0 });
+    });
+  });
+
+  describe("repository cleanup notification (#554)", () => {
+    const seed = async (cleanup: Record<string, unknown> = {}, notification: Record<string, unknown> = NOTIFY_ON_CLEANUP) => {
+      listRepositories = async () => [];
+      sent.length = 0;
+      for (const table of ["events", "mirror_jobs", "repositories", "configs", "users"]) {
+        sqlite.run(`DELETE FROM ${table}`);
+      }
+      await seedUser("user-1", {
+        enabled: true,
+        deleteIfNotInGitHub: true,
+        deleteFromGitea: false,
+        orphanedRepoAction: "archive",
+        dryRun: false,
+        pauseBetweenDeletes: 0,
+        ...cleanup,
+      }, notification);
+      for (const name of ["gone", "also-gone"]) {
+        await db.insert(schema.repositories).values({
+          id: `repo-${name}`,
+          userId: "user-1",
+          configId: "config-user-1",
+          sourceId: "src-1",
+          name,
+          fullName: `octo/${name}`,
+          normalizedFullName: `octo/${name}`,
+          url: `https://github.com/octo/${name}`,
+          cloneUrl: `https://github.com/octo/${name}.git`,
+          owner: "octo",
+          defaultBranch: "main",
+          status: "mirrored",
+        } as any);
+      }
+    };
+
+    test("one notification lists what the run archived, and the next run does not repeat it", async () => {
+      await seed();
+
+      await triggerRepositoryCleanup!("user-1");
+
+      expect(sent).toHaveLength(1);
+      expect(sent[0].type).toBe("repo_cleanup");
+      expect(sent[0].title).toBe("Repository Cleanup: 2 repositories archived");
+      expect(sent[0].message).toContain("marked archived in gitea-mirror because the source is gone");
+      expect(sent[0].message).toContain("- octo/gone");
+      expect(sent[0].message).toContain("- octo/also-gone");
+
+      // Both are archived now, so the next run leaves them out.
+      const again = await triggerRepositoryCleanup!("user-1");
+      expect(again.handled).toEqual([]);
+      expect(sent).toHaveLength(1);
+    });
+
+    test("removed from gitea-mirror with the delete action", async () => {
+      await seed({ orphanedRepoAction: "delete" });
+
+      await triggerRepositoryCleanup!("user-1");
+
+      expect(sent).toHaveLength(1);
+      expect(sent[0].title).toBe("Repository Cleanup: 2 repositories deleted");
+      expect(sent[0].message).toContain("removed from gitea-mirror because the source is gone");
+      expect(await db.select().from(schema.repositories)).toHaveLength(0);
+    });
+
+    test("a dry run and the skip action send nothing", async () => {
+      await seed({ dryRun: true });
+      expect((await triggerRepositoryCleanup!("user-1")).orphanedCount).toBe(2);
+      expect(sent).toHaveLength(0);
+
+      await seed({ orphanedRepoAction: "skip" });
+      expect((await triggerRepositoryCleanup!("user-1")).orphanedCount).toBe(2);
+      expect(sent).toHaveLength(0);
+    });
+
+    test("nothing is sent with the switch off, or from a config saved before it existed", async () => {
+      await seed({}, { ...NOTIFY_ON_CLEANUP, notifyOnCleanup: false });
+      await triggerRepositoryCleanup!("user-1");
+      expect(sent).toHaveLength(0);
+
+      const { notifyOnCleanup: _dropped, ...older } = NOTIFY_ON_CLEANUP;
+      await seed({}, older);
+      await triggerRepositoryCleanup!("user-1");
+      expect(sent).toHaveLength(0);
     });
   });
 }

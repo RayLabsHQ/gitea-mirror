@@ -283,6 +283,7 @@ export const notificationConfigSchema = z.object({
   notifyOnNewOwnRepo: z.boolean().default(true),
   notifyOnNewOrgRepo: z.boolean().default(true),
   notifyOnNewStarredRepo: z.boolean().default(true),
+  notifyOnCleanup: z.boolean().default(false),
   ntfy: ntfyConfigSchema.optional(),
   apprise: appriseConfigSchema.optional(),
   gotify: gotifyConfigSchema.optional(),

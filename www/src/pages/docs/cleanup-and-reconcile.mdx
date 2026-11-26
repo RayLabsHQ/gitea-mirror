@@ -27,6 +27,8 @@ The first four are on the card. If you also set one of their environment variabl
 
 To check right away instead of waiting, click **Run now** on the card. If the action would change anything, it asks first. A dry run or the `skip` action runs without asking. Its progress and the outcome show in the card's footer, and the info button next to the outcome lists the repositories whose source is gone and any errors. The same run is available as `POST /api/cleanup/trigger`, see the [API page](/docs/api/#run-cleanup).
 
+To hear about what cleanup did, turn on **Repository cleanup** under Notification Events on the [Notifications](/docs/notifications/#event-types) tab.
+
 ### What each action does
 
 `archive` never deletes. With **Apply to the destination too** off, the default, the row is marked archived in the database and the destination is left alone. With it on:
