@@ -12,7 +12,7 @@ import { DESTINATION_PROVIDER_DEFAULT_URLS, isDestinationProviderKind, type Dest
 import { hasDestinationChanged, hasSourceChanged, loadConfigLocks } from '@/lib/config-locks';
 import type { SourceUpdateInput } from '@/lib/sources';
 import { backupDefaultsFromEnv, storedBackupStrategy } from '@/lib/utils/backup-defaults';
-import { normalizeReleaseAssetLimit, normalizeReleaseTagPatterns, normalizeReleaseType, splitReleaseTagEntries } from '@/lib/utils/mirror-overrides';
+import { normalizePrereleaseLimit, normalizeReleaseAssetLimit, normalizeReleaseTagPatterns, normalizeReleaseType, splitReleaseTagEntries } from '@/lib/utils/mirror-overrides';
 
 interface EnvConfig {
   github: {
@@ -67,6 +67,7 @@ interface EnvConfig {
     mirrorMetadata?: boolean;
     releaseLimit?: number;
     releaseAssetLimit?: number;
+    prereleaseLimit?: number;
     pruneOldReleaseAssets?: boolean;
     releaseType?: string;
     releaseIncludeTags?: string[];
@@ -235,6 +236,7 @@ function parseEnvConfig(): EnvConfig {
       mirrorMetadata: envFlag('MIRROR_METADATA'),
       releaseLimit: process.env.RELEASE_LIMIT ? parseInt(process.env.RELEASE_LIMIT, 10) : undefined,
       releaseAssetLimit: process.env.RELEASE_ASSET_LIMIT ? parseInt(process.env.RELEASE_ASSET_LIMIT, 10) : undefined,
+      prereleaseLimit: process.env.RELEASE_PRERELEASE_LIMIT ? parseInt(process.env.RELEASE_PRERELEASE_LIMIT, 10) : undefined,
       pruneOldReleaseAssets: envFlag('PRUNE_OLD_RELEASE_ASSETS'),
       releaseType: process.env.RELEASE_TYPE,
       releaseIncludeTags,
@@ -458,6 +460,11 @@ export async function initializeConfigFromEnv(): Promise<void> {
       releaseAssetLimit:
         normalizeReleaseAssetLimit(envConfig.mirror.releaseAssetLimit) ??
         existingConfig?.[0]?.giteaConfig?.releaseAssetLimit ??
+        null,
+      // 0 is a real value (no pre-releases); unset means no separate limit.
+      prereleaseLimit:
+        normalizePrereleaseLimit(envConfig.mirror.prereleaseLimit) ??
+        existingConfig?.[0]?.giteaConfig?.prereleaseLimit ??
         null,
       // Unset env var keeps what the UI stored, like every switch here.
       pruneOldReleaseAssets:

@@ -28,7 +28,13 @@ Releases are ordered newest first. A release past the asset limit is still creat
 
 The **Pre-releases** switch under the two inputs decides which releases are candidates before either limit is applied: leave it on to mirror every release, or turn it off to skip everything the source marks as a pre-release, which is what most people mean by "back up the releases" when a project ships a beta for every feature. The per organization and per repository dialog carries the same choice under its **Releases** row: **All**, **Stable only**, or **Inherit**.
 
-The filter runs first, so **Latest** counts the releases that match. With **Stable only** and **Latest 10** the mirror looks further back than ten releases when it has to, and keeps the ten newest stable ones. Switching the type also prunes: on the next sync the releases of the other kind that are already on Gitea are removed. A release the destination has no pre-release flag for is left alone. Like the two limits, the type can be set per organization and per repository, and **Inherit** in the dialog means the global value.
+The filter runs first, so **Latest** counts the releases that match. With **Stable only** and **Latest 10** the mirror looks up to 1,000 releases back when it has to, stopping as soon as it has ten, and keeps the ten newest stable ones. Switching the type also prunes: on the next sync the releases of the other kind that are already on Gitea are removed. A release the destination has no pre-release flag for is left alone. Like the two limits, the type can be set per organization and per repository, and **Inherit** in the dialog means the global value.
+
+## Keep stable releases next to nightly builds
+
+Some projects publish a pre-release every night and a stable release now and then. With **Latest 10** the nightly builds take all ten places, and the stable releases never reach Gitea. Turning pre-releases off fixes that but drops the nightly builds entirely.
+
+**At most** under the **Pre-releases** switch is the middle ground: how many of the **Latest** releases may be pre-releases. With **Latest 10** and **At most 3**, the mirror keeps the three newest pre-releases and fills the other seven places with the newest stable releases, looking up to 1,000 releases back for them. It stops reading the source as soon as the places are filled. `0` keeps stable releases only, and leaving it empty means pre-releases count like any other release, as before. On the next sync, pre-releases past the cap are removed from Gitea and the newest are kept. In the per organization and per repository dialog the same setting is **Pre-release limit**.
 
 ## Filter by tag name
 
@@ -43,7 +49,7 @@ Patterns are comma separated, and each one is either a glob over the whole tag o
 | `v?` | `v1`, `v2`, but not `v10` |
 | `/^v\d+\.\d+\.\d+$/` | `v1.2.3`, not `v1.2.3-rc.1` or `nightly-20260101` |
 
-Matching ignores case, and a pattern that cannot compile is ignored rather than failing the run. A tag filter widens the search exactly like the type filter does, so **Latest 1** with `v*` still finds the newest real release behind a wall of nightlies. Releases whose tag no longer matches are removed from Gitea on the next sync, and unlike the type filter a tag pattern can clean up releases the destination has no pre-release flag for, because it only needs the tag name.
+Matching ignores case, and a pattern that cannot compile is ignored rather than failing the run. A tag filter widens the search too, up to 100 releases back or the release limit if that is higher, so **Latest 1** with `v*` still finds the newest real release behind a run of nightlies. Releases whose tag no longer matches are removed from Gitea on the next sync, and unlike the type filter a tag pattern can clean up releases the destination has no pre-release flag for, because it only needs the tag name.
 
 ## Nothing already uploaded is deleted, unless you ask
 
@@ -75,11 +81,12 @@ RELEASE_LIMIT=25
 RELEASE_ASSET_LIMIT=3     # unset for all, 0 for notes only
 PRUNE_OLD_RELEASE_ASSETS=true   # also delete attachments past that count
 RELEASE_TYPE=stable       # all or stable
+RELEASE_PRERELEASE_LIMIT=3   # at most 3 pre-releases among them (with RELEASE_TYPE=all)
 RELEASE_INCLUDE_TAGS=v*   # comma separated globs or /regex/
 RELEASE_EXCLUDE_TAGS=*-rc.*
 ```
 
-`RELEASE_ASSET_LIMIT`, `RELEASE_TYPE` and the two tag lists seed the global settings on first boot, the same way the other mirror options do. The [environment variables page](/docs/environment-variables/) lists the rest.
+`RELEASE_ASSET_LIMIT`, `RELEASE_TYPE`, `RELEASE_PRERELEASE_LIMIT` and the two tag lists seed the global settings on first boot, the same way the other mirror options do. The [environment variables page](/docs/environment-variables/) lists the rest.
 
 ## Doing the disk math
 

@@ -28,6 +28,8 @@ import {
   MIRROR_OVERRIDE_LABELS,
   normalizeIssueState,
   normalizeReleaseAssetLimit,
+  normalizePrereleaseLimit,
+  MIRROR_GATING_REASONS,
   normalizeReleaseLimit,
   normalizeReleaseTagPatterns,
   normalizeReleaseType,
@@ -103,6 +105,12 @@ function parseReleaseAssetLimitDraft(text: string): number | undefined {
   const trimmed = text.trim();
   if (!trimmed) return undefined;
   return normalizeReleaseAssetLimit(Number(trimmed));
+}
+
+function parsePrereleaseLimitDraft(text: string): number | undefined {
+  const trimmed = text.trim();
+  if (!trimmed) return undefined;
+  return normalizePrereleaseLimit(Number(trimmed));
 }
 
 type TagPatternKey = "releaseIncludeTags" | "releaseExcludeTags";
@@ -212,6 +220,9 @@ export function MirrorOverridesDialog({
   const [releaseAssetLimitDraft, setReleaseAssetLimitDraft] = useState(() =>
     buildReleaseAssetLimitDraft(value)
   );
+  const [prereleaseLimitDraft, setPrereleaseLimitDraft] = useState(() =>
+    buildPrereleaseLimitDraft(value)
+  );
   const [releaseTypeDraft, setReleaseTypeDraft] = useState<ReleaseTypeChoice>(
     () => buildReleaseTypeDraft(value)
   );
@@ -239,6 +250,7 @@ export function MirrorOverridesDialog({
       setDraft(buildDraft(value, dialogKeys));
       setReleaseLimitDraft(buildReleaseLimitDraft(value));
       setReleaseAssetLimitDraft(buildReleaseAssetLimitDraft(value));
+      setPrereleaseLimitDraft(buildPrereleaseLimitDraft(value));
       setReleaseTypeDraft(buildReleaseTypeDraft(value));
       setIssueStateDraft(buildIssueStateDraft(value));
       setIncludeTagsDraft(buildReleaseTagDraft(value, "releaseIncludeTags"));
@@ -330,6 +342,10 @@ export function MirrorOverridesDialog({
   const releaseAssetLimitInvalid =
     releaseAssetLimitDraft.trim() !== "" && pinnedReleaseAssetLimit === undefined;
 
+  const pinnedPrereleaseLimit = parsePrereleaseLimitDraft(prereleaseLimitDraft);
+  const prereleaseLimitInvalid =
+    prereleaseLimitDraft.trim() !== "" && pinnedPrereleaseLimit === undefined;
+
   const pinnedReleaseType: ReleaseType | undefined =
     releaseTypeDraft === "inherit" ? undefined : normalizeReleaseType(releaseTypeDraft);
 
@@ -399,6 +415,9 @@ export function MirrorOverridesDialog({
       if (pinnedReleaseAssetLimit !== undefined) {
         next.releaseAssetLimit = pinnedReleaseAssetLimit;
       }
+      if (pinnedPrereleaseLimit !== undefined) {
+        next.prereleaseLimit = pinnedPrereleaseLimit;
+      }
       if (pinnedReleaseType !== undefined) next.releaseType = pinnedReleaseType;
       if (pinnedIssueState !== undefined) {
         next.mirrorIssueState = pinnedIssueState;
@@ -420,6 +439,7 @@ export function MirrorOverridesDialog({
     setDraft(buildDraft(null, dialogKeys));
     setReleaseLimitDraft("");
     setReleaseAssetLimitDraft("");
+    setPrereleaseLimitDraft("");
     setReleaseTypeDraft("inherit");
     setIssueStateDraft("inherit");
     setIncludeTagsDraft("");
@@ -458,6 +478,20 @@ export function MirrorOverridesDialog({
   // the tag patterns together when it decides what stays in the destination.
   const effectiveReleaseType: ReleaseType =
     pinnedReleaseType ?? inheritedFrom?.releaseType ?? "all";
+
+  // Stable only already leaves every pre-release out, so the limit has nothing
+  // to do until pre-releases are mirror candidates again.
+  const prereleaseLimitReason =
+    gating.prereleaseLimit ??
+    (effectiveReleaseType === "stable" ? MIRROR_GATING_REASONS.stableOnly : undefined);
+  const prereleaseLimitDisabled = !!prereleaseLimitReason;
+  // null is a known value here ("no separate limit"), so it still earns a hint.
+  const inheritedPrereleaseLimit = inheritedFrom?.prereleaseLimit;
+  const showPrereleaseLimitHint =
+    !inheritedLoading &&
+    !prereleaseLimitDisabled &&
+    prereleaseLimitDraft.trim() === "" &&
+    inheritedPrereleaseLimit !== undefined;
   const showReleasesHint =
     !inheritedLoading && !releasesRowDisabled && releaseChoice === "inherit";
   const releasesHintText = effective.mirrorReleases
@@ -694,6 +728,58 @@ export function MirrorOverridesDialog({
                       )}
                     </div>
 
+                    {/* How many of the kept releases may be pre-releases, so
+                        nightly builds leave room for stable ones (#560). */}
+                    <div className="space-y-1">
+                      <div className="flex items-center justify-between gap-4">
+                        <Label
+                          htmlFor="override-prereleaseLimit"
+                          className={
+                            prereleaseLimitDisabled
+                              ? "flex-1 text-muted-foreground"
+                              : "flex-1"
+                          }
+                        >
+                          {MIRROR_OVERRIDE_LABELS.prereleaseLimit}
+                          {showPrereleaseLimitHint && (
+                            <span className="ml-2 text-xs font-normal text-muted-foreground">
+                              currently{" "}
+                              {inheritedPrereleaseLimit === null
+                                ? "no limit"
+                                : inheritedPrereleaseLimit}
+                            </span>
+                          )}
+                        </Label>
+                        <Input
+                          id="override-prereleaseLimit"
+                          type="number"
+                          inputMode="numeric"
+                          min={0}
+                          step={1}
+                          placeholder="Inherit"
+                          className="w-32"
+                          value={prereleaseLimitDraft}
+                          disabled={prereleaseLimitDisabled}
+                          aria-invalid={prereleaseLimitInvalid || undefined}
+                          onChange={(event) =>
+                            setPrereleaseLimitDraft(event.target.value)
+                          }
+                        />
+                      </div>
+                      {prereleaseLimitDisabled &&
+                        prereleaseLimitReason === MIRROR_GATING_REASONS.stableOnly && (
+                          <p className="text-xs text-muted-foreground">
+                            Only stable releases are mirrored, so no pre-release is kept.
+                          </p>
+                        )}
+                      {!prereleaseLimitDisabled && prereleaseLimitInvalid && (
+                        <p className="text-xs text-destructive">
+                          Enter a whole number of 0 or more, or leave it empty to
+                          inherit.
+                        </p>
+                      )}
+                    </div>
+
                     {/* Tag patterns narrow the kind filter further, for upstreams
                         that never set the pre-release flag but tag v1.2.3-rc.1. */}
                     <div className="space-y-1">
@@ -813,6 +899,7 @@ export function MirrorOverridesDialog({
               isSaving ||
               releaseLimitInvalid ||
               releaseAssetLimitInvalid ||
+              prereleaseLimitInvalid ||
               includeTagsInvalid ||
               excludeTagsInvalid
             }
@@ -862,6 +949,13 @@ function buildReleaseAssetLimitDraft(
   value: MirrorOverrides | null | undefined
 ): string {
   const limit = normalizeReleaseAssetLimit(value?.releaseAssetLimit);
+  return limit === undefined ? "" : String(limit);
+}
+
+function buildPrereleaseLimitDraft(
+  value: MirrorOverrides | null | undefined
+): string {
+  const limit = normalizePrereleaseLimit(value?.prereleaseLimit);
   return limit === undefined ? "" : String(limit);
 }
 

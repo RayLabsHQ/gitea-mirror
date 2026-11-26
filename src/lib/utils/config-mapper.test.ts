@@ -445,3 +445,41 @@ describe("Apply to the destination too (#558)", () => {
     expect(mapDbCleanupToUi(row as any).deleteFromGitea).toBe(false);
   });
 });
+
+describe("pre-release limit (#560)", () => {
+  const roundTrip = (prereleaseLimit: number | null | undefined) => {
+    const ui = buildMinimalUiConfigs();
+    const db = mapUiToDbConfig(
+      ui.githubConfig,
+      ui.giteaConfig,
+      { ...ui.mirrorOptions, mirrorReleases: true, prereleaseLimit },
+      ui.advancedOptions,
+    );
+    return {
+      stored: db.giteaConfig.prereleaseLimit,
+      read: mapDbToUiConfig({ githubConfig: db.githubConfig, giteaConfig: db.giteaConfig })
+        .mirrorOptions.prereleaseLimit,
+    };
+  };
+
+  test("0 and N round-trip UI -> DB -> UI", () => {
+    expect(roundTrip(0)).toEqual({ stored: 0, read: 0 });
+    expect(roundTrip(3)).toEqual({ stored: 3, read: 3 });
+  });
+
+  test("empty or junk stores null, no separate limit", () => {
+    expect(roundTrip(null)).toEqual({ stored: null, read: null });
+    expect(roundTrip(undefined)).toEqual({ stored: null, read: null });
+    expect(roundTrip(-4)).toEqual({ stored: null, read: null });
+  });
+
+  test("a stored row without the field reads as no limit", () => {
+    const ui = buildMinimalUiConfigs();
+    const db = mapUiToDbConfig(ui.githubConfig, ui.giteaConfig, ui.mirrorOptions, ui.advancedOptions);
+    const { prereleaseLimit: _dropped, ...legacy } = db.giteaConfig as Record<string, unknown>;
+    expect(
+      mapDbToUiConfig({ githubConfig: db.githubConfig, giteaConfig: legacy as any }).mirrorOptions
+        .prereleaseLimit
+    ).toBeNull();
+  });
+});

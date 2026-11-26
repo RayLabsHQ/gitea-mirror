@@ -39,9 +39,11 @@ export type MirrorOverrideKey = (typeof MIRROR_OVERRIDE_KEYS)[number];
  *
  * `releaseLimit` is how many of the newest releases exist in Gitea at all.
  * `releaseAssetLimit` (#311) is how many of those also get their assets
- * uploaded; the rest are created with notes and tag only.
+ * uploaded; the rest are created with notes and tag only. `prereleaseLimit`
+ * (#560) is how many of them may be pre-releases, so nightly builds cannot
+ * take every place from the stable releases.
  */
-export const MIRROR_OVERRIDE_LIMIT_KEYS = ["releaseLimit", "releaseAssetLimit"] as const;
+export const MIRROR_OVERRIDE_LIMIT_KEYS = ["releaseLimit", "releaseAssetLimit", "prereleaseLimit"] as const;
 
 export type MirrorOverrideLimitKey = (typeof MIRROR_OVERRIDE_LIMIT_KEYS)[number];
 
@@ -121,6 +123,15 @@ const FLAG_DEFAULTS: Partial<Record<MirrorOverrideKey, boolean>> = {
 export const RELEASE_SCAN_WINDOW = 100;
 
 /**
+ * How far back a mirror that counts stable releases may look: Stable only, or
+ * a pre-release limit (#560, #538). A project that publishes a build every
+ * night can bury its last stable release under hundreds of pre-releases, so
+ * the 100 release window found none. The listing stops as soon as the
+ * release limit is filled, so most repositories still read one page.
+ */
+export const RELEASE_DEEP_SCAN_WINDOW = 1000;
+
+/**
  * Bounds on stored tag patterns. They are compiled into regular expressions on
  * every mirror run, so a hand-edited row holding thousands of them cannot be
  * allowed to turn a sync into a regex benchmark.
@@ -136,6 +147,7 @@ export const MAX_RELEASE_TAG_PATTERN_LENGTH = 200;
 export type ResolvedMirrorOptions = Record<MirrorOverrideKey, boolean> & {
   releaseLimit: number;
   releaseAssetLimit: number | null;
+  prereleaseLimit: number | null;
   // Global only: a cleanup policy for the destination rather than something a
   // single repository argues about. The ranks it prunes by still come from that
   // repository's own effective `releaseAssetLimit`.
@@ -154,6 +166,7 @@ export type ResolvedMirrorOptions = Record<MirrorOverrideKey, boolean> & {
 export type InheritedMirrorOptions = Partial<Record<MirrorOverrideKey, boolean>> & {
   releaseLimit?: number;
   releaseAssetLimit?: number | null;
+  prereleaseLimit?: number | null;
   releaseType?: ReleaseType;
   releaseIncludeTags?: string[];
   releaseExcludeTags?: string[];
@@ -184,6 +197,46 @@ export function normalizeReleaseAssetLimit(value: unknown): number | undefined {
   if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
   const limit = Math.floor(value);
   return limit >= 0 ? limit : undefined;
+}
+
+/**
+ * Sanitize a pre-release limit from any tier into a non-negative integer, or
+ * `undefined` when the value is absent or unusable (so the next tier out is
+ * consulted). 0 is a real value, no pre-releases at all; no limit at any tier
+ * (`null`) means pre-releases count like any other release, as before #560.
+ */
+export function normalizePrereleaseLimit(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  const limit = Math.floor(value);
+  return limit >= 0 ? limit : undefined;
+}
+
+/**
+ * The releases to mirror from a newest-first list that already passed the
+ * type and tag filters: the newest `releaseLimit` of them, with at most
+ * `prereleaseLimit` pre-releases among them. A pre-release past that limit is
+ * skipped and the place goes to the next older release, so a limit of 10
+ * with 3 pre-releases keeps the 3 newest pre-releases and the 7 newest stable
+ * releases. A release that does not say whether it is a pre-release counts
+ * as stable, the same rule as `releaseMatchesType`.
+ */
+export function selectReleases<T extends { prerelease?: boolean | null }>(
+  releases: readonly T[],
+  releaseLimit: number,
+  prereleaseLimit: number | null
+): T[] {
+  if (prereleaseLimit === null) return releases.slice(0, releaseLimit);
+  const selected: T[] = [];
+  let prereleases = 0;
+  for (const release of releases) {
+    if (selected.length >= releaseLimit) break;
+    if (release.prerelease === true) {
+      if (prereleases >= prereleaseLimit) continue;
+      prereleases++;
+    }
+    selected.push(release);
+  }
+  return selected;
 }
 
 const ISSUE_STATES: readonly IssueStateFilter[] = ["all", "open", "closed"];
@@ -425,18 +478,22 @@ export function releaseMatchesTagFilters(
 
 /**
  * How many releases to fetch before filtering. Without a filter the limit is
- * enough; with one (a release type or either tag list), the newest releases may
- * all be filtered out, so the mirror looks further back before applying
- * `releaseLimit`.
+ * enough; with one, the newest releases may all be filtered out, so the mirror
+ * looks further back before applying `releaseLimit`: as far as
+ * RELEASE_DEEP_SCAN_WINDOW for Stable only or a pre-release limit, and
+ * RELEASE_SCAN_WINDOW for tag patterns alone. With any filter the listing
+ * stops as soon as the limit is filled.
  */
 export function releaseScanLimit(
   releaseLimit: number,
   releaseType: ReleaseType,
-  hasTagFilter = false
+  hasTagFilter = false,
+  prereleaseLimit: number | null = null
 ): number {
-  return releaseType === "all" && !hasTagFilter
-    ? releaseLimit
-    : Math.max(releaseLimit, RELEASE_SCAN_WINDOW);
+  if (releaseType === "stable" || prereleaseLimit !== null) {
+    return Math.max(releaseLimit, RELEASE_DEEP_SCAN_WINDOW);
+  }
+  return hasTagFilter ? Math.max(releaseLimit, RELEASE_SCAN_WINDOW) : releaseLimit;
 }
 
 /** Per-key sanitizers for the numeric overrides. */
@@ -446,6 +503,7 @@ const LIMIT_NORMALIZERS: Record<
 > = {
   releaseLimit: normalizeReleaseLimit,
   releaseAssetLimit: normalizeReleaseAssetLimit,
+  prereleaseLimit: normalizePrereleaseLimit,
 };
 
 /** Per-key sanitizers for the choice overrides. */
@@ -602,6 +660,7 @@ export function mirrorOptionsToFlags(
         mirrorReleases?: boolean;
         releaseLimit?: number;
         releaseAssetLimit?: number | null;
+        prereleaseLimit?: number | null;
         releaseType?: ReleaseType;
         releaseIncludeTags?: string[];
         releaseExcludeTags?: string[];
@@ -639,6 +698,8 @@ export function mirrorOptionsToFlags(
       normalizeReleaseLimit(mirrorOptions?.releaseLimit) ?? DEFAULT_RELEASE_LIMIT,
     releaseAssetLimit:
       normalizeReleaseAssetLimit(mirrorOptions?.releaseAssetLimit) ?? null,
+    prereleaseLimit:
+      normalizePrereleaseLimit(mirrorOptions?.prereleaseLimit) ?? null,
     releaseType: normalizeReleaseType(mirrorOptions?.releaseType) ?? DEFAULT_RELEASE_TYPE,
     releaseIncludeTags:
       normalizeReleaseTagPatterns(mirrorOptions?.releaseIncludeTags) ?? [],
@@ -654,6 +715,7 @@ export const MIRROR_GATING_REASONS = {
   labelsFollowIssues: "Issues mirroring already syncs labels",
   issuesOff: "Issues are not being mirrored",
   releasesOff: "Releases are not being mirrored",
+  stableOnly: "Only stable releases are mirrored (Release type)",
   pushTarget: "Not available for GitHub and GitLab destinations: only branches and tags are pushed",
 } as const;
 
@@ -707,6 +769,7 @@ export function getMirrorOverrideGating({
     }
     gating.releaseLimit = MIRROR_GATING_REASONS.pushTarget;
     gating.releaseAssetLimit = MIRROR_GATING_REASONS.pushTarget;
+    gating.prereleaseLimit = MIRROR_GATING_REASONS.pushTarget;
     gating.releaseType = MIRROR_GATING_REASONS.pushTarget;
     gating.mirrorIssueState = MIRROR_GATING_REASONS.pushTarget;
     gating.releaseIncludeTags = MIRROR_GATING_REASONS.pushTarget;
@@ -757,9 +820,13 @@ export function getMirrorOverrideGating({
   // share the reason.
   if (gating.releaseLimit) {
     gating.releaseAssetLimit = gating.releaseLimit;
+    gating.prereleaseLimit = gating.releaseLimit;
     for (const patternKey of MIRROR_OVERRIDE_PATTERN_KEYS) {
       gating[patternKey] = gating.releaseLimit;
     }
+  } else if (effective.releaseType === "stable") {
+    // Stable only already leaves every pre-release out.
+    gating.prereleaseLimit = MIRROR_GATING_REASONS.stableOnly;
   }
 
   return gating;
@@ -782,6 +849,7 @@ export const MIRROR_OVERRIDE_LABELS: Record<
   mirrorMilestones: "Milestones",
   releaseLimit: "Release limit",
   releaseAssetLimit: "Release asset limit",
+  prereleaseLimit: "Pre-release limit",
   releaseType: "Release type",
   releaseIncludeTags: "Include tags",
   releaseExcludeTags: "Exclude tags",
@@ -949,6 +1017,15 @@ export function resolveMirrorOptions({
     normalizeReleaseAssetLimit(repo?.releaseAssetLimit) ??
     normalizeReleaseAssetLimit(org?.releaseAssetLimit) ??
     normalizeReleaseAssetLimit(globalConfig?.releaseAssetLimit) ??
+    null;
+
+  // The pre-release limit has no default either: when no tier pins one,
+  // pre-releases count like any other release, as before #560. A pinned 0
+  // (no pre-releases) is a real value and must not fall through.
+  resolved.prereleaseLimit =
+    normalizePrereleaseLimit(repo?.prereleaseLimit) ??
+    normalizePrereleaseLimit(org?.prereleaseLimit) ??
+    normalizePrereleaseLimit(globalConfig?.prereleaseLimit) ??
     null;
 
   // Same precedence for the release type. A value no tier recognizes (a typo

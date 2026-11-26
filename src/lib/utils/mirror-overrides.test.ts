@@ -18,6 +18,7 @@ import {
   mirrorOptionsToFlags,
   normalizeIssueState,
   normalizeMirrorOverrides,
+  normalizePrereleaseLimit,
   normalizeReleaseAssetLimit,
   normalizeReleaseLimit,
   normalizeReleaseTagPatterns,
@@ -29,9 +30,11 @@ import {
   releaseMatchesType,
   releaseScanLimit,
   releaseTagMatchesAny,
+  RELEASE_DEEP_SCAN_WINDOW,
   RELEASE_SCAN_WINDOW,
   resolveMirrorOptions,
   resolveOrganizationSkipForks,
+  selectReleases,
   splitReleaseTagEntries,
   STARRED_CLAMPED_KEYS,
   UI_MIRROR_OVERRIDE_KEYS,
@@ -1115,7 +1118,11 @@ describe("release asset limit (#311)", () => {
     });
 
     test("the limit keys and labels agree", () => {
-      expect(MIRROR_OVERRIDE_LIMIT_KEYS).toEqual(["releaseLimit", "releaseAssetLimit"]);
+      expect(MIRROR_OVERRIDE_LIMIT_KEYS).toEqual([
+        "releaseLimit",
+        "releaseAssetLimit",
+        "prereleaseLimit",
+      ]);
       for (const key of MIRROR_OVERRIDE_LIMIT_KEYS) {
         expect(MIRROR_OVERRIDE_LABELS[key]).toBeTruthy();
       }
@@ -1305,9 +1312,9 @@ describe("release type filter", () => {
       expect(releaseScanLimit(10, "all")).toBe(10);
     });
 
-    test("a filter looks back at least the scan window", () => {
-      expect(releaseScanLimit(3, "stable")).toBe(RELEASE_SCAN_WINDOW);
-      expect(releaseScanLimit(1, "stable")).toBe(RELEASE_SCAN_WINDOW);
+    test("stable only looks back the deep window (#538)", () => {
+      expect(releaseScanLimit(3, "stable")).toBe(RELEASE_DEEP_SCAN_WINDOW);
+      expect(releaseScanLimit(1, "stable", true)).toBe(RELEASE_DEEP_SCAN_WINDOW);
     });
 
     test("a tag filter widens the window the same way", () => {
@@ -1316,8 +1323,11 @@ describe("release type filter", () => {
     });
 
     test("a limit bigger than the window still wins", () => {
-      expect(releaseScanLimit(RELEASE_SCAN_WINDOW + 50, "stable")).toBe(
+      expect(releaseScanLimit(RELEASE_SCAN_WINDOW + 50, "all", true)).toBe(
         RELEASE_SCAN_WINDOW + 50
+      );
+      expect(releaseScanLimit(RELEASE_DEEP_SCAN_WINDOW + 50, "stable")).toBe(
+        RELEASE_DEEP_SCAN_WINDOW + 50
       );
     });
   });
@@ -1830,5 +1840,182 @@ describe("issue content options", () => {
     expect(gating.mirrorIssueComments).toBe(MIRROR_GATING_REASONS.issuesOff);
     expect(gating.mirrorIssueMedia).toBe(MIRROR_GATING_REASONS.issuesOff);
     expect(gating.mirrorIssueState).toBe(MIRROR_GATING_REASONS.issuesOff);
+  });
+});
+
+describe("pre-release limit (#560)", () => {
+  /** Newest first, like every source listing. */
+  const rel = (tag: string, prerelease: boolean | null = false) => ({ tag_name: tag, prerelease });
+
+  describe("normalizePrereleaseLimit", () => {
+    test("keeps 0 and positive whole numbers", () => {
+      expect(normalizePrereleaseLimit(0)).toBe(0);
+      expect(normalizePrereleaseLimit(3)).toBe(3);
+      expect(normalizePrereleaseLimit(2.9)).toBe(2);
+    });
+
+    test("anything else means inherit", () => {
+      expect(normalizePrereleaseLimit(-1)).toBeUndefined();
+      expect(normalizePrereleaseLimit(null)).toBeUndefined();
+      expect(normalizePrereleaseLimit(undefined)).toBeUndefined();
+      expect(normalizePrereleaseLimit("3")).toBeUndefined();
+      expect(normalizePrereleaseLimit(Number.NaN)).toBeUndefined();
+    });
+  });
+
+  describe("selectReleases", () => {
+    test("no limit keeps the newest N whatever their kind, as before", () => {
+      const releases = [rel("b3", true), rel("b2", true), rel("b1", true), rel("v1")];
+      expect(selectReleases(releases, 3, null).map((r) => r.tag_name)).toEqual(["b3", "b2", "b1"]);
+    });
+
+    test("pre-releases past the limit give their places to older stable releases", () => {
+      // The llama.cpp case (#538): a build every night buries the stable release.
+      const releases = [
+        rel("b5", true),
+        rel("b4", true),
+        rel("b3", true),
+        rel("v2"),
+        rel("b2", true),
+        rel("v1"),
+        rel("v0"),
+      ];
+      expect(selectReleases(releases, 4, 2).map((r) => r.tag_name)).toEqual([
+        "b5",
+        "b4",
+        "v2",
+        "v1",
+      ]);
+    });
+
+    test("0 keeps stable releases only", () => {
+      const releases = [rel("b2", true), rel("v2"), rel("b1", true), rel("v1")];
+      expect(selectReleases(releases, 10, 0).map((r) => r.tag_name)).toEqual(["v2", "v1"]);
+    });
+
+    test("a limit at or above the release limit changes nothing", () => {
+      const releases = [rel("b3", true), rel("b2", true), rel("v1"), rel("b1", true)];
+      expect(selectReleases(releases, 3, 3)).toEqual(selectReleases(releases, 3, null));
+    });
+
+    test("a release without a pre-release flag counts as stable", () => {
+      const releases = [rel("b2", true), rel("x", null), rel("b1", true)];
+      expect(selectReleases(releases, 3, 1).map((r) => r.tag_name)).toEqual(["b2", "x"]);
+    });
+
+    test("fewer matching releases than the limit returns what there is", () => {
+      expect(selectReleases([rel("b1", true), rel("b0", true)], 5, 1).map((r) => r.tag_name)).toEqual(["b1"]);
+    });
+  });
+
+  describe("releaseScanLimit", () => {
+    test("a pre-release limit looks back the deep window", () => {
+      expect(releaseScanLimit(10, "all", false, 3)).toBe(RELEASE_DEEP_SCAN_WINDOW);
+      expect(releaseScanLimit(10, "all", true, 0)).toBe(RELEASE_DEEP_SCAN_WINDOW);
+    });
+
+    test("no pre-release limit keeps the old windows", () => {
+      expect(releaseScanLimit(10, "all", false, null)).toBe(10);
+      expect(releaseScanLimit(10, "all", true, null)).toBe(RELEASE_SCAN_WINDOW);
+    });
+
+    test("stable only looks back the same deep window with or without one", () => {
+      expect(releaseScanLimit(10, "stable", false, 3)).toBe(RELEASE_DEEP_SCAN_WINDOW);
+    });
+
+    test("a release limit bigger than the deep window still wins", () => {
+      expect(releaseScanLimit(RELEASE_DEEP_SCAN_WINDOW + 5, "all", false, 3)).toBe(
+        RELEASE_DEEP_SCAN_WINDOW + 5
+      );
+    });
+  });
+
+  describe("resolveMirrorOptions", () => {
+    test("no limit at any tier resolves to null", () => {
+      const resolved = resolveMirrorOptions({
+        config: makeConfig({ mirrorReleases: true }),
+        repository: makeRepo(),
+      });
+      expect(resolved.prereleaseLimit).toBeNull();
+    });
+
+    test("organization beats global, repository beats organization, 0 is real", () => {
+      const config = makeConfig({ mirrorReleases: true, prereleaseLimit: 5 });
+      expect(resolveMirrorOptions({ config, repository: makeRepo() }).prereleaseLimit).toBe(5);
+      expect(
+        resolveMirrorOptions({
+          config,
+          repository: makeRepo(),
+          orgOverrides: { prereleaseLimit: 2 },
+        }).prereleaseLimit
+      ).toBe(2);
+      expect(
+        resolveMirrorOptions({
+          config,
+          repository: makeRepo({ mirrorOverrides: { prereleaseLimit: 0 } }),
+          orgOverrides: { prereleaseLimit: 2 },
+        }).prereleaseLimit
+      ).toBe(0);
+    });
+
+    test("null or junk in an override means inherit", () => {
+      const resolved = resolveMirrorOptions({
+        config: makeConfig({ mirrorReleases: true, prereleaseLimit: 4 }),
+        repository: makeRepo({ mirrorOverrides: { prereleaseLimit: -2 } }),
+        orgOverrides: { prereleaseLimit: null },
+      });
+      expect(resolved.prereleaseLimit).toBe(4);
+    });
+  });
+
+  describe("override helpers", () => {
+    test("0 counts as an override, null does not", () => {
+      expect(hasMirrorOverrides({ prereleaseLimit: 0 })).toBe(true);
+      expect(hasMirrorOverrides({ prereleaseLimit: null })).toBe(false);
+      expect(normalizeMirrorOverrides({ prereleaseLimit: 0 })).toEqual({ prereleaseLimit: 0 });
+      expect(listOverriddenKeys({ prereleaseLimit: 3 })).toEqual(["prereleaseLimit"]);
+    });
+
+    test("mirrorOptionsToFlags passes the limit through and reports null when absent", () => {
+      expect(mirrorOptionsToFlags({ prereleaseLimit: 0 }).prereleaseLimit).toBe(0);
+      expect(mirrorOptionsToFlags({ prereleaseLimit: 3 }).prereleaseLimit).toBe(3);
+      expect(mirrorOptionsToFlags({ mirrorReleases: true }).prereleaseLimit).toBeNull();
+    });
+  });
+
+  describe("getMirrorOverrideGating", () => {
+    test("disabled with the release limit when releases are off", () => {
+      const gating = getMirrorOverrideGating({
+        targetKind: "repository",
+        effective: { mirrorReleases: false },
+      });
+      expect(gating.prereleaseLimit).toBe(MIRROR_GATING_REASONS.releasesOff);
+    });
+
+    test("disabled for push destinations", () => {
+      const gating = getMirrorOverrideGating({
+        targetKind: "repository",
+        effective: { mirrorReleases: true },
+        destinationProvider: "github",
+      });
+      expect(gating.prereleaseLimit).toBe(MIRROR_GATING_REASONS.pushTarget);
+    });
+
+    test("disabled when only stable releases are mirrored", () => {
+      const gating = getMirrorOverrideGating({
+        targetKind: "organization",
+        effective: { mirrorReleases: true, releaseType: "stable" },
+      });
+      expect(gating.prereleaseLimit).toBe(MIRROR_GATING_REASONS.stableOnly);
+      expect(gating.releaseAssetLimit).toBeUndefined();
+    });
+
+    test("editable while every release type is mirrored", () => {
+      const gating = getMirrorOverrideGating({
+        targetKind: "repository",
+        effective: { mirrorReleases: true, releaseType: "all" },
+      });
+      expect(gating.prereleaseLimit).toBeUndefined();
+    });
   });
 });
