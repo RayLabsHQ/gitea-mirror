@@ -214,6 +214,23 @@ The mirror is looked for at its recorded location first, then anywhere on the de
 
 `dryRun` defaults to `true` and answers with `plan.moves` (`id`, `fullName`, `from`, `to`) and `plan.skipped` (`fullName`, `reason`) without touching anything. Repositories with their own destination, starred repositories (unless `starredReposMode` is `follow-strategy`), rows that are not mirrored yet and rows in a running mirror or sync are skipped. With `dryRun: false` each planned move runs, the organization's `destinationOrg` is written, and the answer lists `moved`, `pending`, `recorded` and `failed` (`fullName`, `error`). A failed repository keeps syncing where it is.
 
+### Move mirrors to match the settings
+
+These calls move existing mirrors to where the current strategy, organization destinations and starred setting put them, as **Review and move** does in the app. They need a Gitea or Forgejo destination; otherwise they answer `400`.
+
+`GET /api/placement/summary` reads the database only and answers `{ "supported": true, "outOfPlace": 3, "inPlace": 40 }`, where `outOfPlace` counts mirrors whose owner is not the one the settings name.
+
+`POST /api/placement/preview` with `{ "rename": true }` checks those mirrors on the destination and changes nothing. `rename` (default `true`) gives each moved mirror its source repository's name when that name is free. The answer lists:
+
+- `moves`: `id`, `fullName`, `from` and `to` (owner/name on the destination), `kind` (`move`, or `record` when only Gitea Mirror's record changes), `ownerState` (`account`, `organization` or `new-organization`), `renamed`, and optional `keptNameBecause` and `note`.
+- `blocked`: `id`, `fullName`, `from`, `to`, `reason` and an optional `hint`.
+- `skipped`: `id`, `fullName`, `from` and `reason`, for mirrors that are left out.
+- `inPlace`: how many mirrors are already where the settings put them.
+
+`POST /api/placement/run` with `{ "rename": true, "moves": [{ "id": "…", "to": "acme/api" }] }` starts the move in the background and answers `202`. Send the `id` and `to` of each move from the preview. Each one is checked again, and moved only when the check still gives the same `to`; the others are reported as skipped with the reason. A second run while one is going answers `409`.
+
+`GET /api/placement/run` reports the current or last run of the account since the server started, or `null`: `state` (`checking`, `running` or `done`), and `items` with `id`, `fullName`, `from`, `to`, `status` (`waiting`, `moving`, `moved`, `recorded`, `pending`, `failed` or `skipped`) and `message`. `stoppedBecause` is set when the run stopped early.
+
 ### Storage
 
 `GET /api/storage` returns what the Storage page shows: how much space the account's mirrors take on the destination.

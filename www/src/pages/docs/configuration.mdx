@@ -96,6 +96,22 @@ Splits the difference. Your personal repositories go into a single named organiz
 
 > **Note:** Repositories mirrored because you starred them have their own setting, **Starred repository destination**. **Dedicated organization** puts them all in one organization, named `starred` by default. **Preserve source owner** puts each under its GitHub owner's name, whatever the strategy above says. **Same as other repos** places them like any other repository, so the strategy, an organization's destination and a repository's own destination apply to them too. When a starred repository would take a name already used by a different repository in the same place, the duplicate strategy setting adds the owner's name as a suffix or a prefix.
 
+### Moving existing mirrors after a change
+
+A new strategy, organization destination or starred setting applies to repositories mirrored from then on. Mirrors that already exist stay where they were created and keep syncing there. When some of them are not where the current settings would put them, the footer of the **Organization Structure** card says how many, with a **Review and move** button. This works on Gitea and Forgejo destinations; on GitHub and GitLab the footer only says the strategy applies to new repositories.
+
+**Review and move** checks each of those mirrors on the destination and shows what a move would do, before anything changes:
+
+- **Will move**, grouped by the new owner. An owner that does not exist yet is marked **new organization** and is created first. A mirror marked **nothing to move** is already in the right place, for example because someone moved it there by hand, or because a mirror of the same repository already sits there; only Gitea Mirror's record changes, and the other copy is left for you to delete.
+- **Blocked**, with the reason and what to do about it: the target name is taken by another repository, the owner is a person's account rather than an organization, the owner is a name the destination keeps for itself, your destination account cannot create repositories in that organization or transfer the repository, or the mirror is not on the destination at all. Blocked mirrors stay where they are and keep syncing.
+- **Left out**: mirrors with a sync or mirror run going on, mirrors archived after their source disappeared, mirrors whose source is gone while cleanup waits, and mirrors made on a previous destination.
+
+**Use the source name**, on by default, gives each moved mirror its source repository's name, the way a new mirror would get it. When that name is taken at the new owner, the mirror keeps its current name if that one is free, and is blocked otherwise. Gitea Mirror never makes up a new name during a move. Turn the switch off to keep every mirror's current name.
+
+**Move** checks each mirror again right before moving it, and moves only the ones whose target is still the one you saw. Each mirror is transferred, and renamed when needed, with its history, issues and mirror settings; nothing is deleted or downloaded again. The record is updated after every step, so a failure halfway leaves Gitea Mirror pointing at wherever the mirror ended up. The run stops after three destination errors in a row. You can close the dialog while it runs; the card shows the progress, and the [activity log](/docs/repositories-and-organizations/#activity-log) gets a line per mirror.
+
+Old links and clones keep working after a move: the destination sends the old address on to the new one until another repository takes that name. Access given through the old organization's teams does not come along, and organizations left empty stay on the destination.
+
 ## Schedule intervals
 
 Anywhere Gitea Mirror asks for an interval, it accepts several formats:
