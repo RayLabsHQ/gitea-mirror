@@ -34,6 +34,9 @@ import { db, repositories, organizations } from "@/lib/db";
 import { inArray, eq } from "drizzle-orm";
 import { repoStatusEnum } from "@/types/Repository";
 import { createMirrorJob } from "@/lib/helpers";
+import { getProcessStart } from "@/lib/process-start";
+
+export { getProcessStart };
 
 /** Repository statuses that indicate in-flight work. */
 export const IN_FLIGHT_REPO_STATUSES = ["mirroring", "syncing"] as const;
@@ -49,17 +52,6 @@ export const IN_FLIGHT_ORG_STATUSES = ["mirroring"] as const;
 export const STUCK_IN_FLIGHT_THRESHOLD_MS = 2 * 60 * 60 * 1000;
 
 /**
- * Captured at module load, before any request handling can start a mirror or
- * sync in this process. Any in-flight row older than this was written by a
- * previous (crashed/restarted) process.
- */
-const PROCESS_START = new Date();
-
-export function getProcessStart(): Date {
-  return PROCESS_START;
-}
-
-/**
  * Compute the cutoff before which an in-flight status counts as stuck:
  * max(processStart, now - threshold).
  *
@@ -71,7 +63,7 @@ export function getProcessStart(): Date {
  */
 export function computeStuckStatusCutoff(
   now: Date,
-  processStart: Date = PROCESS_START,
+  processStart: Date = getProcessStart(),
   thresholdMs: number = STUCK_IN_FLIGHT_THRESHOLD_MS
 ): Date {
   return new Date(Math.max(processStart.getTime(), now.getTime() - thresholdMs));

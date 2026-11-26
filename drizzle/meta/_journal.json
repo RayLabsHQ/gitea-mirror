@@ -162,6 +162,13 @@
       "when": 1795649706051,
       "tag": "0022_sso_provider_owner_trust",
       "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "6",
+      "when": 1795652110452,
+      "tag": "0023_mirror_job_resume_attempts",
+      "breakpoints": true
     }
   ]
 }

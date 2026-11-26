@@ -1,7 +1,11 @@
 import type { ActivityStatus, RepoStatus } from "@/types/Repository";
 import { db, mirrorJobs } from "./db";
 import { eq, and } from "drizzle-orm";
-import { buildInterruptedJobsCondition } from "./interrupted-job-detection";
+import {
+  MAX_RESUMES_WITHOUT_PROGRESS,
+  buildInterruptedJobsCondition,
+  hasExhaustedResumes,
+} from "./interrupted-job-detection";
 import { v4 as uuidv4 } from "uuid";
 import { publishEvent } from "./events";
 import { withKeyedLock } from "./utils/keyed-mutex";
@@ -135,6 +139,8 @@ export async function updateMirrorJobProgress(params: {
   isCompleted?: boolean;
   /** Record a new start time, as when recovery resumes the job. */
   startedAt?: Date;
+  /** Resumes in a row without progress; finishing an item resets it to 0. */
+  resumeAttempts?: number;
   /** Write the progress without publishing a mirror-status event. */
   silent?: boolean;
 }) {
@@ -150,6 +156,7 @@ async function updateMirrorJobProgressLocked({
   inProgress,
   isCompleted,
   startedAt,
+  resumeAttempts,
   silent = false,
 }: Parameters<typeof updateMirrorJobProgress>[0]) {
   try {
@@ -174,11 +181,17 @@ async function updateMirrorJobProgressLocked({
       if (!completedItemIds.includes(completedItemId)) {
         updates.completedItemIds = [...completedItemIds, completedItemId];
         updates.completedItems = (job.completedItems || 0) + 1;
+        // Progress: the job is not stuck crashing on resume.
+        updates.resumeAttempts = 0;
       }
     }
 
     if (startedAt) {
       updates.startedAt = startedAt;
+    }
+
+    if (resumeAttempts !== undefined) {
+      updates.resumeAttempts = resumeAttempts;
     }
 
     // Update status if provided
@@ -352,6 +365,27 @@ export async function resumeInterruptedJob(job: any) {
       return null;
     }
 
+    // A job resumed this many times without finishing an item is most
+    // likely what keeps taking the app down (#564). Stop here instead of
+    // resuming it after every restart.
+    if (hasExhaustedResumes(job.resumeAttempts)) {
+      console.warn(
+        `Not resuming job ${job.id}: it was resumed ${job.resumeAttempts} times in a row without finishing an item`
+      );
+      await updateMirrorJobProgress({
+        jobId: job.id,
+        status: "failed",
+        message: `Stopped resuming after ${MAX_RESUMES_WITHOUT_PROGRESS} restarts in a row without progress`,
+        details:
+          `The job was interrupted again each time it was resumed, before any of its ${remainingItemIds.length} remaining items finished. ` +
+          "That usually means the work itself stops the app, for example by running out of memory. " +
+          "Check the logs and the memory limit, then sync the remaining repositories again.",
+        inProgress: false,
+        isCompleted: true,
+      });
+      return null;
+    }
+
     // Update the job to show it's being resumed. The start time moves to
     // now so the row records this pass; the fresh checkpoint written here is
     // what keeps a second recovery sweep from resuming the same job again.
@@ -361,6 +395,7 @@ export async function resumeInterruptedJob(job: any) {
       details: `Job was interrupted and is being resumed. ${job.completedItemIds.length} of ${job.itemIds.length} items were already processed.`,
       inProgress: true,
       startedAt: new Date(),
+      resumeAttempts: (job.resumeAttempts ?? 0) + 1,
     });
 
     return {

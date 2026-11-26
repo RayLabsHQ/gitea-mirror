@@ -1,0 +1,1 @@
+ALTER TABLE `mirror_jobs` ADD `resume_attempts` integer DEFAULT 0 NOT NULL;
