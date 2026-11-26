@@ -22,6 +22,12 @@ An import that failed never cleans itself up: the repository stays on the destin
 
 If you deleted a repository and Gitea still refuses the name, its files may be left on disk. They are listed under **Site Administration**, **Repositories**, **Unadopted repositories**, where you can delete them.
 
+## Mirroring fails with "already exists on the destination and is not a mirror"
+
+A regular repository, one that is not a mirror, already has the name the mirror needs. Gitea Mirror leaves it alone instead of replacing it. Rename or delete it on the destination, or give the repository another destination on the Repositories page, then retry.
+
+A failed import shows up the same way. Its page on the destination says the migration failed; delete it there and retry.
+
 ## Mirroring fails with HTTP 422 "You can not import from disallowed hosts"
 
 Gitea refuses to import from private network addresses by default. That hits a self-hosted GitLab, Forgejo or git host on your LAN, or a source reached through a local IP. Allow it in the destination's `app.ini`:

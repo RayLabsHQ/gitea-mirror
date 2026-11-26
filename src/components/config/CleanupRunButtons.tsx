@@ -26,6 +26,8 @@ export interface CleanupRunDetails {
   text?: string;
   items?: string[];
   itemsLabel?: string;
+  /** Repositories on the destination the run did not touch, with the reason. */
+  leftAlone?: string[];
   errors?: string[];
 }
 
@@ -122,6 +124,7 @@ export function useRepositoryCleanupRun() {
           errors: string[];
           repositories: string[];
           waiting?: { fullName: string; actOn: string }[];
+          leftAlone?: string[];
           dryRun: boolean;
           action: "skip" | "archive" | "delete";
         };
@@ -159,6 +162,9 @@ export function useRepositoryCleanupRun() {
         const counts: string[] = [];
         if (results.processedCount > 0 || waiting.length === 0) counts.push(`${results.processedCount} ${done}`);
         if (waiting.length > 0) counts.push(`${waiting.length} waiting`);
+        const leftAlone = results.leftAlone ?? [];
+        // They were archived or removed here, but the repository at their address is not their mirror.
+        if (leftAlone.length > 0) counts.push(`${leftAlone.length} of them only in Gitea Mirror`);
         if (results.errorCount > 0) counts.push(`${results.errorCount} failed`);
         setState({
           kind: "done",
@@ -168,6 +174,7 @@ export function useRepositoryCleanupRun() {
             title: "Repository cleanup",
             items,
             itemsLabel,
+            leftAlone,
             errors: results.errors,
           },
         });
@@ -266,6 +273,23 @@ function RunDetailsDialog({
               {details.items.map((item) => (
                 <li key={item} className="break-all">
                   {item}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {details.leftAlone && details.leftAlone.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+              Left alone on the destination ({details.leftAlone.length})
+            </p>
+            <p className="text-sm text-muted-foreground">
+              Each of these addresses holds a repository that is not the mirror, so it was not touched.
+            </p>
+            <ul className="max-h-48 space-y-1 overflow-y-auto rounded-md border border-amber-500/30 bg-amber-500/5 p-3 font-mono text-[13px]">
+              {details.leftAlone.map((line) => (
+                <li key={line} className="break-words">
+                  {line}
                 </li>
               ))}
             </ul>

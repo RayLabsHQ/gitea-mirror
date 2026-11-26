@@ -528,6 +528,7 @@ export function buildRepositoryCleanupNotificationEvent({
   action,
   destinationChanged,
   repositoryNames,
+  leftAlone = [],
   failures,
 }: {
   action: "skip" | "archive" | "delete";
@@ -535,6 +536,8 @@ export function buildRepositoryCleanupNotificationEvent({
   destinationChanged: boolean;
   /** Full names of the repositories archived or removed. */
   repositoryNames: string[];
+  /** Repositories whose destination copy was left alone, one line each with the reason. */
+  leftAlone?: string[];
   /** One line per repository the run could not handle. */
   failures: string[];
 }): NotificationEvent {
@@ -552,6 +555,9 @@ export function buildRepositoryCleanupNotificationEvent({
     const what = cleanupOutcomeText(action, destinationChanged);
     const untouched = destinationChanged ? "" : " The copies on the destination were not changed.";
     parts.push(`${count} ${noun} ${what} because the source is gone.${untouched}`, list(repositoryNames));
+  }
+  if (destinationChanged && leftAlone.length > 0) {
+    parts.push("\nOn the destination, these were left alone:", list(leftAlone));
   }
   if (failures.length > 0) {
     parts.push(`${count > 0 ? "\n" : ""}Cleanup failed for:`, list(failures));
@@ -670,6 +676,7 @@ export async function triggerRepositoryCleanupNotification(args: {
   action: "skip" | "archive" | "delete";
   destinationChanged: boolean;
   repositoryNames: string[];
+  leftAlone?: string[];
   failures: string[];
 }): Promise<void> {
   try {

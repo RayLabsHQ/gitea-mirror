@@ -86,6 +86,9 @@ export interface GiteaRepoInfo {
   id: number;
   name: string;
   owner: { login: string } | string;
+  // owner/name as Gitea knows it now. A lookup at an old address follows the
+  // redirect, so this can differ from the address that was asked for.
+  full_name?: string;
   mirror: boolean;
   mirror_interval?: string;
   // True until the first commit arrives; with an empty mirror_interval it means
@@ -1546,39 +1549,6 @@ export async function syncGiteaRepoEnhanced({
 }
 
 /**
- * Delete a repository in Gitea (useful for cleaning up non-mirror repos)
- */
-export async function deleteGiteaRepo({
-  config,
-  owner,
-  repoName,
-}: {
-  config: Partial<Config>;
-  owner: string;
-  repoName: string;
-}): Promise<void> {
-  if (!config.giteaConfig?.url || !config.giteaConfig?.token) {
-    throw new Error("Gitea config is required.");
-  }
-
-  const decryptedConfig = decryptConfigTokens(config as Config);
-  
-  const response = await fetch(
-    `${config.giteaConfig.url}/api/v1/repos/${owner}/${repoName}`,
-    {
-      method: "DELETE",
-      headers: {
-        Authorization: `token ${decryptedConfig.giteaConfig.token}`,
-      },
-    }
-  );
-
-  if (!response.ok && response.status !== 404) {
-    throw new Error(`Failed to delete repository: ${response.statusText}`);
-  }
-}
-
-/**
  * Convert a regular repository to a mirror (if supported by Gitea version)
  * Note: This might not be supported in all Gitea versions
  */
@@ -1629,53 +1599,3 @@ export async function createOrganizationsSequentially({
   return orgIdMap;
 }
 
-/**
- * Check and handle existing non-mirror repositories
- */
-export async function handleExistingNonMirrorRepo({
-  config,
-  repository,
-  repoInfo,
-  strategy = "skip",
-}: {
-  config: Partial<Config>;
-  repository: Repository;
-  repoInfo: GiteaRepoInfo;
-  strategy?: "skip" | "delete" | "rename";
-}): Promise<void> {
-  const owner = typeof repoInfo.owner === 'string' ? repoInfo.owner : repoInfo.owner.login;
-  const repoName = repoInfo.name;
-
-  switch (strategy) {
-    case "skip":
-      console.log(`[Handle] Skipping existing non-mirror repository: ${owner}/${repoName}`);
-      
-      await db
-        .update(repositories)
-        .set({
-          status: repoStatusEnum.parse("failed"),
-          updatedAt: new Date(),
-          errorMessage: "Repository exists but is not a mirror. Skipped.",
-        })
-        .where(eq(repositories.id, repository.id!));
-      
-      break;
-
-    case "delete":
-      console.log(`[Handle] Deleting existing non-mirror repository: ${owner}/${repoName}`);
-      
-      await deleteGiteaRepo({
-        config,
-        owner,
-        repoName,
-      });
-      
-      console.log(`[Handle] Deleted repository ${owner}/${repoName}. It can now be recreated as a mirror.`);
-      break;
-
-    case "rename":
-      console.log(`[Handle] Renaming strategy not implemented yet for: ${owner}/${repoName}`);
-      // TODO: Implement rename strategy if needed
-      break;
-  }
-}

@@ -49,6 +49,10 @@ let migrateError: Error | null = null;
 let readsAfterMigrate = 0;
 // Whether the destination lets the configured token push to the mirror.
 let pushAllowed = true;
+// False when a regular repository, not a mirror, holds the name.
+let existingIsMirror = true;
+// Every request the run sent through the global fetch.
+let fetchCalls: Array<{ method: string; url: string }> = [];
 
 /** Whether the repository is on the destination at this point of the run. */
 const repoThere = () =>
@@ -144,6 +148,9 @@ if (isChild) {
     getGiteaRepoInfo: mock(async ({ owner, repoName }: any) => {
       if (!repoThere()) return null;
       if (migrateCalls > 0) readsAfterMigrate++;
+      if (!existingIsMirror) {
+        return { id: 1, name: repoName, owner: { login: owner }, mirror: false, private: false, empty: false };
+      }
       return {
         id: 1,
         name: repoName,
@@ -156,7 +163,6 @@ if (isChild) {
         mirror_interval: importFinished ? "8h0m0s" : "",
       };
     }),
-    handleExistingNonMirrorRepo: mock(async () => {}),
     syncGiteaRepoEnhanced: mock(async (args: any) => {
       syncCalls.push({ args, importFinishedAtCall: importFinished });
       if (syncError) throw syncError;
@@ -181,7 +187,10 @@ if (isChild) {
   }));
 
   // isRepoPresentInGitea reads the repository through the global fetch.
-  globalThis.fetch = mock(async () => new Response("{}", { status: repoThere() ? 200 : 404 })) as any;
+  globalThis.fetch = mock(async (url: any, init?: RequestInit) => {
+    fetchCalls.push({ method: (init?.method ?? "GET").toUpperCase(), url: String(url) });
+    return new Response("{}", { status: repoThere() ? 200 : 404 });
+  }) as any;
 }
 
 const { mirrorGithubRepoToGitea, mirrorGitHubRepoToGiteaOrg } = isChild
@@ -256,6 +265,8 @@ beforeEach(() => {
   migrateError = null;
   readsAfterMigrate = 0;
   pushAllowed = true;
+  existingIsMirror = true;
+  fetchCalls = [];
 });
 
 for (const path of paths) {
@@ -275,6 +286,19 @@ for (const path of paths) {
       // that is the sync's to write once the work has happened.
       expect(rowWrites[0]).toMatchObject({ status: "mirroring", mirroredLocation: path.location });
       expect(rowWrites.some((write) => write.status === "mirrored")).toBe(false);
+    });
+
+    test("leaves a regular repository at the name alone and says why", async () => {
+      existingIsMirror = false;
+
+      await expect(path.run()).rejects.toThrow("is not a mirror, so Gitea Mirror left it alone");
+
+      expect(fetchCalls.filter((call) => call.method === "DELETE")).toEqual([]);
+      expect(migrateCalls).toBe(0);
+      expect(syncCalls).toHaveLength(0);
+      const failure = rowWrites.find((write) => write.status === "failed");
+      expect(failure?.errorMessage).toContain(`${path.location} already exists on the destination and is not a mirror`);
+      expect(failure?.mirroredLocation).toBe("");
     });
 
     test("waits for an import Gitea is still running, then syncs", async () => {

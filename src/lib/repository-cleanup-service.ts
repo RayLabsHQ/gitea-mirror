@@ -12,7 +12,11 @@ import {
   isRepositoryFromConfiguredSource,
   sourceKindListsRepositories,
 } from '@/lib/source-providers';
-import { createGiteaClient, deleteGiteaRepo, archiveGiteaRepo, getGiteaRepoOwnerAsync, checkRepoLocation } from '@/lib/gitea';
+import { createGiteaClient, deleteGiteaRepo, archiveGiteaRepo, getGiteaRepoOwnerAsync } from '@/lib/gitea';
+import { HttpError, httpGet } from '@/lib/http-client';
+import { isRecordedMirror, ownerLogin, splitLocation } from '@/lib/destination-transfer';
+import { isMirrorOfSource } from '@/lib/utils/mirror-source-match';
+import type { GiteaRepoInfo } from '@/lib/gitea-enhanced';
 import { usesPushEngine } from '@/lib/destination-connection';
 import { getDecryptedGiteaToken } from '@/lib/utils/config-encryption';
 import { publishEvent } from '@/lib/events';
@@ -372,33 +376,83 @@ async function scanForOrphanedRepositories(config: any): Promise<OrphanScan> {
  * Gitea side. Only called when the cleanup plan actually touches Gitea, so
  * a database-only cleanup never needs a decryptable Gitea token.
  */
-async function resolveGiteaTarget(config: any, repo: any): Promise<{
-  giteaClient: ReturnType<typeof createGiteaClient>;
-  giteaOwner: string;
-  giteaRepoName: string;
-}> {
-  const giteaToken = getDecryptedGiteaToken(config);
-  const giteaClient = createGiteaClient(config.giteaConfig.url, giteaToken);
+/**
+ * What cleanup found on the destination for an orphan: its mirror, at the
+ * repository's current address, or the reason the destination is left alone.
+ */
+export type OrphanDestinationTarget =
+  | { kind: 'mirror'; owner: string; name: string }
+  | { kind: 'absent'; location: string }
+  | { kind: 'not-ours'; location: string; reason: string; askedAt: string };
 
-  // Determine the Gitea owner and repo name more robustly
-  const mirroredLocation = (repo.mirroredLocation || '').trim();
-  let giteaOwner: string;
-  let giteaRepoName: string;
+/**
+ * Find an orphan's mirror on the destination before archiving or deleting
+ * it. Cleanup only acts on a repository it has confirmed is this row's
+ * mirror. At the recorded location a mirror without original_url is trusted,
+ * because that location came from our own success path. A row that was
+ * never recorded falls back to where the strategy would put it, and there
+ * the mirror has to name this source: the same name can hold a regular
+ * repository or another source's mirror.
+ *
+ * The lookup follows redirects and answers with the repository's current
+ * address, so a mirror renamed or moved on the destination is acted on
+ * where it is now, never at the old address.
+ */
+export async function locateOrphanMirror(
+  config: any,
+  repo: any,
+  deps: {
+    getRepoInfo?: (owner: string, name: string) => Promise<GiteaRepoInfo | null>;
+    guessOwner?: () => Promise<string>;
+  } = {}
+): Promise<OrphanDestinationTarget> {
+  const recorded = splitLocation(repo.mirroredLocation);
+  const owner = recorded?.owner
+    ?? (await (deps.guessOwner ?? (() => getGiteaRepoOwnerAsync({ config, repository: repo })))()).trim();
+  const name = recorded?.name ?? repo.name;
+  const location = `${owner}/${name}`;
 
-  if (mirroredLocation && mirroredLocation.includes('/')) {
-    const [ownerPart, namePart] = mirroredLocation.split('/');
-    giteaOwner = ownerPart;
-    giteaRepoName = namePart;
-  } else {
-    // Fall back to expected owner based on config and repo flags (starred/org overrides)
-    giteaOwner = await getGiteaRepoOwnerAsync({ config, repository: repo });
-    giteaRepoName = repo.name;
+  const getRepoInfo = deps.getRepoInfo ?? (async (o: string, n: string) => {
+    try {
+      const response = await httpGet<GiteaRepoInfo>(
+        `${config.giteaConfig.url}/api/v1/repos/${encodeURIComponent(o)}/${encodeURIComponent(n)}`,
+        { Authorization: `token ${getDecryptedGiteaToken(config)}` }
+      );
+      return response.data ?? null;
+    } catch (error) {
+      if (error instanceof HttpError && error.status === 404) return null;
+      throw error;
+    }
+  });
+
+  const info = await getRepoInfo(owner, name);
+  if (!info) return { kind: 'absent', location };
+
+  const current = splitLocation(info.full_name) ?? { owner: ownerLogin(info) || owner, name: info.name || name };
+  const currentLocation = `${current.owner}/${current.name}`;
+  const ours = recorded ? isRecordedMirror(info, repo.cloneUrl) : isMirrorOfSource(info, repo.cloneUrl);
+  if (!ours) {
+    return {
+      kind: 'not-ours',
+      location: currentLocation,
+      reason: info.mirror ? 'mirrors a different source' : 'is not a mirror',
+      askedAt: location,
+    };
   }
+  return { kind: 'mirror', owner: current.owner, name: current.name };
+}
 
-  // Normalize owner casing to avoid GetUserByName issues on some Gitea setups
-  giteaOwner = giteaOwner.trim();
+/** A repository cleanup did not touch, as the Run now details and the notification list it. */
+export function leftAloneListLine(target: Extract<OrphanDestinationTarget, { kind: 'not-ours' }>): string {
+  const redirected = target.askedAt.toLowerCase() !== target.location.toLowerCase();
+  return `${target.location} ${target.reason}${redirected ? ` (${target.askedAt} redirects here)` : ''}`;
+}
 
-  return { giteaClient, giteaOwner, giteaRepoName };
+/** One line for the log and the event when the destination is left alone. */
+export function leftAloneNote(target: Exclude<OrphanDestinationTarget, { kind: 'mirror' }>): string {
+  return target.kind === 'absent'
+    ? `Nothing to change on the destination: there is no repository at ${target.location}.`
+    : `${target.location} on the destination was left alone: it ${target.reason}.`;
 }
 
 /**
@@ -414,9 +468,15 @@ async function handleOrphanedRepository(
   config: any,
   repo: any,
   action: 'skip' | 'archive' | 'delete',
-  dryRun: boolean
+  dryRun: boolean,
+  /** Told when a repository on the destination was left alone because it is not this row's mirror. */
+  onLeftAlone?: (note: string) => void
 ): Promise<OrphanedRepositoryOutcome> {
   const repoFullName = repo.fullName;
+  // Set when the destination was left alone (nothing there, or not this row's mirror).
+  let destinationNote = '';
+  // The line for the run's list, only for a repository that is there but not ours.
+  let leftAloneLine = '';
   
   if (action === 'skip') {
     console.log(`[Repository Cleanup] Skipping orphaned repository ${repoFullName}`);
@@ -451,39 +511,32 @@ async function handleOrphanedRepository(
         const { archiveOnPushTarget } = await import('@/lib/push-engine/cleanup');
         await archiveOnPushTarget({ config, repository: repo });
       } else if (plan.gitea === 'archive') {
-        console.log(`[Repository Cleanup] Archiving orphaned repository ${repoFullName} in Gitea`);
-        const { giteaClient, giteaRepoName, giteaOwner: expectedOwner } = await resolveGiteaTarget(config, repo);
-        let giteaOwner = expectedOwner;
-        // Best-effort check to validate actual location; falls back gracefully
-        try {
-          const { present, actualOwner } = await checkRepoLocation({
-            config,
-            repository: repo,
-            expectedOwner: giteaOwner,
-          });
-          if (present) {
-            giteaOwner = actualOwner;
+        const target = await locateOrphanMirror(config, repo);
+        if (target.kind === 'mirror') {
+          console.log(`[Repository Cleanup] Archiving orphaned repository ${repoFullName} in Gitea at ${target.owner}/${target.name}`);
+          const giteaClient = createGiteaClient(config.giteaConfig.url, getDecryptedGiteaToken(config));
+          const { archivedName } = await archiveGiteaRepo(giteaClient, target.owner, target.name);
+
+          // If the archive call renamed the repo in Gitea (mirror path), persist
+          // the new location so a later manual Sync (the UI's documented
+          // path for refreshing an archived mirror) can find it by its actual
+          // current name instead of the stale pre-rename one — otherwise
+          // syncGiteaRepoEnhanced looks up a name that no longer exists and
+          // Gitea returns HTTP 405 ("not a pull mirror").
+          //
+          // Only mirroredLocation gets the Gitea-side `archived-{name}` value.
+          // Do NOT write it into `name`: repositories.name is consumed as the
+          // GITHUB repo name elsewhere (release listing, force-push detection),
+          // and mirroredLocation alone is what syncGiteaRepoEnhanced resolves
+          // first when locating the Gitea mirror.
+          if (archivedName && archivedName !== target.name) {
+            dbUpdate.mirroredLocation = `${target.owner}/${archivedName}`;
           }
-        } catch {
-          // Non-fatal; continue with best guess
-        }
-
-        const { archivedName } = await archiveGiteaRepo(giteaClient, giteaOwner, giteaRepoName);
-
-        // If the archive call renamed the repo in Gitea (mirror path), persist
-        // the new location so a later manual Sync (the UI's documented
-        // path for refreshing an archived mirror) can find it by its actual
-        // current name instead of the stale pre-rename one — otherwise
-        // syncGiteaRepoEnhanced looks up a name that no longer exists and
-        // Gitea returns HTTP 405 ("not a pull mirror").
-        //
-        // Only mirroredLocation gets the Gitea-side `archived-{name}` value.
-        // Do NOT write it into `name`: repositories.name is consumed as the
-        // GITHUB repo name elsewhere (release listing, force-push detection),
-        // and mirroredLocation alone is what syncGiteaRepoEnhanced resolves
-        // first when locating the Gitea mirror.
-        if (archivedName && archivedName !== giteaRepoName) {
-          dbUpdate.mirroredLocation = `${giteaOwner}/${archivedName}`;
+        } else {
+          destinationNote = leftAloneNote(target);
+          if (target.kind === 'not-ours') leftAloneLine = leftAloneListLine(target);
+          console.log(`[Repository Cleanup] ${repoFullName}: ${destinationNote}`);
+          dbUpdate.errorMessage = `Repository archived in gitea-mirror - no longer in GitHub. ${destinationNote}`;
         }
       } else {
         console.log(`[Repository Cleanup] Marking orphaned repository ${repoFullName} archived in gitea-mirror (deleteFromGitea disabled; Gitea copy untouched)`);
@@ -498,7 +551,9 @@ async function handleOrphanedRepository(
         payload: {
           type: 'repository.archived',
           message: plan.gitea === 'archive'
-            ? `Repository ${repoFullName} archived (no longer in GitHub)`
+            ? destinationNote
+              ? `Repository ${repoFullName} marked archived in gitea-mirror (no longer in GitHub). ${destinationNote}`
+              : `Repository ${repoFullName} archived (no longer in GitHub)`
             : `Repository ${repoFullName} marked archived in gitea-mirror (no longer in GitHub; Gitea copy untouched)`,
           metadata: {
             repositoryId: repo.id,
@@ -508,6 +563,7 @@ async function handleOrphanedRepository(
           },
         },
       });
+      if (leftAloneLine) onLeftAlone?.(leftAloneLine);
       return 'archived';
     } else if (action === 'delete') {
       if (plan.gitea === 'delete' && usesPushEngine(config)) {
@@ -515,9 +571,16 @@ async function handleOrphanedRepository(
         const { deleteOnPushTarget } = await import('@/lib/push-engine/cleanup');
         await deleteOnPushTarget({ config, repository: repo });
       } else if (plan.gitea === 'delete') {
-        console.log(`[Repository Cleanup] Deleting orphaned repository ${repoFullName} from Gitea`);
-        const { giteaClient, giteaOwner, giteaRepoName } = await resolveGiteaTarget(config, repo);
-        await deleteGiteaRepo(giteaClient, giteaOwner, giteaRepoName);
+        const target = await locateOrphanMirror(config, repo);
+        if (target.kind === 'mirror') {
+          console.log(`[Repository Cleanup] Deleting orphaned repository ${repoFullName} from Gitea at ${target.owner}/${target.name}`);
+          const giteaClient = createGiteaClient(config.giteaConfig.url, getDecryptedGiteaToken(config));
+          await deleteGiteaRepo(giteaClient, target.owner, target.name);
+        } else {
+          destinationNote = leftAloneNote(target);
+          if (target.kind === 'not-ours') leftAloneLine = leftAloneListLine(target);
+          console.log(`[Repository Cleanup] ${repoFullName}: ${destinationNote}`);
+        }
       } else {
         console.log(`[Repository Cleanup] Removing orphaned repository ${repoFullName} from gitea-mirror (deleteFromGitea disabled; Gitea copy untouched)`);
       }
@@ -538,7 +601,9 @@ async function handleOrphanedRepository(
         payload: {
           type: 'repository.deleted',
           message: plan.gitea === 'delete'
-            ? `Repository ${repoFullName} deleted (no longer in GitHub)`
+            ? destinationNote
+              ? `Repository ${repoFullName} removed from gitea-mirror (no longer in GitHub). ${destinationNote}`
+              : `Repository ${repoFullName} deleted (no longer in GitHub)`
             : `Repository ${repoFullName} removed from gitea-mirror (no longer in GitHub; Gitea copy untouched)`,
           metadata: {
             repositoryId: repo.id,
@@ -548,6 +613,7 @@ async function handleOrphanedRepository(
           },
         },
       });
+      if (leftAloneLine) onLeftAlone?.(leftAloneLine);
       return 'deleted';
     }
     return 'none';
@@ -577,6 +643,8 @@ export interface RepositoryCleanupResult {
   repositories: string[];
   /** Full names of the repositories this run archived or removed. */
   handled: string[];
+  /** Repositories whose destination copy was left alone, one line each with the reason. */
+  leftAlone: string[];
   /** Repositories whose source is gone but whose wait is not over (#549). */
   waiting: Array<{ fullName: string; actOn: string }>;
   /** Planned actions were only logged. */
@@ -615,6 +683,7 @@ async function runRepositoryCleanup(
       errors: [],
       repositories: [],
       handled: [],
+      leftAlone: [],
       waiting: [],
       dryRun: cleanupConfig.dryRun ?? false,
       action: cleanupConfig.orphanedRepoAction || 'archive',
@@ -640,6 +709,7 @@ async function runRepositoryCleanupUnlocked(config: any): Promise<RepositoryClea
     errors: [] as string[],
     repositories: [],
     handled: [],
+    leftAlone: [],
     waiting: [],
     dryRun: cleanupConfig.dryRun ?? false,
     action: cleanupConfig.orphanedRepoAction || 'archive',
@@ -738,7 +808,7 @@ async function runRepositoryCleanupUnlocked(config: any): Promise<RepositoryClea
       
       for (const repo of batch) {
         try {
-          const outcome = await handleOrphanedRepository(config, repo, action, dryRun);
+          const outcome = await handleOrphanedRepository(config, repo, action, dryRun, (note) => results.leftAlone.push(note));
           results.processedCount++;
           if (outcome !== 'none') {
             results.handled.push(repo.fullName);
@@ -782,6 +852,7 @@ async function runRepositoryCleanupUnlocked(config: any): Promise<RepositoryClea
     action: results.action,
     destinationChanged,
     repositoryNames: results.handled,
+    leftAlone: results.leftAlone,
     failures: results.errors,
   });
 
