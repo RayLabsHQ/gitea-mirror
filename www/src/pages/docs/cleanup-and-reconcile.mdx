@@ -19,22 +19,22 @@ Cleanup looks for repositories that the database tracks but that no longer exist
 | Enabled | `CLEANUP_DELETE_IF_NOT_IN_GITHUB` | on | The card's switch. Checks every 6 hours and with each scheduled sync. |
 | Action | `CLEANUP_ORPHANED_REPO_ACTION` | `archive` | `skip` leaves the mirror untouched, `archive` keeps it read only with an archived prefix, `delete` removes it. |
 | Dry run | `CLEANUP_DRY_RUN` | off | Log the planned actions without changing anything. |
-| Delete from destination | `CLEANUP_DELETE_FROM_GITEA` | `false` | Apply the action on the destination too. Off means only the database is updated. |
+| Apply to the destination too | `CLEANUP_DELETE_FROM_GITEA` | `false` | Apply the action on the destination too. Off means only gitea-mirror's own list is updated. Shown on the card unless the action is `skip`. |
 | Protected repositories | `CLEANUP_PROTECTED_REPOS` | none | Comma-separated repository names cleanup never touches. |
 | Batch size and pause | `CLEANUP_BATCH_SIZE`, `CLEANUP_PAUSE_BETWEEN_DELETES` | `10`, `2000` | Items per batch, and the pause between deletions in milliseconds. |
 
-The first three are on the card. The others are environment variables; see the [reference](/docs/environment-variables/#cleanup).
+The first four are on the card. If you also set one of their environment variables, and environment seeding applies, it replaces the card's value on every restart; see the [warning on the reference page](/docs/environment-variables/). The others are environment variables only; see the [reference](/docs/environment-variables/#cleanup).
 
 To check right away instead of waiting, click **Run now** on the card. If the action would change anything, it asks first. A dry run or the `skip` action runs without asking. Its progress and the outcome show in the card's footer, and the info button next to the outcome lists the repositories whose source is gone and any errors. The same run is available as `POST /api/cleanup/trigger`, see the [API page](/docs/api/#run-cleanup).
 
 ### What each action does
 
-`archive` never deletes. With **Delete from destination** off, the default, the row is marked archived in the database and the destination is left alone. With it on:
+`archive` never deletes. With **Apply to the destination too** off, the default, the row is marked archived in the database and the destination is left alone. With it on:
 
-- On Gitea and Forgejo, a regular repository gets the native archive flag, which makes it read only while keeping every byte. A mirror repository cannot be archived through the Gitea API, so it is renamed with an `archived-` prefix, given a description that says why, and has its mirror interval pushed out to a year so no more sync attempts run. It remains fully cloneable.
+- On Gitea and Forgejo, a regular repository gets the native archive flag, which makes it read only while keeping every byte. A mirror repository cannot be archived through the Gitea API, so it is renamed with an `archived-` prefix, given a description that says why, and has its automatic syncs turned off (a manual sync still works). It remains fully cloneable.
 - On GitHub and GitLab, the repository is archived through the host's API.
 
-`delete` removes the row from the database and, with **Delete from destination** on, removes the repository from the destination. Deleting on GitHub needs a token with the `delete_repo` scope; without it the run fails with a message naming the scope and the repository stays. On gitlab.com and instances with delayed deletion, a deleted project is renamed and kept for the configured number of days. For push targets the bare clone on disk is removed as well.
+`delete` removes the row from the database and, with **Apply to the destination too** on, removes the repository from the destination. Deleting on GitHub needs a token with the `delete_repo` scope; without it the run fails with a message naming the scope and the repository stays. On gitlab.com and instances with delayed deletion, a deleted project is renamed and kept for the configured number of days. For push targets the bare clone on disk is removed as well.
 
 If archiving fails for any reason, the repository is left alone and stays accessible.
 

@@ -96,29 +96,45 @@ function formatIntervalSeconds(interval: number | string | undefined): string {
   return `every ${seconds} seconds`;
 }
 
-const orphanActions = [
-  {
-    value: "skip" as const,
-    label: "Skip",
-    description: "Leave the mirror untouched",
-    icon: CircleOff,
-    info: "Orphaned mirrors stay exactly as they are and keep their sync settings.",
-  },
-  {
-    value: "archive" as const,
-    label: "Archive",
-    description: "Kept read-only with an archived prefix",
-    icon: Archive,
-    info: "Renames the mirror with an archived- prefix and disables automatic syncs. Nothing is lost; use Sync on the Repositories page to refresh.",
-  },
-  {
-    value: "delete" as const,
-    label: "Delete",
-    description: "Remove the mirror from Gitea",
-    icon: Trash2,
-    info: "Permanently deletes the mirror repository from Gitea.",
-  },
-];
+/**
+ * The three choices for a repository whose source is gone. What archive and
+ * delete do depends on the destination switch below them: with it off only
+ * gitea-mirror's own list changes (#558), so the tiles say so instead of
+ * promising a change on the destination.
+ */
+function orphanActions(applyToDestination: boolean) {
+  return [
+    {
+      value: "skip" as const,
+      label: "Skip",
+      description: "Leave the mirror untouched",
+      icon: CircleOff,
+      info: "Orphaned mirrors stay exactly as they are and keep their sync settings.",
+    },
+    {
+      value: "archive" as const,
+      label: "Archive",
+      description: applyToDestination
+        ? "Kept read-only with an archived prefix"
+        : "Marked archived in gitea-mirror only",
+      icon: Archive,
+      info: applyToDestination
+        ? "Renames the mirror with an archived- prefix and disables automatic syncs. Nothing is lost; use Sync on the Repositories page to refresh."
+        : "The repository is marked archived in gitea-mirror. The copy on the destination stays as it is. Turn on Apply to the destination too to archive it there as well.",
+    },
+    {
+      value: "delete" as const,
+      label: "Delete",
+      description: applyToDestination
+        ? "Remove the mirror from the destination"
+        : "Removed from gitea-mirror only",
+      icon: Trash2,
+      info: applyToDestination
+        ? "Permanently deletes the mirror repository from the destination."
+        : "The repository is removed from gitea-mirror. The copy on the destination stays as it is. Turn on Apply to the destination too to delete it there as well.",
+    },
+  ];
+}
 
 export function AutomationSettings({
   scheduleConfig,
@@ -436,12 +452,14 @@ export function AutomationSettings({
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground">
-                    Cleanup runs {cleanupFrequencyText(cleanupConfig.retentionDays)}
+                    Log cleanup runs {cleanupFrequencyText(cleanupConfig.retentionDays)}
                   </p>
                 </div>
                 <p className="max-w-md text-[13px] leading-relaxed text-muted-foreground">
                   Activity logs and events older than the retention period are
-                  removed. Cleanup frequency adapts to the period you pick.
+                  removed. How often this runs adapts to the period you pick.
+                  Repositories are not touched here, see Repository Cleanup
+                  below.
                 </p>
               </CardSection>
               {/* Sits at the bottom of the card, above the footer, like the rows on
@@ -492,9 +510,9 @@ export function AutomationSettings({
         {cleanupConfig.deleteIfNotInGitHub && (
           <>
             <CardSection>
-              <SectionTitle>When a GitHub repo is deleted</SectionTitle>
+              <SectionTitle>When the source repository is gone</SectionTitle>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                {orphanActions.map((action) => (
+                {orphanActions(Boolean(cleanupConfig.deleteFromGitea)).map((action) => (
                   <OptionTile
                     key={action.value}
                     icon={action.icon}
@@ -517,6 +535,17 @@ export function AutomationSettings({
             </CardSection>
             <CardDivider />
             <CardSection>
+              {(cleanupConfig.orphanedRepoAction ?? "archive") !== "skip" && (
+                <SwitchRow
+                  label="Apply to the destination too"
+                  description="When off, only gitea-mirror's list changes and the copies on the destination stay as they are"
+                  info="Archiving keeps everything: a Gitea or Forgejo mirror gets an archived- prefix and stops syncing automatically, and GitHub or GitLab use their own archive. Deleting cannot be undone. CLEANUP_DELETE_FROM_GITEA, when set, replaces this on every restart."
+                  checked={Boolean(cleanupConfig.deleteFromGitea)}
+                  onCheckedChange={(checked) =>
+                    onCleanupChange({ ...cleanupConfig, deleteFromGitea: checked })
+                  }
+                />
+              )}
               <SwitchRow
                 label="Dry run"
                 description="Log planned actions without changing anything"
