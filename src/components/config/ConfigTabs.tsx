@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { GitHubConfigForm } from './GitHubConfigForm';
 import { GiteaConfigForm } from './GiteaConfigForm';
+import { MirrorPlacementBar, MirrorPlacementProvider } from './MirrorPlacement';
 import { SourcesCard } from './SourcesCard';
 import { GitHubMirrorSettings } from './GitHubMirrorSettings';
 import { AutomationSettings } from './AutomationSettings';
@@ -721,6 +722,17 @@ export function ConfigTabs() {
       <ConfigCardSkeleton />
     </div>
   ) : (
+    <MirrorPlacementProvider
+      isSaving={isAutoSavingGitea}
+      refreshKey={[
+        config.giteaConfig.mirrorStrategy,
+        config.giteaConfig.organization,
+        config.giteaConfig.personalReposOrg,
+        config.giteaConfig.starredReposOrg,
+        config.giteaConfig.starredReposMode,
+        config.giteaConfig.preserveOrgStructure,
+      ].join("|")}
+    >
     <div className="space-y-6">
       {/* Header section */}
       <div className="flex flex-col md:flex-row justify-between gap-y-4 items-start">
@@ -909,6 +921,8 @@ export function ConfigTabs() {
           <ApiKeysSettings />
         </TabsContent>
       </Tabs>
+      <MirrorPlacementBar />
     </div>
+    </MirrorPlacementProvider>
   );
 }

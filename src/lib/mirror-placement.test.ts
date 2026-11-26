@@ -11,7 +11,7 @@ import type { PlacementDeps } from "./mirror-placement-service";
 
 // Other files mock modules these import; run this file on its own.
 const isChild = runsIsolated(import.meta.path);
-const { scanPlacement } = (isChild ? await import("./mirror-placement") : {}) as typeof import("./mirror-placement");
+const { scanPlacement, placementBarMode } = (isChild ? await import("./mirror-placement") : {}) as typeof import("./mirror-placement");
 const { previewPlacement } = (isChild ? await import("./mirror-placement-service") : {}) as typeof import("./mirror-placement-service");
 
 type Repo = { owner: string; name: string; mirror: boolean; original_url?: string; admin?: boolean };
@@ -325,5 +325,50 @@ describe.skipIf(!isChild)("isReservedOwnerName", () => {
     expect(isReservedOwnerName("admin", "gitea")).toBe(false);
     expect(isReservedOwnerName("admin", "forgejo")).toBe(true);
     expect(isReservedOwnerName("search")).toBe(false);
+  });
+});
+
+describe.skipIf(!isChild)("the Configuration page's bar", () => {
+  // Opened on single-org, changed to preserve, 4 mirrors now out of place.
+  const changed = {
+    supported: true,
+    outOfPlace: 4,
+    baseKey: "single-org|Mirrors",
+    summaryKey: "preserve|Mirrors",
+    currentKey: "preserve|Mirrors",
+    dismissedKey: null,
+    runStartedHere: false,
+  };
+
+  test("comes up when a change on the page leaves mirrors out of place", () => {
+    expect(placementBarMode(changed)).toBe("prompt");
+  });
+
+  test("leaves mirrors that were out of place when the page opened to the card", () => {
+    expect(placementBarMode({ ...changed, currentKey: changed.baseKey, summaryKey: changed.baseKey })).toBeNull();
+  });
+
+  test("waits for the first summary before it knows the settings the page opened with", () => {
+    expect(placementBarMode({ ...changed, baseKey: null })).toBeNull();
+  });
+
+  test("waits for the summary of the current settings instead of showing the previous count", () => {
+    expect(placementBarMode({ ...changed, summaryKey: "single-org|Mirrors" })).toBeNull();
+  });
+
+  test("stays away when nothing is out of place or the destination cannot move mirrors", () => {
+    expect(placementBarMode({ ...changed, outOfPlace: 0 })).toBeNull();
+    expect(placementBarMode({ ...changed, supported: false })).toBeNull();
+  });
+
+  test("Not now puts it away until the next change", () => {
+    const dismissed = { ...changed, dismissedKey: changed.currentKey };
+    expect(placementBarMode(dismissed)).toBeNull();
+    expect(placementBarMode({ ...dismissed, currentKey: "mixed|Mirrors", summaryKey: "mixed|Mirrors" })).toBe("prompt");
+  });
+
+  test("follows a move started on the page, whatever the settings say", () => {
+    expect(placementBarMode({ ...changed, runStartedHere: true })).toBe("run");
+    expect(placementBarMode({ ...changed, outOfPlace: 0, runStartedHere: true })).toBe("run");
   });
 });
