@@ -99,7 +99,7 @@ Standard GitHub Enterprise Cloud on `github.com` needs no override. Use a token 
 | `MIRROR_STARRED` | `false` | Mirror repositories you have starred. |
 | `MIRROR_STARRED_LISTS` | none | Comma-separated GitHub Star List names to restrict starred mirroring to. Only used when `MIRROR_STARRED=true`. Empty means all starred repositories. |
 | `STARRED_REPOS_ORG` | `starred` | Gitea organization that receives starred repositories. |
-| `STARRED_REPOS_MODE` | `dedicated-org` | `dedicated-org` puts starred repositories in one organization, `preserve-owner` keeps the original owner path. |
+| `STARRED_REPOS_MODE` | `dedicated-org` | `dedicated-org` puts starred repositories in one organization, `preserve-owner` puts each under its GitHub owner's name whatever the mirror strategy says, and `follow-strategy` places them like any other repository. |
 | `STARRED_DUPLICATE_STRATEGY` | `suffix` | Name collision handling when two starred repositories share a name. `suffix` gives `repo-owner`, `prefix` gives `owner-repo`, `owner-org` is accepted but not implemented yet and behaves like `suffix`. |
 | `SKIP_STARRED_ISSUES` | `false` | Lightweight mode for starred repositories: mirror code and LFS, but skip the wiki, releases, issues, pull requests, labels and milestones. |
 | `AUTO_MIRROR_STARRED` | `false` | Mirror starred repositories during scheduled syncs and "Mirror All". When `false`, they are imported for browsing but must be mirrored individually. |

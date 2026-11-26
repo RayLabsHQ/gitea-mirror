@@ -15,6 +15,7 @@ import {
 import { destinationInfo } from "@/components/destination/DestinationIcon";
 import { cn } from "@/lib/utils";
 import { resolveDestinationSaveValue } from "@/lib/utils/destination-editor";
+import { normalizeStarredReposMode, usesStarredDestination } from "@/lib/utils/starred-destination";
 import type { Repository } from "@/lib/db/schema";
 
 export interface DestinationUpdateOptions {
@@ -68,12 +69,16 @@ export function InlineDestinationEditor({
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // Whether the starred setting decides this repository's destination, which
+  // then cannot be changed per repository.
+  const hasStarredPlacement = usesStarredDestination(repository, giteaConfig?.starredReposMode);
+
   // Determine the default destination based on repository properties and config
   const getDefaultDestination = () => {
-    // Starred repos can use either dedicated org or preserved source owner
-    if (repository.isStarred) {
-      const starredReposMode = giteaConfig?.starredReposMode || "dedicated-org";
-      if (starredReposMode === "preserve-owner") {
+    // Starred repos use the starred organization or their source owner,
+    // unless they follow the strategy like the rest (#551).
+    if (hasStarredPlacement) {
+      if (normalizeStarredReposMode(giteaConfig?.starredReposMode) === "preserve-owner") {
         return repository.organization || repository.owner;
       }
       if (giteaConfig?.starredReposOrg) {
@@ -141,7 +146,7 @@ export function InlineDestinationEditor({
   }, [isEditing]);
 
   const handleStartEdit = () => {
-    if (isStarredRepo) return; // Don't allow editing starred repos
+    if (hasStarredPlacement) return; // The starred setting decides this one
     setEditValue(currentDestination);
     setIsEditing(true);
   };
@@ -331,7 +336,7 @@ export function InlineDestinationEditor({
               starred
             </Badge>
           )}
-          {!isStarredRepo && (
+          {!hasStarredPlacement && (
             <Button
               size="sm"
               variant="ghost"

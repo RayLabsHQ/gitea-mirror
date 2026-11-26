@@ -16,6 +16,7 @@ import { applyIssueMediaOption, stripIssueMedia } from "./utils/issue-media";
 import { db, organizations, repositories } from "./db";
 import { eq, and, ne } from "drizzle-orm";
 import { decryptConfigTokens } from "./utils/config-encryption";
+import { normalizeStarredReposMode, usesStarredDestination } from "./utils/starred-destination";
 import { formatDateShort } from "./utils";
 import { buildSourceAuthPayload } from "./utils/mirror-source-auth";
 import {
@@ -253,8 +254,9 @@ export const getGiteaRepoOwnerAsync = async ({
   // decided. Everything else is shared with `resolveDestinationOwner` below,
   // which the repositories list uses to filter by the real destination
   // without one query per row.
+  const starredPlacement = usesStarredDestination(repository, config.githubConfig.starredReposMode);
   let organizationDestination: string | undefined;
-  if (!repository.isStarred && !repository.destinationOrg && repository.organization) {
+  if (!starredPlacement && !repository.destinationOrg && repository.organization) {
     const orgConfig = await getOrganizationConfig({
       orgName: repository.organization,
       userId: config.userId,
@@ -271,7 +273,7 @@ export const getGiteaRepoOwnerAsync = async ({
 
   // Logged here rather than in the resolver, which the repositories list
   // runs for every row on every load.
-  if (!repository.isStarred && repository.destinationOrg) {
+  if (!starredPlacement && repository.destinationOrg) {
     console.log(`Using repository override: ${repository.fullName} -> ${repository.destinationOrg}`);
   } else if (organizationDestination) {
     console.log(`Using organization override: ${repository.organization} -> ${organizationDestination}`);
@@ -298,8 +300,9 @@ export const getGiteaRepoOwner = ({
     throw new Error("Gitea username is required.");
   }
 
-  // Check if repository is starred
-  if (repository.isStarred) {
+  // Starred repositories have their own placement unless they follow the
+  // strategy like everything else (#551).
+  if (usesStarredDestination(repository, config.githubConfig.starredReposMode)) {
     const starredReposMode = config.githubConfig.starredReposMode || "dedicated-org";
     if (starredReposMode === "preserve-owner") {
       return repository.organization || repository.owner;
@@ -403,7 +406,7 @@ export const resolveDestinationOwner = ({
     throw new Error("Gitea username is required.");
   }
 
-  if (repository.isStarred) {
+  if (usesStarredDestination(repository, config.githubConfig.starredReposMode)) {
     const starredReposMode = config.githubConfig.starredReposMode || "dedicated-org";
     if (starredReposMode === "preserve-owner") {
       return repository.organization || repository.owner;
@@ -1003,7 +1006,7 @@ export const mirrorGithubRepoToGitea = async ({
     const isExternalPersonalRepoInPreserveMode =
       mirrorStrategy === "preserve" &&
       !repository.organization &&
-      !repository.isStarred &&
+      !usesStarredDestination(repository, config.githubConfig.starredReposMode) &&
       normalizedRepoOwner !== "" &&
       configuredGitHubOwner !== "" &&
       normalizedRepoOwner !== configuredGitHubOwner;
@@ -1034,7 +1037,11 @@ export const mirrorGithubRepoToGitea = async ({
     } else if (
       repository.isStarred &&
       config.githubConfig &&
-      (config.githubConfig.starredReposMode || "dedicated-org") === "dedicated-org"
+      // A starred repository shares its owner with others in the starred
+      // organization, and with the user's own repositories when it follows
+      // the strategy (#551), so both need a name that cannot clash. Under its
+      // source owner it keeps its own name.
+      normalizeStarredReposMode(config.githubConfig.starredReposMode) !== "preserve-owner"
     ) {
       // Extract GitHub owner from full_name (format: owner/repo)
       const githubOwner = repository.fullName.split('/')[0];
@@ -1927,7 +1934,11 @@ export async function mirrorGitHubRepoToGiteaOrg({
     } else if (
       repository.isStarred &&
       config.githubConfig &&
-      (config.githubConfig.starredReposMode || "dedicated-org") === "dedicated-org"
+      // A starred repository shares its owner with others in the starred
+      // organization, and with the user's own repositories when it follows
+      // the strategy (#551), so both need a name that cannot clash. Under its
+      // source owner it keeps its own name.
+      normalizeStarredReposMode(config.githubConfig.starredReposMode) !== "preserve-owner"
     ) {
       // Extract GitHub owner from full_name (format: owner/repo)
       const githubOwner = repository.fullName.split('/')[0];

@@ -483,3 +483,30 @@ describe("pre-release limit (#560)", () => {
     ).toBeNull();
   });
 });
+
+describe("starred destination mode (#551)", () => {
+  const roundTrip = (starredReposMode: unknown) => {
+    const ui = buildMinimalUiConfigs();
+    const db = mapUiToDbConfig(
+      ui.githubConfig,
+      { ...ui.giteaConfig, starredReposMode: starredReposMode as any },
+      ui.mirrorOptions,
+      ui.advancedOptions,
+    );
+    return {
+      stored: db.githubConfig.starredReposMode,
+      read: mapDbToUiConfig({ githubConfig: db.githubConfig, giteaConfig: db.giteaConfig }).giteaConfig
+        .starredReposMode,
+    };
+  };
+
+  test("follow-strategy round-trips UI -> DB -> UI", () => {
+    expect(roundTrip("follow-strategy")).toEqual({ stored: "follow-strategy", read: "follow-strategy" });
+    expect(roundTrip("preserve-owner")).toEqual({ stored: "preserve-owner", read: "preserve-owner" });
+  });
+
+  test("a missing or unknown mode is stored as dedicated-org", () => {
+    expect(roundTrip(undefined)).toEqual({ stored: "dedicated-org", read: "dedicated-org" });
+    expect(roundTrip("sideways")).toEqual({ stored: "dedicated-org", read: "dedicated-org" });
+  });
+});

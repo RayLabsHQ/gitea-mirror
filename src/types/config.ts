@@ -6,7 +6,7 @@ import {
 
 export type GiteaOrgVisibility = "public" | "private" | "limited";
 export type MirrorStrategy = "preserve" | "single-org" | "flat-user" | "mixed";
-export type StarredReposMode = "dedicated-org" | "preserve-owner";
+export type StarredReposMode = "dedicated-org" | "preserve-owner" | "follow-strategy";
 export type BackupStrategy = "disabled" | "always" | "on-force-push" | "block-on-force-push";
 export type ScheduleMode = "interval" | "clock";
 /**

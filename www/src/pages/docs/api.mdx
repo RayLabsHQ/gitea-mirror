@@ -212,7 +212,7 @@ The mirror is looked for at its recorded location first, then anywhere on the de
 { "destinationOrg": "archive", "dryRun": true }
 ```
 
-`dryRun` defaults to `true` and answers with `plan.moves` (`id`, `fullName`, `from`, `to`) and `plan.skipped` (`fullName`, `reason`) without touching anything. Repositories with their own destination, starred repositories, rows that are not mirrored yet and rows in a running mirror or sync are skipped. With `dryRun: false` each planned move runs, the organization's `destinationOrg` is written, and the answer lists `moved`, `pending`, `recorded` and `failed` (`fullName`, `error`). A failed repository keeps syncing where it is.
+`dryRun` defaults to `true` and answers with `plan.moves` (`id`, `fullName`, `from`, `to`) and `plan.skipped` (`fullName`, `reason`) without touching anything. Repositories with their own destination, starred repositories (unless `starredReposMode` is `follow-strategy`), rows that are not mirrored yet and rows in a running mirror or sync are skipped. With `dryRun: false` each planned move runs, the organization's `destinationOrg` is written, and the answer lists `moved`, `pending`, `recorded` and `failed` (`fullName`, `error`). A failed repository keeps syncing where it is.
 
 ### Storage
 

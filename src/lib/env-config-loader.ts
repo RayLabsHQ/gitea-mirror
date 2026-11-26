@@ -13,6 +13,7 @@ import { hasDestinationChanged, hasSourceChanged, loadConfigLocks } from '@/lib/
 import type { SourceUpdateInput } from '@/lib/sources';
 import { backupDefaultsFromEnv, storedBackupStrategy } from '@/lib/utils/backup-defaults';
 import { normalizePrereleaseLimit, normalizeReleaseAssetLimit, normalizeReleaseTagPatterns, normalizeReleaseType, splitReleaseTagEntries } from '@/lib/utils/mirror-overrides';
+import { STARRED_REPOS_MODES } from '@/lib/utils/starred-destination';
 
 interface EnvConfig {
   github: {
@@ -34,7 +35,7 @@ interface EnvConfig {
     starredCodeOnly?: boolean;
     autoMirrorStarred?: boolean;
     starredReposOrg?: string;
-    starredReposMode?: 'dedicated-org' | 'preserve-owner';
+    starredReposMode?: 'dedicated-org' | 'preserve-owner' | 'follow-strategy';
     starredDuplicateStrategy?: 'suffix' | 'prefix' | 'owner-org';
     starredLists?: string[];
     mirrorStrategy?: 'preserve' | 'single-org' | 'flat-user' | 'mixed';
@@ -199,7 +200,10 @@ function parseEnvConfig(): EnvConfig {
       starredCodeOnly: envFlag('SKIP_STARRED_ISSUES'),
       autoMirrorStarred: envFlag('AUTO_MIRROR_STARRED'),
       starredReposOrg: process.env.STARRED_REPOS_ORG,
-      starredReposMode: process.env.STARRED_REPOS_MODE as 'dedicated-org' | 'preserve-owner',
+      // An unknown value is ignored rather than stored, so it cannot break the saved settings.
+      starredReposMode: (STARRED_REPOS_MODES as readonly string[]).includes(process.env.STARRED_REPOS_MODE ?? '')
+        ? (process.env.STARRED_REPOS_MODE as 'dedicated-org' | 'preserve-owner' | 'follow-strategy')
+        : undefined,
       starredDuplicateStrategy: process.env.STARRED_DUPLICATE_STRATEGY as 'suffix' | 'prefix' | 'owner-org',
       starredLists,
       mirrorStrategy: process.env.MIRROR_STRATEGY as 'preserve' | 'single-org' | 'flat-user' | 'mixed',
