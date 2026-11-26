@@ -43,7 +43,7 @@ To turn it on, open the account menu (your avatar, top right), choose **2FA** (i
 From then on, logging in with your password asks for the current code from the app. **Use a backup code** takes one of the saved codes instead; each works once. **Trust this device for 30 days**, off by default, skips the code in that browser until then.
 
 - Five wrong codes in one login send you back to the password. Ten wrong codes in a row lock code entry for 15 minutes.
-- Once it is on, the menu item shows **On** and opens **Manage 2FA**, with **New backup codes** (which replaces the old ones) and **Turn off**. Both ask for your password.
+- Once it is on, the menu item shows a switch. Flipping it off asks for your password and turns 2FA off; setting it up again takes a new QR code. The same dialog has **New backup codes**, which replaces the old ones and also asks for your password.
 - 2FA guards the email and password login only. SSO accounts use their identity provider's own two-factor, header auth trusts the proxy, and API keys work as before. An application that signs in through Gitea Mirror as an OIDC provider gets the code step on the login page like anyone else.
 - The app's secret and the backup codes are stored encrypted with `BETTER_AUTH_SECRET`. If that secret changes, codes stop working until two-factor is turned off and set up again.
 

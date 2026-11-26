@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Check, Copy, Download, ShieldCheck } from "lucide-react";
+import { Check, Copy, Download } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,11 +17,10 @@ import { QrCode } from "./QrCode";
 import { manualEntryKey, twoFactorErrorText } from "@/lib/two-factor-ui";
 
 /**
- * Where the dialog is: managing 2FA that is on, confirming the password for
- * an action, scanning the QR code, or showing backup codes.
+ * Where the dialog is: confirming the password for an action, scanning the
+ * QR code, or showing backup codes.
  */
 type Step =
-  | { kind: "manage" }
   | { kind: "password"; purpose: "enable" | "disable" | "codes" }
   | { kind: "scan"; totpURI: string; backupCodes: string[] }
   | { kind: "codes"; backupCodes: string[]; fresh: boolean };
@@ -36,11 +35,12 @@ interface TwoFactorDialogProps {
 
 /**
  * 2FA for the signed-in account (#552), opened from the account menu. When
- * it is off this is the setup with an authenticator app; when it is on, it
- * makes new backup codes or turns 2FA off. Every action asks for the password.
+ * it is off this is the setup with an authenticator app; when it is on (the
+ * switch), it turns 2FA off, with new backup codes one link away. Every
+ * action asks for the password.
  */
 export function TwoFactorDialog({ open, onOpenChange, enabled, onChanged }: TwoFactorDialogProps) {
-  const initial: Step = enabled ? { kind: "manage" } : { kind: "password", purpose: "enable" };
+  const initial: Step = { kind: "password", purpose: enabled ? "disable" : "enable" };
   const [step, setStep] = useState<Step>(initial);
   const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
@@ -149,17 +149,15 @@ export function TwoFactorDialog({ open, onOpenChange, enabled, onChanged }: TwoF
   }
 
   const title =
-    step.kind === "manage"
-      ? "Manage 2FA"
-      : step.kind === "codes"
-        ? "Save your backup codes"
-        : step.kind === "scan"
-          ? "Scan the QR code"
-          : step.purpose === "disable"
-            ? "Turn off 2FA"
-            : step.purpose === "codes"
-              ? "New backup codes"
-              : "Set up 2FA";
+    step.kind === "codes"
+      ? "Save your backup codes"
+      : step.kind === "scan"
+        ? "Scan the QR code"
+        : step.purpose === "disable"
+          ? "Turn off 2FA"
+          : step.purpose === "codes"
+            ? "New backup codes"
+            : "Set up 2FA";
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -167,12 +165,10 @@ export function TwoFactorDialog({ open, onOpenChange, enabled, onChanged }: TwoF
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>
-            {step.kind === "manage" &&
-              "2FA is on. Logging in with your password also asks for a code from your authenticator app."}
             {step.kind === "password" && step.purpose === "enable" &&
               "With 2FA, each login with your password also asks for a 6‑digit code from an authenticator app, such as 1Password, Google Authenticator, Authy or Aegis. Enter your password to start."}
             {step.kind === "password" && step.purpose === "disable" &&
-              "Logging in will only need your password again. Enter it to confirm."}
+              "Logging in will only need your password again. Enter it to confirm. Turning 2FA on later means scanning a new QR code."}
             {step.kind === "password" && step.purpose === "codes" &&
               "Your current backup codes stop working and you get ten new ones. Enter your password to continue."}
             {step.kind === "scan" &&
@@ -181,30 +177,6 @@ export function TwoFactorDialog({ open, onOpenChange, enabled, onChanged }: TwoF
               "If you lose your phone, each of these codes lets you log in once. Keep them somewhere safe, like a password manager. They won't be shown again."}
           </DialogDescription>
         </DialogHeader>
-
-        {step.kind === "manage" && (
-          <>
-            <div className="flex items-center gap-3 rounded-md border bg-muted/40 p-3">
-              <ShieldCheck className="h-5 w-5 shrink-0 text-green-600 dark:text-green-500" />
-              <p className="text-sm">
-                Lost your phone? A backup code works instead of the app code. If you're running
-                out, make new ones.
-              </p>
-            </div>
-            <DialogFooter className="gap-2 sm:justify-between">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setStep({ kind: "password", purpose: "disable" })}
-              >
-                Turn off
-              </Button>
-              <Button type="button" onClick={() => setStep({ kind: "password", purpose: "codes" })}>
-                New backup codes
-              </Button>
-            </DialogFooter>
-          </>
-        )}
 
         {step.kind === "password" && (
           <form onSubmit={submitPassword} className="space-y-4">
@@ -222,13 +194,28 @@ export function TwoFactorDialog({ open, onOpenChange, enabled, onChanged }: TwoF
               />
             </div>
             <DialogFooter className="gap-2">
+              {step.purpose === "disable" && (
+                <Button
+                  type="button"
+                  variant="link"
+                  className="px-0 text-muted-foreground sm:mr-auto"
+                  onClick={() => setStep({ kind: "password", purpose: "codes" })}
+                  disabled={busy}
+                >
+                  New backup codes
+                </Button>
+              )}
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => (enabled ? setStep({ kind: "manage" }) : handleOpenChange(false))}
+                onClick={() =>
+                  step.purpose === "codes"
+                    ? setStep({ kind: "password", purpose: "disable" })
+                    : handleOpenChange(false)
+                }
                 disabled={busy}
               >
-                {enabled ? "Back" : "Cancel"}
+                {step.purpose === "codes" ? "Back" : "Cancel"}
               </Button>
               <Button
                 type="submit"

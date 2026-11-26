@@ -17,6 +17,7 @@ import {
 import { ChangePasswordDialog } from "./ChangePasswordDialog";
 import { ChangeEmailDialog } from "./ChangeEmailDialog";
 import { TwoFactorDialog } from "./TwoFactorDialog";
+import { Switch } from "@/components/ui/switch";
 
 export function AccountMenu() {
   const { user, logout, refreshUser } = useAuth();
@@ -105,16 +106,25 @@ export function AccountMenu() {
             </DropdownMenuItem>
           )}
           {/* 2FA only guards the password login, so it needs a password (#552).
-              Off, the item offers the setup; on, it opens Manage 2FA. */}
+              Off, the item offers the setup (a QR code each time); on, it
+              shows a switch, and flipping it asks for the password to turn
+              2FA off. The switch only shows the state; the item opens the
+              dialog. */}
           {hasPassword && (
             <DropdownMenuItem
               onSelect={() => setTwoFactorOpen(true)}
               className="cursor-pointer"
+              aria-label={user.twoFactorEnabled ? "2FA is on. Turn off" : "Set up 2FA"}
             >
               <ShieldCheck className="h-4 w-4 mr-2" />
               2FA
               {user.twoFactorEnabled ? (
-                <span className="ml-auto text-xs font-medium text-green-600 dark:text-green-500">On</span>
+                <Switch
+                  checked
+                  tabIndex={-1}
+                  aria-hidden="true"
+                  className="ml-auto pointer-events-none"
+                />
               ) : (
                 <span className="ml-auto rounded-md border px-1.5 py-0.5 text-xs font-medium leading-none">Set up</span>
               )}
