@@ -12,7 +12,7 @@ import { withBase } from "./base-path";
 import { headerAuthPlugin } from "./auth-header-plugin";
 import { apiKeyGuardPlugin } from "./auth-api-key-guard";
 import { signupGuardPlugin } from "./auth-signup-guard";
-import { ownerGuardPlugin } from "./auth-owner-guard";
+import { oauthClientPrivileges, ownerGuardPlugin } from "./auth-owner-guard";
 
 /**
  * Extracts the origins implied by registered SSO identity providers.
@@ -318,8 +318,17 @@ export const auth = betterAuth({
     oauthProvider({
       loginPage: withBase("/login"),
       consentPage: withBase("/oauth/consent"),
-      // Allow dynamic client registration for flexibility
+      // Allow dynamic client registration for flexibility. It still needs a
+      // signed-in session, and clientPrivileges below keeps it to the owner.
       allowDynamicClientRegistration: true,
+      // Only the instance owner manages OAuth applications, through any
+      // route. See oauthClientPrivileges in auth-owner-guard.ts.
+      clientPrivileges: oauthClientPrivileges({
+        isOwner: async (userId) => {
+          const { isInstanceOwner } = await import("./instance-owner");
+          return isInstanceOwner(userId);
+        },
+      }),
       // Mirror the old getAdditionalUserInfoClaim: expose our extra `username`
       // field on both the userinfo endpoint and the id_token when the
       // "profile" scope is granted.

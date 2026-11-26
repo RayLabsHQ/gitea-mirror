@@ -50,6 +50,17 @@ if (isChild) {
      VALUES ('oc-1', 'c-1', 'Wiki', '["https://wiki.example/callback"]', 1790000200, 1790000200),
             ('oc-2', 'c-2', 'Grafana', '["https://grafana.example/login"]', 1790000300, 1790000300)`
   );
+  // An application a member made before only the owner could, with tokens
+  // and an approval from the owner, next to c-1's.
+  sqlite.run(
+    `INSERT INTO oauth_clients (id, client_id, name, redirect_uris, user_id, created_at, updated_at)
+     VALUES ('oc-m', 'c-member', 'Grafana', '["https://grafana.attacker.example/cb"]', 'member', 1790000400, 1790000400)`
+  );
+  for (const clientId of ["c-member", "c-1"]) {
+    sqlite.run(`INSERT INTO oauth_access_tokens (id, token, client_id, user_id, scopes) VALUES ('at-${clientId}', 'at-${clientId}', '${clientId}', 'owner', '["openid"]')`);
+    sqlite.run(`INSERT INTO oauth_refresh_tokens (id, token, client_id, user_id, scopes) VALUES ('rt-${clientId}', 'rt-${clientId}', '${clientId}', 'owner', '["openid"]')`);
+    sqlite.run(`INSERT INTO oauth_consents (id, client_id, user_id, scopes) VALUES ('co-${clientId}', '${clientId}', 'owner', '["openid"]')`);
+  }
 
   mock.module("@/lib/utils/auth-helpers", () => ({
     requireAuth: mock(async () => ({ user: { id: currentUserId }, response: null })),
@@ -157,12 +168,78 @@ describe.skipIf(!isChild)("only the instance owner manages instance-wide SSO set
     ]);
   });
 
-  test("the owner lists every application", async () => {
+  test("the owner lists every application, including one another account made", async () => {
     currentUserId = "owner";
     const response = await applications.GET(ctx("/api/sso/applications", "GET"));
 
     expect(response.status).toBe(200);
     const list = (await response.json()) as { clientId: string }[];
-    expect(list.map((app) => app.clientId).sort()).toEqual(["c-1", "c-2"]);
+    expect(list.map((app) => app.clientId).sort()).toEqual(["c-1", "c-2", "c-member"]);
+  });
+
+  test("the owner can change an application another account made", async () => {
+    currentUserId = "owner";
+    const response = await applications.PUT(
+      ctx("/api/sso/applications?id=c-member", "PUT", {
+        name: "Grafana (member)",
+        redirectURLs: "https://grafana.example/cb, http://localhost:3000/cb",
+        disabled: true,
+      })
+    );
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { name: string; redirectURLs: string; disabled: boolean };
+    expect(body).toMatchObject({
+      name: "Grafana (member)",
+      redirectURLs: "https://grafana.example/cb,http://localhost:3000/cb",
+      disabled: true,
+    });
+    const row = sqlite
+      .query("SELECT name, redirect_uris, disabled, user_id FROM oauth_clients WHERE client_id = 'c-member'")
+      .get() as { name: string; redirect_uris: string; disabled: number; user_id: string };
+    expect(row).toEqual({
+      name: "Grafana (member)",
+      redirect_uris: '["https://grafana.example/cb","http://localhost:3000/cb"]',
+      disabled: 1,
+      user_id: "member",
+    });
+    expect(updateOAuthClient).not.toHaveBeenCalled();
+  });
+
+  test("a changed redirect address follows the plugin's rules", async () => {
+    currentUserId = "owner";
+    for (const bad of [
+      "http://grafana.example/cb",
+      "javascript:alert(1)",
+      "https://grafana.example/cb#token",
+      "not a url",
+    ]) {
+      const response = await applications.PUT(ctx("/api/sso/applications?id=c-1", "PUT", { redirectURLs: [bad] }));
+      expect([bad, response.status]).toEqual([bad, 400]);
+    }
+    const unchanged = sqlite.query("SELECT redirect_uris FROM oauth_clients WHERE client_id = 'c-1'").get() as {
+      redirect_uris: string;
+    };
+    expect(unchanged.redirect_uris).toBe('["https://wiki.example/callback"]');
+
+    expect((await applications.PUT(ctx("/api/sso/applications?id=c-1", "PUT", { name: " " }))).status).toBe(400);
+    expect((await applications.PUT(ctx("/api/sso/applications?id=c-1", "PUT", {}))).status).toBe(400);
+    expect((await applications.PUT(ctx("/api/sso/applications?id=nope", "PUT", { name: "x" }))).status).toBe(404);
+  });
+
+  test("deleting an application also ends its tokens and approvals", async () => {
+    currentUserId = "owner";
+    const response = await applications.DELETE(ctx("/api/sso/applications?id=c-member", "DELETE"));
+
+    expect(response.status).toBe(200);
+    const count = (table: string, clientId: string) =>
+      (sqlite.query(`SELECT count(*) AS n FROM ${table} WHERE client_id = ?`).get(clientId) as { n: number }).n;
+    for (const table of ["oauth_clients", "oauth_access_tokens", "oauth_refresh_tokens", "oauth_consents"]) {
+      expect([table, count(table, "c-member")]).toEqual([table, 0]);
+      // Other applications keep theirs.
+      expect([table, count(table, "c-1")]).toEqual([table, 1]);
+    }
+    expect(deleteOAuthClient).not.toHaveBeenCalled();
+    expect((await applications.DELETE(ctx("/api/sso/applications?id=c-member", "DELETE"))).status).toBe(404);
   });
 });
