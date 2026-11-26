@@ -80,7 +80,7 @@ The code itself is copied by the destination: Gitea and Forgejo pull from the so
 | Starred repositories | yes | yes | yes | no |
 | Private repositories | yes | yes | yes | yes, with a login |
 | Add a single repository by URL | yes | yes | yes | yes |
-| Issues, pull requests, labels, milestones | yes | no | no | no |
+| Issues, pull requests, labels, milestones, security advisories | yes | no | no | no |
 | Releases with assets | yes | no | yes | no |
 | Star lists | yes | no | no | no |
 | Force push detection | yes | no | no | no |
@@ -141,6 +141,6 @@ These variables set up the first source, and create it when there is none. Add m
 
 ## Not yet
 
-- Issues, pull requests, merge requests, labels and milestones are read from GitHub only.
+- Issues, pull requests, merge requests, labels, milestones and security advisories are read from GitHub only.
 - Releases from GitLab are not mirrored. Gitea, Forgejo and Codeberg sources do mirror releases.
 - The import filters on the card apply to all sources at once, and when one GitHub source hits its rate limit, the other GitHub sources of the same user pause with it.

@@ -1144,6 +1144,74 @@ describe("Enhanced Gitea Operations", () => {
       expect(String(mirrorSyncCalls[0][0])).not.toContain("/api/v1/repos/ceph/test-repo/mirror-sync");
     });
 
+    describe("security advisories (#561)", () => {
+      const advisoryConfig = (mirrorSecurityAdvisories: boolean) => ({
+        userId: "user123",
+        githubConfig: { username: "testuser", token: "github-token", privateRepositories: false, mirrorStarred: true },
+        giteaConfig: {
+          url: "https://gitea.example.com", token: "encrypted-token", defaultOwner: "testuser",
+          mirrorReleases: false, mirrorSecurityAdvisories,
+        },
+      }) as unknown as Partial<Config>;
+      const advisoryRepository = (): Repository => ({
+        id: "repo-advisories", name: "test-repo", fullName: "ceph/test-repo", owner: "ceph",
+        cloneUrl: "https://github.com/ceph/test-repo.git", isPrivate: false, isStarred: true,
+        status: repoStatusEnum.parse("mirrored"), visibility: "public", userId: "user123",
+        mirroredLocation: "starred/test-repo", createdAt: new Date(), updatedAt: new Date(),
+      } as Repository);
+      const dependencies = (mirrorSecurityAdvisoriesToGitea: any) => ({
+        getGiteaRepoOwnerAsync: mockGetGiteaRepoOwnerAsync,
+        mirrorGitHubReleasesToGitea: mockMirrorGitHubReleasesToGitea,
+        mirrorGitRepoIssuesToGitea: mockMirrorGitRepoIssuesToGitea,
+        mirrorGitRepoPullRequestsToGitea: mockMirrorGitRepoPullRequestsToGitea,
+        mirrorGitRepoLabelsToGitea: mockMirrorGitRepoLabelsToGitea,
+        mirrorGitRepoMilestonesToGitea: mockMirrorGitRepoMilestonesToGitea,
+        syncRepositoryMetadataToGitea: mockSyncRepositoryMetadataToGitea,
+        mirrorSecurityAdvisoriesToGitea,
+      });
+
+      test("a sync mirrors them into the repository's destination when the switch is on", async () => {
+        const mirrorAdvisories = mock(async () => ({ created: 1, updated: 0, closed: 0 }));
+
+        const result = await syncGiteaRepoEnhanced(
+          { config: advisoryConfig(true), repository: advisoryRepository() },
+          dependencies(mirrorAdvisories)
+        );
+
+        expect(result).toEqual({ success: true });
+        expect(mirrorAdvisories).toHaveBeenCalledTimes(1);
+        expect((mirrorAdvisories.mock.calls[0] as any[])[0]).toMatchObject({
+          giteaOwner: "starred",
+          giteaRepoName: "test-repo",
+        });
+      });
+
+      test("nothing is read with the switch off", async () => {
+        const mirrorAdvisories = mock(async () => ({ created: 0, updated: 0, closed: 0 }));
+
+        await syncGiteaRepoEnhanced(
+          { config: advisoryConfig(false), repository: advisoryRepository() },
+          dependencies(mirrorAdvisories)
+        );
+
+        expect(mirrorAdvisories).not.toHaveBeenCalled();
+      });
+
+      test("a failure is logged and the sync still succeeds", async () => {
+        const mirrorAdvisories = mock(async () => {
+          throw new Error("Gitea said no");
+        });
+
+        const result = await syncGiteaRepoEnhanced(
+          { config: advisoryConfig(true), repository: advisoryRepository() },
+          dependencies(mirrorAdvisories)
+        );
+
+        expect(result).toEqual({ success: true });
+        expect(mirrorAdvisories).toHaveBeenCalledTimes(1);
+      });
+    });
+
     describe("destination size (#479)", () => {
       const sizeConfig = {
         userId: "user123",

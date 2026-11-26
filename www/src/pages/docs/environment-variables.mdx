@@ -157,11 +157,12 @@ Only used when `DESTINATION_PROVIDER` is `github` or `gitlab`.
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `MIRROR_METADATA` | `false` | The metadata switch on the Configuration page. Turning on any of the four options below turns it on too. Through the environment it does not switch those four off: set them to `false` instead. |
+| `MIRROR_METADATA` | `false` | The metadata switch on the Configuration page. Turning on any of the five options below turns it on too. Through the environment it does not switch those five off: set them to `false` instead. |
 | `MIRROR_ISSUES` | `false` | Mirror issues with their comments and labels. |
 | `MIRROR_PULL_REQUESTS` | `false` | Mirror pull requests. Gitea's API cannot create pull requests, so they are created as issues tagged with a `pull-request` label. |
 | `MIRROR_LABELS` | `false` | Mirror repository labels. |
 | `MIRROR_MILESTONES` | `false` | Mirror milestones. |
+| `MIRROR_SECURITY_ADVISORIES` | `false` | Mirror published GitHub security advisories as issues labeled `security-advisory`. Drafts are never mirrored. |
 | `MIRROR_RELEASES` | `false` | Mirror GitHub releases along with their assets. |
 | `RELEASE_LIMIT` | `10` | Maximum releases mirrored per repository, newest first. |
 | `RELEASE_TYPE` | `all` | Which releases are candidates: `all` or `stable` (skip what the source marks as a pre-release). With a filter active the limit counts the releases that match, and releases of the other kind are removed from Gitea on the next sync. |
@@ -176,7 +177,7 @@ Only used when `DESTINATION_PROVIDER` is `github` or `gitlab`.
 
 > **Note:** Concurrency above `1` speeds up metadata mirroring but issues and pull requests may be created out of chronological order, since Gitea assigns numbers on creation. Set both to `1` if exact ordering matters more than throughput.
 
-Issues, pull requests, labels and milestones are read from the GitHub API and need a GitHub source. Releases are read from the source's own API, so they mirror from GitHub and from Gitea/Forgejo sources, but not from GitLab. With a GitHub or GitLab destination none of the metadata options apply, and neither do wiki and LFS: push targets receive branches and tags only.
+Issues, pull requests, labels, milestones and security advisories are read from the GitHub API and need a GitHub source. Releases are read from the source's own API, so they mirror from GitHub and from Gitea/Forgejo sources, but not from GitLab. With a GitHub or GitLab destination none of the metadata options apply, and neither do wiki and LFS: push targets receive branches and tags only.
 
 ## Scheduling
 

@@ -127,6 +127,7 @@ export const mirrorOverridesSchema = z.object({
   mirrorPullRequests: z.boolean().nullable().optional(),
   mirrorLabels: z.boolean().nullable().optional(),
   mirrorMilestones: z.boolean().nullable().optional(),
+  mirrorSecurityAdvisories: z.boolean().nullable().optional(),
   releaseLimit: z.number().nullable().optional(),
   releaseAssetLimit: z.number().nullable().optional(),
   prereleaseLimit: z.number().nullable().optional(),
@@ -201,6 +202,8 @@ export const giteaConfigSchema = z.object({
   mirrorPullRequests: z.boolean().default(false),
   mirrorLabels: z.boolean().default(false),
   mirrorMilestones: z.boolean().default(false),
+  // Published GitHub security advisories as issues (#561).
+  mirrorSecurityAdvisories: z.boolean().default(false),
   backupStrategy: backupStrategyEnum.default("on-force-push"),
   backupBeforeSync: z.boolean().default(true), // Deprecated: kept for backward compat, use backupStrategy
   backupRetentionCount: z.number().int().min(1).default(5),

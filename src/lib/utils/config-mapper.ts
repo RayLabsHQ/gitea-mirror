@@ -201,6 +201,7 @@ export function mapUiToDbConfig(
     mirrorPullRequests: mirrorOptions.mirrorMetadata && mirrorOptions.metadataComponents.pullRequests,
     mirrorLabels: mirrorOptions.mirrorMetadata && mirrorOptions.metadataComponents.labels,
     mirrorMilestones: mirrorOptions.mirrorMetadata && mirrorOptions.metadataComponents.milestones,
+    mirrorSecurityAdvisories: mirrorOptions.mirrorMetadata && (mirrorOptions.metadataComponents.securityAdvisories ?? false),
     backupStrategy: giteaConfig.backupStrategy || "on-force-push",
     backupBeforeSync: giteaConfig.backupBeforeSync ?? true,
     backupRetentionCount: giteaConfig.backupRetentionCount ?? 5,
@@ -281,6 +282,7 @@ export function mapDbToUiConfig(dbConfig: any): {
       pullRequests: dbConfig.giteaConfig?.mirrorPullRequests || false,
       labels: dbConfig.giteaConfig?.mirrorLabels || false,
       milestones: dbConfig.giteaConfig?.mirrorMilestones || false,
+      securityAdvisories: dbConfig.giteaConfig?.mirrorSecurityAdvisories || false,
       wiki: dbConfig.giteaConfig?.wiki || false,
     },
     issueState:

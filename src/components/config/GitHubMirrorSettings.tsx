@@ -28,6 +28,7 @@ import {
   FileText,
   MessageSquare,
   Target,
+  ShieldAlert,
   BookOpen,
   GitFork,
   ChevronDown,
@@ -501,6 +502,7 @@ export function GitHubMirrorSettings({
                     pullRequests: newValue,
                     labels: newValue,
                     milestones: newValue,
+                    securityAdvisories: newValue,
                     wiki: newValue,
                   },
                 });
@@ -656,6 +658,40 @@ export function GitHubMirrorSettings({
               >
                 <Target className="h-3.5 w-3.5 text-muted-foreground" />
                 Milestones
+              </Label>
+            </div>
+
+            <div className="flex items-center space-x-3 py-1 px-1 rounded hover:bg-accent">
+              <Checkbox
+                id="metadata-advisories-popup"
+                disabled={!isGithubSource}
+                checked={mirrorOptions.metadataComponents.securityAdvisories ?? false}
+                onCheckedChange={(checked) => handleMetadataComponentChange('securityAdvisories', !!checked)}
+              />
+              <Label
+                htmlFor="metadata-advisories-popup"
+                className="text-sm font-normal cursor-pointer flex items-center gap-2 flex-1"
+              >
+                <ShieldAlert className="h-3.5 w-3.5 text-muted-foreground" />
+                Security advisories
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Info className="h-3 w-3 text-muted-foreground" />
+                    </TooltipTrigger>
+                    <TooltipContent side="right" className="max-w-sm">
+                      <div className="space-y-2">
+                        <p className="font-semibold">Security advisories are mirrored as issues</p>
+                        <p className="text-xs">
+                          Gitea has no advisories of its own, so each published GitHub security
+                          advisory becomes an issue labeled security-advisory, titled with its
+                          GHSA id. It is updated when the advisory changes and closed if the
+                          advisory is withdrawn. Drafts are never mirrored.
+                        </p>
+                      </div>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
               </Label>
             </div>
 
@@ -988,7 +1024,7 @@ export function GitHubMirrorSettings({
                 : isGithubSource
                   ? "Pull requests are mirrored as issues due to Gitea API limits"
                   : isReleaseCapableSource
-                    ? "Releases are mirrored. Issues, pull requests, labels and milestones need a GitHub source"
+                    ? "Releases are mirrored. Issues, pull requests, labels, milestones and security advisories need a GitHub source"
                     : "Issues, pull requests and releases are mirrored for GitHub sources only"
             }
           />
@@ -1182,8 +1218,8 @@ export function GitHubMirrorSettings({
               isPushTarget
                 ? pushTargetReason
                 : isGithubSource
-                  ? "Issues, pull requests, labels, milestones and wiki"
-                  : "Wiki only. Issues, pull requests, labels and milestones need a GitHub source"
+                  ? "Issues, pull requests, labels, milestones, security advisories and wiki"
+                  : "Wiki only. Issues, pull requests, labels, milestones and security advisories need a GitHub source"
             }
             disabled={isPushTarget}
             checked={mirrorOptions.mirrorMetadata}

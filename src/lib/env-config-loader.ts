@@ -65,6 +65,7 @@ interface EnvConfig {
     mirrorPullRequests?: boolean;
     mirrorLabels?: boolean;
     mirrorMilestones?: boolean;
+    mirrorSecurityAdvisories?: boolean;
     mirrorMetadata?: boolean;
     releaseLimit?: number;
     releaseAssetLimit?: number;
@@ -237,6 +238,7 @@ function parseEnvConfig(): EnvConfig {
       mirrorPullRequests: envFlag('MIRROR_PULL_REQUESTS'),
       mirrorLabels: envFlag('MIRROR_LABELS'),
       mirrorMilestones: envFlag('MIRROR_MILESTONES'),
+      mirrorSecurityAdvisories: envFlag('MIRROR_SECURITY_ADVISORIES'),
       mirrorMetadata: envFlag('MIRROR_METADATA'),
       releaseLimit: process.env.RELEASE_LIMIT ? parseInt(process.env.RELEASE_LIMIT, 10) : undefined,
       releaseAssetLimit: process.env.RELEASE_ASSET_LIMIT ? parseInt(process.env.RELEASE_ASSET_LIMIT, 10) : undefined,
@@ -500,7 +502,7 @@ export async function initializeConfigFromEnv(): Promise<void> {
       // Turning on any metadata kind turns on the metadata switch too.
       mirrorMetadata:
         envConfig.mirror.mirrorMetadata ??
-        ([envConfig.mirror.mirrorIssues, envConfig.mirror.mirrorPullRequests, envConfig.mirror.mirrorLabels, envConfig.mirror.mirrorMilestones].includes(true)
+        ([envConfig.mirror.mirrorIssues, envConfig.mirror.mirrorPullRequests, envConfig.mirror.mirrorLabels, envConfig.mirror.mirrorMilestones, envConfig.mirror.mirrorSecurityAdvisories].includes(true)
           ? true
           : undefined) ??
         existingConfig?.[0]?.giteaConfig?.mirrorMetadata ??
@@ -513,6 +515,7 @@ export async function initializeConfigFromEnv(): Promise<void> {
       mirrorPullRequests: envConfig.mirror.mirrorPullRequests ?? existingConfig?.[0]?.giteaConfig?.mirrorPullRequests ?? false,
       mirrorLabels: envConfig.mirror.mirrorLabels ?? existingConfig?.[0]?.giteaConfig?.mirrorLabels ?? false,
       mirrorMilestones: envConfig.mirror.mirrorMilestones ?? existingConfig?.[0]?.giteaConfig?.mirrorMilestones ?? false,
+      mirrorSecurityAdvisories: envConfig.mirror.mirrorSecurityAdvisories ?? existingConfig?.[0]?.giteaConfig?.mirrorSecurityAdvisories ?? false,
       // Backup options: keep what is stored so UI-configured settings survive a
       // restart, and start from PRE_SYNC_BACKUP_* when nothing is (#503).
       backupStrategy,

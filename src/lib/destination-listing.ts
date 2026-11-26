@@ -23,21 +23,28 @@ export interface DestinationListing<T> {
   truncated: boolean;
 }
 
-/** Every item of a paged destination endpoint. `url` must not carry a query. */
+/**
+ * Every item of a paged destination endpoint. `url` must not carry a query;
+ * filters go in `query`.
+ */
 export async function listDestinationPages<T = unknown>({
   url,
   token,
   max,
+  query,
 }: {
   url: string;
   token: string;
   /** Stop once this many items are listed. */
   max?: number;
+  /** Extra query parameters sent with every page, such as filters. */
+  query?: Record<string, string>;
 }): Promise<DestinationListing<T>> {
   const items: T[] = [];
+  const filters = query ? `&${new URLSearchParams(query).toString()}` : "";
 
   for (let page = 1; page <= MAX_PAGES; page++) {
-    const response = await httpGet<T[]>(`${url}?limit=${DESTINATION_PAGE_SIZE}&page=${page}`, {
+    const response = await httpGet<T[]>(`${url}?limit=${DESTINATION_PAGE_SIZE}&page=${page}${filters}`, {
       Authorization: `token ${token}`,
     }).catch(() => null);
     const batch = response?.data;

@@ -34,7 +34,9 @@ If your Gitea instance is reachable at one URL from the Gitea Mirror process and
 
 ### Mirror settings
 
-Below the connection cards, the mirror settings decide what travels with the code: issues, pull requests, labels, milestones, releases, wiki and LFS objects, plus the force push protection strategy. Switches that the current source or destination cannot serve are disabled and say why. LFS also needs LFS turned on in Gitea or Forgejo itself: `LFS_START_SERVER = true` in the `[server]` section of `app.ini`.
+Below the connection cards, the mirror settings decide what travels with the code: issues, pull requests, labels, milestones, security advisories, releases, wiki and LFS objects, plus the force push protection strategy. Switches that the current source or destination cannot serve are disabled and say why. LFS also needs LFS turned on in Gitea or Forgejo itself: `LFS_START_SERVER = true` in the `[server]` section of `app.ini`.
+
+**Security advisories**, under **Metadata to mirror**, copies each published GitHub security advisory of a repository to its mirror. Gitea and Forgejo have no advisories of their own, so each one becomes an issue labeled `security-advisory` and titled with its id, for example `[GHSA-8jhw-6pjj-8723] Email verification links can redirect users to any website`, with the severity, CVE, affected and patched versions, credits and the advisory's text. The issue is updated when the advisory changes and closed if it is withdrawn. Draft advisories are never copied. It needs a GitHub source, costs one request per repository and sync, and is off by default.
 
 Releases have two numbers under the switch. **Latest** is how many releases are mirrored per repository, newest first, ten by default. **Assets for latest** is how many of those get their assets uploaded: leave it empty to upload assets for every mirrored release, set it to `0` for release notes and tags only, or set it to a number to keep assets for the newest N releases while older ones keep their notes and tag. The limit never deletes assets that were already uploaded.
 

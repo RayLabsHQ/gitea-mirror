@@ -510,3 +510,30 @@ describe("starred destination mode (#551)", () => {
     expect(roundTrip("sideways")).toEqual({ stored: "dedicated-org", read: "dedicated-org" });
   });
 });
+
+describe("security advisories component (#561)", () => {
+  const roundTrip = (securityAdvisories: boolean | undefined, mirrorMetadata = true) => {
+    const ui = buildMinimalUiConfigs();
+    const db = mapUiToDbConfig(
+      ui.githubConfig,
+      ui.giteaConfig,
+      { ...ui.mirrorOptions, mirrorMetadata, metadataComponents: { ...ui.mirrorOptions.metadataComponents, securityAdvisories } },
+      ui.advancedOptions,
+    );
+    return {
+      stored: db.giteaConfig.mirrorSecurityAdvisories,
+      read: mapDbToUiConfig({ githubConfig: db.githubConfig, giteaConfig: db.giteaConfig }).mirrorOptions
+        .metadataComponents.securityAdvisories,
+    };
+  };
+
+  test("round-trips UI -> DB -> UI", () => {
+    expect(roundTrip(true)).toEqual({ stored: true, read: true });
+    expect(roundTrip(false)).toEqual({ stored: false, read: false });
+  });
+
+  test("the metadata switch turns it off, and a config without it reads as off", () => {
+    expect(roundTrip(true, false)).toEqual({ stored: false, read: false });
+    expect(roundTrip(undefined)).toEqual({ stored: false, read: false });
+  });
+});

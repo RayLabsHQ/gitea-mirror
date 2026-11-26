@@ -28,6 +28,7 @@ export const MIRROR_OVERRIDE_KEYS = [
   "mirrorPullRequests",
   "mirrorLabels",
   "mirrorMilestones",
+  "mirrorSecurityAdvisories",
 ] as const;
 
 export type MirrorOverrideKey = (typeof MIRROR_OVERRIDE_KEYS)[number];
@@ -557,6 +558,7 @@ export const STARRED_CLAMPED_KEYS = [
   "mirrorPullRequests",
   "mirrorLabels",
   "mirrorMilestones",
+  "mirrorSecurityAdvisories",
 ] as const satisfies readonly MirrorOverrideKey[];
 
 /**
@@ -579,6 +581,7 @@ export const GITHUB_ONLY_METADATA_KEYS = [
   "mirrorPullRequests",
   "mirrorLabels",
   "mirrorMilestones",
+  "mirrorSecurityAdvisories",
 ] as const satisfies readonly MirrorOverrideKey[];
 
 /**
@@ -599,6 +602,7 @@ export const PUSH_TARGET_CLAMPED_KEYS = [
   "mirrorPullRequests",
   "mirrorLabels",
   "mirrorMilestones",
+  "mirrorSecurityAdvisories",
 ] as const satisfies readonly MirrorOverrideKey[];
 
 /** True when a config's destination is served by the push engine. */
@@ -626,6 +630,7 @@ export const UI_MIRROR_OVERRIDE_KEYS: MirrorOverrideKey[] = [
   "mirrorReleases",
   "mirrorLabels",
   "mirrorMilestones",
+  "mirrorSecurityAdvisories",
 ];
 
 /**
@@ -673,6 +678,7 @@ export function mirrorOptionsToFlags(
           pullRequests?: boolean;
           labels?: boolean;
           milestones?: boolean;
+          securityAdvisories?: boolean;
           wiki?: boolean;
         };
       }
@@ -694,6 +700,7 @@ export function mirrorOptionsToFlags(
     mirrorPullRequests: !!components?.pullRequests,
     mirrorLabels: !!components?.labels,
     mirrorMilestones: !!components?.milestones,
+    mirrorSecurityAdvisories: !!components?.securityAdvisories,
     releaseLimit:
       normalizeReleaseLimit(mirrorOptions?.releaseLimit) ?? DEFAULT_RELEASE_LIMIT,
     releaseAssetLimit:
@@ -847,6 +854,7 @@ export const MIRROR_OVERRIDE_LABELS: Record<
   mirrorPullRequests: "Pull requests",
   mirrorLabels: "Labels",
   mirrorMilestones: "Milestones",
+  mirrorSecurityAdvisories: "Security advisories",
   releaseLimit: "Release limit",
   releaseAssetLimit: "Release asset limit",
   prereleaseLimit: "Pre-release limit",

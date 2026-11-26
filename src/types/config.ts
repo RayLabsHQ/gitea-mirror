@@ -112,6 +112,8 @@ export interface MirrorOptions {
     pullRequests: boolean;
     labels: boolean;
     milestones: boolean;
+    /** Published GitHub security advisories, mirrored as issues (#561). */
+    securityAdvisories?: boolean;
     wiki: boolean;
   };
   /** Which source issues are listed: all, open only, or closed only. */
