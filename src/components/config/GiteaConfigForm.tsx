@@ -29,6 +29,7 @@ import type {
 import { toast } from "sonner";
 import { OrganizationStrategy } from "./OrganizationStrategy";
 import { OrganizationConfiguration } from "./OrganizationConfiguration";
+import { MirrorPlacementFooter } from "./MirrorPlacement";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import {
@@ -474,9 +475,16 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
         icon={Building2}
         title="Organization Structure"
         footer={
-          <StatusFooterItem
-            icon={Info}
-            label="Strategy applies to newly mirrored repositories"
+          <MirrorPlacementFooter
+            isSaving={isAutoSaving}
+            refreshKey={[
+              mirrorStrategy,
+              config.organization,
+              config.personalReposOrg,
+              config.starredReposOrg,
+              config.starredReposMode,
+              config.preserveOrgStructure,
+            ].join("|")}
           />
         }
       >
