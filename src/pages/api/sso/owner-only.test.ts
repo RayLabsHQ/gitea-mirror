@@ -50,6 +50,16 @@ if (isChild) {
      VALUES ('oc-1', 'c-1', 'Wiki', '["https://wiki.example/callback"]', 1790000200, 1790000200),
             ('oc-2', 'c-2', 'Grafana', '["https://grafana.example/login"]', 1790000300, 1790000300)`
   );
+  // A web application from better-auth 1.6 with an http://localhost address
+  // the 1.7 rules refuse, and a native one.
+  sqlite.run(
+    `INSERT INTO oauth_clients (id, client_id, name, redirect_uris, created_at, updated_at)
+     VALUES ('oc-legacy', 'c-legacy', 'Dev', '["http://localhost:3000/cb"]', 1790000250, 1790000250)`
+  );
+  sqlite.run(
+    `INSERT INTO oauth_clients (id, client_id, name, redirect_uris, application_type, created_at, updated_at)
+     VALUES ('oc-native', 'c-native', 'CLI', '["http://127.0.0.1:8400/cb"]', 'native', 1790000260, 1790000260)`
+  );
   // An application a member made before only the owner could, with tokens
   // and an approval from the owner, next to c-1's.
   sqlite.run(
@@ -174,7 +184,7 @@ describe.skipIf(!isChild)("only the instance owner manages instance-wide SSO set
 
     expect(response.status).toBe(200);
     const list = (await response.json()) as { clientId: string }[];
-    expect(list.map((app) => app.clientId).sort()).toEqual(["c-1", "c-2", "c-member"]);
+    expect(list.map((app) => app.clientId).sort()).toEqual(["c-1", "c-2", "c-legacy", "c-member", "c-native"]);
   });
 
   test("the owner can change an application another account made", async () => {
@@ -182,7 +192,7 @@ describe.skipIf(!isChild)("only the instance owner manages instance-wide SSO set
     const response = await applications.PUT(
       ctx("/api/sso/applications?id=c-member", "PUT", {
         name: "Grafana (member)",
-        redirectURLs: "https://grafana.example/cb, http://localhost:3000/cb",
+        redirectURLs: "https://grafana.example/cb, https://grafana.example/alt",
         disabled: true,
       })
     );
@@ -191,7 +201,7 @@ describe.skipIf(!isChild)("only the instance owner manages instance-wide SSO set
     const body = (await response.json()) as { name: string; redirectURLs: string; disabled: boolean };
     expect(body).toMatchObject({
       name: "Grafana (member)",
-      redirectURLs: "https://grafana.example/cb,http://localhost:3000/cb",
+      redirectURLs: "https://grafana.example/cb,https://grafana.example/alt",
       disabled: true,
     });
     const row = sqlite
@@ -199,7 +209,7 @@ describe.skipIf(!isChild)("only the instance owner manages instance-wide SSO set
       .get() as { name: string; redirect_uris: string; disabled: number; user_id: string };
     expect(row).toEqual({
       name: "Grafana (member)",
-      redirect_uris: '["https://grafana.example/cb","http://localhost:3000/cb"]',
+      redirect_uris: '["https://grafana.example/cb","https://grafana.example/alt"]',
       disabled: 1,
       user_id: "member",
     });
@@ -225,6 +235,65 @@ describe.skipIf(!isChild)("only the instance owner manages instance-wide SSO set
     expect((await applications.PUT(ctx("/api/sso/applications?id=c-1", "PUT", { name: " " }))).status).toBe(400);
     expect((await applications.PUT(ctx("/api/sso/applications?id=c-1", "PUT", {}))).status).toBe(400);
     expect((await applications.PUT(ctx("/api/sso/applications?id=nope", "PUT", { name: "x" }))).status).toBe(404);
+  });
+
+  test("redirect rules follow the application type, and a URL already stored can stay", async () => {
+    currentUserId = "owner";
+    const put = (id: string, redirectURLs: string[]) =>
+      applications.PUT(ctx(`/api/sso/applications?id=${id}`, "PUT", { redirectURLs }));
+
+    // A 1.6 web application keeps its http://localhost address when edited...
+    const kept = await put("c-legacy", ["http://localhost:3000/cb", "https://dev.example/cb"]);
+    expect(kept.status).toBe(200);
+    // ...but cannot add another one.
+    const added = await put("c-legacy", ["http://localhost:3000/cb", "http://localhost:4000/cb"]);
+    expect(added.status).toBe(400);
+    expect((await added.json()).error).toContain("web applications cannot use");
+
+    // Native: http on loopback and app schemes, never http on a real host.
+    expect((await put("c-native", ["http://localhost:9000/cb", "com.example.cli:/oauth"])).status).toBe(200);
+    const lan = await put("c-native", ["http://grafana.lan/cb"]);
+    expect(lan.status).toBe(400);
+    expect((await lan.json()).error).toContain("http only for localhost");
+  });
+
+  test("creating an application says why a redirect URL is refused instead of failing with a 500", async () => {
+    currentUserId = "owner";
+    createOAuthClient.mockClear();
+    const post = (body: unknown) => applications.POST(ctx("/api/sso/applications", "POST", body));
+
+    const http = await post({ name: "Grafana", redirectURLs: ["http://grafana.lan:3000/login"] });
+    expect(http.status).toBe(400);
+    expect((await http.json()).error).toBe("http://grafana.lan:3000/login must use https: web applications need an https redirect URL");
+    const loopback = await post({ name: "Dev", redirectURLs: ["http://localhost:3000/cb"] });
+    expect(loopback.status).toBe(400);
+    expect((await loopback.json()).error).toContain('Send type "native"');
+    expect(createOAuthClient).not.toHaveBeenCalled();
+
+    // The same address is fine for a native application.
+    expect((await post({ name: "Dev", type: "native", redirectURLs: ["http://localhost:3000/cb"] })).status).toBe(201);
+    expect(createOAuthClient).toHaveBeenCalledTimes(1);
+
+    // Anything else the plugin refuses comes back with its reason.
+    createOAuthClient.mockImplementationOnce(async () => {
+      throw Object.assign(new Error(""), {
+        name: "APIError",
+        statusCode: 400,
+        status: "BAD_REQUEST",
+        body: { error: "invalid_client_metadata", error_description: "client_name is too long" },
+      });
+    });
+    const refused = await post({ name: "x".repeat(500), redirectURLs: ["https://wiki.example/cb"] });
+    expect(refused.status).toBe(400);
+    expect(await refused.json()).toEqual({ error: "client_name is too long" });
+
+    // A real failure still hides its details.
+    createOAuthClient.mockImplementationOnce(async () => {
+      throw new Error("database is locked");
+    });
+    const failed = await post({ name: "Wiki", redirectURLs: ["https://wiki.example/cb"] });
+    expect(failed.status).toBe(500);
+    expect(JSON.stringify(await failed.json())).not.toContain("database is locked");
   });
 
   test("deleting an application also ends its tokens and approvals", async () => {

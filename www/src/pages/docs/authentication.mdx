@@ -248,7 +248,14 @@ It returns `{"enabled": true, ...}` once the variables are set.
 
 ## Gitea Mirror as an OIDC provider
 
-Gitea Mirror can also issue identities to other applications. The app has no page for OAuth applications; create one through the API with a `POST` to `/api/sso/applications`, sending `name` and `redirectURLs` as JSON, plus `type` set to `web` (the default) or `native`. The response carries the `client_id` and the `client_secret`, which is shown only once. `GET` lists the applications. `PUT /api/sso/applications?id={client_id}` changes its name, redirect URLs (https, or http only for `localhost`) or `disabled` flag, and `DELETE /api/sso/applications?id={client_id}` removes it, along with the tokens it was given and the approvals people gave it.
+Gitea Mirror can also issue identities to other applications. The app has no page for OAuth applications; create one through the API with a `POST` to `/api/sso/applications`, sending `name` and `redirectURLs` as JSON, plus `type` set to `web` (the default) or `native`. The response carries the `client_id` and the `client_secret`, which is shown only once. `GET` lists the applications. `PUT /api/sso/applications?id={client_id}` changes its name, redirect URLs or `disabled` flag, and `DELETE /api/sso/applications?id={client_id}` removes it, along with the tokens it was given and the approvals people gave it.
+
+Redirect URLs follow the OAuth rules for each type, and a refused one comes back as a 400 that says why:
+
+- A **web** application needs an https URL on a real host name. `localhost`, `127.0.0.1` and `[::1]` are refused, as is plain http. An app that is only reachable over http on your network cannot be registered as it is; serve it over https, for example through your reverse proxy.
+- A **native** application can use https on a real host name, plain http only on exactly `localhost`, `127.0.0.1` or `[::1]` (any port), or an app scheme named like a reverse domain, such as `com.example.app:/callback`.
+
+The same rules apply when `PUT` changes the redirect URLs. A URL the application already has can stay, so an application registered by an older version keeps the addresses it was created with.
 
 Like SSO providers, OAuth applications are managed by the instance owner only. That covers these calls and the auth library's own endpoints under `/api/auth/oauth2/` for creating, registering, listing, changing and deleting applications, dynamic client registration at `/api/auth/oauth2/register` included. An application can ask anyone on the instance to approve it, so one made by another account could pass itself off as a familiar service and collect approvals for that account. Everyone can still sign in to the applications the owner set up and manage their own approvals, and any signed-in account can look up one application with `GET /api/sso/applications?clientId={client_id}`, which the consent page uses. In earlier versions any account could create its own applications; those show up in the owner's list, so delete any you do not recognize.
 
