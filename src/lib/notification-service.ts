@@ -518,3 +518,96 @@ export async function triggerMirrorSyncStalledNotification(args: {
     console.error("[NotificationService] Mirror sync stalled notification failed:", error);
   }
 }
+
+/**
+ * The repository cleanup event (#554): what one cleanup run did to
+ * repositories whose source is gone. Every repository acted on in the run
+ * shares one notification.
+ */
+export function buildRepositoryCleanupNotificationEvent({
+  action,
+  destinationChanged,
+  repositoryNames,
+  failures,
+}: {
+  action: "skip" | "archive" | "delete";
+  /** The destination copies were changed too, not only gitea-mirror's records. */
+  destinationChanged: boolean;
+  /** Full names of the repositories archived or removed. */
+  repositoryNames: string[];
+  /** One line per repository the run could not handle. */
+  failures: string[];
+}): NotificationEvent {
+  const list = (items: string[]) => {
+    const listed = items.slice(0, MAX_LISTED_NEW_REPOSITORIES);
+    const overflow = items.length - listed.length;
+    return listed.map((item) => `\n- ${item}`).join("") + (overflow > 0 ? `\n- and ${overflow} more` : "");
+  };
+  const count = repositoryNames.length;
+  const noun = count === 1 ? "repository" : "repositories";
+  const archived = action === "archive";
+
+  const parts: string[] = [];
+  if (count > 0) {
+    const what = archived
+      ? destinationChanged
+        ? "archived on the destination"
+        : "marked archived in gitea-mirror"
+      : destinationChanged
+        ? "deleted from the destination"
+        : "removed from gitea-mirror";
+    const untouched = destinationChanged ? "" : " The copies on the destination were not changed.";
+    parts.push(`${count} ${noun} ${what} because the source is gone.${untouched}`, list(repositoryNames));
+  }
+  if (failures.length > 0) {
+    parts.push(`${count > 0 ? "\n" : ""}Cleanup failed for:`, list(failures));
+  }
+
+  return {
+    title: count > 0
+      ? `Repository Cleanup: ${count} ${noun} ${archived ? "archived" : "deleted"}`
+      : "Repository Cleanup Failed",
+    message: parts.join(""),
+    type: "repo_cleanup",
+  };
+}
+
+/** Whether cleanup notifications are on. Off unless the switch was turned on. */
+export function isCleanupNotificationEnabled(
+  config: Pick<NotificationConfig, "enabled" | "notifyOnCleanup">,
+): boolean {
+  return config.enabled === true && config.notifyOnCleanup === true;
+}
+
+/**
+ * Tells the user what a repository cleanup run archived, removed or failed
+ * on. Dry runs and the skip action change nothing, so they send nothing, and
+ * a repository already archived by an earlier run is not reported again.
+ *
+ * Called at the end of a cleanup run, so it NEVER throws.
+ */
+export async function triggerRepositoryCleanupNotification(args: {
+  userId: string;
+  action: "skip" | "archive" | "delete";
+  destinationChanged: boolean;
+  repositoryNames: string[];
+  failures: string[];
+}): Promise<void> {
+  try {
+    if (args.repositoryNames.length === 0 && args.failures.length === 0) {
+      return;
+    }
+
+    const notificationConfig = await loadNotificationConfig(args.userId);
+
+    if (!notificationConfig || !isCleanupNotificationEnabled(notificationConfig)) {
+      return;
+    }
+
+    const event = buildRepositoryCleanupNotificationEvent(args);
+
+    await sendNotification(decryptNotificationConfig(notificationConfig), event);
+  } catch (error) {
+    console.error("[NotificationService] Repository cleanup notification failed:", error);
+  }
+}

@@ -612,6 +612,20 @@ export function NotificationSettings({
               />
             </div>
           </CardSection>
+          <CardDivider />
+          <CardSection>
+            <SwitchRow
+              label="Repository cleanup"
+              description="Notify when Repository Cleanup archives or removes a repository whose source is gone, or fails to"
+              checked={notificationConfig.notifyOnCleanup === true}
+              onCheckedChange={(checked) =>
+                onNotificationChange({
+                  ...notificationConfig,
+                  notifyOnCleanup: checked,
+                })
+              }
+            />
+          </CardSection>
         </SettingsCard>
       )}
     </div>

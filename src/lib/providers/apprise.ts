@@ -8,7 +8,7 @@ export async function sendAppriseNotification(config: AppriseConfig, event: Noti
   const body = JSON.stringify({
     title: event.title,
     body: event.message,
-    type: event.type === "sync_error" ? "failure" : "success",
+    type: event.type === "sync_error" ? "failure" : event.type === "repo_cleanup" ? "warning" : "success",
     tag: config.tag || undefined,
   });
   const resp = await safeFetch(url, { method: "POST", body, headers });

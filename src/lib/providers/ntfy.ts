@@ -4,7 +4,7 @@ import { safeFetch } from "@/lib/utils/outbound-url";
 export interface NotificationEvent {
   title: string;
   message: string;
-  type: "sync_error" | "sync_success" | "new_repo";
+  type: "sync_error" | "sync_success" | "new_repo" | "repo_cleanup";
 }
 
 export async function sendNtfyNotification(config: NtfyConfig, event: NotificationEvent): Promise<void> {
@@ -12,7 +12,7 @@ export async function sendNtfyNotification(config: NtfyConfig, event: Notificati
   const headers: Record<string, string> = {
     "Title": event.title,
     "Priority": event.type === "sync_error" ? "high" : (config.priority || "default"),
-    "Tags": event.type === "sync_error" ? "warning" : "white_check_mark",
+    "Tags": event.type === "sync_error" ? "warning" : event.type === "repo_cleanup" ? "wastebasket" : "white_check_mark",
   };
   if (config.token) {
     headers["Authorization"] = `Bearer ${config.token}`;

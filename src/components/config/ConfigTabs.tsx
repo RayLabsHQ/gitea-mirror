@@ -114,6 +114,7 @@ export function ConfigTabs() {
       notifyOnNewOwnRepo: true,
       notifyOnNewOrgRepo: true,
       notifyOnNewStarredRepo: true,
+      notifyOnCleanup: false,
     },
   });
   const { user } = useAuth();

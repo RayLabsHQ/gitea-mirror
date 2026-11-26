@@ -226,6 +226,8 @@ export interface NotificationConfig {
   notifyOnNewOwnRepo: boolean;
   notifyOnNewOrgRepo: boolean;
   notifyOnNewStarredRepo: boolean;
+  /** Repository cleanup archived or removed a repository whose source is gone (#554). */
+  notifyOnCleanup?: boolean;
   ntfy?: NtfyConfig;
   apprise?: AppriseConfig;
   gotify?: GotifyConfig;

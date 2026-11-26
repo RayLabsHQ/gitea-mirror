@@ -16,6 +16,7 @@ import { createGiteaClient, deleteGiteaRepo, archiveGiteaRepo, getGiteaRepoOwner
 import { usesPushEngine } from '@/lib/destination-connection';
 import { getDecryptedGiteaToken } from '@/lib/utils/config-encryption';
 import { publishEvent } from '@/lib/events';
+import { triggerRepositoryCleanupNotification } from '@/lib/notification-service';
 import { isMirrorableGitHubRepo } from '@/lib/repo-eligibility';
 
 let cleanupInterval: NodeJS.Timeout | null = null;
@@ -371,29 +372,35 @@ async function resolveGiteaTarget(config: any, repo: any): Promise<{
 /**
  * Handle an orphaned repository based on configuration
  */
+/**
+ * What handleOrphanedRepository did: "none" for the skip action, a dry run,
+ * or a repository an earlier run already archived.
+ */
+export type OrphanedRepositoryOutcome = 'none' | 'archived' | 'deleted';
+
 async function handleOrphanedRepository(
   config: any,
   repo: any,
   action: 'skip' | 'archive' | 'delete',
   dryRun: boolean
-): Promise<void> {
+): Promise<OrphanedRepositoryOutcome> {
   const repoFullName = repo.fullName;
   
   if (action === 'skip') {
     console.log(`[Repository Cleanup] Skipping orphaned repository ${repoFullName}`);
-    return;
+    return 'none';
   }
 
   if (repo.status === 'archived' || repo.isArchived) {
     console.log(`[Repository Cleanup] Repository ${repoFullName} already archived; skipping additional actions`);
-    return;
+    return 'none';
   }
 
   const plan = planOrphanedRepoAction(action, config.cleanupConfig?.deleteFromGitea === true);
 
   if (dryRun) {
     console.log(`[Repository Cleanup] DRY RUN: Would ${action} orphaned repository ${repoFullName}${plan.gitea === 'none' ? ' (database only; deleteFromGitea is disabled)' : ' (including the Gitea copy)'}`);
-    return;
+    return 'none';
   }
 
   try {
@@ -469,6 +476,7 @@ async function handleOrphanedRepository(
           },
         },
       });
+      return 'archived';
     } else if (action === 'delete') {
       if (plan.gitea === 'delete' && usesPushEngine(config)) {
         console.log(`[Repository Cleanup] Deleting orphaned repository ${repoFullName} from the push target`);
@@ -508,7 +516,9 @@ async function handleOrphanedRepository(
           },
         },
       });
+      return 'deleted';
     }
+    return 'none';
   } catch (error) {
     console.error(`[Repository Cleanup] Error handling orphaned repository ${repoFullName}:`, error);
     
@@ -533,6 +543,8 @@ export interface RepositoryCleanupResult {
   errors: string[];
   /** Full names of the repositories whose source is gone. */
   repositories: string[];
+  /** Full names of the repositories this run archived or removed. */
+  handled: string[];
   /** Planned actions were only logged. */
   dryRun: boolean;
   action: "skip" | "archive" | "delete";
@@ -568,6 +580,7 @@ async function runRepositoryCleanup(
       processedCount: 0,
       errors: [],
       repositories: [],
+      handled: [],
       dryRun: cleanupConfig.dryRun ?? false,
       action: cleanupConfig.orphanedRepoAction || 'archive',
     };
@@ -591,6 +604,7 @@ async function runRepositoryCleanupUnlocked(config: any): Promise<RepositoryClea
     processedCount: 0,
     errors: [] as string[],
     repositories: [],
+    handled: [],
     dryRun: cleanupConfig.dryRun ?? false,
     action: cleanupConfig.orphanedRepoAction || 'archive',
   };
@@ -648,8 +662,11 @@ async function runRepositoryCleanupUnlocked(config: any): Promise<RepositoryClea
         }
         
         try {
-          await handleOrphanedRepository(config, repo, action, dryRun);
+          const outcome = await handleOrphanedRepository(config, repo, action, dryRun);
           results.processedCount++;
+          if (outcome !== 'none') {
+            results.handled.push(repo.fullName);
+          }
         } catch (error) {
           const errorMsg = `Failed to ${action} ${repo.fullName}: ${error instanceof Error ? error.message : 'Unknown error'}`;
           console.error(`[Repository Cleanup] ${errorMsg}`);
@@ -672,7 +689,16 @@ async function runRepositoryCleanupUnlocked(config: any): Promise<RepositoryClea
     console.error(`[Repository Cleanup] Error during cleanup for user ${userId}:`, error);
     results.errors.push(`General cleanup error: ${error instanceof Error ? error.message : 'Unknown error'}`);
   }
-  
+
+  // One notification for the whole run (#554). Never throws.
+  await triggerRepositoryCleanupNotification({
+    userId,
+    action: results.action,
+    destinationChanged: planOrphanedRepoAction(results.action, cleanupConfig.deleteFromGitea === true).gitea !== 'none',
+    repositoryNames: results.handled,
+    failures: results.errors,
+  });
+
   return results;
 }
 
