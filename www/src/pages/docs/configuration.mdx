@@ -98,7 +98,7 @@ Splits the difference. Your personal repositories go into a single named organiz
 
 ### Moving existing mirrors after a change
 
-A new strategy, organization destination or starred setting applies to repositories mirrored from then on. Mirrors that already exist stay where they were created and keep syncing there. When some of them are not where the current settings would put them, the footer of the **Organization Structure** card says how many, with a **Review and move** button. This works on Gitea and Forgejo destinations; on GitHub and GitLab the footer only says the strategy applies to new repositories.
+A new strategy, organization destination or starred setting applies to repositories mirrored from then on. Mirrors that already exist stay where they were created and keep syncing there. When a change you make leaves some of them somewhere else than the new settings put them, a bar comes up at the bottom of the page, wherever it is scrolled, saying how many, with **Review and move** and **Not now**. **Not now** puts the bar away until your next change. The footer of the **Organization Structure** card always shows the same count and button, also for mirrors that were already out of place when you opened the page. This works on Gitea and Forgejo destinations; on GitHub and GitLab the footer only says the strategy applies to new repositories.
 
 **Review and move** checks each of those mirrors on the destination and shows what a move would do, before anything changes:
 
@@ -108,7 +108,7 @@ A new strategy, organization destination or starred setting applies to repositor
 
 **Use the source name**, on by default, gives each moved mirror its source repository's name, the way a new mirror would get it. When that name is taken at the new owner, the mirror keeps its current name if that one is free, and is blocked otherwise. Gitea Mirror never makes up a new name during a move. Turn the switch off to keep every mirror's current name.
 
-**Move** checks each mirror again right before moving it, and moves only the ones whose target is still the one you saw. Each mirror is transferred, and renamed when needed, with its history, issues and mirror settings; nothing is deleted or downloaded again. The record is updated after every step, so a failure halfway leaves Gitea Mirror pointing at wherever the mirror ended up. The run stops after three destination errors in a row. You can close the dialog while it runs; the card shows the progress, and the [activity log](/docs/repositories-and-organizations/#activity-log) gets a line per mirror.
+**Move** checks each mirror again right before moving it, and moves only the ones whose target is still the one you saw. Each mirror is transferred, and renamed when needed, with its history, issues and mirror settings; nothing is deleted or downloaded again. The record is updated after every step, so a failure halfway leaves Gitea Mirror pointing at wherever the mirror ended up. The run stops after three destination errors in a row. You can close the dialog while it runs; the bar and the card show the progress, the bar says how the move went when it ends, and the [activity log](/docs/repositories-and-organizations/#activity-log) gets a line per mirror.
 
 Old links and clones keep working after a move: the destination sends the old address on to the new one until another repository takes that name. Access given through the old organization's teams does not come along, and organizations left empty stay on the destination.
 

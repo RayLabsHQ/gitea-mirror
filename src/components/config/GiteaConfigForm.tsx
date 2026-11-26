@@ -475,17 +475,7 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
         icon={Building2}
         title="Organization Structure"
         footer={
-          <MirrorPlacementFooter
-            isSaving={isAutoSaving}
-            refreshKey={[
-              mirrorStrategy,
-              config.organization,
-              config.personalReposOrg,
-              config.starredReposOrg,
-              config.starredReposMode,
-              config.preserveOrgStructure,
-            ].join("|")}
-          />
+          <MirrorPlacementFooter />
         }
       >
         <CardSection>

@@ -204,3 +204,44 @@ export function isReservedOwnerName(name: string, provider?: string): boolean {
     RESERVED_OWNER_SUFFIXES.some((suffix) => lower.endsWith(suffix))
   );
 }
+
+/** What the Configuration page knows when it decides on its bar. */
+export interface PlacementBarState {
+  /** The destination supports moving mirrors. */
+  supported: boolean;
+  outOfPlace: number;
+  /** The placement settings as the page opened, once saved; null before the first summary. */
+  baseKey: string | null;
+  /** The settings the latest summary was read for. */
+  summaryKey: string | null;
+  /** The settings now. */
+  currentKey: string;
+  /** The settings the bar was last put away for. */
+  dismissedKey: string | null;
+  /** The last save failed, so the summary describes the settings the server still has. */
+  saveFailed: boolean;
+  /** A move was started from this page and its result has not been put away. */
+  runStartedHere: boolean;
+}
+
+/**
+ * What the bar at the bottom of the Configuration page shows: "run" for a
+ * move started there, "prompt" when a change made on the page left mirrors
+ * out of place, and nothing otherwise. Mirrors that were already out of
+ * place when the page opened are left to the Organization Structure card,
+ * and a prompt waits for the summary of the current settings, so it never
+ * shows a count that belongs to the previous ones. After a failed save the
+ * server still has the old settings, so there is nothing to announce.
+ */
+export function placementBarMode(state: PlacementBarState): "prompt" | "run" | null {
+  if (state.runStartedHere) return "run";
+  const prompt =
+    state.supported &&
+    !state.saveFailed &&
+    state.outOfPlace > 0 &&
+    state.baseKey !== null &&
+    state.summaryKey === state.currentKey &&
+    state.currentKey !== state.baseKey &&
+    state.currentKey !== state.dismissedKey;
+  return prompt ? "prompt" : null;
+}

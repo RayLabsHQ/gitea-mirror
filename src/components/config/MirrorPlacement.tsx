@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ArrowRight,
   Ban,
@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/dialog";
 import { withBase } from "@/lib/base-path";
 import { cn } from "@/lib/utils";
+import { placementBarMode } from "@/lib/mirror-placement";
 import type {
   BlockedMove,
   PlacementPreview,
@@ -78,19 +79,66 @@ function saveRename(value: boolean) {
   }
 }
 
+type PlacementState = {
+  summary: PlacementSummary | null;
+  run: PlacementRunState | null;
+  running: boolean;
+  /** Mirrors the run has finished with, moved or not. */
+  settled: number;
+  /** Mirrors not where the settings put them. */
+  count: number;
+  /**
+   * What the page bar shows: "prompt" when a change made on this page left
+   * mirrors out of place, "run" for a move started here, null when it is put away.
+   */
+  bar: "prompt" | "run" | null;
+  dismiss: () => void;
+  openDialog: () => void;
+};
+
+const PlacementContext = createContext<PlacementState | null>(null);
+
+function usePlacement(): PlacementState {
+  const value = useContext(PlacementContext);
+  if (!value) throw new Error("MirrorPlacementProvider is missing");
+  return value;
+}
+
 /**
- * The footer of the Organization Structure card (#550): how many existing
- * mirrors are not where the settings put them, with the way to move them.
- * Asks again after every saved change.
+ * Where existing mirrors stand against the settings (#550), shared by the
+ * Organization Structure card's footer and the bar at the bottom of the
+ * page. Asks again after every saved change.
  */
-export function MirrorPlacementFooter({ refreshKey, isSaving }: { refreshKey: string; isSaving?: boolean }) {
+export function MirrorPlacementProvider({
+  refreshKey,
+  isSaving,
+  saveFailed = false,
+  children,
+}: {
+  refreshKey: string;
+  isSaving?: boolean;
+  /** The last save of these settings failed, so the server still has the old ones. */
+  saveFailed?: boolean;
+  children: ReactNode;
+}) {
   const [summary, setSummary] = useState<PlacementSummary | null>(null);
+  const [summaryKey, setSummaryKey] = useState<string | null>(null);
   const [run, setRun] = useState<PlacementRunState | null>(null);
   const [open, setOpen] = useState(false);
+  // The settings as the page opened, once saved: only a change from them asks.
+  const [baseKey, setBaseKey] = useState<string | null>(null);
+  const [dismissedKey, setDismissedKey] = useState<string | null>(null);
+  const [runStartedHere, setRunStartedHere] = useState(false);
+  const keyRef = useRef(refreshKey);
+  keyRef.current = refreshKey;
 
   const refresh = useCallback(async () => {
+    const key = keyRef.current;
     try {
-      setSummary(await call<PlacementSummary>(SUMMARY_PATH));
+      const next = await call<PlacementSummary>(SUMMARY_PATH);
+      setSummary(next);
+      setSummaryKey(key);
+      setBaseKey((base) => base ?? key);
     } catch {
       setSummary(null);
     }
@@ -110,9 +158,9 @@ export function MirrorPlacementFooter({ refreshKey, isSaving }: { refreshKey: st
       .catch(() => undefined);
   }, []);
 
-  const isRunning = run !== null && run.state !== "done";
+  const running = run !== null && run.state !== "done";
   useEffect(() => {
-    if (!isRunning) return;
+    if (!running) return;
     const timer = setInterval(async () => {
       try {
         const { run: next } = await call<{ run: PlacementRunState | null }>(RUN_PATH);
@@ -123,15 +171,67 @@ export function MirrorPlacementFooter({ refreshKey, isSaving }: { refreshKey: st
       }
     }, 1200);
     return () => clearInterval(timer);
-  }, [isRunning, refresh]);
+  }, [running, refresh]);
 
-  const running = isRunning;
-  if (!running && (!summary?.supported || summary.outOfPlace + summary.inPlace === 0)) {
-    return <FooterText icon={Info}>Strategy applies to newly mirrored repositories</FooterText>;
-  }
+  // A finished move's message is about the old settings; a new change replaces it.
+  useEffect(() => {
+    setRunStartedHere((startedHere) => (startedHere && run?.state === "done" ? false : startedHere));
+  }, [refreshKey]);
 
   const count = summary?.outOfPlace ?? 0;
   const settled = run ? run.items.filter((item) => item.status !== "waiting" && item.status !== "moving").length : 0;
+  const bar = placementBarMode({
+    supported: Boolean(summary?.supported),
+    outOfPlace: count,
+    baseKey,
+    summaryKey,
+    currentKey: refreshKey,
+    dismissedKey,
+    saveFailed,
+    runStartedHere: runStartedHere && run !== null,
+  });
+
+  const value = useMemo<PlacementState>(
+    () => ({
+      summary,
+      run,
+      running,
+      settled,
+      count,
+      bar,
+      dismiss: () => {
+        setDismissedKey(keyRef.current);
+        setRunStartedHere(false);
+      },
+      openDialog: () => setOpen(true),
+    }),
+    [summary, run, running, settled, count, bar]
+  );
+
+  return (
+    <PlacementContext.Provider value={value}>
+      {children}
+      <MirrorPlacementDialog
+        open={open}
+        onOpenChange={setOpen}
+        run={run}
+        onRun={(next) => {
+          setRun(next);
+          if (next) setRunStartedHere(true);
+        }}
+        onChanged={refresh}
+      />
+    </PlacementContext.Provider>
+  );
+}
+
+/** The footer of the Organization Structure card: always there, quiet. */
+export function MirrorPlacementFooter() {
+  const { summary, run, running, settled, count, openDialog } = usePlacement();
+
+  if (!running && (!summary?.supported || summary.outOfPlace + summary.inPlace === 0)) {
+    return <FooterText icon={Info}>Strategy applies to newly mirrored repositories</FooterText>;
+  }
 
   return (
     <>
@@ -147,18 +247,80 @@ export function MirrorPlacementFooter({ refreshKey, isSaving }: { refreshKey: st
         <FooterText icon={CircleCheck}>Every mirror is where these settings put it</FooterText>
       )}
       {(running || count > 0) && (
-        <Button type="button" variant="outline" size="sm" className="h-8 shrink-0 gap-1.5 text-xs" onClick={() => setOpen(true)}>
+        <Button type="button" variant="outline" size="sm" className="h-8 shrink-0 gap-1.5 text-xs" onClick={openDialog}>
           {running ? "View" : <><MoveRight className="h-3.5 w-3.5" />Review and move</>}
         </Button>
       )}
-      <MirrorPlacementDialog
-        open={open}
-        onOpenChange={setOpen}
-        run={run}
-        onRun={setRun}
-        onChanged={refresh}
-      />
     </>
+  );
+}
+
+/**
+ * The bar at the bottom of the Configuration page. It comes up when a change
+ * on the page leaves mirrors out of place, wherever the page is scrolled,
+ * and while a move started here runs. Not now puts it away until the next
+ * change; the card's footer stays.
+ */
+export function MirrorPlacementBar() {
+  const { bar, run: lastRun, running, settled, count, dismiss, openDialog } = usePlacement();
+  if (!bar) return null;
+
+  const run = bar === "run" ? lastRun : null;
+  const total = run?.items.length ?? 0;
+  const moved = run ? run.items.filter((item) => item.status === "moved" || item.status === "recorded").length : 0;
+  const failed = run ? run.items.filter((item) => item.status === "failed").length : 0;
+  const done = run !== null && !running;
+
+  let icon = <TriangleAlert className="h-5 w-5 shrink-0 text-amber-500" />;
+  let title = `${count === 1 ? "1 mirror doesn't" : `${count} mirrors don't`} match your new settings`;
+  let detail = "The new settings apply to new mirrors. These stay where they are and keep syncing until you move them.";
+  if (run && running) {
+    icon = <LoaderCircle className="h-5 w-5 shrink-0 animate-spin text-indigo-500" />;
+    title = `Moving mirrors: ${settled} of ${total} done`;
+    detail = "You can keep working. View shows each mirror as it moves.";
+  } else if (done) {
+    icon = failed > 0
+      ? <TriangleAlert className="h-5 w-5 shrink-0 text-amber-500" />
+      : <CircleCheck className="h-5 w-5 shrink-0 text-emerald-500" />;
+    title =
+      moved === total
+        ? `Moved ${plural(moved, "mirror")}`
+        : `Moved ${moved} of ${total} mirrors${failed > 0 ? `, ${failed} failed` : ""}`;
+    detail = moved === total ? "Old links and clones keep working." : "The others stay where they were. View shows why.";
+  }
+
+  return (
+    // Pinned to the very bottom of the scroll area (past its padding), over a
+    // fade, so nothing shows through under the bar.
+    <div className="pointer-events-none sticky -bottom-4 z-30 -mb-4 bg-linear-to-t from-background from-60% to-transparent pb-[max(1rem,env(safe-area-inset-bottom))] pt-6 sm:-bottom-6 sm:-mb-6 sm:pb-6">
+      <div
+        role="status"
+        className="pointer-events-auto flex flex-wrap items-center gap-x-4 gap-y-3 rounded-xl border border-border bg-card px-4 py-3 shadow-[0_8px_30px_rgb(0_0_0/0.12)] animate-in fade-in slide-in-from-bottom-4 duration-300 dark:shadow-[0_8px_30px_rgb(0_0_0/0.5)] sm:flex-nowrap sm:px-5"
+      >
+        <div className="flex min-w-0 flex-1 items-start gap-3">
+          {icon}
+          <div className="min-w-0">
+            <p className="text-sm font-medium">{title}</p>
+            <p className="text-xs text-muted-foreground">{detail}</p>
+          </div>
+        </div>
+        <div className="flex w-full shrink-0 items-center justify-end gap-2 sm:w-auto">
+          {!(run && running) && (
+            <Button type="button" variant="ghost" size="sm" onClick={dismiss}>
+              {done ? "Close" : "Not now"}
+            </Button>
+          )}
+          <Button
+            type="button"
+            size="sm"
+            className="gap-1.5 bg-indigo-600 text-white hover:bg-indigo-700"
+            onClick={openDialog}
+          >
+            {run ? "View" : <><MoveRight className="h-4 w-4" />Review and move</>}
+          </Button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -233,7 +395,6 @@ function MirrorPlacementDialog({
       return;
     }
     if (!showRun) load(rename);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const toggleRename = (value: boolean) => {

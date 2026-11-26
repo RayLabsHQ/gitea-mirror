@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { GitHubConfigForm } from './GitHubConfigForm';
 import { GiteaConfigForm } from './GiteaConfigForm';
+import { MirrorPlacementBar, MirrorPlacementProvider } from './MirrorPlacement';
 import { SourcesCard } from './SourcesCard';
 import { GitHubMirrorSettings } from './GitHubMirrorSettings';
 import { AutomationSettings } from './AutomationSettings';
@@ -131,6 +132,8 @@ export function ConfigTabs() {
   const [isAutoSavingCleanup, setIsAutoSavingCleanup] = useState<boolean>(false);
   const [isAutoSavingGitHub, setIsAutoSavingGitHub] = useState<boolean>(false);
   const [isAutoSavingGitea, setIsAutoSavingGitea] = useState<boolean>(false);
+  // The last destination save failed: the screen shows settings the server does not have.
+  const [giteaSaveFailed, setGiteaSaveFailed] = useState<boolean>(false);
   const [isAutoSavingNotification, setIsAutoSavingNotification] = useState<boolean>(false);
   const autoSaveScheduleTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const autoSaveCleanupTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -440,13 +443,16 @@ export function ConfigTabs() {
           // Silent success - no toast for auto-save
           // Invalidate config cache so other components get fresh data
           invalidateConfigCache();
+          setGiteaSaveFailed(false);
         } else {
+          setGiteaSaveFailed(true);
           showErrorToast(
             `Auto-save failed: ${result.message || 'Unknown error'}`,
             toast
           );
         }
       } catch (error) {
+        setGiteaSaveFailed(true);
         showErrorToast(error, toast);
       } finally {
         setIsAutoSavingGitea(false);
@@ -721,6 +727,18 @@ export function ConfigTabs() {
       <ConfigCardSkeleton />
     </div>
   ) : (
+    <MirrorPlacementProvider
+      isSaving={isAutoSavingGitea}
+      saveFailed={giteaSaveFailed}
+      refreshKey={[
+        config.giteaConfig.mirrorStrategy,
+        config.giteaConfig.organization,
+        config.giteaConfig.personalReposOrg,
+        config.giteaConfig.starredReposOrg,
+        config.giteaConfig.starredReposMode,
+        config.giteaConfig.preserveOrgStructure,
+      ].join("|")}
+    >
     <div className="space-y-6">
       {/* Header section */}
       <div className="flex flex-col md:flex-row justify-between gap-y-4 items-start">
@@ -909,6 +927,8 @@ export function ConfigTabs() {
           <ApiKeysSettings />
         </TabsContent>
       </Tabs>
+      <MirrorPlacementBar />
     </div>
+    </MirrorPlacementProvider>
   );
 }
