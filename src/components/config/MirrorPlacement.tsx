@@ -290,7 +290,7 @@ function MirrorPlacementDialog({
               </DialogDescription>
             </DialogHeader>
 
-            <div className="flex items-start justify-between gap-4 border-y border-border bg-muted/30 px-6 py-3">
+            <div className="flex items-start justify-between gap-4 border-y border-border bg-muted/30 px-6 pb-3.5 pt-2.5">
               <div className="space-y-0.5">
                 <label htmlFor="placement-rename" className="text-sm font-medium">
                   Use the source name
