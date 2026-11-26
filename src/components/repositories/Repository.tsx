@@ -3,13 +3,13 @@ import RepositoryTable, { REPOSITORY_SORT_OPTIONS } from "./RepositoryTable";
 import type { MirrorJob, Repository } from "@/lib/db/schema";
 import { useAuth } from "@/hooks/useAuth";
 import {
-  repoStatusEnum,
   type AddRepositoriesApiRequest,
   type AddRepositoriesApiResponse,
   type RepositoryApiResponse,
-  type RepoStatus,
 } from "@/types/Repository";
-import { apiRequest, showErrorToast, getStatusColor } from "@/lib/utils";
+import type { FilterParams } from "@/types/filter";
+import { apiRequest, showErrorToast } from "@/lib/utils";
+import { countStatuses, isStatusFilterActive, statusFilterSummary } from "@/lib/repository-status-filter";
 import { readPageCache, writePageCache } from "@/lib/page-cache";
 import {
   Select,
@@ -48,6 +48,7 @@ import {
   OrganizationCombobox,
   DestinationCombobox,
 } from "./RepositoryComboboxes";
+import { StatusFilter } from "./StatusFilter";
 import type { RetryRepoRequest, RetryRepoResponse } from "@/types/retry";
 import type { ResetMetadataRequest, ResetMetadataResponse } from "@/types/reset-metadata";
 import AddRepositoryDialog from "./AddRepositoryDialog";
@@ -942,6 +943,8 @@ export default function Repository() {
     )
   ).sort(compareNames);
   // The destination owner each row resolves to, not the source organization.
+  const statusCounts = useMemo(() => countStatuses(repositories), [repositories]);
+
   const destinationOptions = Array.from(
     new Set(
       repositories
@@ -1103,13 +1106,13 @@ export default function Repository() {
     filter.owner ||
     filter.organization ||
     filter.destinationOrganization ||
-    filter.status
+    isStatusFilterActive(filter.status)
   );
   const activeFilterCount = [
     filter.owner,
     filter.organization,
     filter.destinationOrganization,
-    filter.status,
+    isStatusFilterActive(filter.status),
     filter.hasOverrides,
   ].filter(Boolean).length;
 
@@ -1248,39 +1251,19 @@ export default function Repository() {
                 <div className="space-y-2">
                   <label className="text-sm font-medium flex items-center gap-2">
                     <span className="text-muted-foreground">By</span> Status
-                    {filter.status && (
+                    {isStatusFilterActive(filter.status) && (
                       <span className="ml-auto text-xs text-muted-foreground">
-                        {filter.status.charAt(0).toUpperCase() + filter.status.slice(1)}
+                        {statusFilterSummary(filter.status)}
                       </span>
                     )}
                   </label>
-                  <Select
-                    value={filter.status || "all"}
-                    onValueChange={(value) =>
-                      setFilter((prev) => ({
-                        ...prev,
-                        status: value === "all" ? "" : (value as RepoStatus),
-                      }))
+                  <StatusFilter
+                    value={filter.status || ""}
+                    onChange={(status) =>
+                      setFilter((prev) => ({ ...prev, status: status as FilterParams["status"] }))
                     }
-                  >
-                    <SelectTrigger className="w-full h-10">
-                      <SelectValue placeholder="All statuses" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {["all", ...repoStatusEnum.options].map((status) => (
-                        <SelectItem key={status} value={status}>
-                          <span className="flex items-center gap-2">
-                            {status !== "all" && (
-                              <span className={`h-2 w-2 rounded-full ${getStatusColor(status)}`} />
-                            )}
-                            {status === "all"
-                              ? "All statuses"
-                              : status.charAt(0).toUpperCase() + status.slice(1)}
-                          </span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                    counts={statusCounts}
+                  />
                 </div>
 
                 {/* Mirror Options Filter */}

@@ -24,7 +24,9 @@ export const useFilterParams = (
     const result: FilterParams = { ...defaultFilters };
 
     FILTER_KEYS.forEach((key) => {
-      const value = params.get(key);
+      // The Repositories page takes several statuses (#580), as one
+      // comma separated value or as the parameter repeated.
+      const value = key === "status" && params.getAll(key).length > 1 ? params.getAll(key).join(",") : params.get(key);
       if (value !== null) {
         (result as any)[key] = value;
       }
@@ -47,7 +49,8 @@ export const useFilterParams = (
         }
       });
 
-      const newUrl = `${window.location.pathname}?${params.toString()}`;
+      // Commas need no escaping in a query, and status=mirrored,synced reads better.
+      const newUrl = `${window.location.pathname}?${params.toString().replace(/%2C/gi, ",")}`;
       window.history.replaceState({}, "", newUrl);
     }, debounceDelay);
 
