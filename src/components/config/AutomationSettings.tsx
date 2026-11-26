@@ -33,6 +33,7 @@ import {
   SettingsCard,
   SectionTitle,
   SwitchRow,
+  OptionRow,
   OptionTile,
   StatusFooterItem,
   CardDivider,
@@ -536,15 +537,44 @@ export function AutomationSettings({
             <CardDivider />
             <CardSection>
               {(cleanupConfig.orphanedRepoAction ?? "archive") !== "skip" && (
-                <SwitchRow
-                  label="Apply to the destination too"
-                  description="When off, only gitea-mirror's list changes and the copies on the destination stay as they are"
-                  info="Archiving keeps everything: a Gitea or Forgejo mirror gets an archived- prefix and stops syncing automatically, and GitHub or GitLab use their own archive. Deleting cannot be undone. CLEANUP_DELETE_FROM_GITEA, when set, replaces this on every restart."
-                  checked={Boolean(cleanupConfig.deleteFromGitea)}
-                  onCheckedChange={(checked) =>
-                    onCleanupChange({ ...cleanupConfig, deleteFromGitea: checked })
-                  }
-                />
+                <>
+                  <OptionRow
+                    label="Wait before acting"
+                    description="Act only once the source has been gone this many days. 0 acts on the first check that finds it gone"
+                    info="Counted from the first check that finds the source gone. If the source comes back during the wait, nothing happens and the count starts over. With cleanup notifications on, you hear about it when the wait starts. CLEANUP_ORPHANED_REPO_GRACE_DAYS, when set, replaces this on every restart."
+                    right={
+                      <div className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
+                        <input
+                          id="cleanup-grace-days"
+                          type="number"
+                          min="0"
+                          inputMode="numeric"
+                          value={cleanupConfig.orphanedRepoGraceDays ?? 0}
+                          onChange={(event) => {
+                            const value = parseInt(event.target.value, 10);
+                            onCleanupChange({
+                              ...cleanupConfig,
+                              orphanedRepoGraceDays: Number.isFinite(value) ? Math.max(0, value) : 0,
+                            });
+                          }}
+                          className="w-16 rounded border border-input bg-background px-2 py-1 text-xs text-foreground"
+                        />
+                        <label htmlFor="cleanup-grace-days">
+                          {(cleanupConfig.orphanedRepoGraceDays ?? 0) === 1 ? "day" : "days"}
+                        </label>
+                      </div>
+                    }
+                  />
+                  <SwitchRow
+                    label="Apply to the destination too"
+                    description="When off, only gitea-mirror's list changes and the copies on the destination stay as they are"
+                    info="Archiving keeps everything: a Gitea or Forgejo mirror gets an archived- prefix and stops syncing automatically, and GitHub or GitLab use their own archive. Deleting cannot be undone. CLEANUP_DELETE_FROM_GITEA, when set, replaces this on every restart."
+                    checked={Boolean(cleanupConfig.deleteFromGitea)}
+                    onCheckedChange={(checked) =>
+                      onCleanupChange({ ...cleanupConfig, deleteFromGitea: checked })
+                    }
+                  />
+                </>
               )}
               <SwitchRow
                 label="Dry run"

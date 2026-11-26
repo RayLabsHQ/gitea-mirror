@@ -60,6 +60,7 @@ const TOUCHED = [
   "CLEANUP_ENABLED",
   "CLEANUP_DELETE_IF_NOT_IN_GITHUB",
   "CLEANUP_DRY_RUN",
+  "CLEANUP_ORPHANED_REPO_GRACE_DAYS",
   "MIRROR_STRATEGY",
   "PRESERVE_ORG_STRUCTURE",
   "GITEA_ORGANIZATION",
@@ -176,6 +177,26 @@ if (isolated) {
       await initializeConfigFromEnv!();
 
       expect((await stored()).cleanupConfig).toMatchObject({ enabled: true, deleteIfNotInGitHub: true });
+    });
+
+    test("CLEANUP_ORPHANED_REPO_GRACE_DAYS sets the wait; unset or unusable keeps the stored one (#549)", async () => {
+      await createDefaultConfig!({ userId: "user-1" });
+      const row = await stored();
+      await db
+        .update(schema.configs)
+        .set({ cleanupConfig: { ...row.cleanupConfig, orphanedRepoGraceDays: 3 } })
+        .where(eq(schema.configs.userId, "user-1"));
+
+      await initializeConfigFromEnv!();
+      expect((await stored()).cleanupConfig.orphanedRepoGraceDays).toBe(3);
+
+      process.env.CLEANUP_ORPHANED_REPO_GRACE_DAYS = "seven";
+      await initializeConfigFromEnv!();
+      expect((await stored()).cleanupConfig.orphanedRepoGraceDays).toBe(3);
+
+      process.env.CLEANUP_ORPHANED_REPO_GRACE_DAYS = "14";
+      await initializeConfigFromEnv!();
+      expect((await stored()).cleanupConfig.orphanedRepoGraceDays).toBe(14);
     });
 
     test("a first start without a stored configuration gets the documented defaults", async () => {

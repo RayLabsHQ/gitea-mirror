@@ -546,30 +546,18 @@ async function runScheduledSync(config: any): Promise<void> {
       }
     }
     
-    // Auto-cleanup: Remove orphaned repositories (repos that no longer exist in GitHub)
+    // Auto-cleanup: repositories whose source is gone. The same run as the
+    // background check and Run now, so protected repositories, the wait before
+    // acting (#549) and the cleanup notifications apply here too.
     if (config.cleanupConfig?.deleteIfNotInGitHub) {
       console.log(`[Scheduler] Checking for orphaned repositories to cleanup for user ${userId}...`);
       try {
-        const { identifyOrphanedRepositories, handleOrphanedRepository } = await import('@/lib/repository-cleanup-service');
-        
-        const orphanedRepos = await identifyOrphanedRepositories(config);
-        
-        if (orphanedRepos.length > 0) {
-          console.log(`[Scheduler] Found ${orphanedRepos.length} orphaned repositories for cleanup`);
-          
-          for (const repo of orphanedRepos) {
-            try {
-              await handleOrphanedRepository(
-                config,
-                repo,
-                config.cleanupConfig.orphanedRepoAction || 'archive',
-                config.cleanupConfig.dryRun ?? false
-              );
-              console.log(`[Scheduler] Handled orphaned repository: ${repo.fullName}`);
-            } catch (error) {
-              console.error(`[Scheduler] Failed to handle orphaned repository ${repo.fullName}:`, error);
-            }
-          }
+        const { runRepositoryCleanupForConfig } = await import('@/lib/repository-cleanup-service');
+        const result = await runRepositoryCleanupForConfig(config);
+        if (result.orphanedCount > 0) {
+          console.log(
+            `[Scheduler] Repository cleanup: the source is gone for ${result.orphanedCount} repositories, ${result.handled.length} handled, ${result.waiting.length} waiting, ${result.errors.length} failed`
+          );
         } else {
           console.log(`[Scheduler] No orphaned repositories found for cleanup`);
         }

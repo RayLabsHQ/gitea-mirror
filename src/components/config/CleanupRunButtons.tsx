@@ -121,37 +121,52 @@ export function useRepositoryCleanupRun() {
           errorCount: number;
           errors: string[];
           repositories: string[];
+          waiting?: { fullName: string; actOn: string }[];
           dryRun: boolean;
           action: "skip" | "archive" | "delete";
         };
       }>(REPOSITORY_CLEANUP_API_PATH);
       const found = plural(results.orphanedCount, "repository", "repositories");
       const itemsLabel = "Repositories whose source is gone";
+      // Repositories inside the wait before acting (#549) show their date.
+      const waiting = results.waiting ?? [];
+      const actOnByName = new Map(waiting.map((entry) => [entry.fullName, entry.actOn] as const));
+      const items = results.repositories.map((name) => {
+        const actOn = actOnByName.get(name);
+        return actOn
+          ? `${name} (waiting until ${new Date(actOn).toLocaleDateString(undefined, { dateStyle: "medium" })})`
+          : name;
+      });
       if (results.orphanedCount === 0) {
         setState({ kind: "done", tone: "success", text: "Every repository's source is still there" });
       } else if (results.dryRun) {
         setState({
           kind: "done",
           tone: "success",
-          text: `Dry run: the source is gone for ${found}. Nothing was changed.`,
+          text: `Dry run: the source is gone for ${found}${
+            waiting.length > 0 ? `, ${waiting.length} still waiting` : ""
+          }. Nothing was changed.`,
           details: {
             title: "Dry run",
             text: "Nothing was changed. Turn off Dry run to apply the action.",
-            items: results.repositories,
+            items,
             itemsLabel,
           },
         });
       } else {
         const done =
           results.action === "skip" ? "left as they are" : results.action === "archive" ? "archived" : "removed";
-        const failed = results.errorCount > 0 ? `, ${results.errorCount} failed` : "";
+        const counts: string[] = [];
+        if (results.processedCount > 0 || waiting.length === 0) counts.push(`${results.processedCount} ${done}`);
+        if (waiting.length > 0) counts.push(`${waiting.length} waiting`);
+        if (results.errorCount > 0) counts.push(`${results.errorCount} failed`);
         setState({
           kind: "done",
           tone: results.errorCount > 0 ? "warning" : "success",
-          text: `The source is gone for ${found}: ${results.processedCount} ${done}${failed}`,
+          text: `The source is gone for ${found}: ${counts.join(", ")}`,
           details: {
             title: "Repository cleanup",
-            items: results.repositories,
+            items,
             itemsLabel,
             errors: results.errors,
           },
@@ -383,14 +398,19 @@ export function RepositoryCleanupFooterStatus({ state }: { state: CleanupRunStat
 function describeAction(config: DatabaseCleanupConfig): string | null {
   const action = config.orphanedRepoAction ?? "archive";
   if (config.dryRun || action === "skip") return null;
+  const days = Math.max(0, Math.floor(config.orphanedRepoGraceDays ?? 0));
+  const subject =
+    days > 0
+      ? `Repositories whose source has been gone for ${days} ${days === 1 ? "day" : "days"} or more`
+      : "Repositories whose source is gone";
   if (action === "archive") {
     return config.deleteFromGitea
-      ? "Repositories whose source is gone will be archived here and on the destination."
-      : "Repositories whose source is gone will be marked archived here. The copies on the destination stay as they are.";
+      ? `${subject} will be archived here and on the destination.`
+      : `${subject} will be marked archived here. The copies on the destination stay as they are.`;
   }
   return config.deleteFromGitea
-    ? "Repositories whose source is gone will be removed here and deleted from the destination. This cannot be undone."
-    : "Repositories whose source is gone will be removed here. The copies on the destination stay as they are.";
+    ? `${subject} will be removed here and deleted from the destination. This cannot be undone.`
+    : `${subject} will be removed here. The copies on the destination stay as they are.`;
 }
 
 /**

@@ -18,16 +18,23 @@ Cleanup looks for repositories that the database tracks but that no longer exist
 | --- | --- | --- | --- |
 | Enabled | `CLEANUP_DELETE_IF_NOT_IN_GITHUB` | on | The card's switch. Checks every 6 hours and with each scheduled sync. |
 | Action | `CLEANUP_ORPHANED_REPO_ACTION` | `archive` | `skip` leaves the mirror untouched, `archive` keeps it read only with an archived prefix, `delete` removes it. |
+| Wait before acting | `CLEANUP_ORPHANED_REPO_GRACE_DAYS` | `0` | Act only once the source has been gone this many days. `0` acts on the first check that finds it gone. Shown on the card unless the action is `skip`. See [the wait](#waiting-before-acting). |
 | Dry run | `CLEANUP_DRY_RUN` | off | Log the planned actions without changing anything. |
 | Apply to the destination too | `CLEANUP_DELETE_FROM_GITEA` | `false` | Apply the action on the destination too. Off means only gitea-mirror's own list is updated. Shown on the card unless the action is `skip`. |
 | Protected repositories | `CLEANUP_PROTECTED_REPOS` | none | Comma-separated repository names cleanup never touches. |
 | Batch size and pause | `CLEANUP_BATCH_SIZE`, `CLEANUP_PAUSE_BETWEEN_DELETES` | `10`, `2000` | Items per batch, and the pause between deletions in milliseconds. |
 
-The first four are on the card. If you also set one of their environment variables, and environment seeding applies, it replaces the card's value on every restart; see the [warning on the reference page](/docs/environment-variables/). The others are environment variables only; see the [reference](/docs/environment-variables/#cleanup).
+The first five are on the card. If you also set one of their environment variables, and environment seeding applies, it replaces the card's value on every restart; see the [warning on the reference page](/docs/environment-variables/). The others are environment variables only; see the [reference](/docs/environment-variables/#cleanup).
 
 To check right away instead of waiting, click **Run now** on the card. If the action would change anything, it asks first. A dry run or the `skip` action runs without asking. Its progress and the outcome show in the card's footer, and the info button next to the outcome lists the repositories whose source is gone and any errors. The same run is available as `POST /api/cleanup/trigger`, see the [API page](/docs/api/#run-cleanup).
 
 To hear about what cleanup did, turn on **Repository cleanup** under Notification Events on the [Notifications](/docs/notifications/#event-types) tab.
+
+### Waiting before acting
+
+A deleted repository sometimes comes back, for example when it was removed by mistake or moved and restored. **Wait before acting** gives it time. The first check that finds a source gone records the time, and the action is only applied once the source has been gone for that many days. Until then the repository keeps its mirror and shows as waiting, with the date, in the outcome of **Run now**. If the source shows up again during the wait, nothing happens and the time is forgotten, so a later disappearance starts a new wait.
+
+The wait counts from the first check that saw the source gone, and checks run every 6 hours and with each scheduled sync, so the action can come up to a few hours after the exact day. A failed lookup, such as a rate limit or an outage, neither starts nor resets the wait. Dry runs record the time too, so a dry run shows the real dates. With cleanup notifications on, you get a heads-up when the wait starts, naming the repositories and the day the action will be applied, and the usual notification when it is.
 
 ### What each action does
 

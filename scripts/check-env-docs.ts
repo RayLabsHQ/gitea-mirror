@@ -7,7 +7,7 @@
  *
  * "Reads" means `process.env.NAME`, `import.meta.env.NAME`, `Bun.env.NAME`,
  * `env.NAME` on a ProcessEnv parameter, the bracket forms, or a name passed
- * to the env config loader's `envFlag` / `envFlagAny` helpers, in src/ and
+ * to the env config loader's `envFlag` / `envFlagAny` / `envNonNegativeInt` helpers, in src/ and
  * scripts/ outside tests, plus the variables docker-entrypoint.sh takes from
  * the environment. The reference is every variable in the first column of a
  * table in www/src/pages/docs/environment-variables.mdx.
@@ -92,8 +92,8 @@ const codeFiles = trackedFiles("src", "scripts", "astro.config.mjs").filter(
 );
 const envRead =
   /(?:process\.env|import\.meta\.env|Bun\.env|(?<![.\w])env)(?:\.([A-Z][A-Z0-9_]+)|\[\s*["'`]([A-Z][A-Z0-9_]+)["'`]\s*\])/g;
-// envFlag('NAME') and envFlagAny('A', 'B') in env-config-loader.ts.
-const envHelperCall = /\benvFlag(?:Any)?\(([^)]*)\)/g;
+// envFlag('NAME'), envFlagAny('A', 'B') and envNonNegativeInt('NAME') in env-config-loader.ts.
+const envHelperCall = /\b(?:envFlag(?:Any)?|envNonNegativeInt)\(([^)]*)\)/g;
 const quotedName = /["'`]([A-Z][A-Z0-9_]+)["'`]/g;
 for (const file of codeFiles) {
   const text = readFileSync(path.join(root, file), "utf8");

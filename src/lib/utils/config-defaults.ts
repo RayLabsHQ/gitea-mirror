@@ -144,6 +144,7 @@ export async function createDefaultConfig({ userId, envOverrides = {} }: Default
       protectedRepos: [],
       dryRun: false,
       orphanedRepoAction: "archive",
+      orphanedRepoGraceDays: 0,
       batchSize: 10,
       pauseBetweenDeletes: 2000,
       lastRun: null,

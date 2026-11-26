@@ -549,13 +549,7 @@ export function buildRepositoryCleanupNotificationEvent({
 
   const parts: string[] = [];
   if (count > 0) {
-    const what = archived
-      ? destinationChanged
-        ? "archived on the destination"
-        : "marked archived in gitea-mirror"
-      : destinationChanged
-        ? "deleted from the destination"
-        : "removed from gitea-mirror";
+    const what = cleanupOutcomeText(action, destinationChanged);
     const untouched = destinationChanged ? "" : " The copies on the destination were not changed.";
     parts.push(`${count} ${noun} ${what} because the source is gone.${untouched}`, list(repositoryNames));
   }
@@ -572,11 +566,96 @@ export function buildRepositoryCleanupNotificationEvent({
   };
 }
 
+/** What the cleanup action will do, in the words the notifications use. */
+function cleanupOutcomeText(action: "skip" | "archive" | "delete", destinationChanged: boolean): string {
+  if (action === "archive") {
+    return destinationChanged ? "archived on the destination" : "marked archived in gitea-mirror";
+  }
+  return destinationChanged ? "deleted from the destination" : "removed from gitea-mirror";
+}
+
+/**
+ * The heads-up when repository cleanup first finds sources gone while a wait
+ * before acting is set (#549): which repositories, and what happens on which
+ * day if their source is still gone then.
+ */
+export function buildSourceMissingNotificationEvent({
+  action,
+  destinationChanged,
+  graceDays,
+  repositories,
+}: {
+  action: "skip" | "archive" | "delete";
+  destinationChanged: boolean;
+  graceDays: number;
+  /** The repositories and when each will be acted on (ISO time). */
+  repositories: Array<{ fullName: string; actOn: string }>;
+}): NotificationEvent {
+  const count = repositories.length;
+  const noun = count === 1 ? "repository" : "repositories";
+  const listed = repositories.slice(0, MAX_LISTED_NEW_REPOSITORIES);
+  const overflow = count - listed.length;
+  const list =
+    listed.map((repository) => `\n- ${repository.fullName}`).join("") +
+    (overflow > 0 ? `\n- and ${overflow} more` : "");
+  // Found in the same run, so they share the day; the earliest is the honest one.
+  const actOn = repositories
+    .map((repository) => repository.actOn)
+    .sort()[0]
+    ?.slice(0, 10);
+  const wait = `${graceDays} ${graceDays === 1 ? "day" : "days"} from now`;
+  const what = cleanupOutcomeText(action, destinationChanged);
+  const outcome = count === 1
+    ? `If it is still gone on ${actOn} (${wait}), the repository will be ${what}.`
+    : `Those still gone on ${actOn} (${wait}) will be ${what}.`;
+  const untouched = destinationChanged ? "" : " The copies on the destination will not be changed.";
+
+  return {
+    title: `Repository Cleanup: source gone for ${count} ${noun}`,
+    message: `The source is gone for ${count} ${noun}. ${outcome}${untouched}${list}`,
+    type: "repo_cleanup",
+  };
+}
+
 /** Whether cleanup notifications are on. Off unless the switch was turned on. */
 export function isCleanupNotificationEnabled(
   config: Pick<NotificationConfig, "enabled" | "notifyOnCleanup">,
 ): boolean {
   return config.enabled === true && config.notifyOnCleanup === true;
+}
+
+/**
+ * Tells the user that repository cleanup found sources gone and is waiting
+ * before it acts (#549). Sent once per repository, from the run that first
+ * found it gone; the cleanup run leaves out dry runs and the skip action.
+ * Uses the same switch as the cleanup notification.
+ *
+ * Called at the end of a cleanup run, so it NEVER throws.
+ */
+export async function triggerSourceMissingNotification(args: {
+  userId: string;
+  action: "skip" | "archive" | "delete";
+  destinationChanged: boolean;
+  graceDays: number;
+  repositories: Array<{ fullName: string; actOn: string }>;
+}): Promise<void> {
+  try {
+    if (args.repositories.length === 0 || args.action === "skip") {
+      return;
+    }
+
+    const notificationConfig = await loadNotificationConfig(args.userId);
+
+    if (!notificationConfig || !isCleanupNotificationEnabled(notificationConfig)) {
+      return;
+    }
+
+    const event = buildSourceMissingNotificationEvent(args);
+
+    await sendNotification(decryptNotificationConfig(notificationConfig), event);
+  } catch (error) {
+    console.error("[NotificationService] Source missing notification failed:", error);
+  }
 }
 
 /**

@@ -18,7 +18,7 @@ mock.module("@/lib/utils/encryption", () => ({
 }));
 
 // Import after mocks are set up — db is already mocked via setup.bun.ts
-import { sendNotification, testNotification, buildNewRepositoriesNotificationEvent, buildAllReleasesRemovedNotificationEvent, triggerAllReleasesRemovedNotification, buildMirrorSyncStalledNotificationEvent, claimMirrorSyncStalledNotification, resetMirrorSyncStalledNotifications, triggerMirrorSyncStalledNotification, MIRROR_SYNC_STALLED_NOTIFICATION_INTERVAL_MS, isNewRepositoryGroupEnabled, MAX_LISTED_NEW_REPOSITORIES, STARRED_GROUP_LABEL, buildRepositoryCleanupNotificationEvent, isCleanupNotificationEnabled, triggerRepositoryCleanupNotification } from "./notification-service";
+import { sendNotification, testNotification, buildNewRepositoriesNotificationEvent, buildAllReleasesRemovedNotificationEvent, triggerAllReleasesRemovedNotification, buildMirrorSyncStalledNotificationEvent, claimMirrorSyncStalledNotification, resetMirrorSyncStalledNotifications, triggerMirrorSyncStalledNotification, MIRROR_SYNC_STALLED_NOTIFICATION_INTERVAL_MS, isNewRepositoryGroupEnabled, MAX_LISTED_NEW_REPOSITORIES, STARRED_GROUP_LABEL, buildRepositoryCleanupNotificationEvent, buildSourceMissingNotificationEvent, isCleanupNotificationEnabled, triggerRepositoryCleanupNotification } from "./notification-service";
 import type { NotificationConfig } from "@/types/config";
 
 describe("sendNotification", () => {
@@ -611,6 +611,49 @@ describe("triggerMirrorSyncStalledNotification", () => {
     // Nothing was sent, so the slot is still free for a user who turns
     // notifications on later.
     expect(claimMirrorSyncStalledNotification("user-1")).toBe(true);
+  });
+});
+
+describe("buildSourceMissingNotificationEvent (#549)", () => {
+  test("several repositories: the day, the wait and what happens then", () => {
+    const event = buildSourceMissingNotificationEvent({
+      action: "archive",
+      destinationChanged: true,
+      graceDays: 7,
+      repositories: [
+        { fullName: "octo/one", actOn: "2026-12-03T10:00:00.000Z" },
+        { fullName: "octo/two", actOn: "2026-12-03T10:00:00.000Z" },
+      ],
+    });
+    expect(event.type).toBe("repo_cleanup");
+    expect(event.title).toBe("Repository Cleanup: source gone for 2 repositories");
+    expect(event.message).toBe(
+      "The source is gone for 2 repositories. Those still gone on 2026-12-03 (7 days from now) will be archived on the destination.\n- octo/one\n- octo/two"
+    );
+  });
+
+  test("one repository with the delete action, leaving the destination alone", () => {
+    const event = buildSourceMissingNotificationEvent({
+      action: "delete",
+      destinationChanged: false,
+      graceDays: 1,
+      repositories: [{ fullName: "octo/one", actOn: "2026-11-27T10:00:00.000Z" }],
+    });
+    expect(event.title).toBe("Repository Cleanup: source gone for 1 repository");
+    expect(event.message).toBe(
+      "The source is gone for 1 repository. If it is still gone on 2026-11-27 (1 day from now), the repository will be removed from gitea-mirror. The copies on the destination will not be changed.\n- octo/one"
+    );
+  });
+
+  test("a long list is cut off", () => {
+    const repositories = Array.from({ length: MAX_LISTED_NEW_REPOSITORIES + 4 }, (_, index) => ({
+      fullName: `octo/repo-${index}`,
+      actOn: "2026-12-03T10:00:00.000Z",
+    }));
+    const event = buildSourceMissingNotificationEvent({ action: "archive", destinationChanged: true, graceDays: 7, repositories });
+    expect(event.message).toContain(`- octo/repo-${MAX_LISTED_NEW_REPOSITORIES - 1}`);
+    expect(event.message).not.toContain(`- octo/repo-${MAX_LISTED_NEW_REPOSITORIES}\n`);
+    expect(event.message.endsWith("- and 4 more")).toBe(true);
   });
 });
 

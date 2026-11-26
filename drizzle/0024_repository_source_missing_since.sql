@@ -1,0 +1,1 @@
+ALTER TABLE `repositories` ADD `source_missing_since` integer;

@@ -81,6 +81,7 @@ export function ConfigTabs() {
       retentionDays: 0, // Will be replaced with actual value from API
       deleteIfNotInGitHub: true,
       orphanedRepoAction: "archive",
+      orphanedRepoGraceDays: 0,
       dryRun: false,
       deleteFromGitea: false,
       protectedRepos: [],
