@@ -14,9 +14,8 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { FlipHorizontal, GitFork, MoreVertical, RefreshCw, RotateCcw, Star, Lock, Ban, Check, ChevronDown, SlidersHorizontal, Trash2, X } from "lucide-react";
 import { SiGithub } from "react-icons/si";
 import type { MirrorOverrides, Repository } from "@/lib/db/schema";
-import { repoStatusEnum, type RepoStatus } from "@/types/Repository";
 import { Button } from "@/components/ui/button";
-import { cn, formatLastSyncTime, getStatusColor } from "@/lib/utils";
+import { cn, formatLastSyncTime } from "@/lib/utils";
 import { buildGiteaWebUrl } from "@/lib/gitea-url";
 import type { FilterParams } from "@/types/filter";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -33,6 +32,8 @@ import {
 import { toast } from "sonner";
 import { InlineDestinationEditor, type DestinationUpdateOptions } from "./InlineDestinationEditor";
 import { DestinationCombobox } from "./RepositoryComboboxes";
+import { StatusFilter } from "./StatusFilter";
+import { countStatuses, isStatusFilterActive, matchesStatusFilter, parseStatusFilter } from "@/lib/repository-status-filter";
 import { MarqueeText, MarqueeTrigger } from "@/components/ui/marquee-text";
 import { MirrorOverridesDialog } from "@/components/config/MirrorOverridesDialog";
 import {
@@ -314,7 +315,7 @@ export default function RepositoryTable({
 
   const hasAnyFilter = [
     filter.searchTerm,
-    filter.status,
+    isStatusFilterActive(filter.status) ? filter.status : "",
     filter.owner,
     filter.organization,
     filter.destinationOrganization,
@@ -326,8 +327,9 @@ export default function RepositoryTable({
   const columnFilters = useMemo<ColumnFiltersState>(() => {
     const next: ColumnFiltersState = [];
 
-    if (filter.status) {
-      next.push({ id: "status", value: filter.status });
+    const statuses = parseStatusFilter(filter.status);
+    if (statuses.length > 0) {
+      next.push({ id: "status", value: statuses });
     }
 
     if (filter.owner) {
@@ -386,7 +388,8 @@ export default function RepositoryTable({
       {
         id: "status",
         accessorFn: (row) => row.status,
-        filterFn: "equalsString",
+        // Any of the picked statuses (#580).
+        filterFn: (row, columnId, value: string[]) => matchesStatusFilter(row.getValue<string>(columnId), value),
       },
       {
         id: "hasOverrides",
@@ -431,6 +434,9 @@ export default function RepositoryTable({
     () => rowModel.rows.map((row) => row.original),
     [rowModel]
   );
+
+  // Repositories per status, for the status filter's list.
+  const statusCounts = useMemo(() => countStatuses(repositories), [repositories]);
 
   // Only the layout on screen is rendered: a hidden list still built every
   // card. The cards are virtualized against the page scroll like the rows.
@@ -841,33 +847,11 @@ export default function RepositoryTable({
           }
         />
 
-        <Select
-          value={filter.status || "all"}
-          onValueChange={(value) =>
-            setFilter({
-              ...filter,
-              status: value === "all" ? "" : (value as RepoStatus),
-            })
-          }
-        >
-          <SelectTrigger className="h-10 w-[140px]">
-            <SelectValue placeholder="All statuses" />
-          </SelectTrigger>
-          <SelectContent>
-            {["all", ...repoStatusEnum.options].map((status) => (
-              <SelectItem key={status} value={status}>
-                <span className="flex items-center gap-2">
-                  {status !== "all" && (
-                    <span className={`h-2 w-2 rounded-full ${getStatusColor(status)}`} />
-                  )}
-                  {status === "all"
-                    ? "All statuses"
-                    : status.charAt(0).toUpperCase() + status.slice(1)}
-                </span>
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <StatusFilter
+          value={filter.status || ""}
+          onChange={(status) => setFilter({ ...filter, status: status as FilterParams["status"] })}
+          counts={statusCounts}
+        />
 
         <Select
           value={filter.hasOverrides || "all"}
