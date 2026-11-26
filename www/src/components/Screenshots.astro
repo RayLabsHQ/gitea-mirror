@@ -6,45 +6,65 @@ import { Button } from './ui/button';
 // Import all images
 import dashboardDesktop from '../../public/assets/dashboard.png';
 import dashboardMobile from '../../public/assets/dashboard_mobile.png';
+import dashboardDesktopDark from '../../public/assets/dashboard_dark.png';
+import dashboardMobileDark from '../../public/assets/dashboard_mobile_dark.png';
 import organisationDesktop from '../../public/assets/organisation.png';
 import organisationMobile from '../../public/assets/organisation_mobile.png';
+import organisationDesktopDark from '../../public/assets/organisation_dark.png';
+import organisationMobileDark from '../../public/assets/organisation_mobile_dark.png';
 import repositoriesDesktop from '../../public/assets/repositories.png';
 import repositoriesMobile from '../../public/assets/repositories_mobile.png';
+import repositoriesDesktopDark from '../../public/assets/repositories_dark.png';
+import repositoriesMobileDark from '../../public/assets/repositories_mobile_dark.png';
 import configurationDesktop from '../../public/assets/configuration.png';
 import configurationMobile from '../../public/assets/configuration_mobile.png';
+import configurationDesktopDark from '../../public/assets/configuration_dark.png';
+import configurationMobileDark from '../../public/assets/configuration_mobile_dark.png';
 import activityDesktop from '../../public/assets/activity.png';
 import activityMobile from '../../public/assets/activity_mobile.png';
+import activityDesktopDark from '../../public/assets/activity_dark.png';
+import activityMobileDark from '../../public/assets/activity_mobile_dark.png';
 
 const screenshots = [
   {
     title: "Dashboard Overview",
     description: "Monitor all your mirrored repositories in one place",
     desktop: dashboardDesktop,
-    mobile: dashboardMobile
+    mobile: dashboardMobile,
+    desktopDark: dashboardDesktopDark,
+    mobileDark: dashboardMobileDark
   },
   {
     title: "Organization Management",
     description: "Easily manage and sync entire GitHub organizations",
     desktop: organisationDesktop,
-    mobile: organisationMobile
+    mobile: organisationMobile,
+    desktopDark: organisationDesktopDark,
+    mobileDark: organisationMobileDark
   },
   {
     title: "Repository Control",
     description: "Fine-grained control over individual repository mirrors",
     desktop: repositoriesDesktop,
-    mobile: repositoriesMobile
+    mobile: repositoriesMobile,
+    desktopDark: repositoriesDesktopDark,
+    mobileDark: repositoriesMobileDark
   },
   {
     title: "Configuration",
     description: "Simple and intuitive configuration interface",
     desktop: configurationDesktop,
-    mobile: configurationMobile
+    mobile: configurationMobile,
+    desktopDark: configurationDesktopDark,
+    mobileDark: configurationMobileDark
   },
   {
     title: "Activity Monitoring",
     description: "Track sync progress and view detailed logs",
     desktop: activityDesktop,
-    mobile: activityMobile
+    mobile: activityMobile,
+    desktopDark: activityDesktopDark,
+    mobileDark: activityMobileDark
   }
 ];
 ---
@@ -65,16 +85,29 @@ const screenshots = [
       <div id="screenshot-container" class="relative group">
         <div class="aspect-[9/16] sm:aspect-[16/10] overflow-hidden rounded-lg sm:rounded-2xl bg-card border shadow-lg">
           {screenshots.map((screenshot, index) => (
-            <picture data-index={index} class={index === 0 ? 'block' : 'hidden'}>
-              <source media="(max-width: 640px)" srcset={screenshot.mobile.src} />
-              <Image
-                src={screenshot.desktop}
-                alt={screenshot.title}
-                class="w-full h-full object-cover object-top"
-                draggable={false}
-                loading={index === 0 ? 'eager' : 'lazy'}
-              />
-            </picture>
+            <div data-slide={index} class={index === 0 ? 'block' : 'hidden'}>
+              {/* The site's theme toggle sets .dark on <html>, so each slide carries both. */}
+              <picture class="block dark:hidden">
+                <source media="(max-width: 640px)" srcset={screenshot.mobile.src} />
+                <Image
+                  src={screenshot.desktop}
+                  alt={screenshot.title}
+                  class="w-full h-full object-cover object-top"
+                  draggable={false}
+                  loading={index === 0 ? 'eager' : 'lazy'}
+                />
+              </picture>
+              <picture class="hidden dark:block">
+                <source media="(max-width: 640px)" srcset={screenshot.mobileDark.src} />
+                <Image
+                  src={screenshot.desktopDark}
+                  alt={screenshot.title}
+                  class="w-full h-full object-cover object-top"
+                  draggable={false}
+                  loading="lazy"
+                />
+              </picture>
+            </div>
           ))}
         </div>
 
@@ -138,7 +171,13 @@ const screenshots = [
           <Image
             src={screenshot.desktop}
             alt={screenshot.title}
-            class="w-full h-full object-cover"
+            class="w-full h-full object-cover dark:hidden"
+            loading="lazy"
+          />
+          <Image
+            src={screenshot.desktopDark}
+            alt={screenshot.title}
+            class="hidden w-full h-full object-cover dark:block"
             loading="lazy"
           />
         </button>
@@ -154,7 +193,7 @@ const screenshots = [
   const minSwipeDistance = 50;
 
   const container = document.getElementById('screenshot-container');
-  const pictures = container.querySelectorAll('picture');
+  const pictures = container.querySelectorAll('[data-slide]');
   const dots = document.querySelectorAll('.screenshot-dot');
   const thumbs = document.querySelectorAll('.screenshot-thumb');
   const titleEl = document.getElementById('screenshot-title');

@@ -26,8 +26,14 @@ docker compose -f docker-compose.alt.yml up -d
 Open http://localhost:4321 and create an account; the first one becomes the admin. Then connect a source and a destination on the **Configuration** page. The [Quickstart](https://gitea-mirror.raylabs.io/docs/quickstart/) walks through it, including the compose file to use without cloning.
 
 <p align="center">
-  <img src=".github/assets/dashboard.png" alt="Dashboard" width="600" />
-  <img src=".github/assets/dashboard_mobile.png" alt="Dashboard Mobile" width="200" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/assets/dashboard_dark.png" />
+    <img src=".github/assets/dashboard.png" alt="Dashboard" width="600" />
+  </picture>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/assets/dashboard_mobile_dark.png" />
+    <img src=".github/assets/dashboard_mobile.png" alt="Dashboard Mobile" width="200" />
+  </picture>
 </p>
 
 ## Features
@@ -69,8 +75,14 @@ The image is `ghcr.io/raylabshq/gitea-mirror`, built for amd64 and arm64. Before
 - [Use cases](https://gitea-mirror.raylabs.io/use-cases/) such as backing up GitHub, moving to Gitea, or mirroring GitLab
 
 <div align="center">
-  <img src=".github/assets/repositories.png" alt="Repositories" width="600" />
-  <img src=".github/assets/repositories_mobile.png" alt="Repositories Mobile" width="200" />
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/assets/repositories_dark.png" />
+    <img src=".github/assets/repositories.png" alt="Repositories" width="600" />
+  </picture>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/assets/repositories_mobile_dark.png" />
+    <img src=".github/assets/repositories_mobile.png" alt="Repositories Mobile" width="200" />
+  </picture>
 </div>
 
 ## Community projects
