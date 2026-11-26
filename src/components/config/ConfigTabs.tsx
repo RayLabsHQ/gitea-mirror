@@ -94,6 +94,7 @@ export function ConfigTabs() {
         pullRequests: false,
         labels: false,
         milestones: false,
+        securityAdvisories: false,
         wiki: false,
       },
       issueState: "all",

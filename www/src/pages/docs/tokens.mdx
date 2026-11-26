@@ -25,7 +25,7 @@ A few things to know:
 
 ### GitHub App instead of a token
 
-A GitHub source can authenticate as a GitHub App installation instead. Create a GitHub App with read access to repository **Contents** and **Metadata**, plus **Issues** and **Pull requests** if you mirror that metadata. Install it on the repositories you want, then in the source editor set **Authentication** to **GitHub App installation** and enter the installation's account or organization as the username, the App ID, the installation ID and the PEM private key.
+A GitHub source can authenticate as a GitHub App installation instead. Create a GitHub App with read access to repository **Contents** and **Metadata**, plus **Issues** and **Pull requests** if you mirror that metadata, and **Repository security advisories** to mirror the advisories of private repositories. Install it on the repositories you want, then in the source editor set **Authentication** to **GitHub App installation** and enter the installation's account or organization as the username, the App ID, the installation ID and the PEM private key.
 
 - The App sees only the repositories selected for its installation. It cannot see your starred repositories or star lists; use a token for those.
 - The private key is encrypted when it is saved and is never sent back by the API.
@@ -53,7 +53,7 @@ The token belongs to the user who owns the mirrors (the username on the destinat
 | `write:repository` | Create the mirrors, start syncs, set descriptions and topics, create releases and upload their assets, move mirrors to another owner, and archive or delete them during cleanup. |
 | `write:organization` | Create the destination organizations your mirror strategy needs, and read the ones that exist. |
 | `read:user` | Read the account the token belongs to. |
-| `write:issue` | Only when you mirror issues, pull requests, labels or milestones. Gitea files all four under its issue scope. |
+| `write:issue` | Only when you mirror issues, pull requests, labels, milestones or security advisories. Gitea files all of them under its issue scope. |
 
 The user also needs permission to create repositories in each destination organization: an owner, or a member of a team allowed to create repositories. An admin token is not needed.
 

@@ -66,6 +66,7 @@ const TOUCHED = [
   "ENVIRONMENT_SEEDING",
   "RELEASE_PRERELEASE_LIMIT",
   "STARRED_REPOS_MODE",
+  "MIRROR_SECURITY_ADVISORIES",
 ];
 
 if (isolated) {
@@ -239,6 +240,19 @@ if (isolated) {
       process.env.STARRED_REPOS_MODE = "sideways";
       await initializeConfigFromEnv!();
       expect((await stored()).githubConfig.starredReposMode).toBe("follow-strategy");
+    });
+
+    test("MIRROR_SECURITY_ADVISORIES turns the advisories and the metadata switch on, and unset keeps what is stored (#561)", async () => {
+      await initializeConfigFromEnv!();
+      expect((await stored()).giteaConfig.mirrorSecurityAdvisories).toBe(false);
+
+      process.env.MIRROR_SECURITY_ADVISORIES = "true";
+      await initializeConfigFromEnv!();
+      expect((await stored()).giteaConfig).toMatchObject({ mirrorSecurityAdvisories: true, mirrorMetadata: true });
+
+      delete process.env.MIRROR_SECURITY_ADVISORIES;
+      await initializeConfigFromEnv!();
+      expect((await stored()).giteaConfig.mirrorSecurityAdvisories).toBe(true);
     });
   });
 

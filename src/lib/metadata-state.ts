@@ -4,6 +4,7 @@ interface MetadataComponentsState {
   pullRequests: boolean;
   labels: boolean;
   milestones: boolean;
+  securityAdvisories: boolean;
 }
 
 /**
@@ -142,6 +143,7 @@ const defaultComponents: MetadataComponentsState = {
   pullRequests: false,
   labels: false,
   milestones: false,
+  securityAdvisories: false,
 };
 
 export function createDefaultMetadataState(): RepositoryMetadataState {
@@ -406,6 +408,7 @@ export function parseRepositoryMetadataState(
       pullRequests: Boolean(parsed.components.pullRequests),
       labels: Boolean(parsed.components.labels),
       milestones: Boolean(parsed.components.milestones),
+      securityAdvisories: Boolean(parsed.components.securityAdvisories),
     };
   }
 

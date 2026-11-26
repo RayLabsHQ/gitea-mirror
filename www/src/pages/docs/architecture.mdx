@@ -144,7 +144,7 @@ The dispatcher in `src/lib/mirror-dispatch.ts` then picks one of two paths by de
 
 **Push engine path** (GitHub, GitLab). The app keeps a bare clone per repository under the data directory, fetches it with prune, and pushes branches and tags to the target with force and prune. A target adapter creates, archives and deletes repositories through the host's API. A lock file per clone and a global concurrency limit keep the number of git processes bounded, and tokens reach git only through an inline credential helper fed from the child process environment. The [Destinations](/docs/destinations/) page describes the engine in detail.
 
-Metadata mirroring, if enabled and the destination is a pull mirror, follows separately. Issues are recreated with their comments, labels, assignees, and milestones; they need a GitHub source. Releases are recreated with their assets, subject to the release and asset limits, from GitHub, Gitea and Forgejo sources. Wiki content is cloned as a separate repository.
+Metadata mirroring, if enabled and the destination is a pull mirror, follows separately. Issues are recreated with their comments, labels, assignees, and milestones, and published security advisories become labeled issues; they need a GitHub source. Releases are recreated with their assets, subject to the release and asset limits, from GitHub, Gitea and Forgejo sources. Wiki content is cloned as a separate repository.
 
 Throughout, job status updates are published as server-sent events so the dashboard reflects progress live without polling.
 

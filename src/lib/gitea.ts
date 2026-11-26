@@ -58,6 +58,9 @@ import { createReleaseAssetDir } from "./utils/release-asset-files";
 import { rm } from "node:fs/promises";
 import path from "node:path";
 import { persistMetadataPassProgress } from "./metadata-progress-store";
+import { mirrorSecurityAdvisoriesToGitea } from "./security-advisories";
+// Re-exported so the sync path's dependency bag can carry it like the other metadata steps.
+export { mirrorSecurityAdvisoriesToGitea };
 import { summarizeReleaseAssets } from "./repository-storage";
 import { recordReleaseAssetStorage } from "./repository-storage-store";
 import { listDestinationReleases } from "./destination-listing";
@@ -1517,6 +1520,32 @@ export const mirrorGithubRepoToGitea = async ({
       }
     }
 
+    // Published GitHub security advisories, as issues (#561).
+    if (mirrorOptions.mirrorSecurityAdvisories && octokit !== null) {
+      try {
+        await mirrorSecurityAdvisoriesToGitea({
+          config,
+          octokit,
+          repository,
+          giteaOwner: repoOwner,
+          giteaRepoName: targetRepoName,
+        });
+        metadataState.components.securityAdvisories = true;
+        metadataUpdated = true;
+      } catch (error) {
+        // A rate limit is not this repository's fault and the other
+        // components would run into the same wall: fail the mirror so the
+        // scheduler puts the row back and retries after the reset (#437).
+        if (isRateLimitError(error)) throw error;
+        console.error(
+          `[Metadata] Failed to mirror security advisories for ${repository.name}: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+        // Continue with other metadata operations even if advisories fail
+      }
+    }
+
     // Labels-only path; issues run above already creates/reconciles labels.
     const shouldMirrorLabels =
       mirrorOptions.mirrorLabels && !shouldMirrorIssuesThisRun && octokit !== null;
@@ -2335,6 +2364,32 @@ export async function mirrorGitHubRepoToGiteaOrg({
           }`
         );
         // Continue with other metadata operations even if PRs fail
+      }
+    }
+
+    // Published GitHub security advisories, as issues (#561).
+    if (mirrorOptions.mirrorSecurityAdvisories && octokit !== null) {
+      try {
+        await mirrorSecurityAdvisoriesToGitea({
+          config,
+          octokit,
+          repository,
+          giteaOwner: orgName,
+          giteaRepoName: targetRepoName,
+        });
+        metadataState.components.securityAdvisories = true;
+        metadataUpdated = true;
+      } catch (error) {
+        // A rate limit is not this repository's fault and the other
+        // components would run into the same wall: fail the mirror so the
+        // scheduler puts the row back and retries after the reset (#437).
+        if (isRateLimitError(error)) throw error;
+        console.error(
+          `[Metadata] Failed to mirror security advisories for ${repository.name}: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+        // Continue with other metadata operations even if advisories fail
       }
     }
 

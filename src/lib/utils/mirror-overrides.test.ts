@@ -456,6 +456,7 @@ describe("UI_MIRROR_OVERRIDE_KEYS", () => {
       "mirrorReleases",
       "mirrorLabels",
       "mirrorMilestones",
+      "mirrorSecurityAdvisories",
     ]);
   });
 
@@ -2017,5 +2018,56 @@ describe("pre-release limit (#560)", () => {
       });
       expect(gating.prereleaseLimit).toBeUndefined();
     });
+  });
+});
+
+describe("security advisories flag (#561)", () => {
+  const config = (giteaConfig: Record<string, unknown> = {}) =>
+    ({ giteaConfig: { mirrorSecurityAdvisories: true, ...giteaConfig }, githubConfig: {} }) as any;
+  const repo = (overrides: Record<string, unknown> = {}) =>
+    ({ isStarred: false, mirrorOverrides: null, ...overrides }) as any;
+
+  test("comes from the global setting, and a repository override wins", () => {
+    expect(resolveMirrorOptions({ config: config(), repository: repo() }).mirrorSecurityAdvisories).toBe(true);
+    expect(
+      resolveMirrorOptions({ config: config(), repository: repo({ mirrorOverrides: { mirrorSecurityAdvisories: false } }) })
+        .mirrorSecurityAdvisories
+    ).toBe(false);
+    expect(
+      resolveMirrorOptions({
+        config: config({ mirrorSecurityAdvisories: false }),
+        repository: repo({ mirrorOverrides: { mirrorSecurityAdvisories: true } }),
+      }).mirrorSecurityAdvisories
+    ).toBe(true);
+  });
+
+  test("is off for GitLab and Gitea sources, push destinations and starred code only", () => {
+    for (const sourceProvider of ["gitlab", "gitea"]) {
+      expect(resolveMirrorOptions({ config: config(), repository: repo({ sourceProvider }) }).mirrorSecurityAdvisories).toBe(false);
+    }
+    expect(resolveMirrorOptions({ config: config({ provider: "github" }), repository: repo() }).mirrorSecurityAdvisories).toBe(false);
+    expect(
+      resolveMirrorOptions({
+        config: { ...config(), githubConfig: { starredCodeOnly: true } },
+        repository: repo({ isStarred: true }),
+      }).mirrorSecurityAdvisories
+    ).toBe(false);
+  });
+
+  test("the overrides dialog shows it with a reason when it cannot apply", () => {
+    expect(MIRROR_OVERRIDE_LABELS.mirrorSecurityAdvisories).toBe("Security advisories");
+    expect(
+      getMirrorOverrideGating({ targetKind: "repository", effective: {}, destinationProvider: "gitlab" }).mirrorSecurityAdvisories
+    ).toBe(MIRROR_GATING_REASONS.pushTarget);
+    expect(
+      getMirrorOverrideGating({ targetKind: "repository", isStarred: true, starredCodeOnly: true, effective: {} })
+        .mirrorSecurityAdvisories
+    ).toBe(MIRROR_GATING_REASONS.starredCodeOnly);
+    expect(getMirrorOverrideGating({ targetKind: "organization", effective: {} }).mirrorSecurityAdvisories).toBeUndefined();
+  });
+
+  test("the organization inheritance reads it from the API's metadata components", () => {
+    expect(mirrorOptionsToFlags({ metadataComponents: { securityAdvisories: true } }).mirrorSecurityAdvisories).toBe(true);
+    expect(mirrorOptionsToFlags({ metadataComponents: {} }).mirrorSecurityAdvisories).toBe(false);
   });
 });

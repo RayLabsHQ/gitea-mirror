@@ -73,6 +73,8 @@ type SyncDependencies = {
   mirrorGitRepoPullRequestsToGitea: typeof import("./gitea")["mirrorGitRepoPullRequestsToGitea"];
   mirrorGitRepoLabelsToGitea: typeof import("./gitea")["mirrorGitRepoLabelsToGitea"];
   mirrorGitRepoMilestonesToGitea: typeof import("./gitea")["mirrorGitRepoMilestonesToGitea"];
+  /** Optional for the same reason as mirrorGiteaSourceReleasesToGitea. */
+  mirrorSecurityAdvisoriesToGitea?: typeof import("./security-advisories")["mirrorSecurityAdvisoriesToGitea"];
   /** Optional for the same reason as mirrorGiteaSourceReleasesToGitea; tests pass one that does not sleep. */
   waitForGiteaImport?: typeof waitForGiteaImport;
 };
@@ -1334,6 +1336,40 @@ export async function syncGiteaRepoEnhanced({
             console.error(
               `[Sync] Failed to mirror pull requests for ${repository.name}: ${
                 prError instanceof Error ? prError.message : String(prError)
+              }`
+            );
+          }
+        }
+      }
+
+      // Published GitHub security advisories, as issues (#561).
+      if (mirrorOptions.mirrorSecurityAdvisories) {
+        const octokit = ensureOctokit();
+        if (!octokit) {
+          console.warn(
+            `[Sync] Skipping security advisory mirroring for ${repository.name}: Missing GitHub token`
+          );
+        } else {
+          try {
+            const mirrorSecurityAdvisories =
+              dependencies.mirrorSecurityAdvisoriesToGitea ??
+              (await import("./security-advisories")).mirrorSecurityAdvisoriesToGitea;
+            await mirrorSecurityAdvisories({
+              config,
+              octokit,
+              repository,
+              giteaOwner: repoOwner,
+              giteaRepoName: repoName,
+            });
+            metadataState.components.securityAdvisories = true;
+            metadataUpdated = true;
+          } catch (advisoryError) {
+            // Rate limited: fail the sync so the scheduler restores the row and
+            // retries after the reset instead of running the next component (#437).
+            if (isRateLimitError(advisoryError)) throw advisoryError;
+            console.error(
+              `[Sync] Failed to mirror security advisories for ${repository.name}: ${
+                advisoryError instanceof Error ? advisoryError.message : String(advisoryError)
               }`
             );
           }
