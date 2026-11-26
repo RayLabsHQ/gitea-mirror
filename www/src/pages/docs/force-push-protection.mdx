@@ -10,7 +10,7 @@ A GitHub repository can be force-pushed at any time, rewriting history, dropping
 
 > **Warning:** Protection only covers the syncs Gitea Mirror runs. Gitea and Forgejo also pull each mirror on their own schedule, set to your mirror interval (8h by default), and nothing pauses that. If Gitea pulls a rewrite before Gitea Mirror checks the repository, both sides already match, so nothing is detected and no snapshot is taken.
 
-Configure it under **Configuration > Connections > Destructive Update Protection**.
+Configure it under **Configuration > Automation > Destructive Update Protection**.
 
 ## How detection works
 

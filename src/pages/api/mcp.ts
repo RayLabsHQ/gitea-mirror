@@ -28,7 +28,7 @@ export const POST: APIRoute = async ({ request, locals }) => {
         -32001,
         apiKey
           ? "Gitea Mirror rejected the API key; it may be revoked or expired."
-          : `Send an API key in the ${API_KEY_HEADER} header. Create one on the Configuration page, Authentication tab.`
+          : `Send an API key in the ${API_KEY_HEADER} header. Create one on the Configuration page, Access tab.`
       ),
       401
     );

@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import {
   Activity,
+  Download,
   ExternalLink,
   Globe,
   KeyRound,
@@ -42,7 +43,7 @@ import {
 } from "@/lib/source-providers/kinds";
 import { invalidateConfigCache } from "@/hooks/useConfigStatus";
 import { HostLockNotice } from "./HostLockNotice";
-import { CardDivider, CardSection, SettingsCard } from "./settings-ui";
+import { CardDivider, CardSection, SettingsCard, StatusFooterItem } from "./settings-ui";
 
 const SOURCES_API_PATH = withBase("/api/sources");
 
@@ -175,6 +176,8 @@ interface SourcesCardProps {
   sources: SourceApiRecord[];
   /** Refetches the config so the list, locks and counts stay fresh. */
   onRefresh: () => Promise<void>;
+  /** The import button, shown in the footer once a source exists. */
+  importAction?: React.ReactNode;
 }
 
 type SourcesMutationResponse = {
@@ -204,7 +207,7 @@ type EditorState = {
  * The Connections tab source card: one row per connected source, with the
  * add/edit form reusing the connection fields of the single-source era.
  */
-export function SourcesCard({ sources, onRefresh }: SourcesCardProps) {
+export function SourcesCard({ sources, onRefresh, importAction }: SourcesCardProps) {
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [isTesting, setIsTesting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -466,6 +469,18 @@ export function SourcesCard({ sources, onRefresh }: SourcesCardProps) {
             Add Source
           </Button>
         </div>
+      }
+      footer={
+        sources.length > 0 && importAction ? (
+          <>
+            {/* The note gives way to the button where the card is narrow: on a
+                phone, and in the two-column layout below 1024px. */}
+            <div className="hidden whitespace-nowrap sm:block md:hidden lg:block">
+              <StatusFooterItem icon={Download} label="Imports from all sources" />
+            </div>
+            <div className="ml-auto shrink-0">{importAction}</div>
+          </>
+        ) : undefined
       }
     >
       {editor && (
