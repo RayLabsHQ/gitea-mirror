@@ -502,6 +502,8 @@ export const users = sqliteTable("users", {
     .default(sql`(unixepoch())`),
   // Custom fields
   username: text("username"),
+  // Better Auth twoFactor plugin (#552): set once an authenticator app is verified.
+  twoFactorEnabled: integer("two_factor_enabled", { mode: "boolean" }).notNull().default(false),
 }, (_table) => []);
 
 export const events = sqliteTable("events", {
@@ -1097,6 +1099,24 @@ export const jwkss = sqliteTable("jwks", {
   alg: text("alg"),
   crv: text("crv"),
 });
+
+// ===== Two-factor authentication (#552) =====
+
+// Better Auth's twoFactor plugin: one row per user with an authenticator app.
+// The secret and the backup codes are encrypted by Better Auth with
+// BETTER_AUTH_SECRET; `verified` stays false until the first code is entered.
+export const twoFactors = sqliteTable("two_factors", {
+  id: text("id").primaryKey(),
+  secret: text("secret").notNull(),
+  backupCodes: text("backup_codes").notNull(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  verified: integer("verified", { mode: "boolean" }).default(true),
+  failedVerificationCount: integer("failed_verification_count").default(0),
+  lockedUntil: integer("locked_until", { mode: "timestamp" }),
+}, (table) => [
+  index("idx_two_factors_user_id").on(table.userId),
+  index("idx_two_factors_secret").on(table.secret),
+]);
 
 // ===== SSO Provider Tables =====
 

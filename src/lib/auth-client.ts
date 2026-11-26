@@ -3,6 +3,7 @@ import { createAuthClient } from "better-auth/react";
 import { oauthProviderClient } from "@better-auth/oauth-provider/client";
 import { ssoClient } from "@better-auth/sso/client";
 import { apiKeyClient } from "@better-auth/api-key/client";
+import { twoFactorClient } from "better-auth/client/plugins";
 import type { Session as BetterAuthSession, User as BetterAuthUser } from "better-auth";
 import { withBase } from "@/lib/base-path";
 
@@ -45,6 +46,8 @@ export const authClient = createAuthClient({
     oauthProviderClient(),
     ssoClient(),
     apiKeyClient(),
+    // The login form handles the code step itself (#552), so no redirect here.
+    twoFactorClient(),
   ],
 });
 
@@ -64,8 +67,11 @@ export const {
 export type Session = BetterAuthSession & {
   user: BetterAuthUser & {
     username?: string | null;
+    twoFactorEnabled?: boolean | null;
   };
 };
 export type AuthUser = BetterAuthUser & {
   username?: string | null;
+  /** An authenticator app is set up for this account (#552). */
+  twoFactorEnabled?: boolean | null;
 };

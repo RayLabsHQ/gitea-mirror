@@ -33,7 +33,7 @@ A `.env` file is optional; copy `.env.example` to preset settings. Without `BETT
 | `bun run test:migrations` | Validate the migrations in `drizzle/`. |
 | `bun run test:e2e` | Playwright suite in `tests/e2e/`, against containers it starts. |
 | `bun run db:studio` | Browse the database in Drizzle Studio. |
-| `bun run manage-db check` | Check the database. `init`, `fix`, `reset-users` and `reset-password` are the other commands. |
+| `bun run manage-db check` | Check the database. `init`, `fix`, `reset-users`, `reset-password` and `disable-2fa` are the other commands. |
 
 Some things only show up in a production build, such as hydration or navigation problems that the dev server's hot reload hides. Check UI changes with `bun run build && bun run start` before calling them done.
 

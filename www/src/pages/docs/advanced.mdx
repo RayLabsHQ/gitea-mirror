@@ -118,9 +118,10 @@ bun run manage-db cleanup         # Remove old events and stale records
 bun run manage-db auto            # Initialize if missing, otherwise check
 bun run manage-db reset-users     # Delete all user accounts
 bun run manage-db reset-password  # Reset a user's password
+bun run manage-db disable-2fa     # Turn off two-factor authentication for a user
 ```
 
-Several of these have shorthand aliases in `package.json`: `bun run init-db`, `bun run check-db`, `bun run fix-db`, `bun run reset-users`, and `bun run reset-password`.
+Several of these have shorthand aliases in `package.json`: `bun run init-db`, `bun run check-db`, `bun run fix-db`, `bun run reset-users`, `bun run reset-password` and `bun run disable-2fa`.
 
 To delete the database file entirely and start over:
 

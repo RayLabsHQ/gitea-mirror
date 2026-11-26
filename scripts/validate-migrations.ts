@@ -1023,7 +1023,41 @@ const latestUpgradeFixtures: Record<string, UpgradeFixture> = {
     seed: seedPre0024Database,
     verify: verify0024Migration,
   },
+  "0025_two_factor": {
+    seed: seedPre0025Database,
+    verify: verify0025Migration,
+  },
 };
+
+function seedPre0025Database(db: any) {
+  // An account from before two-factor (#552): it must keep logging in with
+  // its password alone.
+  db.run("INSERT INTO users (id, email, username, name) VALUES ('u-tf25', 'tf25@example.com', 'tf25', 'Two Factor Twenty-Five')");
+}
+
+function verify0025Migration(db: any) {
+  const userColumns = db.query("PRAGMA table_info(users)").all() as TableInfoRow[];
+  const enabled = userColumns.find((c) => c.name === "two_factor_enabled");
+  assert(enabled, "Expected users.two_factor_enabled to exist after migration");
+  assert(enabled.notnull === 1, "Expected users.two_factor_enabled to be NOT NULL");
+  const user = db.query("SELECT two_factor_enabled FROM users WHERE id = 'u-tf25'").get() as
+    | { two_factor_enabled: number }
+    | null;
+  assert(user?.two_factor_enabled === 0, `Expected an existing account to start with two-factor off, got ${JSON.stringify(user)}`);
+
+  const columns = (db.query("PRAGMA table_info(two_factors)").all() as TableInfoRow[]).map((c) => c.name);
+  for (const name of ["id", "secret", "backup_codes", "user_id", "verified", "failed_verification_count", "locked_until"]) {
+    assert(columns.includes(name), `Expected two_factors.${name} to exist after migration`);
+  }
+  db.run("INSERT INTO two_factors (id, secret, backup_codes, user_id) VALUES ('tf-1', 'enc-secret', 'enc-codes', 'u-tf25')");
+  const row = db.query("SELECT verified, failed_verification_count, locked_until FROM two_factors WHERE id = 'tf-1'").get() as
+    | { verified: number; failed_verification_count: number; locked_until: number | null }
+    | null;
+  assert(
+    row?.verified === 1 && row.failed_verification_count === 0 && row.locked_until === null,
+    `Expected the two-factor defaults (verified, no failures, not locked), got ${JSON.stringify(row)}`,
+  );
+}
 
 function seedPre0024Database(db: any) {
   // A repository from before the cleanup wait (#549): its source was never

@@ -22,7 +22,7 @@ Once one account exists, `/signup` redirects to `/login` and the sign-up endpoin
 
 ### Sessions
 
-Sessions are cookie based. The cookie is named `better-auth-session` and lasts 30 days, refreshed as the user stays active.
+Sessions are cookie based. The cookie is named `better-auth.session_token` and lasts 30 days, refreshed as the user stays active.
 
 ### Resetting a password
 
@@ -33,6 +33,25 @@ bun run reset-password -- --email=user@example.com --new-password='new-secure-pa
 ```
 
 > **Note:** Accounts in Gitea Mirror are never email-verified, since no verification flow exists. This matters for SSO account linking, described below.
+
+### Two-factor authentication
+
+With two-factor authentication (2FA), an account with a password can also ask for a code from an authenticator app, such as 1Password, Google Authenticator, Authy or Aegis, each time it logs in.
+
+To turn it on, open the account menu (your avatar, top right), choose **2FA** (it shows **Set up**) and enter your password. Scan the QR code with the app, or type the key shown under it, and enter the 6-digit code the app shows. You then get ten backup codes: copy or download them and keep them somewhere safe, like a password manager. They are only shown once.
+
+From then on, logging in with your password asks for the current code from the app. **Use a backup code** takes one of the saved codes instead; each works once. **Trust this device for 30 days**, off by default, skips the code in that browser until then.
+
+- Five wrong codes in one login send you back to the password. Ten wrong codes in a row lock code entry for 15 minutes.
+- Once it is on, the menu item shows **On** and opens **Manage 2FA**, with **New backup codes** (which replaces the old ones) and **Turn off**. Both ask for your password.
+- 2FA guards the email and password login only. SSO accounts use their identity provider's own two-factor, header auth trusts the proxy, and API keys work as before. An application that signs in through Gitea Mirror as an OIDC provider gets the code step on the login page like anyone else.
+- The app's secret and the backup codes are stored encrypted with `BETTER_AUTH_SECRET`. If that secret changes, codes stop working until two-factor is turned off and set up again.
+
+If both the phone and the backup codes are gone, turn 2FA off from the command line, the same way as [resetting a password](#resetting-a-password). It also forgets the devices that were trusted:
+
+```bash
+bun run disable-2fa -- --email=user@example.com
+```
 
 ### Required secret
 

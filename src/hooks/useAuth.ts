@@ -9,13 +9,19 @@ import {
 import { authClient, useSession as useBetterAuthSession } from "@/lib/auth-client";
 import type { Session, AuthUser } from "@/lib/auth-client";
 import { withBase } from "@/lib/base-path";
+import { isAuthRedirect, type AuthRedirectData } from "@/lib/auth-redirect";
 
 interface AuthContextType {
   user: AuthUser | null;
   session: Session | null;
   isLoading: boolean;
   error: string | null;
-  login: (email: string, password: string, username?: string) => Promise<void>;
+  /** Resolves with twoFactorRequired when the account asks for a code next (#552). */
+  /**
+   * `twoFactorRequired`: the password was right and a code is needed next.
+   * `redirecting`: the client is already on its way to an app's callback.
+   */
+  login: (email: string, password: string) => Promise<{ twoFactorRequired: boolean; redirecting: boolean }>;
   register: (
     username: string,
     email: string,
@@ -53,6 +59,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (result.error) {
         throw new Error(result.error.message || "Login failed");
       }
+      // The password was right, but no session yet: the two-factor plugin
+      // wants a code from the authenticator app or a backup code (#552).
+      const data = result.data as AuthRedirectData | null;
+      return { twoFactorRequired: data?.twoFactorRedirect === true, redirecting: isAuthRedirect(data) };
     } catch (err) {
       const message = err instanceof Error ? err.message : "Login failed";
       setError(message);

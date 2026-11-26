@@ -98,6 +98,16 @@ The running version is shown at the bottom of the sidebar. Pin a release tag suc
 
 Gitea Mirror only supports SQLite. A `postgres://` or `postgresql://` value is ignored with a warning, and the app uses `data/gitea-mirror.db`. Use a `file:` URL, or leave `DATABASE_URL` unset.
 
+## The authenticator app's codes are not accepted
+
+Codes depend on the time, so first check that the phone's clock is set automatically. If `BETTER_AUTH_SECRET` changed since two-factor was set up (for example a lost `/app/data/.better_auth_secret`), no code will work. Log in with a backup code if you still have one, or turn two-factor off from a checkout of the repository and set it up again:
+
+```bash
+bun run disable-2fa -- --email=user@example.com
+```
+
+See [Two-factor authentication](/docs/authentication/#two-factor-authentication).
+
 ## Resetting the admin password
 
 Gitea Mirror sends no email, so there is no reset link. From a checkout of the repository, with the data directory at `./data`:

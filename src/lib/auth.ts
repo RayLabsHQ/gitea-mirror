@@ -1,6 +1,6 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { jwt } from "better-auth/plugins";
+import { jwt, twoFactor } from "better-auth/plugins";
 import { oauthProvider } from "@better-auth/oauth-provider";
 import { sso } from "@better-auth/sso";
 import { apiKey } from "@better-auth/api-key";
@@ -13,6 +13,9 @@ import { headerAuthPlugin } from "./auth-header-plugin";
 import { apiKeyGuardPlugin } from "./auth-api-key-guard";
 import { signupGuardPlugin } from "./auth-signup-guard";
 import { oauthClientPrivileges, ownerGuardPlugin } from "./auth-owner-guard";
+
+/** The account name authenticator apps show for this app's codes (#552). */
+export const TWO_FACTOR_ISSUER = "Gitea Mirror";
 
 /**
  * Extracts the origins implied by registered SSO identity providers.
@@ -310,6 +313,17 @@ export const auth = betterAuth({
     // expect). Required by @better-auth/oauth-provider unless disableJwtPlugin
     // is set. Keys are persisted in the `jwks` table.
     jwt(),
+
+    // Two-factor authentication with an authenticator app (#552). It only
+    // gates the email and password sign-in: SSO, header auth and API keys do
+    // not go through /sign-in/email. Keep it before oauthProvider: after hooks
+    // run in plugin order, and the OAuth provider continues an authorization
+    // as soon as a sign-in sets a session cookie. Listed after it, a password
+    // alone would mint an authorization code (dropped with the replaced
+    // response, but stored all the same); listed first, this hook deletes the
+    // half-finished session and no code exists until the second factor.
+    // Backup codes and the "trust this device" cookie (30 days) come with it.
+    twoFactor({ issuer: TWO_FACTOR_ISSUER }),
 
     // OAuth 2.1 / OIDC Provider — allows this app to act as an identity
     // provider for other applications. Replaces the deprecated `oidcProvider`
