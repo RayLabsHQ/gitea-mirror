@@ -3,14 +3,17 @@ import { createSecureErrorResponse } from "@/lib/utils";
 import { requireAuth } from "@/lib/utils/auth-helpers";
 import { db, ssoProviders } from "@/lib/db";
 import { nanoid } from "nanoid";
-import { and, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { normalizeOidcProviderConfig, OidcConfigError, type RawOidcConfig } from "@/lib/sso/oidc-config";
+import { isInstanceOwner, ownerOnlyResponse } from "@/lib/instance-owner";
 
 /**
- * Providers are owned by the user who created them. Every read and write
- * here is scoped to the caller, and the client secret never leaves the
- * server: the API reports whether one is stored and the form keeps it by
- * sending an empty value.
+ * SSO providers apply to the whole instance: sign-in looks them up for every
+ * account. So only the instance owner (the first account) may list, add,
+ * change or remove them, and the owner sees all of them, including any
+ * another account added before this rule (GHSA-c6c2-hr73-h7hw). The client
+ * secret never leaves the server: the API reports whether one is stored and
+ * the form keeps it by sending an empty value.
  */
 export function formatProviderForClient(provider: {
   oidcConfig: string | null;
@@ -37,11 +40,9 @@ export async function GET(context: APIContext) {
   try {
     const { user, response } = await requireAuth(context);
     if (response) return response;
+    if (!(await isInstanceOwner(user.id))) return ownerOnlyResponse();
 
-    const providers = await db
-      .select()
-      .from(ssoProviders)
-      .where(eq(ssoProviders.userId, user.id));
+    const providers = await db.select().from(ssoProviders);
 
     const formattedProviders = providers.map(formatProviderForClient);
 
@@ -59,6 +60,7 @@ export async function POST(context: APIContext) {
   try {
     const { user, response } = await requireAuth(context);
     if (response) return response;
+    if (!(await isInstanceOwner(user.id))) return ownerOnlyResponse();
 
     const body = await context.request.json();
     const {
@@ -163,6 +165,8 @@ export async function POST(context: APIContext) {
         userId: user.id,
         providerId,
         organizationId,
+        // Trusted for its domain: only the owner can get here.
+        domainVerified: true,
       })
       .returning();
 
@@ -182,6 +186,7 @@ export async function PUT(context: APIContext) {
   try {
     const { user, response } = await requireAuth(context);
     if (response) return response;
+    if (!(await isInstanceOwner(user.id))) return ownerOnlyResponse();
 
     const url = new URL(context.request.url);
     const providerId = url.searchParams.get("id");
@@ -212,11 +217,10 @@ export async function PUT(context: APIContext) {
       organizationId,
     } = body;
 
-    // Get existing provider; another user's provider reads as not found
     const [existingProvider] = await db
       .select()
       .from(ssoProviders)
-      .where(and(eq(ssoProviders.id, providerId), eq(ssoProviders.userId, user.id)))
+      .where(eq(ssoProviders.id, providerId))
       .limit(1);
 
     if (!existingProvider) {
@@ -288,9 +292,14 @@ export async function PUT(context: APIContext) {
         domain: domain || existingProvider.domain,
         oidcConfig: JSON.stringify(storedOidcConfig),
         organizationId: organizationId !== undefined ? organizationId : existingProvider.organizationId,
+        // Saving a provider is the owner vouching for it. A provider another
+        // account added lost its trust in migration 0022 and refuses sign-in;
+        // saving it here makes it the owner's and turns it back on.
+        userId: user.id,
+        domainVerified: true,
         updatedAt: new Date(),
       })
-      .where(and(eq(ssoProviders.id, providerId), eq(ssoProviders.userId, user.id)))
+      .where(eq(ssoProviders.id, providerId))
       .returning();
 
     const formattedProvider = formatProviderForClient(updatedProvider);
@@ -309,6 +318,7 @@ export async function DELETE(context: APIContext) {
   try {
     const { user, response } = await requireAuth(context);
     if (response) return response;
+    if (!(await isInstanceOwner(user.id))) return ownerOnlyResponse();
 
     const url = new URL(context.request.url);
     const providerId = url.searchParams.get("id");
@@ -325,7 +335,7 @@ export async function DELETE(context: APIContext) {
 
     const deleted = await db
       .delete(ssoProviders)
-      .where(and(eq(ssoProviders.id, providerId), eq(ssoProviders.userId, user.id)))
+      .where(eq(ssoProviders.id, providerId))
       .returning();
 
     if (deleted.length === 0) {

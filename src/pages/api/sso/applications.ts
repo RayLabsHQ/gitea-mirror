@@ -4,6 +4,7 @@ import { requireAuth } from "@/lib/utils/auth-helpers";
 import { auth } from "@/lib/auth";
 import { db, oauthClients } from "@/lib/db";
 import { eq } from "drizzle-orm";
+import { isInstanceOwner, ownerOnlyResponse } from "@/lib/instance-owner";
 
 // Backward-compatible OAuth application management API.
 //
@@ -48,13 +49,21 @@ function toLegacyApplication(row: typeof oauthClients.$inferSelect) {
   };
 }
 
-// GET /api/sso/applications - List all OAuth clients
+// GET /api/sso/applications - List all OAuth clients (instance owner only).
+// GET /api/sso/applications?clientId=<id> - The one client the consent page
+// asks about, as a list of zero or one, for any signed-in user: whoever is
+// approving a sign-in needs its name and redirect addresses.
 export async function GET(context: APIContext) {
   try {
-    const { response } = await requireAuth(context);
+    const { user, response } = await requireAuth(context);
     if (response) return response;
 
-    const rows = await db.select().from(oauthClients);
+    const clientId = new URL(context.request.url).searchParams.get("clientId");
+    if (!clientId && !(await isInstanceOwner(user.id))) return ownerOnlyResponse();
+
+    const rows = clientId
+      ? await db.select().from(oauthClients).where(eq(oauthClients.clientId, clientId)).limit(1)
+      : await db.select().from(oauthClients);
     const sanitized = rows.map(toLegacyApplication);
 
     return new Response(JSON.stringify(sanitized), {
@@ -69,8 +78,9 @@ export async function GET(context: APIContext) {
 // POST /api/sso/applications - Register a new OAuth client
 export async function POST(context: APIContext) {
   try {
-    const { response } = await requireAuth(context);
+    const { user, response } = await requireAuth(context);
     if (response) return response;
+    if (!(await isInstanceOwner(user.id))) return ownerOnlyResponse();
 
     const body = await context.request.json();
     const { name, redirectURLs, type = "web", metadata } = body;
@@ -119,8 +129,9 @@ export async function POST(context: APIContext) {
 // PUT /api/sso/applications?id=<clientId> - Update an OAuth client
 export async function PUT(context: APIContext) {
   try {
-    const { response } = await requireAuth(context);
+    const { user, response } = await requireAuth(context);
     if (response) return response;
+    if (!(await isInstanceOwner(user.id))) return ownerOnlyResponse();
 
     const url = new URL(context.request.url);
     // Accept the OAuth client_id either from the query string or the path.
@@ -168,8 +179,9 @@ export async function PUT(context: APIContext) {
 // DELETE /api/sso/applications?id=<clientId> - Delete an OAuth client
 export async function DELETE(context: APIContext) {
   try {
-    const { response } = await requireAuth(context);
+    const { user, response } = await requireAuth(context);
     if (response) return response;
+    if (!(await isInstanceOwner(user.id))) return ownerOnlyResponse();
 
     const url = new URL(context.request.url);
     const clientId = url.searchParams.get("id");

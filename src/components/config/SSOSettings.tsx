@@ -5,7 +5,7 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { apiRequest, showErrorToast } from '@/lib/utils';
+import { API_BASE, apiRequest, showErrorToast } from '@/lib/utils';
 import { toast } from 'sonner';
 import { Plus, Trash2, Loader2, AlertCircle, Info, KeyRound, Shield, ShieldCheck, Edit2 } from 'lucide-react';
 import { Skeleton } from '../ui/skeleton';
@@ -61,12 +61,18 @@ interface SSOProvider {
     firstName?: string;
     lastName?: string;
   };
+  // False for a provider another account added before only the owner could
+  // manage providers: nobody can sign in with it until the owner saves it.
+  domainVerified?: boolean;
   createdAt: string;
   updatedAt: string;
 }
 
 export function SSOSettings() {
   const [providers, setProviders] = useState<SSOProvider[]>([]);
+  // Only the instance owner (the first account) can see and manage
+  // providers; everyone else gets a 403 from the API.
+  const [canManageProviders, setCanManageProviders] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
   const [showProviderDialog, setShowProviderDialog] = useState(false);
   const [addingProvider, setAddingProvider] = useState(false);
@@ -116,11 +122,20 @@ export function SSOSettings() {
     setIsLoading(true);
     try {
       const [providersRes, headerAuthStatus] = await Promise.all([
-        apiRequest<SSOProvider[] | { providers: SSOProvider[] }>('/sso/providers'),
+        fetch(`${API_BASE}/sso/providers`, { headers: { 'Content-Type': 'application/json' } }),
         apiRequest<{ enabled: boolean }>('/auth/header-status').catch(() => ({ enabled: false }))
       ]);
-      
-      setProviders(Array.isArray(providersRes) ? providersRes : providersRes?.providers || []);
+
+      if (providersRes.status === 403) {
+        setCanManageProviders(false);
+        setProviders([]);
+      } else if (!providersRes.ok) {
+        throw new Error(`Could not load SSO providers (HTTP ${providersRes.status})`);
+      } else {
+        const body = (await providersRes.json()) as SSOProvider[] | { providers: SSOProvider[] };
+        setCanManageProviders(true);
+        setProviders(Array.isArray(body) ? body : body?.providers || []);
+      }
       setHeaderAuthEnabled(headerAuthStatus.enabled);
     } catch (error) {
       showErrorToast(error, toast);
@@ -315,7 +330,9 @@ export function SSOSettings() {
             label="Single Sign-On (OIDC)"
             description="Sign in through an external identity provider"
             info={
-              providers.length > 0
+              !canManageProviders
+                ? "Identity providers are managed by the instance owner, the first account created on this instance."
+                : providers.length > 0
                 ? `${providers.length} provider${providers.length !== 1 ? 's' : ''} configured`
                 : "Turns on automatically when you add an identity provider."
             }
@@ -351,7 +368,11 @@ export function SSOSettings() {
           </div>
           <Dialog open={showProviderDialog} onOpenChange={setShowProviderDialog}>
             <DialogTrigger asChild>
-              <Button size="sm" className="bg-indigo-500 text-white hover:bg-indigo-600">
+              <Button
+                size="sm"
+                className={`bg-indigo-500 text-white hover:bg-indigo-600 ${canManageProviders ? '' : 'invisible'}`}
+                disabled={!canManageProviders}
+              >
                 <Plus className="h-4 w-4" />
                 Add provider
               </Button>
@@ -631,7 +652,15 @@ export function SSOSettings() {
         </div>
         <div className="border-t border-border" />
         <div className="flex-1 p-6">
-          {providers.length === 0 ? (
+          {!canManageProviders ? (
+            <div className="text-center py-12">
+              <ShieldCheck className="mx-auto h-12 w-12 text-muted-foreground/50" />
+              <h3 className="mt-4 text-lg font-medium">Managed by the instance owner</h3>
+              <p className="mt-2 text-sm text-muted-foreground max-w-sm mx-auto">
+                Only the first account created on this instance can add or change identity providers. Ask them if you need one.
+              </p>
+            </div>
+          ) : providers.length === 0 ? (
             <div className="text-center py-12">
               <div className="mx-auto h-12 w-12 text-muted-foreground/50">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
@@ -662,6 +691,11 @@ export function SSOSettings() {
                         </Badge>
                       </div>
                       <p className="text-sm text-muted-foreground mb-3">{provider.domain}</p>
+                      {provider.domainVerified === false && (
+                        <p className="text-xs text-amber-600 dark:text-amber-400 -mt-2 mb-3">
+                          Added by another account before only the instance owner could manage providers, so nobody can sign in with it right now. If you recognize it, edit and save it to turn it back on. If not, delete it.
+                        </p>
+                      )}
                       {domainIsIssuerHost(provider.domain, provider.issuer) && (
                         <p className="text-xs text-amber-600 dark:text-amber-400 -mt-2 mb-3">
                           {ISSUER_HOST_DOMAIN_WARNING}

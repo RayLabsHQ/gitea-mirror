@@ -53,7 +53,9 @@ export default function ConsentPage() {
       }
 
       // Fetch application details
-      const apps = await apiRequest<OAuthApplication[]>('/sso/applications');
+      const apps = await apiRequest<OAuthApplication[]>(
+        `/sso/applications?clientId=${encodeURIComponent(clientId)}`
+      );
       const app = apps.find(a => a.clientId === clientId);
 
       if (!app) {

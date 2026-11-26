@@ -7,12 +7,17 @@ import { eq } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { normalizeOidcProviderConfig, OidcConfigError } from "@/lib/sso/oidc-config";
 import { withBase } from "@/lib/base-path";
+import { isInstanceOwner, ownerOnlyResponse } from "@/lib/instance-owner";
 
-// POST /api/auth/sso/register - Register a new SSO provider using Better Auth
+// POST /api/auth/sso/register - Register a new SSO provider using Better Auth.
+// Only the instance owner may: a provider is trusted for the domain it names,
+// for every account on the instance (GHSA-c6c2-hr73-h7hw). The owner guard
+// plugin in auth.ts enforces the same on the plugin's own endpoints.
 export async function POST(context: APIContext) {
   try {
     const { user, response: authResponse } = await requireAuth(context);
     if (authResponse) return authResponse;
+    if (!(await isInstanceOwner(user.id))) return ownerOnlyResponse();
 
     const body = await context.request.json();
     
@@ -177,7 +182,9 @@ export async function POST(context: APIContext) {
         // flag together with an email-domain match (validateEmailDomain), so
         // sign-ins from users outside the registered domain are NOT
         // auto-linked even though the provider is trusted. The plugin's own
-        // create call hardcodes this to false, so we set it here.
+        // create call hardcodes this to false, so we set it here. Nothing
+        // checks that the domain is really the owner's: only the instance
+        // owner gets this far, and they are the one vouching for it.
         domainVerified: true,
         updatedAt: new Date(),
       };

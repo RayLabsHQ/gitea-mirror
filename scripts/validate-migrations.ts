@@ -1011,7 +1011,89 @@ const latestUpgradeFixtures: Record<string, UpgradeFixture> = {
     seed: seedPre0021Database,
     verify: verify0021Migration,
   },
+  "0022_sso_provider_owner_trust": {
+    seed: seedPre0022Database,
+    verify: verify0022Migration,
+  },
 };
+
+function seedPre0022Database(db: any) {
+  // The owner is the account created first. An earlier created_at wins over
+  // insertion order; within the same second (created_at has whole seconds
+  // only) the row inserted first wins, even when its id sorts later.
+  db.run("INSERT INTO users (id, email, username, name, created_at) VALUES ('u-member', 'member@example.com', 'member', 'Member', 1790000500)");
+  db.run("INSERT INTO users (id, email, username, name, created_at) VALUES ('z-owner', 'owner@example.com', 'owner', 'Owner', 1790000000)");
+  db.run("INSERT INTO users (id, email, username, name, created_at) VALUES ('a-same-second', 'same@example.com', 'same', 'Same', 1790000000)");
+  db.run("INSERT INTO users (id, email, username, name, created_at) VALUES ('u-gone', 'gone@example.com', 'gone', 'Gone', 1790000600)");
+  const insertProvider = (id: string, userId: string) =>
+    db.run(
+      "INSERT INTO sso_providers (id, issuer, domain, oidc_config, user_id, provider_id, created_at, updated_at) " +
+        `VALUES ('${id}', 'https://idp.example.com', 'example.com', '{}', '${userId}', '${id}-idp', 1790001000, 1790001000)`,
+    );
+  insertProvider("p-owner", "z-owner");
+  insertProvider("p-member", "u-member");
+  insertProvider("p-same-second", "a-same-second");
+  // The owner's account was linked through the member's provider and has a
+  // session from it; the member has a session too, with no SSO link.
+  db.run("INSERT INTO accounts (id, account_id, provider_id, user_id, created_at, updated_at) VALUES ('acc-linked', 'sub-1', 'p-member-idp', 'z-owner', 1790002000, 1790002000)");
+  db.run("INSERT INTO accounts (id, account_id, provider_id, user_id, created_at, updated_at) VALUES ('acc-owner-own', 'sub-2', 'p-owner-idp', 'z-owner', 1790002000, 1790002000)");
+  // u-gone signed in through a provider that was deleted before the upgrade,
+  // and also has a password; the member only has a password.
+  db.run("INSERT INTO accounts (id, account_id, provider_id, user_id, created_at, updated_at) VALUES ('acc-gone', 'sub-3', 'deleted-idp', 'u-gone', 1790002000, 1790002000)");
+  db.run("INSERT INTO accounts (id, account_id, provider_id, user_id, created_at, updated_at) VALUES ('acc-gone-pw', 'u-gone', 'credential', 'u-gone', 1790002000, 1790002000)");
+  db.run("INSERT INTO accounts (id, account_id, provider_id, user_id, created_at, updated_at) VALUES ('acc-member-pw', 'u-member', 'credential', 'u-member', 1790002000, 1790002000)");
+  const insertSession = (id: string, userId: string) =>
+    db.run(
+      "INSERT INTO sessions (id, token, user_id, expires_at, created_at, updated_at) " +
+        `VALUES ('${id}', 'tok-${id}', '${userId}', 1890000000, 1790002000, 1790002000)`,
+    );
+  insertSession("s-owner", "z-owner");
+  insertSession("s-member", "u-member");
+  insertSession("s-gone", "u-gone");
+  for (const [id, userId] of [["k-owner", "z-owner"], ["k-member", "u-member"], ["k-gone", "u-gone"]]) {
+    db.run(
+      "INSERT INTO api_keys (id, key, reference_id, enabled, created_at, updated_at) " +
+        `VALUES ('${id}', 'hash-${id}', '${userId}', 1, 1790002000, 1790002000)`,
+    );
+    db.run(
+      "INSERT INTO oauth_access_tokens (id, token, client_id, user_id, scopes) " +
+        `VALUES ('at-${id}', 'at-tok-${id}', 'client', '${userId}', '[]')`,
+    );
+    db.run(
+      "INSERT INTO oauth_refresh_tokens (id, token, client_id, user_id, scopes) " +
+        `VALUES ('rt-${id}', 'rt-tok-${id}', 'client', '${userId}', '[]')`,
+    );
+  }
+}
+
+function verify0022Migration(db: any) {
+  const rows = db.query("SELECT id, domain_verified FROM sso_providers ORDER BY id").all() as { id: string; domain_verified: number }[];
+  assert(
+    JSON.stringify(rows) === JSON.stringify([
+      { id: "p-member", domain_verified: 0 },
+      { id: "p-owner", domain_verified: 1 },
+      { id: "p-same-second", domain_verified: 0 },
+    ]),
+    `Expected only the owner's provider to stay trusted, got ${JSON.stringify(rows)}`,
+  );
+  const sessions = db.query("SELECT id FROM sessions ORDER BY id").all() as { id: string }[];
+  assert(
+    JSON.stringify(sessions) === JSON.stringify([{ id: "s-member" }]),
+    `Expected sessions of accounts linked through an untrusted provider to be revoked, got ${JSON.stringify(sessions)}`,
+  );
+  const keys = db.query("SELECT id, enabled FROM api_keys ORDER BY id").all();
+  assert(
+    JSON.stringify(keys) === JSON.stringify([{ id: "k-gone", enabled: 0 }, { id: "k-member", enabled: 1 }, { id: "k-owner", enabled: 0 }]),
+    `Expected only the linked account's API keys to be turned off, got ${JSON.stringify(keys)}`,
+  );
+  for (const table of ["oauth_access_tokens", "oauth_refresh_tokens"]) {
+    const left = db.query(`SELECT user_id FROM ${table}`).all();
+    assert(
+      JSON.stringify(left) === JSON.stringify([{ user_id: "u-member" }]),
+      `Expected only the linked account's ${table} to be deleted, got ${JSON.stringify(left)}`,
+    );
+  }
+}
 
 function seedPre0021Database(db: any) {
   // Migrations 0000-0020 have run: repositories have no storage columns yet.

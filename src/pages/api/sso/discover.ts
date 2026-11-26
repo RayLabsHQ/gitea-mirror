@@ -2,12 +2,15 @@ import type { APIContext } from "astro";
 import { createSecureErrorResponse } from "@/lib/utils";
 import { requireAuth } from "@/lib/utils/auth-helpers";
 import { safeFetch, OutboundUrlError } from "@/lib/utils/outbound-url";
+import { isInstanceOwner, ownerOnlyResponse } from "@/lib/instance-owner";
 
 // POST /api/sso/discover - Discover OIDC configuration from issuer URL
 export async function POST(context: APIContext) {
   try {
     const { user, response } = await requireAuth(context);
     if (response) return response;
+    // Only used by the SSO provider form, which only the owner can use.
+    if (!(await isInstanceOwner(user.id))) return ownerOnlyResponse();
 
     const { issuer } = await context.request.json();
 
