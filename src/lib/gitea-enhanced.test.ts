@@ -498,7 +498,6 @@ import {
   getGiteaRepoInfo,
   getOrCreateGiteaOrgEnhanced,
   syncGiteaRepoEnhanced,
-  handleExistingNonMirrorRepo,
   transferGiteaRepo,
 } from "./gitea-enhanced";
 import type { Config, Repository } from "./db/schema";
@@ -2497,105 +2496,6 @@ describe("Enhanced Gitea Operations", () => {
       } finally {
         sourceRows.splice(0, sourceRows.length, ...originalRows);
       }
-    });
-  });
-
-  describe("handleExistingNonMirrorRepo", () => {
-    test("should skip non-mirror repository with skip strategy", async () => {
-      const repoInfo = {
-        id: 123,
-        name: "test-repo",
-        owner: "starred",
-        mirror: false,
-        private: false,
-      };
-
-      const repository: Repository = {
-        id: "repo123",
-        name: "test-repo",
-        fullName: "user/test-repo",
-        owner: "user",
-        cloneUrl: "https://github.com/user/test-repo.git",
-        isPrivate: false,
-        isStarred: true,
-        status: repoStatusEnum.parse("imported"),
-        visibility: "public",
-        userId: "user123",
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
-
-      const config: Partial<Config> = {
-        giteaConfig: {
-          url: "https://gitea.example.com",
-          token: "encrypted-token",
-          defaultOwner: "testuser",
-        },
-      };
-
-      await handleExistingNonMirrorRepo({
-        config,
-        repository,
-        repoInfo,
-        strategy: "skip",
-      });
-
-      // Test passes if no error is thrown
-      expect(true).toBe(true);
-    });
-
-    test("should delete non-mirror repository with delete strategy", async () => {
-      // Mock deleteGiteaRepo which uses httpDelete via the http-client mock
-      const repoInfo = {
-        id: 124,
-        name: "test-repo",
-        owner: "starred",
-        mirror: false,
-        private: false,
-      };
-
-      const repository: Repository = {
-        id: "repo124",
-        name: "test-repo",
-        fullName: "user/test-repo",
-        owner: "user",
-        cloneUrl: "https://github.com/user/test-repo.git",
-        isPrivate: false,
-        isStarred: true,
-        status: repoStatusEnum.parse("imported"),
-        visibility: "public",
-        userId: "user123",
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      };
-
-      const config: Partial<Config> = {
-        giteaConfig: {
-          url: "https://gitea.example.com",
-          token: "encrypted-token",
-          defaultOwner: "testuser",
-        },
-      };
-
-      // deleteGiteaRepo in the actual code uses fetch directly, not httpDelete
-      // We need to mock fetch for this test
-      let deleteCalled = false;
-      global.fetch = mockFetch(async (url: string, options?: RequestInit) => {
-        if (url.includes("/api/v1/repos/starred/test-repo") && options?.method === "DELETE") {
-          deleteCalled = true;
-          return createMockResponse(null, { ok: true, status: 204 });
-        }
-        return createMockResponse(null, { ok: false, status: 404 });
-      });
-
-      await handleExistingNonMirrorRepo({
-        config,
-        repository,
-        repoInfo,
-        strategy: "delete",
-      });
-
-      expect(deleteCalled).toBe(true);
     });
   });
 

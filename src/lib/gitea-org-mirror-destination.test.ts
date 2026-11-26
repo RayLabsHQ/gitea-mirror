@@ -216,7 +216,6 @@ mock.module("@/lib/gitea-enhanced", () => ({
     return orgIdFor(orgName);
   }),
   getGiteaRepoInfo: mock(async () => null),
-  handleExistingNonMirrorRepo: mock(async () => {}),
 }));
 
 // NOTE: @/lib/utils/mirror-source-match is deliberately NOT mocked. Its real

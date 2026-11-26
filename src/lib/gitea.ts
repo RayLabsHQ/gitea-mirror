@@ -9,7 +9,7 @@ import { membershipRoleEnum } from "@/types/organizations";
 import { Octokit } from "@octokit/rest";
 import type { Config } from "@/types/config";
 import type { IssueStateFilter, Organization, ReleaseType, Repository } from "./db/schema";
-import { httpPost, httpGet, httpDelete, httpPut, httpPatch } from "./http-client";
+import { httpPost, httpGet, httpDelete, httpPut, httpPatch, httpRequest } from "./http-client";
 import { withMigrateRejectionReason } from "./utils/migrate-error";
 import { createMirrorJob } from "./helpers";
 import { applyIssueMediaOption, stripIssueMedia } from "./utils/issue-media";
@@ -1090,7 +1090,7 @@ export const mirrorGithubRepoToGitea = async ({
     });
 
     if (isExisting) {
-      const { getGiteaRepoInfo, handleExistingNonMirrorRepo } = await import("./gitea-enhanced");
+      const { getGiteaRepoInfo } = await import("./gitea-enhanced");
       const existingRepoInfo = await getGiteaRepoInfo({
         config,
         owner: repoOwner,
@@ -1098,13 +1098,8 @@ export const mirrorGithubRepoToGitea = async ({
       });
 
       if (existingRepoInfo && !existingRepoInfo.mirror) {
-        console.log(`Repository ${targetRepoName} exists but is not a mirror. Handling...`);
-        await handleExistingNonMirrorRepo({
-          config,
-          repository,
-          repoInfo: existingRepoInfo,
-          strategy: "delete", // Can be configured: "skip", "delete", or "rename"
-        });
+        // A regular repository is someone's work, never ours to replace.
+        throw new Error(nonMirrorInTheWayMessage(repoOwner, targetRepoName));
       } else if (existingRepoInfo?.mirror) {
         // PHANTOM-FORK GUARD (#309): a mirror at this name is only "ours" if it
         // mirrors THIS source. existingMirror short-circuits the check
@@ -1244,7 +1239,7 @@ export const mirrorGithubRepoToGitea = async ({
     }
 
     // Check if repository already exists as a non-mirror
-    const { getGiteaRepoInfo, handleExistingNonMirrorRepo } = await import("./gitea-enhanced");
+    const { getGiteaRepoInfo } = await import("./gitea-enhanced");
     const existingRepo = await getGiteaRepoInfo({
       config,
       owner: repoOwner,
@@ -1252,18 +1247,7 @@ export const mirrorGithubRepoToGitea = async ({
     });
 
     if (existingRepo && !existingRepo.mirror) {
-      console.log(`Repository ${targetRepoName} exists but is not a mirror. Handling...`);
-
-      // Handle the existing non-mirror repository
-      await handleExistingNonMirrorRepo({
-        config,
-        repository,
-        repoInfo: existingRepo,
-        strategy: "delete", // Can be configured: "skip", "delete", or "rename"
-      });
-
-      // After handling, proceed with mirror creation
-      console.log(`Proceeding with mirror creation for ${targetRepoName}`);
+      throw new Error(nonMirrorInTheWayMessage(repoOwner, targetRepoName));
     }
 
     // Resolve mirror options once for this repository: global config, then any
@@ -2013,7 +1997,7 @@ export async function mirrorGitHubRepoToGiteaOrg({
     });
 
     if (isExisting) {
-      const { getGiteaRepoInfo, handleExistingNonMirrorRepo } = await import("./gitea-enhanced");
+      const { getGiteaRepoInfo } = await import("./gitea-enhanced");
       const existingRepoInfo = await getGiteaRepoInfo({
         config,
         owner: targetOwner,
@@ -2021,13 +2005,8 @@ export async function mirrorGitHubRepoToGiteaOrg({
       });
 
       if (existingRepoInfo && !existingRepoInfo.mirror) {
-        console.log(`Repository ${targetRepoName} exists but is not a mirror. Handling...`);
-        await handleExistingNonMirrorRepo({
-          config,
-          repository,
-          repoInfo: existingRepoInfo,
-          strategy: "delete", // Can be configured: "skip", "delete", or "rename"
-        });
+        // A regular repository is someone's work, never ours to replace.
+        throw new Error(nonMirrorInTheWayMessage(targetOwner, targetRepoName));
       } else if (existingRepoInfo?.mirror) {
         // PHANTOM-FORK GUARD (#309): only treat this as "ours" if it mirrors
         // THIS source. existingMirror short-circuits because findExistingMirror already
@@ -6239,7 +6218,25 @@ export function createGiteaClient(url: string, token: string) {
 }
 
 /**
- * Delete a repository from Gitea
+ * Why a mirror run stopped at a regular repository that holds the name it
+ * needs. Mirror runs used to delete such a repository and mirror in its
+ * place; now they leave it alone and say what to do.
+ */
+export function nonMirrorInTheWayMessage(owner: string, name: string): string {
+  return (
+    `${owner}/${name} already exists on the destination and is not a mirror, so Gitea Mirror left it alone. ` +
+    `Rename or delete it there, or give this repository another destination, then retry. ` +
+    `A failed import looks the same: its page on the destination says the migration failed.`
+  );
+}
+
+/**
+ * Delete a repository from Gitea.
+ *
+ * Never follows a redirect. After a rename or a transfer Gitea answers the
+ * old address with a 301 to the new one, and fetch repeats a DELETE there,
+ * so following it would delete whatever the repository became. Callers pass
+ * the current address of a repository they have confirmed is theirs.
  */
 export async function deleteGiteaRepo(
   client: { url: string; token: string },
@@ -6247,14 +6244,16 @@ export async function deleteGiteaRepo(
   repo: string
 ): Promise<void> {
   try {
-    const response = await httpDelete(
-      `${client.url}/api/v1/repos/${owner}/${repo}`,
+    const response = await httpRequest(
+      `${client.url}/api/v1/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`,
       {
-        Authorization: `token ${client.token}`,
+        method: "DELETE",
+        headers: { Authorization: `token ${client.token}` },
+        redirect: "manual",
       }
     );
-    
-    if (response.status >= 400) {
+
+    if (response.status >= 300) {
       throw new Error(`Failed to delete repository ${owner}/${repo}: ${response.status} ${response.statusText}`);
     }
     

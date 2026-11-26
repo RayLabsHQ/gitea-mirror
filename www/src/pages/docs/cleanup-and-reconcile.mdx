@@ -40,12 +40,14 @@ The wait counts from the first check that saw the source gone, and checks run ev
 
 `archive` never deletes. With **Apply to the destination too** off, the default, the row is marked archived in the database and the destination is left alone. With it on:
 
-- On Gitea and Forgejo, a regular repository gets the native archive flag, which makes it read only while keeping every byte. A mirror repository cannot be archived through the Gitea API, so it is renamed with an `archived-` prefix, given a description that says why, and has its automatic syncs turned off (a manual sync still works). It remains fully cloneable.
+- On Gitea and Forgejo, the mirror is renamed with an `archived-` prefix, because the Gitea API cannot archive a mirror. It gets a description that says why and has its automatic syncs turned off (a manual sync still works). It remains fully cloneable.
 - On GitHub and GitLab, the repository is archived through the host's API.
 
 `delete` removes the row from the database and, with **Apply to the destination too** on, removes the repository from the destination. Deleting on GitHub needs a token with the `delete_repo` scope; without it the run fails with a message naming the scope and the repository stays. On gitlab.com and instances with delayed deletion, a deleted project is renamed and kept for the configured number of days. For push targets the bare clone on disk is removed as well.
 
 If archiving fails for any reason, the repository is left alone and stays accessible.
+
+On Gitea and Forgejo, cleanup only archives or deletes a repository it has confirmed is the mirror of that source. It looks where the mirror was recorded and follows a rename or move made on the destination since. A row that was never mirrored is looked up where the mirror strategy would put it, and the repository there must mirror the same source. A regular repository, or another source's mirror with the same name, is left alone, and the cleanup event and notification say so.
 
 ### How cleanup decides
 
