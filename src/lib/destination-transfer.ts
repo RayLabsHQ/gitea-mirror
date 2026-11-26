@@ -107,21 +107,24 @@ type PlanRow = Pick<
 /**
  * Which repositories of an organization move when its destination changes.
  * Rows with their own destination keep it (the per-repository override wins
- * over the organization's), starred repositories have their own placement,
- * and a row that was never mirrored has nothing to move.
+ * over the organization's), starred repositories have their own placement
+ * unless they follow the strategy like the rest (#551), and a row that was
+ * never mirrored has nothing to move.
  */
 export function planOrganizationMove({
   rows,
   targetOwnerFor,
+  starredFollowsStrategy = false,
 }: {
   rows: PlanRow[];
   targetOwnerFor: (row: PlanRow) => string;
+  starredFollowsStrategy?: boolean;
 }): MovePlan {
   const moves: MovePlanEntry[] = [];
   const skipped: MovePlan["skipped"] = [];
 
   for (const row of rows) {
-    if (row.isStarred) {
+    if (row.isStarred && !starredFollowsStrategy) {
       skipped.push({ fullName: row.fullName, reason: "starred repositories keep their own destination" });
       continue;
     }

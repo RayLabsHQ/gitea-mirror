@@ -26,6 +26,7 @@ import {
 } from "@/lib/destination-connection";
 import { createMirrorJob } from "@/lib/helpers";
 import { processInParallel } from "@/lib/utils/concurrency";
+import { normalizeStarredReposMode } from "@/lib/utils/starred-destination";
 import {
   MoveMirrorError,
   isRecordedMirror,
@@ -394,6 +395,8 @@ export async function moveOrganizationMirrors({
   }
   const plan = planOrganizationMove({
     rows,
+    starredFollowsStrategy:
+      normalizeStarredReposMode(config.githubConfig?.starredReposMode) === "follow-strategy",
     targetOwnerFor: (row) => {
       if (override) return override;
       try {

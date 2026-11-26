@@ -92,7 +92,7 @@ Places every repository directly under your Gitea user account, with no organiza
 
 Splits the difference. Your personal repositories go into a single named organization, while repositories owned by organizations on the source preserve their original structure. This keeps organization repositories where people expect them while corralling your personal ones.
 
-> **Note:** Repositories mirrored because you starred them are handled separately from the strategy above. They can either go into a dedicated organization, which is named `starred` by default, or preserve their original owner's path. When two starred repositories from different owners share a name, a duplicate strategy setting decides whether the name gets a suffix, a prefix, or is placed in an owner-named organization.
+> **Note:** Repositories mirrored because you starred them have their own setting, **Starred repository destination**. **Dedicated organization** puts them all in one organization, named `starred` by default. **Preserve source owner** puts each under its GitHub owner's name, whatever the strategy above says. **Same as other repos** places them like any other repository, so the strategy, an organization's destination and a repository's own destination apply to them too. When a starred repository would take a name already used by a different repository in the same place, the duplicate strategy setting adds the owner's name as a suffix or a prefix.
 
 ## Schedule intervals
 

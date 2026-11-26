@@ -103,6 +103,16 @@ describe("planOrganizationMove", () => {
     ]);
   });
 
+  test("starred rows move with the rest when they follow the strategy (#551)", () => {
+    const plan = planOrganizationMove({
+      rows: [row({ fullName: "acme/starred", isStarred: true, mirroredLocation: "acme/starred" })],
+      targetOwnerFor: () => "archive",
+      starredFollowsStrategy: true,
+    });
+    expect(plan.moves.map((move) => move.to)).toEqual(["archive/starred"]);
+    expect(plan.skipped).toEqual([]);
+  });
+
   test("asks the resolver per row, so removing the override can send rows to different owners", () => {
     const plan = planOrganizationMove({
       rows: [

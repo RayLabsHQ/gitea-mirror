@@ -70,7 +70,7 @@ When the mirror already exists on Gitea or Forgejo, a dialog asks what to do:
 - **Move the mirror to** the new owner (ticked by default), then **Move and save**: the destination transfers the repository with its history, issues and mirror settings, and creates the owner as an organization if it does not exist. If your token cannot create repositories under that owner, the transfer waits until an owner there accepts it; the mirror keeps syncing in its old place meanwhile, and sync follows it once accepted.
 - Untick it, then **Save the label only**: the mirror stays where it is and keeps syncing there. The new owner is only used if the mirror is ever created again.
 
-Nothing is deleted by a move. If the target already holds a mirror of the same source, the row is pointed at it and the other copy is left alone. Moving is not available for GitHub and GitLab destinations, and starred repositories keep the destination set for starred repositories.
+Nothing is deleted by a move. If the target already holds a mirror of the same source, the row is pointed at it and the other copy is left alone. Moving is not available for GitHub and GitLab destinations, and starred repositories keep the destination set for starred repositories, unless that setting is **Same as other repos**.
 
 An amber **at** badge with an owner name means the mirror is not where its label says, for example after someone transferred it in Gitea by hand. Edit the destination and tick the move option, or run [Reconcile](/docs/cleanup-and-reconcile/#reconcile).
 
@@ -124,7 +124,7 @@ The toggle above the organizations switches between cards and a compact list. Th
 
 Click the pencil next to the destination (**Edit mirror destination**) and enter an organization on the destination, or **Reset to Default**. This only changes where new mirrors go.
 
-To move the mirrors that already exist as well, tick **Also move the mirrored repositories on Gitea** before saving. You get a preview of what will move and what is left alone, and why: starred repositories, repositories with their own destination, repositories not mirrored yet, ones with a run in progress, and ones already in place. Each move works like [moving a single mirror](#moving-a-mirror-to-another-owner). The new destination is saved even if some moves fail; those repositories keep syncing where they are.
+To move the mirrors that already exist as well, tick **Also move the mirrored repositories on Gitea** before saving. You get a preview of what will move and what is left alone, and why: starred repositories (unless they are placed the same as other repositories), repositories with their own destination, repositories not mirrored yet, ones with a run in progress, and ones already in place. Each move works like [moving a single mirror](#moving-a-mirror-to-another-owner). The new destination is saved even if some moves fail; those repositories keep syncing where they are.
 
 ### Pinning an organization to one source
 

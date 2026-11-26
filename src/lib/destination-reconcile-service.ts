@@ -32,6 +32,7 @@ import { resolveDestinationIdentity } from "@/lib/destination-connection";
 import { normalizeGitRepoToInsert } from "@/lib/repo-utils";
 import { createMirrorJob } from "@/lib/helpers";
 import { processInParallel } from "@/lib/utils/concurrency";
+import { normalizeStarredReposMode } from "@/lib/utils/starred-destination";
 import {
   classifyDestinationRepos,
   collectDestinationOwners,
@@ -226,8 +227,12 @@ export async function reconcileDestination(
       knownHosts.add(host);
     }
   }
-  const starredMode = githubConfig?.starredReposMode || "dedicated-org";
-  const starredOrg = githubConfig?.starredReposOrg || "starred";
+  // Only the dedicated-org mode has a starred organization; the other two
+  // place starred repositories where the strategy or their source puts them.
+  const starredOrg =
+    normalizeStarredReposMode(githubConfig?.starredReposMode) === "dedicated-org"
+      ? githubConfig?.starredReposOrg || "starred"
+      : null;
   const strategy =
     githubConfig?.mirrorStrategy || (giteaConfig.preserveOrgStructure ? "preserve" : "flat-user");
 
@@ -249,7 +254,7 @@ export async function reconcileDestination(
   const owners = collectDestinationOwners([
     giteaConfig.defaultOwner,
     giteaConfig.organization,
-    starredMode === "preserve-owner" ? null : starredOrg,
+    starredOrg,
     ...orgRows.flatMap((org) => [org.name, org.destinationOrg]),
     ...rows.flatMap((row) => [
       row.destinationOrg,
@@ -394,7 +399,7 @@ export async function reconcileDestination(
             connection: repoSource
               ? { provider: repoSource.provider, url: repoSource.url }
               : connection,
-            starredOrg: starredMode === "preserve-owner" ? null : starredOrg,
+            starredOrg,
           });
           if (outcome === "adopted") adopted += 1;
           else skipped += 1;

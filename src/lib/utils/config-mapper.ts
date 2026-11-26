@@ -17,6 +17,7 @@ import { normalizeDestinationProviderKind } from "@/lib/destination-kinds";
 import { z } from "zod";
 import { githubConfigSchema, giteaConfigSchema, scheduleConfigSchema, cleanupConfigSchema } from "@/lib/db/schema";
 import { parseInterval } from "@/lib/utils/duration-parser";
+import { normalizeStarredReposMode } from "@/lib/utils/starred-destination";
 import {
   DEFAULT_ISSUE_STATE,
   normalizeIssueState,
@@ -116,7 +117,7 @@ export function mapUiToDbConfig(
     
     // Starred repos organization
     starredReposOrg: giteaConfig.starredReposOrg,
-    starredReposMode: giteaConfig.starredReposMode || "dedicated-org",
+    starredReposMode: normalizeStarredReposMode(giteaConfig.starredReposMode),
     starredLists: normalizeStarredLists(githubConfig.starredLists),
     starredDuplicateStrategy: githubConfig.starredDuplicateStrategy ?? "suffix",
     
@@ -247,7 +248,7 @@ export function mapDbToUiConfig(dbConfig: any): {
     organization: dbConfig.githubConfig?.defaultOrg || "github-mirrors", // Get from GitHub config
     visibility: dbConfig.giteaConfig?.visibility === "default" ? "public" : dbConfig.giteaConfig?.visibility || "public",
     starredReposOrg: dbConfig.githubConfig?.starredReposOrg || "starred", // Get from GitHub config
-    starredReposMode: dbConfig.githubConfig?.starredReposMode || "dedicated-org", // Get from GitHub config
+    starredReposMode: normalizeStarredReposMode(dbConfig.githubConfig?.starredReposMode), // Get from GitHub config
     preserveOrgStructure: dbConfig.giteaConfig?.preserveVisibility || false, // Map preserveVisibility
     mirrorStrategy: dbConfig.githubConfig?.mirrorStrategy || "preserve", // Get from GitHub config
     personalReposOrg: undefined, // Not stored in current schema

@@ -65,6 +65,7 @@ const TOUCHED = [
   "GITEA_ORGANIZATION",
   "ENVIRONMENT_SEEDING",
   "RELEASE_PRERELEASE_LIMIT",
+  "STARRED_REPOS_MODE",
 ];
 
 if (isolated) {
@@ -228,6 +229,16 @@ if (isolated) {
       process.env.RELEASE_PRERELEASE_LIMIT = "3";
       await initializeConfigFromEnv!();
       expect((await stored()).giteaConfig.prereleaseLimit).toBe(3);
+    });
+
+    test("STARRED_REPOS_MODE accepts follow-strategy and ignores an unknown value (#551)", async () => {
+      process.env.STARRED_REPOS_MODE = "follow-strategy";
+      await initializeConfigFromEnv!();
+      expect((await stored()).githubConfig.starredReposMode).toBe("follow-strategy");
+
+      process.env.STARRED_REPOS_MODE = "sideways";
+      await initializeConfigFromEnv!();
+      expect((await stored()).githubConfig.starredReposMode).toBe("follow-strategy");
     });
   });
 

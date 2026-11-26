@@ -10,6 +10,32 @@ import {
 } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import type { MirrorStrategy, GiteaOrgVisibility, StarredReposMode } from "@/types/config";
+import { normalizeStarredReposMode } from "@/lib/utils/starred-destination";
+
+/**
+ * The three places starred repositories can go (#551). "Preserve source owner"
+ * keeps the GitHub owner's name whatever the strategy says, which is not the
+ * same as following the strategy; the descriptions spell that out.
+ */
+const STARRED_MODE_OPTIONS: { value: StarredReposMode; label: string; description: string }[] = [
+  {
+    value: "dedicated-org",
+    label: "Dedicated organization",
+    description: "All starred repositories go to one organization of their own",
+  },
+  {
+    value: "preserve-owner",
+    label: "Preserve source owner",
+    description:
+      "Each starred repository goes under its GitHub owner's name, whatever the mirror strategy says",
+  },
+  {
+    value: "follow-strategy",
+    label: "Same as other repos",
+    description:
+      "Starred repositories go wherever the mirror strategy and destination settings put any other repository",
+  },
+];
 
 interface OrganizationConfigurationProps {
   strategy: MirrorStrategy;
@@ -44,7 +70,7 @@ export const OrganizationConfiguration: React.FC<OrganizationConfigurationProps>
   onPersonalReposOrgChange,
   onVisibilityChange,
 }) => {
-  const activeStarredMode = starredReposMode || "dedicated-org";
+  const activeStarredMode = normalizeStarredReposMode(starredReposMode);
   const showStarredReposOrgInput = activeStarredMode === "dedicated-org";
   const showDestinationOrgInput = strategy === "single-org" || strategy === "mixed";
 
@@ -63,47 +89,32 @@ export const OrganizationConfiguration: React.FC<OrganizationConfigurationProps>
                 <Info className="h-3.5 w-3.5 text-muted-foreground" />
               </TooltipTrigger>
               <TooltipContent>
-                <p>Choose whether starred repos use one org or keep their source Owner/Org paths</p>
+                <p>Where starred repositories are mirrored to</p>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
         </Label>
         <div className="flex w-full gap-1 rounded-lg bg-muted p-1" role="tablist">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeStarredMode === "dedicated-org"}
-            onClick={() => onStarredReposModeChange("dedicated-org")}
-            className={cn(
-              "flex h-8 flex-1 items-center justify-center rounded-md text-xs transition-colors",
-              activeStarredMode === "dedicated-org"
-                ? "bg-background font-medium text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground"
-            )}
-          >
-            Dedicated organization
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={activeStarredMode === "preserve-owner"}
-            onClick={() => onStarredReposModeChange("preserve-owner")}
-            className={cn(
-              "flex h-8 flex-1 items-center justify-center rounded-md text-xs transition-colors",
-              activeStarredMode === "preserve-owner"
-                ? "bg-background font-medium text-foreground shadow-sm"
-                : "text-muted-foreground hover:text-foreground"
-            )}
-          >
-            Preserve source owner
-          </button>
+          {STARRED_MODE_OPTIONS.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              role="tab"
+              aria-selected={activeStarredMode === option.value}
+              onClick={() => onStarredReposModeChange(option.value)}
+              className={cn(
+                "flex min-h-8 flex-1 items-center justify-center rounded-md px-2 py-1 text-center text-xs leading-tight transition-colors",
+                activeStarredMode === option.value
+                  ? "bg-background font-medium text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              {option.label}
+            </button>
+          ))}
         </div>
         <p className="text-[11px] text-muted-foreground/80">
-          {
-            activeStarredMode === "dedicated-org"
-              ? "All starred repositories go to a single destination organization"
-              : "Starred repositories keep their original GitHub Owner/Org destination"
-          }
+          {STARRED_MODE_OPTIONS.find((option) => option.value === activeStarredMode)?.description}
         </p>
       </div>
 

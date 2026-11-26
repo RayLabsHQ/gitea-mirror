@@ -7,6 +7,7 @@ import {
 } from "@/components/ui/hover-card";
 import { cn } from "@/lib/utils";
 import type { StarredReposMode } from "@/types/config";
+import { normalizeStarredReposMode } from "@/lib/utils/starred-destination";
 
 export type MirrorStrategy = "preserve" | "single-org" | "flat-user" | "mixed";
 
@@ -84,10 +85,22 @@ const MappingPreview: React.FC<{
   const displayGiteaUsername = giteaUsername || "<username>";
   const isGithubPlaceholder = !githubUsername;
   const isGiteaPlaceholder = !giteaUsername;
+  // The example starred repository belongs to another person, "awesome". When
+  // starred repositories follow the strategy (#551) it lands where that
+  // strategy puts someone else's personal repository.
+  const mode = normalizeStarredReposMode(starredReposMode);
+  const strategyOwnerForStarred =
+    strategy === "single-org" || strategy === "mixed"
+      ? destinationOrg || "github-mirrors"
+      : strategy === "flat-user"
+        ? displayGiteaUsername
+        : "awesome";
   const starredDestination =
-    (starredReposMode || "dedicated-org") === "preserve-owner"
+    mode === "preserve-owner"
       ? "awesome/starred-repo"
-      : `${starredReposOrg || "starred"}/starred-repo`;
+      : mode === "follow-strategy"
+        ? `${strategyOwnerForStarred}/starred-repo`
+        : `${starredReposOrg || "starred"}/starred-repo`;
   
   if (strategy === "preserve") {
     return (
