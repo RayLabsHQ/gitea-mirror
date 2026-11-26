@@ -26,7 +26,7 @@ Cleanup looks for repositories that the database tracks but that no longer exist
 
 The first five are on the card. If you also set one of their environment variables, and environment seeding applies, it replaces the card's value on every restart; see the [warning on the reference page](/docs/environment-variables/). The others are environment variables only; see the [reference](/docs/environment-variables/#cleanup).
 
-To check right away instead of waiting, click **Run now** on the card. If the action would change anything, it asks first. A dry run or the `skip` action runs without asking. Its progress and the outcome show in the card's footer, and the info button next to the outcome lists the repositories whose source is gone and any errors. The same run is available as `POST /api/cleanup/trigger`, see the [API page](/docs/api/#run-cleanup).
+To check right away instead of waiting, click **Run now** on the card. If the action would change anything, it asks first. A dry run or the `skip` action runs without asking. Its progress and the outcome show in the card's footer, and the info button next to the outcome lists the repositories whose source is gone, any repository it left alone on the destination, and any errors. The same run is available as `POST /api/cleanup/trigger`, see the [API page](/docs/api/#run-cleanup).
 
 To hear about what cleanup did, turn on **Repository cleanup** under Notification Events on the [Notifications](/docs/notifications/#event-types) tab.
 

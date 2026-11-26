@@ -147,7 +147,8 @@ describe.skipIf(!isChild)("locateOrphanMirror", () => {
     expect(await locateOrphanMirror(config(), row(""))).toEqual({
       kind: "not-ours",
       location: "me/tool",
-      reason: "it mirrors a different source",
+      reason: "mirrors a different source",
+      askedAt: "me/tool",
     });
   });
 
@@ -158,7 +159,8 @@ describe.skipIf(!isChild)("locateOrphanMirror", () => {
       expect(await locateOrphanMirror(config(), row(location))).toEqual({
         kind: "not-ours",
         location: "me/tool",
-        reason: "it is not a mirror",
+        reason: "is not a mirror",
+        askedAt: "me/tool",
       });
     }
   });
@@ -193,7 +195,19 @@ describe.skipIf(!isChild)("handleOrphanedRepository on the destination", () => {
 
     expect(has("me", "tool")).toBe(true);
     expect(sent("DELETE")).toEqual([]);
-    expect(notes).toEqual(["acme/tool: me/tool on the destination was left alone: it is not a mirror."]);
+    expect(notes).toEqual(["me/tool is not a mirror"]);
+  });
+
+  test("names the old address when a redirect led to a repository that is not ours", async () => {
+    put({ owner: "me", name: "tool-old", mirror: false });
+    redirects.set(key("me", "tool"), "me/tool-old");
+    const notes: string[] = [];
+
+    await handleOrphanedRepository(config(), row(""), "delete", false, (note: string) => notes.push(note));
+
+    expect(has("me", "tool-old")).toBe(true);
+    expect(sent("DELETE")).toEqual([]);
+    expect(notes).toEqual(["me/tool-old is not a mirror (me/tool redirects here)"]);
   });
 
   test("leaves another source's mirror of the same name alone", async () => {
@@ -260,10 +274,10 @@ describe.skipIf(!isChild)("cleanup notification", () => {
       action: "delete",
       destinationChanged: true,
       repositoryNames: ["acme/tool"],
-      leftAlone: ["acme/tool: me/tool on the destination was left alone: it is not a mirror."],
+      leftAlone: ["me/tool is not a mirror"],
       failures: [],
     });
     expect(event.message).toContain("On the destination, these were left alone:");
-    expect(event.message).toContain("- acme/tool: me/tool on the destination was left alone: it is not a mirror.");
+    expect(event.message).toContain("- me/tool is not a mirror");
   });
 });

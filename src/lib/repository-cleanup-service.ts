@@ -383,7 +383,7 @@ async function scanForOrphanedRepositories(config: any): Promise<OrphanScan> {
 export type OrphanDestinationTarget =
   | { kind: 'mirror'; owner: string; name: string }
   | { kind: 'absent'; location: string }
-  | { kind: 'not-ours'; location: string; reason: string };
+  | { kind: 'not-ours'; location: string; reason: string; askedAt: string };
 
 /**
  * Find an orphan's mirror on the destination before archiving or deleting
@@ -435,17 +435,24 @@ export async function locateOrphanMirror(
     return {
       kind: 'not-ours',
       location: currentLocation,
-      reason: info.mirror ? 'it mirrors a different source' : 'it is not a mirror',
+      reason: info.mirror ? 'mirrors a different source' : 'is not a mirror',
+      askedAt: location,
     };
   }
   return { kind: 'mirror', owner: current.owner, name: current.name };
 }
 
-/** One line for the log, the event and the notification when the destination is left alone. */
+/** A repository cleanup did not touch, as the Run now details and the notification list it. */
+export function leftAloneListLine(target: Extract<OrphanDestinationTarget, { kind: 'not-ours' }>): string {
+  const redirected = target.askedAt.toLowerCase() !== target.location.toLowerCase();
+  return `${target.location} ${target.reason}${redirected ? ` (${target.askedAt} redirects here)` : ''}`;
+}
+
+/** One line for the log and the event when the destination is left alone. */
 export function leftAloneNote(target: Exclude<OrphanDestinationTarget, { kind: 'mirror' }>): string {
   return target.kind === 'absent'
     ? `Nothing to change on the destination: there is no repository at ${target.location}.`
-    : `${target.location} on the destination was left alone: ${target.reason}.`;
+    : `${target.location} on the destination was left alone: it ${target.reason}.`;
 }
 
 /**
@@ -462,12 +469,14 @@ async function handleOrphanedRepository(
   repo: any,
   action: 'skip' | 'archive' | 'delete',
   dryRun: boolean,
-  /** Told when the destination copy was left alone, with the reason. */
+  /** Told when a repository on the destination was left alone because it is not this row's mirror. */
   onLeftAlone?: (note: string) => void
 ): Promise<OrphanedRepositoryOutcome> {
   const repoFullName = repo.fullName;
   // Set when the destination was left alone (nothing there, or not this row's mirror).
   let destinationNote = '';
+  // The line for the run's list, only for a repository that is there but not ours.
+  let leftAloneLine = '';
   
   if (action === 'skip') {
     console.log(`[Repository Cleanup] Skipping orphaned repository ${repoFullName}`);
@@ -525,6 +534,7 @@ async function handleOrphanedRepository(
           }
         } else {
           destinationNote = leftAloneNote(target);
+          if (target.kind === 'not-ours') leftAloneLine = leftAloneListLine(target);
           console.log(`[Repository Cleanup] ${repoFullName}: ${destinationNote}`);
           dbUpdate.errorMessage = `Repository archived in gitea-mirror - no longer in GitHub. ${destinationNote}`;
         }
@@ -553,7 +563,7 @@ async function handleOrphanedRepository(
           },
         },
       });
-      if (destinationNote) onLeftAlone?.(`${repoFullName}: ${destinationNote}`);
+      if (leftAloneLine) onLeftAlone?.(leftAloneLine);
       return 'archived';
     } else if (action === 'delete') {
       if (plan.gitea === 'delete' && usesPushEngine(config)) {
@@ -568,6 +578,7 @@ async function handleOrphanedRepository(
           await deleteGiteaRepo(giteaClient, target.owner, target.name);
         } else {
           destinationNote = leftAloneNote(target);
+          if (target.kind === 'not-ours') leftAloneLine = leftAloneListLine(target);
           console.log(`[Repository Cleanup] ${repoFullName}: ${destinationNote}`);
         }
       } else {
@@ -602,7 +613,7 @@ async function handleOrphanedRepository(
           },
         },
       });
-      if (destinationNote) onLeftAlone?.(`${repoFullName}: ${destinationNote}`);
+      if (leftAloneLine) onLeftAlone?.(leftAloneLine);
       return 'deleted';
     }
     return 'none';
