@@ -37,9 +37,9 @@ ARG GIT_LFS_VERSION=3.7.1
 # Pinned rather than @latest: a cached layer kept an old @latest resolution
 # after golang.org/x/crypto 0.56.0 fixed CVE-2026-56855 and CVE-2026-78662.
 # x/crypto and x/net need Go 1.26 or newer, hence the toolchain above.
-# x/net 0.61.0 requires x/crypto 0.58.0, so bump the two together.
+# x/net 0.62.0 requires x/crypto 0.58.0, so bump the two together.
 ARG GO_X_CRYPTO_VERSION=v0.58.0
-ARG GO_X_NET_VERSION=v0.61.0
+ARG GO_X_NET_VERSION=v0.62.0
 RUN ARCH="$(dpkg --print-architecture)" \
   && wget -qO /tmp/go.tar.gz "https://go.dev/dl/go${GO_VERSION}.linux-${ARCH}.tar.gz" \
   && tar -C /usr/local -xzf /tmp/go.tar.gz \
