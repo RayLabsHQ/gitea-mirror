@@ -3,9 +3,15 @@
  * resumed by recovery (issue #372).
  *
  * A job is interrupted when either of these holds:
- *   - it has a checkpoint older than the checkpoint window, or
- *   - it has no checkpoint and is older than the checkpoint window (or has
- *     no recorded start at all, as legacy rows may).
+ *   - it has a checkpoint older than the cutoff, or
+ *   - it has no checkpoint and started before the cutoff (or has no
+ *     recorded start at all, as legacy rows may).
+ *
+ * The cutoff is the later of two moments: the checkpoint window ago, and
+ * the start of this process (#564). With SQLite there is one app process,
+ * so a job last touched before this process started was left by one that
+ * is gone, and is resumed at once instead of after the window. The window
+ * still covers jobs this process started and then stopped advancing.
  *
  * A job that keeps checkpointing is alive, however long ago it started.
  * Running jobs refresh their checkpoint on a heartbeat between items, so a
@@ -29,6 +35,7 @@
  */
 import { and, eq, isNull, lt, or, type SQL } from "drizzle-orm";
 import type { mirrorJobs } from "@/lib/db/schema";
+import { getProcessStart } from "@/lib/process-start";
 
 /** A job with no checkpoint newer than this is considered inactive. */
 export const INTERRUPTED_CHECKPOINT_AGE_MS = 10 * 60 * 1000;
@@ -40,14 +47,36 @@ export const INTERRUPTED_CHECKPOINT_AGE_MS = 10 * 60 * 1000;
  */
 export const JOB_HEARTBEAT_INTERVAL_MS = 2 * 60 * 1000;
 
+/**
+ * How many times in a row recovery resumes a job that finishes no item
+ * before giving up on it (#564). When the resumed work itself takes the app
+ * down, for example by running it out of memory, every restart resumed the
+ * same job and crashed again, with no end.
+ */
+export const MAX_RESUMES_WITHOUT_PROGRESS = 3;
+
+/** True when a job has used up its resumes without finishing an item. */
+export function hasExhaustedResumes(resumeAttempts: number | null | undefined): boolean {
+  return (resumeAttempts ?? 0) >= MAX_RESUMES_WITHOUT_PROGRESS;
+}
+
 export interface InterruptedJobCutoffs {
   /** Checkpoints (or starts, for jobs without one) before this are too old. */
   checkpointCutoff: Date;
 }
 
-export function computeInterruptedJobCutoffs(now: Date = new Date()): InterruptedJobCutoffs {
+export function computeInterruptedJobCutoffs(
+  now: Date = new Date(),
+  processStart: Date = getProcessStart(),
+): InterruptedJobCutoffs {
+  // mirror_jobs stores times in whole seconds, so a job this process started
+  // in its first second reads back as slightly before processStart. Compare
+  // against the start of that second instead.
+  const processStartSecond = Math.floor(processStart.getTime() / 1000) * 1000;
   return {
-    checkpointCutoff: new Date(now.getTime() - INTERRUPTED_CHECKPOINT_AGE_MS),
+    checkpointCutoff: new Date(
+      Math.max(now.getTime() - INTERRUPTED_CHECKPOINT_AGE_MS, processStartSecond),
+    ),
   };
 }
 
@@ -61,10 +90,14 @@ export interface JobLivenessFields {
  * Pure form of the interrupted-job rule. Must stay equivalent to
  * `buildInterruptedJobsCondition`.
  */
-export function isJobInterrupted(job: JobLivenessFields, now: Date = new Date()): boolean {
+export function isJobInterrupted(
+  job: JobLivenessFields,
+  now: Date = new Date(),
+  processStart: Date = getProcessStart(),
+): boolean {
   if (!job.inProgress) return false;
 
-  const { checkpointCutoff } = computeInterruptedJobCutoffs(now);
+  const { checkpointCutoff } = computeInterruptedJobCutoffs(now, processStart);
 
   // A checkpoint is the job's own proof of life; its age decides on its own.
   if (job.lastCheckpoint) return job.lastCheckpoint < checkpointCutoff;
@@ -83,8 +116,9 @@ export function isJobInterrupted(job: JobLivenessFields, now: Date = new Date())
 export function buildInterruptedJobsCondition(
   table: typeof mirrorJobs,
   now: Date = new Date(),
+  processStart: Date = getProcessStart(),
 ): SQL {
-  const { checkpointCutoff } = computeInterruptedJobCutoffs(now);
+  const { checkpointCutoff } = computeInterruptedJobCutoffs(now, processStart);
 
   return and(
     eq(table.inProgress, true),

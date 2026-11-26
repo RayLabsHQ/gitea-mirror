@@ -56,6 +56,7 @@ if (isChild) {
       startedAt: null,
       completedAt: null,
       lastCheckpoint: null,
+      resumeAttempts: 0,
     },
     {
       id: "job-mirrored",
@@ -78,6 +79,7 @@ if (isChild) {
       startedAt: null,
       completedAt: null,
       lastCheckpoint: null,
+      resumeAttempts: 0,
     },
   ];
 

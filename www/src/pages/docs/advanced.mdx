@@ -138,11 +138,12 @@ Back up the whole data directory, including the generated secret files. [Backups
 
 Mirroring a large repository with metadata can take a long time, and a restart in the middle of it would otherwise leave jobs stranded in a `mirroring` state forever. Gitea Mirror handles this in two places.
 
-On startup, a recovery pass finds jobs that were interrupted and resumes or fails them cleanly. In Docker this runs automatically from the entrypoint with a 30 second timeout, before the server starts accepting requests. You can run it manually:
+When the server starts, it picks up jobs that were interrupted, whether by a crash, a kill or a clean stop, and resumes the repositories they had not finished. A job that was resumed 3 times in a row without finishing a single repository is marked failed instead, with a message saying so: something in that work keeps stopping the app, often the memory limit, so check the logs before syncing those repositories again.
+
+In Docker, the entrypoint first runs a startup pass that resets repositories left in `mirroring` or `syncing` and lists the interrupted jobs, before the server starts accepting requests. You can run it manually:
 
 ```bash
-bun run startup-recovery         # Normal recovery pass
-bun run startup-recovery-force   # Force recovery of all interrupted jobs
+bun run startup-recovery
 ```
 
 The entrypoint also runs a repository status repair pass, which reconciles repositories whose recorded state disagrees with what actually exists in Gitea.
@@ -162,7 +163,7 @@ Two timeouts bound the process: 30 seconds for the shutdown overall, and 10 seco
 
 The Docker entrypoint traps signals and forwards them to the application process rather than letting the shell absorb them, so `docker stop` and Kubernetes pod termination both produce a clean shutdown instead of a kill.
 
-Jobs interrupted this way are marked as interrupted rather than failed, which is what the startup recovery pass looks for on the next boot.
+Jobs interrupted this way stay marked as in progress rather than failed, and the server resumes them on the next start.
 
 To test it:
 

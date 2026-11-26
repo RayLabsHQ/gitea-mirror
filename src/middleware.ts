@@ -22,7 +22,7 @@ function prefixAstroInternalAssetPaths(html: string, basePath: string): string {
 
 // Flag to track whether the *startup* recovery pass has run. This
 // only gates the post-startup chain (cleanup service, scheduler,
-// etc.) and the "startup script may not have run" log line — it does
+// etc.) and which log line the first pass prints. It does
 // NOT gate subsequent recovery attempts, see below.
 let recoveryInitialized = false;
 // Throttle for runtime recovery retries (separate from the
@@ -153,7 +153,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
 
       if (needsRecovery) {
         if (!recoveryInitialized) {
-          console.log('⚠️  Middleware detected jobs needing recovery (startup script may not have run)');
+          console.log('⚠️  Middleware found jobs interrupted by the previous run; resuming them');
         } else {
           console.log('⚠️  Middleware detected jobs needing recovery mid-run (sync interrupted after startup)');
         }
@@ -191,7 +191,7 @@ export const onRequest = defineMiddleware(async (context, next) => {
       } else if (!recoveryInitialized) {
         // Only log this on the first request; otherwise we'd spam
         // it on every request.
-        console.log('✅ No recovery needed (startup script likely handled it)');
+        console.log('✅ No interrupted jobs to resume');
       }
 
       recoveryInitialized = true;

@@ -1015,7 +1015,35 @@ const latestUpgradeFixtures: Record<string, UpgradeFixture> = {
     seed: seedPre0022Database,
     verify: verify0022Migration,
   },
+  "0023_mirror_job_resume_attempts": {
+    seed: seedPre0023Database,
+    verify: verify0023Migration,
+  },
 };
+
+function seedPre0023Database(db: any) {
+  // A job left in progress by the version before: it must be resumable.
+  db.run("INSERT INTO users (id, email, username, name) VALUES ('u-rj23', 'rj23@example.com', 'rj23', 'Resume Twenty-Three')");
+  db.run(
+    "INSERT INTO mirror_jobs (id, user_id, message, job_type, in_progress, item_ids, completed_item_ids, started_at, last_checkpoint) " +
+      "VALUES ('job-rj23', 'u-rj23', 'Mirroring', 'mirror', 1, '[\"a\",\"b\"]', '[\"a\"]', 1793000000, 1793000060)",
+  );
+}
+
+function verify0023Migration(db: any) {
+  const columns = db.query("PRAGMA table_info(mirror_jobs)").all() as TableInfoRow[];
+  const column = columns.find((c) => c.name === "resume_attempts");
+  assert(column, "Expected mirror_jobs.resume_attempts to exist after migration");
+  assert(column.notnull === 1, "Expected mirror_jobs.resume_attempts to be NOT NULL");
+  assert(column.dflt_value === "0", `Expected mirror_jobs.resume_attempts to default to 0, got ${column.dflt_value}`);
+  const row = db.query("SELECT resume_attempts, in_progress FROM mirror_jobs WHERE id = 'job-rj23'").get() as
+    | { resume_attempts: number; in_progress: number }
+    | null;
+  assert(
+    row?.resume_attempts === 0 && row.in_progress === 1,
+    `Expected the existing job to start with no resume attempts and stay in progress, got ${JSON.stringify(row)}`,
+  );
+}
 
 function seedPre0022Database(db: any) {
   // The owner is the account created first. An earlier created_at wins over

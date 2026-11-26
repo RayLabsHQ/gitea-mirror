@@ -5,9 +5,9 @@ What happens to running mirror jobs when the app stops, crashes or restarts. Thi
 ## Overview
 
 - A clean stop (SIGTERM, SIGINT, SIGHUP) runs a graceful shutdown that saves the state of running jobs, within 30 seconds.
-- A crash or a hard kill leaves jobs marked as in progress. Recovery finds them on the next start and resumes them.
+- A crash, a hard kill or a clean stop leaves jobs marked as in progress. The server resumes them as soon as it starts.
+- A job resumed 3 times in a row without finishing a single item is marked `failed` instead of being resumed again, see [the resume limit](#the-resume-limit).
 - Repositories left in `mirroring` or `syncing` are reset to `failed`, so the scheduler or a manual sync picks them up again.
-- A job stopped by a clean shutdown is not resumed by recovery, see [the gap](#the-gap-after-a-clean-shutdown).
 
 ## Startup order
 
@@ -21,7 +21,7 @@ What happens to running mirror jobs when the app stops, crashes or restarts. Thi
 
 `src/lib/shutdown-manager.ts` then:
 
-1. Saves each running job, with up to 10 seconds per job. The job's `inProgress` flag is cleared and its checkpoint updated.
+1. Saves each running job, with up to 10 seconds per job. The job stays marked `inProgress`, with its checkpoint updated and a message saying it will resume on restart. Until #564 the flag was cleared, so a job stopped cleanly was never resumed.
 2. Runs the registered shutdown callbacks, which stop the scheduler, the cleanup service and the repository cleanup service.
 3. Logs a database close step, which does nothing else today.
 4. Exits with code 0 for a signal, or 1 after a crash.
@@ -45,7 +45,9 @@ The platform has to wait longer than the 30 second shutdown, or it kills the pro
 `src/lib/interrupted-job-detection.ts` decides which jobs recovery resumes. A job is interrupted when:
 
 - it is still marked `inProgress`, and
-- its last checkpoint is more than 10 minutes old, or it has none and started more than 10 minutes ago.
+- its last checkpoint is older than the cutoff, or it has none and started before the cutoff.
+
+The cutoff is the later of 10 minutes ago and the start of the server process (`src/lib/process-start.ts`, taken from `performance.timeOrigin`). With SQLite there is one app process, so a job last touched before it started was left by a process that is gone, and is resumed at once (#564). The 10 minute window still covers a job this process started that stopped moving. Times in `mirror_jobs` are whole seconds, so the process start is rounded down to its second; otherwise a job started in the first second would look older than the process.
 
 Running jobs refresh their checkpoint every 2 minutes as a heartbeat, so a live job is never picked up, however long it runs. An older rule also resumed any job started more than 2 hours ago; it was removed because it resumed jobs that were still running and duplicated their work (#417).
 
@@ -53,14 +55,14 @@ Separately, in-progress jobs that started more than 24 hours ago are marked `fai
 
 ## Recovery passes
 
-- **At startup** (Docker and Nix): `scripts/startup-recovery.ts` checks for interrupted jobs, exits early when there are none, and otherwise runs recovery with a 30 second default timeout. It exits 0 even when some jobs could not be recovered, and 1 on a timeout or an error. `--force` is meant to skip the 5 minute throttle, but the throttle lives in memory and the script is a fresh process, so it changes nothing in practice.
+- **At startup** (Docker and Nix): `scripts/startup-recovery.ts` resets stuck repository statuses (below) and logs the interrupted jobs it finds, then exits 0, or 1 on an error. It does not resume them. It used to, in its own process, and exited after 30 seconds with the job half done and a fresh checkpoint, so the server only picked it up 10 minutes later (#564). `--force` and `--timeout` are still accepted and do nothing.
 - **On requests:** the middleware runs recovery when no run is in flight, with 2 retries 3 seconds apart. A request waits at most 15 seconds for it, and the run continues in the background after that. `initializeRecovery()` skips a run when the last attempt was less than 5 minutes ago.
 
 Each interrupted job resumes the repositories or organizations it had not finished. A job that cannot be resumed is marked `failed`.
 
-## The gap after a clean shutdown
+## The resume limit
 
-A graceful shutdown clears `inProgress` on the jobs it saves, and recovery only looks at jobs with `inProgress` set. So a job stopped cleanly is never resumed, even though its message says "will resume on restart". Its repositories are not lost: rows left in `mirroring` or `syncing` are reset to `failed` (below), and the next scheduled run or a manual sync mirrors them again.
+When the resumed work itself takes the app down, for example by running it out of memory, every start resumed the same job and went down again (#564). `mirror_jobs.resume_attempts` counts resumes in a row that finished no item. Recovery adds one each time it resumes a job, and finishing an item sets it back to 0. A job that reaches `MAX_RESUMES_WITHOUT_PROGRESS` (3) is marked `failed`, with a message saying it stopped resuming, instead of being resumed again. Its repositories are reset by the stuck status reset and mirrored again by the next scheduled run or a manual sync.
 
 ## Stuck repository statuses
 
@@ -74,15 +76,16 @@ A graceful shutdown clears `inProgress` on the jobs it saves, and recovery only 
 
 | Command | What it does |
 | --- | --- |
-| `bun run startup-recovery` | The startup recovery pass described above. |
+| `bun run startup-recovery` | The startup pass described above: resets stuck statuses and lists interrupted jobs. |
 | `bun run test-recovery` | Writes fake interrupted jobs into the database and recovers them. `--cleanup` removes them. It uses the real database, so run it against a scratch copy. |
 | `bun run test-shutdown` | Exercises the graceful shutdown with a test job. `--cleanup` removes it. Same warning about the database. |
 | `bun scripts/fix-interrupted-jobs.ts` | Marks interrupted jobs as failed by hand. |
 
-Unit tests: `src/lib/shutdown-manager.test.ts`, `src/lib/interrupted-job-detection.test.ts`, `src/lib/stuck-status-recovery.test.ts`, `src/lib/orchestrator-resume-after-startup.test.ts`.
+Unit tests: `src/lib/shutdown-manager.test.ts`, `src/lib/interrupted-job-detection.test.ts`, `src/lib/recovery-restart-loop.test.ts`, `src/lib/stuck-status-recovery.test.ts`, `src/lib/orchestrator-resume-after-startup.test.ts`.
 
 ## Troubleshooting
 
 - **Jobs are cut off when the container stops.** Docker's 10 second default is shorter than the 30 second shutdown. Set `stop_grace_period`.
 - **A repository shows `failed` with a message about an interrupted run.** The stuck status reset did that after a restart. Sync it, or wait for the next scheduled run.
+- **A job shows `failed` with "Stopped resuming after 3 restarts in a row without progress".** Each resume of it ended with the app going down. Check the logs and the memory limit around those restarts, then sync the remaining repositories.
 - **`/api/health` says `degraded`.** Interrupted jobs are waiting for recovery. It runs on the next request when the 5 minute throttle allows; check the logs for `Recovery attempt` lines.

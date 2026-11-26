@@ -419,6 +419,7 @@ export const mirrorJobSchema = z.object({
   startedAt: z.coerce.date().optional().nullable(),
   completedAt: z.coerce.date().optional().nullable(),
   lastCheckpoint: z.coerce.date().optional().nullable(),
+  resumeAttempts: z.number().optional(),
 });
 
 export const organizationSchema = z.object({
@@ -737,6 +738,10 @@ export const mirrorJobs = sqliteTable("mirror_jobs", {
   startedAt: integer("started_at", { mode: "timestamp" }),
   completedAt: integer("completed_at", { mode: "timestamp" }),
   lastCheckpoint: integer("last_checkpoint", { mode: "timestamp" }),
+  // Resumes in a row that finished no item. Recovery stops resuming a job
+  // once this reaches MAX_RESUMES_WITHOUT_PROGRESS (#564); finishing an
+  // item sets it back to 0.
+  resumeAttempts: integer("resume_attempts").notNull().default(0),
 }, (table) => [
   index("idx_mirror_jobs_user_id").on(table.userId),
   index("idx_mirror_jobs_batch_id").on(table.batchId),

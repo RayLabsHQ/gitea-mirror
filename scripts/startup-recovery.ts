@@ -1,55 +1,38 @@
 #!/usr/bin/env bun
 /**
- * Startup recovery script
- * This script runs job recovery before the application starts serving requests
- * It ensures that any interrupted jobs from previous runs are properly handled
+ * Startup recovery script, run by the Docker entrypoint and the Nix service
+ * before the server starts.
+ *
+ * It resets repositories and organizations left in "mirroring" or "syncing"
+ * by the previous process, and reports interrupted jobs. It does not resume
+ * them: the server does that as soon as it starts, because a job last
+ * touched before the server's process started counts as interrupted at once
+ * (#564). This script used to resume them in its own short-lived process,
+ * which exited after its timeout and left the job marked as running with a
+ * fresh checkpoint, so the server only picked it up 10 minutes later.
  *
  * Usage:
- *   bun scripts/startup-recovery.ts [--force] [--timeout=30000]
+ *   bun scripts/startup-recovery.ts
  *
- * Options:
- *   --force: Force recovery even if a recent attempt was made
- *   --timeout: Maximum time to wait for recovery (in milliseconds, default: 30000)
+ * --force and --timeout=<ms> are still accepted, so existing entrypoints keep
+ * working, but no longer change anything.
  */
 
-import { initializeRecovery, hasJobsNeedingRecovery, getRecoveryStatus } from "../src/lib/recovery";
+import { hasJobsNeedingRecovery } from "../src/lib/recovery";
+import { findInterruptedJobs } from "../src/lib/helpers";
 import { resetStuckMirrorStatuses } from "../src/lib/stuck-status-recovery";
-
-// Parse command line arguments
-const args = process.argv.slice(2);
-const forceRecovery = args.includes('--force');
-const timeoutArg = args.find(arg => arg.startsWith('--timeout='));
-const timeout = timeoutArg ? parseInt(timeoutArg.split('=')[1], 10) : 30000;
-
-if (isNaN(timeout) || timeout < 1000) {
-  console.error("Error: Timeout must be at least 1000ms");
-  process.exit(1);
-}
 
 async function runStartupRecovery() {
   console.log('=== Gitea Mirror Startup Recovery ===');
-  console.log(`Timeout: ${timeout}ms`);
-  console.log(`Force recovery: ${forceRecovery}`);
-  console.log('');
-
-  const startTime = Date.now();
 
   try {
-    // Set up timeout
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => {
-        reject(new Error(`Recovery timeout after ${timeout}ms`));
-      }, timeout);
-    });
-
     // Reset repositories/organizations stuck in an in-flight status
-    // ("mirroring"/"syncing") from a previous run (issue #339). This must
-    // happen BEFORE the needsRecovery early-exit below: scheduler-driven
-    // syncs create no resilient job records, so a crash mid-scheduled-sync
-    // leaves stuck repo rows but NO interrupted jobs — the early exit would
-    // skip them forever. The app is not running while this script executes,
-    // so every in-flight row is an orphan by definition (this script's own
-    // process start is the cutoff). Never throws.
+    // ("mirroring"/"syncing") from a previous run (issue #339). Scheduler
+    // driven syncs create no resilient job records, so a crash mid-sync can
+    // leave stuck rows without any interrupted job. The app is not running
+    // while this script executes, so every in-flight row is an orphan by
+    // definition (this script's own process start is the cutoff). Never
+    // throws.
     console.log('Checking for repositories stuck in an in-flight status...');
     const stuckReset = await resetStuckMirrorStatuses();
     if (stuckReset.repositories > 0 || stuckReset.organizations > 0) {
@@ -61,60 +44,20 @@ async function runStartupRecovery() {
       console.log('✅ No stuck repository/organization statuses found.');
     }
 
-    // Check if recovery is needed first
-    console.log('Checking if recovery is needed...');
-    const needsRecovery = await hasJobsNeedingRecovery();
-
-    if (!needsRecovery) {
-      console.log('✅ No jobs need recovery. Startup can proceed.');
+    if (!(await hasJobsNeedingRecovery())) {
+      console.log('✅ No interrupted jobs. Startup can proceed.');
       process.exit(0);
     }
 
-    console.log('⚠️  Jobs found that need recovery. Starting recovery process...');
-
-    // Run recovery with timeout
-    const recoveryPromise = initializeRecovery({
-      skipIfRecentAttempt: !forceRecovery,
-      maxRetries: 3,
-      retryDelay: 5000,
-    });
-
-    const recoveryResult = await Promise.race([recoveryPromise, timeoutPromise]);
-
-    const endTime = Date.now();
-    const duration = endTime - startTime;
-
-    if (recoveryResult) {
-      console.log(`✅ Recovery completed successfully in ${duration}ms`);
-      console.log('Application startup can proceed.');
-      process.exit(0);
-    } else {
-      console.log(`⚠️  Recovery completed with some failures in ${duration}ms`);
-      console.log('Application startup can proceed, but some jobs may have failed.');
-      process.exit(0);
-    }
-
+    const jobs = await findInterruptedJobs({ logFound: true });
+    console.log(
+      `ℹ️  ${jobs.length} interrupted job(s) will be resumed by the server as soon as it starts.`
+    );
+    process.exit(0);
   } catch (error) {
-    const endTime = Date.now();
-    const duration = endTime - startTime;
-
-    if (error instanceof Error && error.message.includes('timeout')) {
-      console.error(`❌ Recovery timed out after ${duration}ms`);
-      console.error('Application will start anyway, but some jobs may remain interrupted.');
-      
-      // Get current recovery status
-      const status = getRecoveryStatus();
-      console.log('Recovery status:', status);
-      
-      // Exit with warning code but allow startup to continue
-      process.exit(1);
-    } else {
-      console.error(`❌ Recovery failed after ${duration}ms:`, error);
-      console.error('Application will start anyway, but recovery was unsuccessful.');
-      
-      // Exit with error code but allow startup to continue
-      process.exit(1);
-    }
+    console.error('❌ Startup recovery check failed:', error);
+    console.error('Application will start anyway; the server checks for interrupted jobs itself.');
+    process.exit(1);
   }
 }
 
@@ -129,5 +72,4 @@ process.on('SIGTERM', () => {
   process.exit(143);
 });
 
-// Run the startup recovery
 runStartupRecovery();

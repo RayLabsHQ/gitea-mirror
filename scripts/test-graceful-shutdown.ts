@@ -72,9 +72,9 @@ async function verifyJobState(jobId: string): Promise<boolean> {
   
   const job = jobs[0];
   
-  // Check that the job was marked as interrupted
-  if (job.inProgress) {
-    console.error(`❌ Job ${jobId} is still marked as in progress`);
+  // The job must stay in progress so the next start resumes it (#564)
+  if (!job.inProgress) {
+    console.error(`❌ Job ${jobId} is no longer marked as in progress, so it would never be resumed`);
     return false;
   }
   

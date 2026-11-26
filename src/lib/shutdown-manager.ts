@@ -73,11 +73,13 @@ async function saveJobState(jobId: string): Promise<void> {
   try {
     console.log(`Saving state for job ${jobId}...`);
 
-    // Update the job to mark it as interrupted but not failed
+    // Leave the job in progress: recovery only resumes jobs still marked as
+    // running, and the next process treats a job last touched before it
+    // started as interrupted (#564). Setting inProgress to false here left
+    // the job unfinished for good, despite this message.
     await db
       .update(mirrorJobs)
       .set({
-        inProgress: false,
         lastCheckpoint: new Date(),
         message: 'Job interrupted by application shutdown - will resume on restart',
       })

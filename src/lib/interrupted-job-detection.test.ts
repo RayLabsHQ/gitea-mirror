@@ -29,12 +29,16 @@ const MINUTE = 60 * 1000;
 const HOUR = 60 * MINUTE;
 const NOW = new Date("2026-09-02T12:00:00Z");
 const ago = (ms: number) => new Date(NOW.getTime() - ms);
+// Most cases model a process that has been up for days, so only the
+// checkpoint window decides. Jobs left by an earlier process are covered
+// in their own block below (#564).
+const LONG_RUNNING = ago(48 * HOUR);
 
 describe("computeInterruptedJobCutoffs", () => {
   test("keeps the 10 minute checkpoint window and has no stale age cutoff", () => {
     expect(INTERRUPTED_CHECKPOINT_AGE_MS).toBe(10 * MINUTE);
 
-    const cutoffs = computeInterruptedJobCutoffs(NOW);
+    const cutoffs = computeInterruptedJobCutoffs(NOW, LONG_RUNNING);
 
     expect(cutoffs.checkpointCutoff.getTime()).toBe(NOW.getTime() - 10 * MINUTE);
     // The two hour "stale regardless of checkpoint" rule resumed live jobs
@@ -50,52 +54,52 @@ describe("computeInterruptedJobCutoffs", () => {
 describe("isJobInterrupted", () => {
   test("a job that just started with no checkpoint is live (regression for #372)", () => {
     expect(
-      isJobInterrupted({ inProgress: true, startedAt: ago(MINUTE), lastCheckpoint: null }, NOW)
+      isJobInterrupted({ inProgress: true, startedAt: ago(MINUTE), lastCheckpoint: null }, NOW, LONG_RUNNING)
     ).toBe(false);
   });
 
   test("a job with no checkpoint is interrupted once it is older than the checkpoint window", () => {
     expect(
-      isJobInterrupted({ inProgress: true, startedAt: ago(11 * MINUTE), lastCheckpoint: null }, NOW)
+      isJobInterrupted({ inProgress: true, startedAt: ago(11 * MINUTE), lastCheckpoint: null }, NOW, LONG_RUNNING)
     ).toBe(true);
   });
 
   test("a legacy row with neither checkpoint nor start time is interrupted", () => {
     expect(
-      isJobInterrupted({ inProgress: true, startedAt: null, lastCheckpoint: null }, NOW)
+      isJobInterrupted({ inProgress: true, startedAt: null, lastCheckpoint: null }, NOW, LONG_RUNNING)
     ).toBe(true);
   });
 
   test("a fresh checkpoint keeps a job live", () => {
     expect(
-      isJobInterrupted({ inProgress: true, startedAt: ago(HOUR), lastCheckpoint: ago(2 * MINUTE) }, NOW)
+      isJobInterrupted({ inProgress: true, startedAt: ago(HOUR), lastCheckpoint: ago(2 * MINUTE) }, NOW, LONG_RUNNING)
     ).toBe(false);
   });
 
   test("a checkpoint older than the window marks the job interrupted", () => {
     expect(
-      isJobInterrupted({ inProgress: true, startedAt: ago(HOUR), lastCheckpoint: ago(11 * MINUTE) }, NOW)
+      isJobInterrupted({ inProgress: true, startedAt: ago(HOUR), lastCheckpoint: ago(11 * MINUTE) }, NOW, LONG_RUNNING)
     ).toBe(true);
   });
 
   test("a job that keeps checkpointing stays live however long ago it started", () => {
     expect(
-      isJobInterrupted({ inProgress: true, startedAt: ago(3 * HOUR), lastCheckpoint: ago(MINUTE) }, NOW)
+      isJobInterrupted({ inProgress: true, startedAt: ago(3 * HOUR), lastCheckpoint: ago(MINUTE) }, NOW, LONG_RUNNING)
     ).toBe(false);
     expect(
-      isJobInterrupted({ inProgress: true, startedAt: ago(30 * HOUR), lastCheckpoint: ago(2 * MINUTE) }, NOW)
+      isJobInterrupted({ inProgress: true, startedAt: ago(30 * HOUR), lastCheckpoint: ago(2 * MINUTE) }, NOW, LONG_RUNNING)
     ).toBe(false);
   });
 
   test("an old job whose checkpoint went stale is still interrupted", () => {
     expect(
-      isJobInterrupted({ inProgress: true, startedAt: ago(3 * HOUR), lastCheckpoint: ago(11 * MINUTE) }, NOW)
+      isJobInterrupted({ inProgress: true, startedAt: ago(3 * HOUR), lastCheckpoint: ago(11 * MINUTE) }, NOW, LONG_RUNNING)
     ).toBe(true);
   });
 
   test("jobs that are not in progress are never interrupted", () => {
     expect(
-      isJobInterrupted({ inProgress: false, startedAt: ago(3 * HOUR), lastCheckpoint: null }, NOW)
+      isJobInterrupted({ inProgress: false, startedAt: ago(3 * HOUR), lastCheckpoint: null }, NOW, LONG_RUNNING)
     ).toBe(false);
   });
 });
@@ -136,7 +140,7 @@ describe("buildInterruptedJobsCondition", () => {
     const rows = await db
       .select({ id: mirrorJobs.id })
       .from(mirrorJobs)
-      .where(buildInterruptedJobsCondition(mirrorJobs, NOW));
+      .where(buildInterruptedJobsCondition(mirrorJobs, NOW, LONG_RUNNING));
     return rows.map((row) => row.id).sort();
   }
 
@@ -187,13 +191,102 @@ describe("buildInterruptedJobsCondition", () => {
     seed(rows);
 
     const expected = rows
-      .filter((row) => isJobInterrupted(row, NOW))
+      .filter((row) => isJobInterrupted(row, NOW, LONG_RUNNING))
       .map((row) => row.id)
       .sort();
 
     expect(expected.length).toBeGreaterThan(0);
     expect(expected.length).toBeLessThan(rows.length);
     expect(await findInterruptedIds()).toEqual(expected);
+  });
+});
+
+describe("jobs left by an earlier process (#564)", () => {
+  // This process started 30 seconds ago, at 11:59:30.700. The previous one
+  // was killed a minute ago, with a checkpoint well inside the window.
+  const BOOTED = new Date(NOW.getTime() - 29_300);
+  // mirror_jobs keeps whole seconds; this is what a row reads back as.
+  const stored = (value: Date) => new Date(Math.floor(value.getTime() / 1000) * 1000);
+
+  test("a job checkpointed by the previous process is resumed at once, not after the window", () => {
+    expect(
+      isJobInterrupted({ inProgress: true, startedAt: ago(20 * MINUTE), lastCheckpoint: ago(MINUTE) }, NOW, BOOTED)
+    ).toBe(true);
+    // Before #564 this waited until the checkpoint was 10 minutes old.
+    expect(
+      isJobInterrupted({ inProgress: true, startedAt: ago(20 * MINUTE), lastCheckpoint: ago(MINUTE) }, NOW, LONG_RUNNING)
+    ).toBe(false);
+  });
+
+  test("a job the previous process started but never checkpointed is resumed at once", () => {
+    expect(
+      isJobInterrupted({ inProgress: true, startedAt: ago(2 * MINUTE), lastCheckpoint: null }, NOW, BOOTED)
+    ).toBe(true);
+  });
+
+  test("a job this process started is live, even one started in its first second", () => {
+    const firstSecond = new Date(BOOTED.getTime() + 200);
+    expect(
+      isJobInterrupted({ inProgress: true, startedAt: stored(firstSecond), lastCheckpoint: null }, NOW, BOOTED)
+    ).toBe(false);
+    expect(
+      isJobInterrupted(
+        { inProgress: true, startedAt: stored(firstSecond), lastCheckpoint: stored(ago(5_000)) },
+        NOW,
+        BOOTED
+      )
+    ).toBe(false);
+  });
+
+  test("the checkpoint window still applies once the process has been up longer than it", () => {
+    const later = new Date(NOW.getTime() + 2 * HOUR);
+    const jobStart = new Date(NOW.getTime() + 10 * MINUTE);
+    expect(
+      isJobInterrupted({ inProgress: true, startedAt: jobStart, lastCheckpoint: new Date(later.getTime() - 11 * MINUTE) }, later, BOOTED)
+    ).toBe(true);
+    expect(
+      isJobInterrupted({ inProgress: true, startedAt: jobStart, lastCheckpoint: new Date(later.getTime() - 2 * MINUTE) }, later, BOOTED)
+    ).toBe(false);
+  });
+
+  test("the SQL condition agrees, against whole-second rows", async () => {
+    const sqlite = new Database(":memory:");
+    const db = drizzle(sqlite);
+    sqlite.run(
+      "CREATE TABLE mirror_jobs (id TEXT PRIMARY KEY, in_progress INTEGER NOT NULL DEFAULT 0, started_at INTEGER, last_checkpoint INTEGER)"
+    );
+    const firstSecond = new Date(BOOTED.getTime() + 200);
+    const rows: Array<JobLivenessFields & { id: string }> = [
+      { id: "previous-checkpointed", inProgress: true, startedAt: ago(20 * MINUTE), lastCheckpoint: ago(MINUTE) },
+      { id: "previous-no-checkpoint", inProgress: true, startedAt: ago(2 * MINUTE), lastCheckpoint: null },
+      { id: "this-first-second", inProgress: true, startedAt: stored(firstSecond), lastCheckpoint: null },
+      { id: "this-checkpointed", inProgress: true, startedAt: stored(firstSecond), lastCheckpoint: stored(ago(5_000)) },
+      { id: "previous-finished", inProgress: false, startedAt: ago(20 * MINUTE), lastCheckpoint: ago(MINUTE) },
+    ];
+    const insert = sqlite.prepare(
+      "INSERT INTO mirror_jobs (id, in_progress, started_at, last_checkpoint) VALUES (?, ?, ?, ?)"
+    );
+    const seconds = (value: Date | null | undefined) => (value ? Math.floor(value.getTime() / 1000) : null);
+    for (const row of rows) {
+      insert.run(row.id, row.inProgress ? 1 : 0, seconds(row.startedAt), seconds(row.lastCheckpoint));
+    }
+
+    const found = (
+      await db
+        .select({ id: mirrorJobs.id })
+        .from(mirrorJobs)
+        .where(buildInterruptedJobsCondition(mirrorJobs, NOW, BOOTED))
+    )
+      .map((row) => row.id)
+      .sort();
+    const expected = rows
+      .filter((row) => isJobInterrupted(row, NOW, BOOTED))
+      .map((row) => row.id)
+      .sort();
+
+    expect(found).toEqual(["previous-checkpointed", "previous-no-checkpoint"]);
+    expect(found).toEqual(expected);
+    sqlite.close();
   });
 });
 
