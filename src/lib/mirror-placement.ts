@@ -218,6 +218,8 @@ export interface PlacementBarState {
   currentKey: string;
   /** The settings the bar was last put away for. */
   dismissedKey: string | null;
+  /** The last save failed, so the summary describes the settings the server still has. */
+  saveFailed: boolean;
   /** A move was started from this page and its result has not been put away. */
   runStartedHere: boolean;
 }
@@ -228,12 +230,14 @@ export interface PlacementBarState {
  * out of place, and nothing otherwise. Mirrors that were already out of
  * place when the page opened are left to the Organization Structure card,
  * and a prompt waits for the summary of the current settings, so it never
- * shows a count that belongs to the previous ones.
+ * shows a count that belongs to the previous ones. After a failed save the
+ * server still has the old settings, so there is nothing to announce.
  */
 export function placementBarMode(state: PlacementBarState): "prompt" | "run" | null {
   if (state.runStartedHere) return "run";
   const prompt =
     state.supported &&
+    !state.saveFailed &&
     state.outOfPlace > 0 &&
     state.baseKey !== null &&
     state.summaryKey === state.currentKey &&

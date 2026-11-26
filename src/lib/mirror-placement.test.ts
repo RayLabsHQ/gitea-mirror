@@ -337,6 +337,7 @@ describe.skipIf(!isChild)("the Configuration page's bar", () => {
     summaryKey: "preserve|Mirrors",
     currentKey: "preserve|Mirrors",
     dismissedKey: null,
+    saveFailed: false,
     runStartedHere: false,
   };
 
@@ -359,6 +360,10 @@ describe.skipIf(!isChild)("the Configuration page's bar", () => {
   test("stays away when nothing is out of place or the destination cannot move mirrors", () => {
     expect(placementBarMode({ ...changed, outOfPlace: 0 })).toBeNull();
     expect(placementBarMode({ ...changed, supported: false })).toBeNull();
+  });
+
+  test("says nothing after a failed save, since the server still has the old settings", () => {
+    expect(placementBarMode({ ...changed, saveFailed: true })).toBeNull();
   });
 
   test("Not now puts it away until the next change", () => {

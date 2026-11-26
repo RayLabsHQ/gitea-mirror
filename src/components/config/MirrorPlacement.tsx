@@ -112,10 +112,13 @@ function usePlacement(): PlacementState {
 export function MirrorPlacementProvider({
   refreshKey,
   isSaving,
+  saveFailed = false,
   children,
 }: {
   refreshKey: string;
   isSaving?: boolean;
+  /** The last save of these settings failed, so the server still has the old ones. */
+  saveFailed?: boolean;
   children: ReactNode;
 }) {
   const [summary, setSummary] = useState<PlacementSummary | null>(null);
@@ -184,6 +187,7 @@ export function MirrorPlacementProvider({
     summaryKey,
     currentKey: refreshKey,
     dismissedKey,
+    saveFailed,
     runStartedHere: runStartedHere && run !== null,
   });
 
@@ -269,7 +273,7 @@ export function MirrorPlacementBar() {
 
   let icon = <TriangleAlert className="h-5 w-5 shrink-0 text-amber-500" />;
   let title = `${count === 1 ? "1 mirror doesn't" : `${count} mirrors don't`} match your new settings`;
-  let detail = "They stay where they are and keep syncing until you move them.";
+  let detail = "The new settings apply to new mirrors. These stay where they are and keep syncing until you move them.";
   if (run && running) {
     icon = <LoaderCircle className="h-5 w-5 shrink-0 animate-spin text-indigo-500" />;
     title = `Moving mirrors: ${settled} of ${total} done`;
@@ -288,7 +292,7 @@ export function MirrorPlacementBar() {
   return (
     // Pinned to the very bottom of the scroll area (past its padding), over a
     // fade, so nothing shows through under the bar.
-    <div className="pointer-events-none sticky -bottom-4 z-30 -mb-4 bg-linear-to-t from-background from-60% to-transparent pb-4 pt-6 sm:-bottom-6 sm:-mb-6 sm:pb-6">
+    <div className="pointer-events-none sticky -bottom-4 z-30 -mb-4 bg-linear-to-t from-background from-60% to-transparent pb-[max(1rem,env(safe-area-inset-bottom))] pt-6 sm:-bottom-6 sm:-mb-6 sm:pb-6">
       <div
         role="status"
         className="pointer-events-auto flex flex-wrap items-center gap-x-4 gap-y-3 rounded-xl border border-border bg-card px-4 py-3 shadow-[0_8px_30px_rgb(0_0_0/0.12)] animate-in fade-in slide-in-from-bottom-4 duration-300 dark:shadow-[0_8px_30px_rgb(0_0_0/0.5)] sm:flex-nowrap sm:px-5"
