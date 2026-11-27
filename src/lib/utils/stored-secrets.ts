@@ -189,6 +189,32 @@ export function mergeNotificationSecrets<T extends Record<string, any>>(
 }
 
 /**
+ * For a settings import (#587): drop each saved notification secret whose
+ * address now points at another origin, where a save would refuse instead,
+ * since the file never carries the secret and the user cannot type it into
+ * an import. Returns the cleaned settings and the labels of the secrets that
+ * were dropped, so the import can say which ones to enter again.
+ */
+export function dropMovedNotificationSecrets<T extends Record<string, any>>(
+  next: T,
+  stored: NotificationLike
+): { config: T; dropped: string[] } {
+  const config: Record<string, any> = { ...next };
+  const dropped: string[] = [];
+  for (const { provider, field, label, defaultUrl, bound } of NOTIFICATION_SECRETS) {
+    if (!bound) continue;
+    const section = config[provider];
+    if (!section || typeof section !== "object" || !hasValue(section[field])) continue;
+    const savedUrl = stored?.[provider]?.url || defaultUrl;
+    const nextUrl = section.url || defaultUrl;
+    if (savedUrl === nextUrl || sameOrigin(savedUrl, nextUrl)) continue;
+    config[provider] = { ...section, [field]: "" };
+    dropped.push(label);
+  }
+  return { config: config as T, dropped };
+}
+
+/**
  * A notification config for a test send of the selected provider: an empty
  * secret filled in with the saved one where allowed, decrypted. The other
  * providers' sections are left out. Throws SecretHostChangedError.

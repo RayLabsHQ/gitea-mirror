@@ -8,6 +8,7 @@ import { AutomationSettings } from './AutomationSettings';
 import { SSOSettings } from './SSOSettings';
 import { ApiKeysSettings } from './ApiKeysSettings';
 import { NotificationSettings } from './NotificationSettings';
+import { ImportSettingsDialog } from './ImportSettingsDialog';
 import type {
   ConfigApiResponse,
   GiteaConfig,
@@ -846,18 +847,26 @@ export function ConfigTabs() {
             mirroring.
           </p>
         </div>
-        {/* A JSON copy of the settings without tokens (#587). */}
-        <Button
-          asChild
-          variant="outline"
-          size="sm"
-          title="Download the settings as JSON, without tokens or passwords"
-        >
-          <a href={withBase('/api/config/export')} download>
-            <Download className="mr-2 h-4 w-4" />
-            Export settings
-          </a>
-        </Button>
+        {/* A JSON copy of the settings without tokens, and the way back in (#587). */}
+        <div className="flex flex-wrap gap-2">
+          <ImportSettingsDialog
+            onImported={async () => {
+              invalidateConfigCache();
+              await loadConfig();
+            }}
+          />
+          <Button
+            asChild
+            variant="outline"
+            size="sm"
+            title="Download the settings as JSON, without tokens or passwords"
+          >
+            <a href={withBase('/api/config/export')} download>
+              <Download className="mr-2 h-4 w-4" />
+              Export settings
+            </a>
+          </Button>
+        </div>
       </div>
 
       {/* Content section - Tabs layout */}

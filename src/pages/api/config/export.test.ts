@@ -99,6 +99,8 @@ function get(query = "") {
   } as any);
 }
 
+const added = (seconds: number) => new Date(Date.UTC(2026, 0, 1) + seconds * 1000);
+
 async function seed() {
   await db.insert(schema.configs).values({
     id: "config-1",
@@ -136,10 +138,10 @@ async function seed() {
     privateKey: "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----",
   })}`;
   await db.insert(schema.sources).values([
-    { id: "src-gh", userId: "user-1", name: "GitHub", provider: "github", url: "https://github.com", username: "octo", token: encrypt!("ghp_personal_token_value") },
-    { id: "src-app", userId: "user-1", name: "Work app", provider: "github", url: "https://github.com", username: "work", token: encrypt!(appCredential) },
-    { id: "src-pub", userId: "user-1", name: "Codeberg", provider: "gitea", url: "https://codeberg.org", username: "", token: null },
-    { id: "src-gl", userId: "user-1", name: "GitLab", provider: "gitlab", url: "https://gitlab.com", username: "octo", token: encrypt!("gitlab_token_value"), enabled: false },
+    { id: "src-gh", userId: "user-1", name: "GitHub", provider: "github", url: "https://github.com", username: "octo", token: encrypt!("ghp_personal_token_value"), createdAt: added(1) },
+    { id: "src-app", userId: "user-1", name: "Work app", provider: "github", url: "https://github.com", username: "work", token: encrypt!(appCredential), createdAt: added(2) },
+    { id: "src-pub", userId: "user-1", name: "Codeberg", provider: "gitea", url: "https://codeberg.org", username: "", token: null, createdAt: added(3) },
+    { id: "src-gl", userId: "user-1", name: "GitLab", provider: "gitlab", url: "https://gitlab.com", username: "octo", token: encrypt!("gitlab_token_value"), enabled: false, createdAt: added(4) },
   ] as any);
 
   await db.insert(schema.organizations).values([
@@ -209,21 +211,23 @@ describe.skipIf(!isChild)("GET /api/config/export (#587)", () => {
     }
     const file = JSON.parse(text);
     expect(file.settings.giteaConfig.url).toBe("https://gitea.example.com");
+    // The first source's connection lives in the sources list, not twice.
+    expect(file.settings.githubConfig).toEqual({ includeStarred: true, mirrorStrategy: "single-org" });
     expect(file.settings.notificationConfig.ntfy).toEqual({ topic: "mirror", url: "https://ntfy.sh" });
     expect(file.settings.notificationConfig.webhook).toEqual({});
     expect(file.settings.scheduleConfig).toEqual({ enabled: true, interval: "0 22 * * *" });
     expect(file.settings.exclude).toEqual(["octo/scratch"]);
   });
 
-  test("lists sources by a stable reference, saying how each logs in", async () => {
+  test("lists sources in the order they were added, by a stable reference, saying how each logs in", async () => {
     await seed();
     const file = await (await get()).json();
     expect(file.format).toBe("gitea-mirror-settings");
     expect(file.version).toBe(1);
     expect(file.sources).toEqual([
-      { authentication: "none", enabled: true, name: "Codeberg", provider: "gitea", reference: "gitea https://codeberg.org", url: "https://codeberg.org", username: null },
       { authentication: "token", enabled: true, name: "GitHub", provider: "github", reference: "github https://github.com octo", url: "https://github.com", username: "octo" },
       { authentication: "github-app", enabled: true, name: "Work app", provider: "github", reference: "github https://github.com work", url: "https://github.com", username: "work" },
+      { authentication: "none", enabled: true, name: "Codeberg", provider: "gitea", reference: "gitea https://codeberg.org", url: "https://codeberg.org", username: null },
       { authentication: "token", enabled: false, name: "GitLab", provider: "gitlab", reference: "gitlab https://gitlab.com octo", url: "https://gitlab.com", username: "octo" },
     ]);
   });

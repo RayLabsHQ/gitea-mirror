@@ -10,9 +10,10 @@
  *   status, errors, sizes, timestamps and ids, which differ per instance;
  * - accounts, SSO providers, API keys and OAuth applications.
  *
- * The output is stable: object keys are sorted, lists of sources,
- * organizations and repositories are sorted, and nothing in it depends on
- * when it was made, so two exports of an unchanged instance are identical.
+ * The output is stable: object keys are sorted, organizations and
+ * repositories are sorted, sources keep the order they were added in, and
+ * nothing in it depends on when it was made, so two exports of an unchanged
+ * instance are identical. src/lib/settings-import.ts reads it back.
  */
 import { isGitHubAppCredential } from "@/lib/github-app-credentials";
 import { listOverriddenKeys } from "@/lib/utils/mirror-overrides";
@@ -26,14 +27,24 @@ const NOTE =
 /** Keys that hold a credential, dropped wherever they appear in the settings. */
 const SECRET_KEYS = new Set(["token", "secret", "password", "clientsecret", "privatekey", "apikey"]);
 
-/** Run state written back into the settings, per settings section. */
-const STATE_KEYS: Record<string, readonly string[]> = {
+/** True for a settings key that holds a credential, at any depth. */
+export function isCredentialKey(key: string): boolean {
+  return SECRET_KEYS.has(key.toLowerCase());
+}
+
+/**
+ * Keys left out of each settings section: run state written back by the app,
+ * and the source connection the legacy githubConfig copies from the first
+ * source (the sources list carries it, first source first).
+ */
+export const STATE_KEYS: Record<string, readonly string[]> = {
+  githubConfig: ["provider", "url", "owner"],
   scheduleConfig: ["lastRun", "nextRun"],
   cleanupConfig: ["lastRun", "nextRun"],
 };
 
 /** The settings sections of a configs row, by their stored names. */
-const SETTINGS_SECTIONS = [
+export const SETTINGS_SECTIONS = [
   "githubConfig",
   "giteaConfig",
   "include",
@@ -128,7 +139,7 @@ function scrub(value: unknown): unknown {
   if (value && typeof value === "object") {
     const out: Record<string, unknown> = {};
     for (const [key, child] of Object.entries(value)) {
-      if (SECRET_KEYS.has(key.toLowerCase())) continue;
+      if (isCredentialKey(key)) continue;
       if (child === undefined) continue;
       out[key] = scrub(child);
     }
@@ -138,7 +149,7 @@ function scrub(value: unknown): unknown {
 }
 
 /** Sort object keys at every depth so the same settings always print the same. */
-function sortKeys(value: unknown): unknown {
+export function sortKeys(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(sortKeys);
   if (value && typeof value === "object") {
     return Object.fromEntries(
@@ -160,7 +171,7 @@ function parseJson(value: unknown): unknown {
 }
 
 /** One settings section, with credentials and run state removed. */
-function exportSection(section: SettingsSection, raw: unknown): unknown {
+export function exportSection(section: SettingsSection, raw: unknown): unknown {
   const value = scrub(parseJson(raw));
   if (!value || typeof value !== "object" || Array.isArray(value)) return value ?? null;
   const out = { ...(value as Record<string, unknown>) };
@@ -221,8 +232,10 @@ export function buildSettingsExport(input: SettingsExportInput): Record<string, 
       username: source.username?.trim() || null,
       enabled: source.enabled !== false,
       authentication: sourceAuthentication(source, input.decryptToken),
-    }))
-    .sort((a, b) => byText(a.reference, b.reference));
+    }));
+  // Sources stay in the order they were added (listSources), which is stable:
+  // the first one is the primary source the legacy settings copy from, and an
+  // import adds them back in this order.
 
   const settings: Record<string, unknown> = {};
   for (const section of SETTINGS_SECTIONS) {
