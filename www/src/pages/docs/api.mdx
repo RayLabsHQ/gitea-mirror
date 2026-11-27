@@ -271,6 +271,15 @@ Sizes are bytes. `destinationSize` is Git and LFS together as Gitea or Forgejo r
 curl -fsS -H "x-api-key: $KEY" "$URL/api/config/export" -o gitea-mirror-settings.json
 ```
 
+### Import the settings
+
+`POST /api/config/import` reads a settings file back in, like **Import settings** on the Configuration page. The body is `{ "file": ..., "apply": false }`, with the file's JSON as `file`. Without `"apply": true` it changes nothing and returns a `summary` of what would change: `settings` (the changed settings as paths such as `giteaConfig.releaseLimit`), `sources`, `organizations` and `repositories` (each with what changes, and `notFound` for the ones this instance does not have yet), `todo` (tokens to enter, sources to turn on), `skipped` (parts of the file that were not imported) and `destinationLock`. With `"apply": true` it makes the changes and returns the same summary. A file that moves a locked destination answers 409 with `"lock": "destination"` until the body also has `"confirmDestinationChange": true`, and a file this version cannot read answers 400 with the reason in `message` and `details`. It needs a key with write access. [Importing the settings](/docs/configuration/#importing-the-settings) describes what changes and what does not.
+
+```bash
+jq -n --slurpfile file gitea-mirror-settings.json '{file: $file[0], apply: true}' |
+  curl -fsS -H "x-api-key: $KEY" -H "Content-Type: application/json" -d @- "$URL/api/config/import"
+```
+
 ### Run cleanup
 
 `POST /api/cleanup/trigger` runs the [repository cleanup](/docs/cleanup-and-reconcile/) now, with the account's saved cleanup settings, and returns how many orphaned repositories were found and processed, their names, the ones still inside the [wait before acting](/docs/cleanup-and-reconcile/#waiting-before-acting) with the time each will be acted on (`waiting`), whether it was a dry run, and any errors. It answers 409 while a cleanup for the account is already running. `GET /api/cleanup/trigger` returns the cleanup configuration and the last and next run times.

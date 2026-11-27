@@ -15,7 +15,7 @@ Start with the web interface. Reach for environment variables when you want a de
 <img src="/assets/configuration.png" alt="The Configuration page showing the Connections tab, with the Sources card and the destination card" class="dark:hidden" />
 <img src="/assets/configuration_dark.png" alt="The Configuration page showing the Connections tab, with the Sources card and the destination card" class="hidden dark:block" />
 
-The Configuration page is organized into five tabs: **Connections**, **Mirroring**, **Automation**, **Notifications** and **Access**. Settings save as soon as you change them. Adding or editing a source, an SSO provider or an API key happens in its own editor, saved with its own button. **Export settings** at the top downloads them as a file, see [Exporting the settings](#exporting-the-settings).
+The Configuration page is organized into five tabs: **Connections**, **Mirroring**, **Automation**, **Notifications** and **Access**. Settings save as soon as you change them. Adding or editing a source, an SSO provider or an API key happens in its own editor, saved with its own button. **Export settings** at the top downloads them as a file and **Import settings** reads one back, see [Exporting the settings](#exporting-the-settings) and [Importing the settings](#importing-the-settings).
 
 ### Connections
 
@@ -130,7 +130,19 @@ Old links and clones keep working after a move: the destination sends the old ad
 
 It leaves out tokens, passwords, secrets, GitHub App keys, webhook URLs (Slack and Discord put the credential in the URL) and any `user:password@` in a URL, so enter those again on the new instance. It also leaves out what changes as the app runs, such as sync status, errors, sizes, the last and next run times and the database ids, plus user accounts, SSO providers, API keys and OAuth applications.
 
-Nothing in the file depends on when it was made: keys and lists are sorted, so exporting an unchanged instance twice gives the same file and a diff shows only real changes. The repositories found by an import come back with the next import, so they are not listed. Repositories added one at a time are not marked as such, so to keep those too, add `?repositories=all` to list every tracked repository. The same file is available to scripts as `GET /api/config/export`, see [API and API keys](/docs/api/#export-the-settings). The app has no import for it yet.
+Nothing in the file depends on when it was made: keys are sorted, organizations and repositories are sorted by name, and sources keep the order they were added in, so exporting an unchanged instance twice gives the same file and a diff shows only real changes. The repositories found by an import come back with the next import, so they are not listed. Repositories added one at a time are not marked as such, so to keep those too, add `?repositories=all` to list every tracked repository. The same file is available to scripts as `GET /api/config/export`, see [API and API keys](/docs/api/#export-the-settings).
+
+## Importing the settings
+
+**Import settings**, next to Export settings, reads a file made by Export settings back in, on the same instance or a new one. Pick the file and the dialog lists what would change before anything is saved: the settings, the sources to add, and the organizations and repositories whose choices differ. **Import** applies it, and the dialog then lists anything left to do by hand.
+
+- **Settings** in the file replace the ones here, one by one. Settings the file does not mention stay as they are.
+- **Sources** that are not here yet are added. A source that logs in arrives without its token, so it is added turned off: enter the token, password or GitHub App details on the Connections tab and turn it on. A source this instance already has keeps its token; the import only changes its name and whether it is on.
+- **Organizations and repositories** are matched by source and name, and get exactly the choices in the file: included or not, ignored or not, their own destination and their own mirror options. Ones the file does not list are left alone. The import does not add organizations or repositories, so on a new instance: import the file, enter the tokens, run **Import repositories**, then import the file again. Importing the same file twice is safe.
+
+Tokens are never read from a file. Saved tokens stay, except one tied to an address that the file moves to another host, such as a new destination URL: that token is cleared, because it is only ever sent to the address it was saved for, and the dialog asks you to enter it again. The saved webhook URL stays, since the file has none. A destination that is locked because repositories are mirrored to it only changes when you tick **Switch the destination anyway**. Values this version does not accept stop the import and say which ones, and parts of the file that are not settings in this version are listed and skipped.
+
+Environment variables still win at startup: settings seeded from the environment are written again on the next start, see [How environment configuration is applied](/docs/environment-variables/#how-environment-configuration-is-applied). Scripts can import with `POST /api/config/import`, see [API and API keys](/docs/api/#import-the-settings).
 
 ## Schedule intervals
 
