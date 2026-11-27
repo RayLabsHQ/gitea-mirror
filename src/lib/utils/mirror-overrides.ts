@@ -903,9 +903,10 @@ export const MIRROR_OVERRIDE_LABELS: Record<
   mirrorLabels: "Labels",
   mirrorMilestones: "Milestones",
   mirrorSecurityAdvisories: "Security advisories",
-  releaseLimit: "Release limit",
-  releaseAssetLimit: "Release asset limit",
-  prereleaseLimit: "Pre-release limit",
+  // Same words as the release table on the Configuration page.
+  releaseLimit: "Releases to keep",
+  releaseAssetLimit: "Releases with assets",
+  prereleaseLimit: "Pre-releases to keep",
   prereleaseAssetLimit: "Pre-releases with assets",
   releaseType: "Release type",
   releaseIncludeTags: "Include tags",

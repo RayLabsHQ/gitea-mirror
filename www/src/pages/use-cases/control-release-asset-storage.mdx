@@ -34,7 +34,7 @@ The filter runs first, so **Keep latest** counts the releases that match. With *
 
 Some projects publish a pre-release every night and a stable release now and then. With **Keep latest** at 10 the nightly builds take all ten places, and the stable releases never reach Gitea. Turning pre-releases off fixes that but drops the nightly builds entirely.
 
-**Keep latest** in the **Pre-releases** row is the middle ground: how many of the kept releases may be pre-releases. With 10 for all releases and 3 for pre-releases, the mirror keeps the three newest pre-releases and fills the other seven places with the newest stable releases, looking up to 1,000 releases back for them. It stops reading the source as soon as the places are filled. `0` keeps stable releases only, and leaving it empty means pre-releases count like any other release, as before. On the next sync, pre-releases past the cap are removed from Gitea and the newest are kept. In the per organization and per repository dialog the same setting is **Pre-release limit**.
+**Keep latest** in the **Pre-releases** row is the middle ground: how many of the kept releases may be pre-releases. With 10 for all releases and 3 for pre-releases, the mirror keeps the three newest pre-releases and fills the other seven places with the newest stable releases, looking up to 1,000 releases back for them. It stops reading the source as soon as the places are filled. `0` keeps stable releases only, and leaving it empty means pre-releases count like any other release, as before. On the next sync, pre-releases past the cap are removed from Gitea and the newest are kept. In the per organization and per repository dialog the same setting is **Pre-releases to keep**.
 
 ## Keep pre-release notes without their builds
 
