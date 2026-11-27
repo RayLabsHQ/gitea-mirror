@@ -12,9 +12,9 @@ import {
 } from "./destination-kinds";
 
 describe("destination kinds", () => {
-  test("Gitea is the supported default; every other destination is beta", () => {
+  test("only the GitHub and GitLab push targets are still beta", () => {
     expect(isBetaDestinationProvider("gitea")).toBe(false);
-    expect(isBetaDestinationProvider("forgejo")).toBe(true);
+    expect(isBetaDestinationProvider("forgejo")).toBe(false);
     expect(isBetaDestinationProvider("github")).toBe(true);
     expect(isBetaDestinationProvider("gitlab")).toBe(true);
   });

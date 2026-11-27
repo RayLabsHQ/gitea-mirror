@@ -77,7 +77,7 @@ The variable names are historical: `GITHUB_USERNAME` and `GITHUB_TOKEN` hold the
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `SOURCE_PROVIDER` | `github` | Which host repositories are pulled from: `github`, `gitlab`, `gitea` or `git`. `gitea` also covers Forgejo and Codeberg, and `git` is a plain git host. Anything other than `github` is beta. |
+| `SOURCE_PROVIDER` | `github` | Which host repositories are pulled from: `github`, `gitlab`, `gitea` or `git`. `gitea` also covers Forgejo and Codeberg, and `git` is a plain git host. `git` is beta. |
 | `SOURCE_URL` | `https://gitlab.com` or `https://codeberg.org` | Base URL of the GitLab or Gitea / Forgejo instance. Ignored for GitHub, which uses `GH_API_URL`. |
 | `GITLAB_PAGE_SIZE` | `100` | How many projects a GitLab listing asks for at a time, from 10 to 100. Gitea Mirror starts at 100 and drops to 50, 20, then 10 when a page times out, which costs about 30 s per step on every import. Set a lower value for a slow GitLab so it starts there; it still steps down below it. |
 | `GITHUB_USERNAME` | none | Your username on the source host. |
@@ -123,7 +123,7 @@ The `GITEA_*` names are kept for every destination kind, so an existing deployme
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `DESTINATION_PROVIDER` | `gitea` | Which host mirrors are created on: `gitea`, `forgejo`, `github` or `gitlab`. Gitea and Forgejo are pull mirrors; GitHub and GitLab receive pushes of branches and tags from the app. Anything other than `gitea` is beta. |
+| `DESTINATION_PROVIDER` | `gitea` | Which host mirrors are created on: `gitea`, `forgejo`, `github` or `gitlab`. Gitea and Forgejo are pull mirrors; GitHub and GitLab receive pushes of branches and tags from the app. `github` and `gitlab` are beta. |
 | `GITEA_URL` | none | Destination instance URL used for all API and mirroring traffic. Optional for GitHub and GitLab, which default to github.com and gitlab.com; set it for GitHub Enterprise Server or a self-hosted GitLab. |
 | `GITEA_EXTERNAL_URL` | none | Browser-facing URL used for dashboard links, when it differs from `GITEA_URL`. |
 | `GITEA_TOKEN` | none | Destination access token. GitHub push targets need `repo` and `workflow`, plus `delete_repo` if cleanup should delete; GitLab needs `api` and `write_repository`. |

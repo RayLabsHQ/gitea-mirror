@@ -13,9 +13,15 @@ export type SourceProviderKind = (typeof SOURCE_PROVIDER_KINDS)[number];
 
 export const DEFAULT_SOURCE_PROVIDER: SourceProviderKind = "github";
 
-/** Sources other than GitHub are beta: they work end to end but have had less time in the field. */
+/**
+ * Sources still in beta: they work end to end but have had little time in the
+ * field. GitLab and Gitea / Forgejo left beta after three months of use and
+ * fixes (#506, #440); Git URL arrived in 3.52.
+ */
+const BETA_SOURCE_PROVIDERS: readonly SourceProviderKind[] = ["git"];
+
 export function isBetaSourceProvider(kind: SourceProviderKind): boolean {
-  return kind !== DEFAULT_SOURCE_PROVIDER;
+  return BETA_SOURCE_PROVIDERS.includes(kind);
 }
 
 /**

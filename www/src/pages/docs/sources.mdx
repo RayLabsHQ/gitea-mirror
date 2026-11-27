@@ -1,7 +1,7 @@
 ---
 layout: '../../layouts/DocsLayout.astro'
 title: Sources
-description: Where Gitea Mirror pulls repositories from. GitHub is the default; GitLab, Gitea or Forgejo, and plain git URLs are available as beta sources.
+description: Where Gitea Mirror pulls repositories from. GitHub is the default; GitLab and Gitea or Forgejo work too, and plain git URLs are available as a beta source.
 ---
 
 # Sources
@@ -11,11 +11,11 @@ A source is the host Gitea Mirror pulls repositories from. Each account can conn
 | Source | Covers | Default instance |
 | --- | --- | --- |
 | GitHub | github.com and GitHub Enterprise | `https://github.com` |
-| GitLab (beta) | gitlab.com and self-hosted GitLab | `https://gitlab.com` |
-| Gitea / Forgejo (beta) | Codeberg and any self-hosted Gitea or Forgejo | `https://codeberg.org` |
+| GitLab | gitlab.com and self-hosted GitLab | `https://gitlab.com` |
+| Gitea / Forgejo | Codeberg and any self-hosted Gitea or Forgejo | `https://codeberg.org` |
 | Git URL (beta) | Any host that can be cloned over http(s): cgit, gitweb, Gitflic, kernel.org and the like | none, the host is required |
 
-GitHub to Gitea is the supported path. GitLab, Gitea / Forgejo and Git URL carry a BETA pill in the dropdown: they are tested end to end against real hosts, but have had less time in the field. Sources other than GitHub also carry a short note under the dropdown saying what they cannot mirror.
+GitHub, GitLab and Gitea / Forgejo are supported. Git URL carries a BETA pill in the dropdown: it is tested end to end against real hosts, but has had little time in the field. Sources other than GitHub also carry a short note under the dropdown saying what they cannot mirror.
 
 <img src="/assets/sources.png" alt="The Add source editor on the Sources card, with the Source dropdown, instance URL, username and token fields" class="dark:hidden" />
 <img src="/assets/sources_dark.png" alt="The Add source editor on the Sources card, with the Source dropdown, instance URL, username and token fields" class="hidden dark:block" />

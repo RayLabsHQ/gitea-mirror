@@ -8,7 +8,7 @@ const faqs = [
   },
   {
     question: "Which hosts can it mirror from and to?",
-    answer: "Sources: GitHub is the default. GitLab and Gitea or Forgejo, which covers Codeberg, are available in beta. Destinations: Gitea is the default. Forgejo, GitHub and GitLab are available in beta. Each account uses one source and one destination at a time. GitHub to Gitea is the supported path; every other combination works end to end but has had less time in the field, so it carries a beta label in the dropdowns.",
+    answer: "Sources: GitHub, GitLab, and Gitea or Forgejo, which covers Codeberg, plus plain git hosts in beta. Destinations: Gitea and Forgejo as pull mirrors, plus GitHub and GitLab as push targets in beta. An account can have several sources and one destination. Issues and pull requests are read from GitHub only, and releases from GitHub, Gitea and Forgejo.",
     href: "/docs/sources/",
     linkText: "Read about sources and destinations"
   },

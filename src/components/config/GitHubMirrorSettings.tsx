@@ -1203,7 +1203,6 @@ export function GitHubMirrorSettings({
             description={
               isPushTarget ? pushTargetReason : "Requires LFS enabled on your Gitea server and Git v2.1.2+"
             }
-            badge="BETA"
             disabled={isPushTarget}
             checked={mirrorOptions.mirrorLFS}
             onCheckedChange={(checked) => handleMirrorChange('mirrorLFS', checked)}
