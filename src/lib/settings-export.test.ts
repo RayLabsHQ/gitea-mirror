@@ -17,7 +17,15 @@ describe("withoutUserInfo", () => {
     // A space in a password parses, so it must go too.
     ["https://bob:pa ss@gitea.example.com", "https://gitea.example.com"],
     ["ssh://git@host.example.com:22/repo.git", "ssh://host.example.com:22/repo.git"],
-    ["HTTPS://Bob:Secret@Gitea.Example.com", "HTTPS://Gitea.Example.com"],
+    // Rebuilt from the parse, so host and scheme come out normalized.
+    ["HTTPS://Bob:Secret@Gitea.Example.com", "https://gitea.example.com"],
+    // Forms a URL parser accepts that a string match would miss.
+    ["  https://bob:secret@gitea.example.com", "https://gitea.example.com"],
+    ["https:///bob:secret@gitea.example.com", "https://gitea.example.com"],
+    ["https:\\\\bob:secret@gitea.example.com", "https://gitea.example.com"],
+    ["https:bob:secret@gitea.example.com", "https://gitea.example.com"],
+    ["https://bob:se\tcr\net@gitea.example.com", "https://gitea.example.com"],
+    ["https://bob:secret@gitea.example.com/", "https://gitea.example.com/"],
   ])("%s", (input, expected) => {
     expect(withoutUserInfo(input)).toBe(expected);
   });
@@ -29,6 +37,8 @@ describe("withoutUserInfo", () => {
       "https://gitea.example.com/a?mail=a@b.c",
       "https://gitea.example.com/#a@b",
       "alex@example.com",
+      "mailto:alex@example.com",
+      "note: ask alex@example.com",
       "git@github.com:octo/repo.git",
       "0 22 * * *",
       "",
@@ -43,6 +53,38 @@ describe("withoutUserInfo", () => {
     for (const password of ["pa/ss", "pa?ss", "pa#ss", "pa\\ss"]) {
       const out = withoutUserInfo(`https://bob:${password}@gitea.example.com/x`);
       expect(out).toBe("https://gitea.example.com/x");
+    }
+  });
+
+  test("no user info survives any form the parser accepts", () => {
+    const forms = (userinfo: string) => [
+      `https://${userinfo}@h.example.com/p`,
+      ` \thttps://${userinfo}@h.example.com`,
+      `https:////${userinfo}@h.example.com`,
+      `https:\\${userinfo}@h.example.com`,
+      `https:/\\/${userinfo}@h.example.com`,
+      `https:${userinfo}@h.example.com`,
+      `HTTP://${userinfo}@h.example.com:8080`,
+      `ws://${userinfo}@h.example.com`,
+      `ssh://${userinfo}@h.example.com/r.git`,
+    ];
+    for (const userinfo of ["zed:hunter2", "zed:hun@ter2", "zed:hun ter2", "zed:hun\nter2", "zed", ":hunter2"]) {
+      for (const input of forms(userinfo)) {
+        let before: URL | null = null;
+        try {
+          before = new URL(input);
+        } catch {
+          // Covered by the fallback test.
+        }
+        if (!before) continue;
+        const out = withoutUserInfo(input);
+        const after = new URL(out);
+        expect(after.username).toBe("");
+        expect(after.password).toBe("");
+        expect(out).not.toContain("zed");
+        expect(out).not.toContain("hun");
+        expect(after.host).toBe(before.host);
+      }
     }
   });
 

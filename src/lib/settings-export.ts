@@ -81,31 +81,43 @@ export interface SettingsExportInput {
   decryptToken?: (stored: string) => string;
 }
 
-const SPECIAL_SCHEMES = new Set(["http:", "https:", "ws:", "wss:", "ftp:", "file:"]);
+/** Something that starts like a URL: optional leading space, then a scheme and a colon. */
+const SCHEME_PREFIX = /^[\s\x00-\x1f]*[a-z][a-z0-9+.-]*:[/\\]*/i;
 
 /**
- * Drop the user:password part of a URL, keeping everything else as written.
+ * Drop the user:password part of a URL.
  *
- * Cuts where a URL parser does: at the last "@" before the path, query or
- * fragment, so a password holding "@" or a space goes too. A string that
- * does not parse can still hold a password with "/", "?" or "#" in it, so
- * there the cut is at the last "@" anywhere.
+ * The URL parser decides what the user info is, since that is what a
+ * request made with the value would send: it takes the last "@", accepts
+ * spaces, extra or missing slashes and backslashes, and drops tabs and
+ * newlines. A URL that carries user info is rebuilt from the parse without
+ * it (so it comes out normalized); anything else is returned as written. A
+ * string that starts like a URL but does not parse can still hold a
+ * password with "/", "?" or "#" in it, so there everything after the scheme
+ * up to the last "@" goes.
  */
 export function withoutUserInfo(value: string): string {
-  const scheme = /^([a-z][a-z0-9+.-]*):\/\//i.exec(value);
-  if (!scheme) return value;
-  const rest = value.slice(scheme[0].length);
-  let parses = true;
+  if (!value.includes("@") || !SCHEME_PREFIX.test(value)) return value;
+  let url: URL | null = null;
   try {
-    new URL(value);
+    url = new URL(value);
   } catch {
-    parses = false;
+    // Handled below.
   }
-  const delimiters = SPECIAL_SCHEMES.has(`${scheme[1].toLowerCase()}:`) ? /[/?#\\]/ : /[/?#]/;
-  const end = parses ? rest.search(delimiters) : -1;
-  const authority = end === -1 ? rest : rest.slice(0, end);
-  const at = authority.lastIndexOf("@");
-  return at === -1 ? value : scheme[0] + rest.slice(at + 1);
+  if (url) {
+    if (!url.username && !url.password) return value;
+    url.username = "";
+    url.password = "";
+    let out = url.href;
+    // Keep "https://host" as written instead of the parser's "https://host/".
+    if (url.pathname === "/" && !url.search && !url.hash && !value.trim().endsWith("/") && out.endsWith("/")) {
+      out = out.slice(0, -1);
+    }
+    return out;
+  }
+  const prefix = SCHEME_PREFIX.exec(value)![0];
+  const rest = value.slice(prefix.length);
+  return prefix.trimStart() + rest.slice(rest.lastIndexOf("@") + 1);
 }
 
 /** A copy with credentials removed and URLs cleaned, at any depth. */
