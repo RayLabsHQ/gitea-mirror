@@ -4,7 +4,7 @@
  * but are no longer present in GitHub (e.g., unstarred repositories)
  */
 
-import { db, configs, repositories } from '@/lib/db';
+import { db, configs, organizations, repositories } from '@/lib/db';
 import { eq, and, or, sql, not, inArray } from 'drizzle-orm';
 import {
   describeSource,
@@ -22,6 +22,7 @@ import { getDecryptedGiteaToken } from '@/lib/utils/config-encryption';
 import { publishEvent } from '@/lib/events';
 import { triggerRepositoryCleanupNotification, triggerSourceMissingNotification } from '@/lib/notification-service';
 import { isMirrorableGitHubRepo } from '@/lib/repo-eligibility';
+import type { GitRepo } from '@/types/Repository';
 
 let cleanupInterval: NodeJS.Timeout | null = null;
 let isCleanupRunning = false;
@@ -83,6 +84,60 @@ export function planOrphanedRepoAction(
     return { gitea: deleteFromGitea ? "archive" : "none", db: "archive" };
   }
   return { gitea: deleteFromGitea ? "delete" : "none", db: "delete" };
+}
+
+/**
+ * The organizations a public only source lists during cleanup (#589): the
+ * ones added to that source that still hold one of its repositories. Any
+ * other repository on the source (one added by URL, or one in an
+ * organization that was never added) is checked on its own, which is
+ * cheaper than listing a whole organization to vouch for a single row.
+ */
+export function organizationsToListForPublicSource(
+  sourceId: string,
+  sourceRepos: Array<{ sourceId?: string | null; organization?: string | null }>,
+  organizationRows: Array<{ sourceId?: string | null; name: string; normalizedName?: string | null }>
+): string[] {
+  const held = new Set(
+    sourceRepos
+      .filter(repo => repo.sourceId === sourceId && repo.organization)
+      .map(repo => repo.organization!.toLowerCase())
+  );
+  const names = new Map<string, string>();
+  for (const org of organizationRows) {
+    if (org.sourceId !== sourceId) continue;
+    const key = (org.normalizedName || org.name).toLowerCase();
+    if (held.has(key) && !names.has(key)) names.set(key, org.name);
+  }
+  return [...names.values()];
+}
+
+/**
+ * What a public only source (no token) can vouch for in one pass (#589).
+ * It has no account, so the personal, collaborator and starred listings are
+ * skipped, the same way import and the scheduler skip them. The given
+ * organizations are listed instead. A failed organization listing is logged
+ * and leaves that organization's repositories to the direct check, which
+ * only treats a clean 404 as gone.
+ */
+export async function listPublicOnlySourceRepositories(
+  provider: { listOrganizationRepositories(name: string): Promise<GitRepo[]> },
+  organizationNames: string[],
+  sourceName: string
+): Promise<GitRepo[]> {
+  const repos: GitRepo[] = [];
+  for (const name of organizationNames) {
+    try {
+      repos.push(...(await provider.listOrganizationRepositories(name)));
+    } catch (error) {
+      console.warn(
+        `[Repository Cleanup] Could not list organization ${name} on source ${sourceName}, checking its repositories one by one instead: ${
+          error instanceof Error ? error.message : String(error)
+        }`
+      );
+    }
+  }
+  return repos;
 }
 
 /**
@@ -164,6 +219,16 @@ async function scanForOrphanedRepositories(config: any): Promise<OrphanScan> {
       return true;
     });
 
+    // Public only sources list the organizations added to them (#589).
+    const organizationRows = await db
+      .select({
+        sourceId: organizations.sourceId,
+        name: organizations.name,
+        normalizedName: organizations.normalizedName,
+      })
+      .from(organizations)
+      .where(eq(organizations.userId, userId));
+
     const orphanedById = new Map<string, any>();
     // Only a clean sighting clears the wait (#549); an error proves nothing.
     const seenAgainById = new Map<string, any>();
@@ -181,26 +246,45 @@ async function scanForOrphanedRepositories(config: any): Promise<OrphanScan> {
       // The source host with its token decrypted (GitHub honors GH_API_URL and tracks rate limits)
       const sourceProvider = createSourceProviderFromSource(source, { userId });
       const sourceConnection = sourceProvider.connection;
+      // No token means no account (#589): there is nothing personal to list,
+      // and a listing for a blank user fails on every run.
+      const publicOnly = (sourceConnection.token ?? '').trim() === '';
 
       let allGithubRepos: any[] = [];
 
       try {
-        // Fetch source data. Always include collaborator repos and bypass the
-        // organization allowlist here regardless of the user's import filters,
-        // otherwise repos previously mirrored as a collaborator or from an org the
-        // user later removed from the allowlist would be flagged as orphaned and
-        // archived/deleted as soon as the user narrows those filters.
-        const [basicAndForkedRepos, starredRepos] = await Promise.all([
-          sourceProvider.listRepositories(config, {
-            includeCollaboratorReposOverride: true,
-            includeAllOrgsOverride: true,
-          }),
-          config.githubConfig?.includeStarred
-            ? sourceProvider.listStarredRepositories(config)
-            : Promise.resolve([]),
-        ]);
+        if (publicOnly) {
+          const organizationNames = organizationsToListForPublicSource(
+            source.id,
+            sourceOwnedRepos.filter(repo => repo.status !== 'archived' && !repo.isArchived),
+            organizationRows
+          );
+          console.log(
+            `[Repository Cleanup] Source ${source.name} is public only: listing ${organizationNames.length} organization(s) added to it and checking its other repositories one by one`
+          );
+          allGithubRepos = await listPublicOnlySourceRepositories(
+            sourceProvider,
+            organizationNames,
+            source.name
+          );
+        } else {
+          // Fetch source data. Always include collaborator repos and bypass the
+          // organization allowlist here regardless of the user's import filters,
+          // otherwise repos previously mirrored as a collaborator or from an org the
+          // user later removed from the allowlist would be flagged as orphaned and
+          // archived/deleted as soon as the user narrows those filters.
+          const [basicAndForkedRepos, starredRepos] = await Promise.all([
+            sourceProvider.listRepositories(config, {
+              includeCollaboratorReposOverride: true,
+              includeAllOrgsOverride: true,
+            }),
+            config.githubConfig?.includeStarred
+              ? sourceProvider.listStarredRepositories(config)
+              : Promise.resolve([]),
+          ]);
 
-        allGithubRepos = [...basicAndForkedRepos, ...starredRepos];
+          allGithubRepos = [...basicAndForkedRepos, ...starredRepos];
+        }
       } catch (githubError: any) {
         // Handle source API errors gracefully
         console.warn(`[Repository Cleanup] Source API error for user ${userId} on source ${source.name}: ${githubError.message}`);
@@ -254,6 +338,11 @@ async function scanForOrphanedRepositories(config: any): Promise<OrphanScan> {
         // if a starred repo is orphaned - skip it to prevent data loss
         if (repo.isStarred && !config.githubConfig?.includeStarred) {
           console.log(`[Repository Cleanup] Skipping starred repo ${repo.fullName} - starred repos not being fetched from the source`);
+          return false;
+        }
+        // Stars belong to an account; a public only source has none to ask.
+        if (repo.isStarred && publicOnly) {
+          console.log(`[Repository Cleanup] Skipping starred repo ${repo.fullName} - source ${source.name} has no account to check stars with`);
           return false;
         }
 

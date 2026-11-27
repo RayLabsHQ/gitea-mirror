@@ -35,13 +35,16 @@ function applyMigrations(): void {
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const LAST_RUN = new Date("2026-11-20T00:00:00Z");
-const NEXT_RUN = new Date("2026-11-27T00:00:00Z");
+// Whole seconds, a week either side of now: the next run must stay in the future.
+const NOW_S = Math.floor(Date.now() / 1000) * 1000;
+const LAST_RUN = new Date(NOW_S - 7 * DAY_MS);
+const NEXT_RUN = new Date(NOW_S + 7 * DAY_MS);
 
 /** The fake source host: lists nothing and finds nothing, so a repository from it is gone. */
 let listRepositories: () => Promise<any[]> = async () => [];
 const provider = {
-  connection: {},
+  // A token, so cleanup takes the account listing (no token is the public only path, #589).
+  connection: { token: "token" },
   listRepositories: () => listRepositories(),
   listStarredRepositories: async () => [],
   getRepository: async () => null,

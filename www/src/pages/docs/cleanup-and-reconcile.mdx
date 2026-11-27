@@ -54,8 +54,9 @@ On Gitea and Forgejo, cleanup only archives or deletes a repository it has confi
 Cleanup is careful about what it calls an orphan, because the cost of a false positive is an archived or deleted backup.
 
 - It first lists everything the source token can see, including collaborator repositories and every organization regardless of the import filters, so narrowing a filter later cannot make old mirrors look orphaned.
+- A public only source, one without a token, has no account to list. Cleanup lists the organizations you added to it instead, and every other repository on it, such as one added by URL, goes straight to the direct lookup below. Its starred repositories are left alone. On GitHub these lookups count against the anonymous limit of 60 requests an hour.
 - A repository missing from that list is only a candidate. It counts as orphaned when a direct lookup of that repository on the source returns a clean 404 as well. Any other outcome, including a rate limit, a network error or a 5xx, leaves it alone.
-- If the source API cannot be reached at all, or answers 403 or 404 for the account itself, the whole run is skipped.
+- If the source API cannot be reached at all, or answers 403 or 404 for the account itself, that source is skipped until the next run.
 - Repositories imported from a previous source, and rows mirrored to a previous destination, are not touched.
 
 ## Database maintenance
