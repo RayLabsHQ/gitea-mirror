@@ -326,8 +326,8 @@ export function GitHubConfigForm({
               {provider === "github"
                 ? "Where your repositories are pulled from"
                 : provider === "gitlab"
-                  ? "Beta. Code, tags, wiki and LFS are mirrored. Issues, merge requests and releases need a GitHub source."
-                  : "Beta. Code, tags, releases, wiki and LFS are mirrored. Issues and pull requests need a GitHub source."}
+                  ? "Code, tags, wiki and LFS are mirrored. Issues, merge requests and releases need a GitHub source."
+                  : "Code, tags, releases, wiki and LFS are mirrored. Issues and pull requests need a GitHub source."}
             </p>
             {sourceLock?.locked && (
               <HostLockNotice

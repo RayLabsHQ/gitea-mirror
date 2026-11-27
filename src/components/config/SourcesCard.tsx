@@ -131,10 +131,10 @@ function providerMetaFor(provider: SourceProvider): SourceProviderMeta {
 function providerHelp(provider: SourceProvider): string {
   if (provider === "github") return "Where your repositories are pulled from";
   if (provider === "gitlab")
-    return "Beta. Code, tags, wiki and LFS are mirrored. Issues, merge requests and releases need a GitHub source.";
+    return "Code, tags, wiki and LFS are mirrored. Issues, merge requests and releases need a GitHub source.";
   if (provider === "git")
     return "Beta. Any host that can be cloned over http(s). Add each repository by its clone URL on the Repositories page. Branches and tags are mirrored; there is nothing to list, so no auto-import, releases or issues.";
-  return "Beta. Code, tags, releases, wiki and LFS are mirrored. Issues and pull requests need a GitHub source.";
+  return "Code, tags, releases, wiki and LFS are mirrored. Issues and pull requests need a GitHub source.";
 }
 
 function sourceHost(source: SourceApiRecord): string {

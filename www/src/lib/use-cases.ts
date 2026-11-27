@@ -115,18 +115,18 @@ export const useCases: UseCase[] = [
   {
     slug: 'mirror-gitlab-to-gitea',
     title: 'Mirror GitLab Projects to Gitea',
-    summary: 'Point the source at gitlab.com or your own GitLab (beta) and keep projects, groups and subgroups mirrored into Gitea on a schedule.',
+    summary: 'Point the source at gitlab.com or your own GitLab and keep projects, groups and subgroups mirrored into Gitea on a schedule.',
     painPoint: 'Projects that live on GitLab were out of reach for a tool that only spoke GitHub, and hand-made pull mirrors do not notice new projects.',
     outcome: 'GitLab projects are discovered through the API, mirrored with branches, tags, wiki and LFS, and kept in sync like any GitHub repository.',
-    tags: ['GitLab', 'Sources', 'Beta'],
+    tags: ['GitLab', 'Sources'],
   },
   {
     slug: 'backup-codeberg-forgejo-repositories',
     title: 'Back Up Codeberg and Forgejo Repositories',
-    summary: 'Use a Gitea or Forgejo instance, Codeberg included, as the source (beta), and Forgejo as a named destination for the other direction.',
+    summary: 'Use a Gitea or Forgejo instance, Codeberg included, as the source, and Forgejo as a named destination for the other direction.',
     painPoint: 'Code on Codeberg or on a second Gitea had no place in a GitHub-only backup routine, and Forgejo had to pretend to be Gitea.',
     outcome: 'Any Gitea or Forgejo host can be the source, Forgejo is a destination in its own right, and each row remembers where it was mirrored.',
-    tags: ['Codeberg', 'Forgejo', 'Beta'],
+    tags: ['Codeberg', 'Forgejo'],
   },
   {
     slug: 'mirror-to-github-or-gitlab',

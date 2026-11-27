@@ -39,8 +39,8 @@ Open http://localhost:4321 and create an account; the first one becomes the admi
 ## Features
 
 - Mirror your public, private and starred repositories and whole organizations, including public organizations you are not a member of
-- Sources: GitHub, GitHub Enterprise and GitHub Apps, plus GitLab, Gitea, Forgejo and plain git hosts in beta ([Sources](https://gitea-mirror.raylabs.io/docs/sources/))
-- Destinations: Gitea as pull mirrors, plus Forgejo, and GitHub or GitLab as push targets, in beta ([Destinations](https://gitea-mirror.raylabs.io/docs/destinations/))
+- Sources: GitHub, GitHub Enterprise and GitHub Apps, GitLab, Gitea and Forgejo, plus plain git hosts in beta ([Sources](https://gitea-mirror.raylabs.io/docs/sources/))
+- Destinations: Gitea and Forgejo as pull mirrors, plus GitHub or GitLab as push targets in beta ([Destinations](https://gitea-mirror.raylabs.io/docs/destinations/))
 - Issues, pull requests (as issues), labels, milestones, releases with assets, wiki and Git LFS, with filters and limits per organization and repository
 - Mirror strategies to keep the source's structure, use one organization, or put everything under your user, plus a destination per organization or repository
 - Scheduled syncs, discovery of new repositories, and cleanup that archives mirrors whose source is gone ([Cleanup and reconcile](https://gitea-mirror.raylabs.io/docs/cleanup-and-reconcile/))

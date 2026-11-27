@@ -19,9 +19,15 @@ export type PushDestinationKind = (typeof PUSH_DESTINATION_KINDS)[number];
 
 export const DEFAULT_DESTINATION_PROVIDER: DestinationProviderKind = "gitea";
 
-/** Destinations other than Gitea are beta: they work end to end but have had less time in the field. */
+/**
+ * Destinations still in beta: the push targets, which overwrite the copy on
+ * every sync and have had little use in the field. Forgejo shares Gitea's API
+ * and left beta in 3.59.
+ */
+const BETA_DESTINATION_PROVIDERS: readonly DestinationProviderKind[] = ["github", "gitlab"];
+
 export function isBetaDestinationProvider(kind: DestinationProviderKind): boolean {
-  return kind !== DEFAULT_DESTINATION_PROVIDER;
+  return BETA_DESTINATION_PROVIDERS.includes(kind);
 }
 
 export const DESTINATION_PROVIDER_LABELS: Record<DestinationProviderKind, string> = {

@@ -138,8 +138,8 @@ export function Hero() {
           Preserve issues, PRs, releases, and wiki in your own Gitea server.
         </p>
         <p className="mt-3 text-sm sm:text-base text-muted-foreground max-w-2xl mx-auto px-4 z-20">
-          It also mirrors from GitLab, Gitea and Forgejo, including Codeberg, and can push to GitHub, GitLab and Forgejo.
-          Those paths are in beta. GitHub to Gitea is the supported default.
+          It also mirrors from GitLab, Gitea and Forgejo, including Codeberg, into Gitea or Forgejo.
+          Pushing to GitHub or GitLab is in beta.
         </p>
 
         <div className="mt-6 sm:mt-8 flex flex-wrap items-center justify-center gap-3 text-xs sm:text-sm text-muted-foreground px-4 z-20">
@@ -157,7 +157,7 @@ export function Hero() {
           </div>
           <div className="flex items-center gap-2 px-3 py-1 rounded-full bg-accent-teal/10 text-accent-teal">
             <GitBranch className="w-3 h-3 sm:w-4 sm:h-4" />
-            <span className="font-medium">GitLab, Forgejo and Codeberg in beta</span>
+            <span className="font-medium">GitLab, Forgejo and Codeberg too</span>
           </div>
         </div>
 

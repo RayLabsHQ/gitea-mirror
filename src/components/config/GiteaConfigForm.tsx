@@ -325,7 +325,7 @@ export function GiteaConfigForm({ config, setConfig, onAutoSave, isAutoSaving, g
               {isPushTarget
                 ? `${providerLabel} has no pull mirror API, so this app keeps a bare clone of each source repository and pushes its branches and tags there.`
                 : provider === "forgejo"
-                  ? "Beta. Where mirrors are created. Forgejo shares Gitea's API, so everything Gitea supports works here."
+                  ? "Where mirrors are created. Forgejo shares Gitea's API, so everything Gitea supports works here."
                   : "Where mirrors are created."}
             </p>
             {destinationLock?.locked && (

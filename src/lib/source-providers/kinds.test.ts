@@ -13,10 +13,11 @@ import {
 } from "./kinds";
 
 describe("isBetaSourceProvider", () => {
-  test("GitHub is the supported default; every other source is beta", () => {
+  test("only the Git URL source is still beta", () => {
     expect(isBetaSourceProvider("github")).toBe(false);
-    expect(isBetaSourceProvider("gitlab")).toBe(true);
-    expect(isBetaSourceProvider("gitea")).toBe(true);
+    expect(isBetaSourceProvider("gitlab")).toBe(false);
+    expect(isBetaSourceProvider("gitea")).toBe(false);
+    expect(isBetaSourceProvider("git")).toBe(true);
   });
 });
 
