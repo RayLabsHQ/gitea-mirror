@@ -15,7 +15,7 @@ Start with the web interface. Reach for environment variables when you want a de
 <img src="/assets/configuration.png" alt="The Configuration page showing the Connections tab, with the Sources card and the destination card" class="dark:hidden" />
 <img src="/assets/configuration_dark.png" alt="The Configuration page showing the Connections tab, with the Sources card and the destination card" class="hidden dark:block" />
 
-The Configuration page is organized into five tabs: **Connections**, **Mirroring**, **Automation**, **Notifications** and **Access**. Settings save as soon as you change them. Adding or editing a source, an SSO provider or an API key happens in its own editor, saved with its own button.
+The Configuration page is organized into five tabs: **Connections**, **Mirroring**, **Automation**, **Notifications** and **Access**. Settings save as soon as you change them. Adding or editing a source, an SSO provider or an API key happens in its own editor, saved with its own button. **Export settings** at the top downloads them as a file, see [Exporting the settings](#exporting-the-settings).
 
 ### Connections
 
@@ -118,6 +118,19 @@ A new strategy, organization destination or starred setting applies to repositor
 **Move** checks each mirror again right before moving it, and moves only the ones whose target is still the one you saw. Each mirror is transferred, and renamed when needed, with its history, issues and mirror settings; nothing is deleted or downloaded again. The record is updated after every step, so a failure halfway leaves Gitea Mirror pointing at wherever the mirror ended up. The run stops after three destination errors in a row. You can close the dialog while it runs; the bar and the card show the progress, the bar says how the move went when it ends, and the [activity log](/docs/repositories-and-organizations/#activity-log) gets a line per mirror.
 
 Old links and clones keep working after a move: the destination sends the old address on to the new one until another repository takes that name. Access given through the old organization's teams does not come along, and organizations left empty stay on the destination.
+
+## Exporting the settings
+
+**Export settings** at the top of the Configuration page downloads the settings as a JSON file, for a backup you can keep next to your other configuration or in git. It holds what a new instance needs to be set up the same way:
+
+- the sources, with their provider, URL, username, whether they are on, and how they log in (`token`, `github-app`, `password` or `none`);
+- every setting on the Configuration page, under the names they are stored with (`githubConfig`, `giteaConfig`, `scheduleConfig`, `cleanupConfig`, `notificationConfig`, `include` and `exclude`);
+- every organization, with its source, whether it is included or ignored, its destination and its own mirror options;
+- the repositories that have a choice of their own: ignored ones, ones with their own destination, and ones with their own mirror options.
+
+It leaves out tokens, passwords, secrets, GitHub App keys, webhook URLs (Slack and Discord put the credential in the URL) and any `user:password@` in a URL, so enter those again on the new instance. It also leaves out what changes as the app runs, such as sync status, errors, sizes, the last and next run times and the database ids, plus user accounts, SSO providers, API keys and OAuth applications.
+
+Nothing in the file depends on when it was made: keys and lists are sorted, so exporting an unchanged instance twice gives the same file and a diff shows only real changes. The repositories found by an import come back with the next import, so they are not listed. Repositories added one at a time are not marked as such, so to keep those too, add `?repositories=all` to list every tracked repository. The same file is available to scripts as `GET /api/config/export`, see [API and API keys](/docs/api/#export-the-settings). The app has no import for it yet.
 
 ## Schedule intervals
 

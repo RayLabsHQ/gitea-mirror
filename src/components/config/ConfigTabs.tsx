@@ -25,7 +25,7 @@ import type {
 import { Button } from '../ui/button';
 import { useAuth } from '@/hooks/useAuth';
 import { apiRequest, showErrorToast } from '@/lib/utils';
-import { RefreshCw } from 'lucide-react';
+import { Download, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import { Skeleton } from '@/components/ui/skeleton';
 import { invalidateConfigCache } from '@/hooks/useConfigStatus';
@@ -846,6 +846,18 @@ export function ConfigTabs() {
             mirroring.
           </p>
         </div>
+        {/* A JSON copy of the settings without tokens (#587). */}
+        <Button
+          asChild
+          variant="outline"
+          size="sm"
+          title="Download the settings as JSON, without tokens or passwords"
+        >
+          <a href={withBase('/api/config/export')} download>
+            <Download className="mr-2 h-4 w-4" />
+            Export settings
+          </a>
+        </Button>
       </div>
 
       {/* Content section - Tabs layout */}
