@@ -40,6 +40,7 @@ import {
   hasMirrorOverrides,
   mirrorOptionsToFlags,
   normalizeIssueState,
+  normalizePrereleaseAssetLimit,
   normalizePrereleaseLimit,
   normalizeReleaseAssetLimit,
   normalizeReleaseLimit,
@@ -204,6 +205,8 @@ export default function RepositoryTable({
     if (orgReleaseAssetLimit !== undefined) globals.releaseAssetLimit = orgReleaseAssetLimit;
     const orgPrereleaseLimit = normalizePrereleaseLimit(orgOverrides.prereleaseLimit);
     if (orgPrereleaseLimit !== undefined) globals.prereleaseLimit = orgPrereleaseLimit;
+    const orgPrereleaseAssetLimit = normalizePrereleaseAssetLimit(orgOverrides.prereleaseAssetLimit);
+    if (orgPrereleaseAssetLimit !== undefined) globals.prereleaseAssetLimit = orgPrereleaseAssetLimit;
     const orgReleaseType = normalizeReleaseType(orgOverrides.releaseType);
     if (orgReleaseType !== undefined) globals.releaseType = orgReleaseType;
     const orgIncludeTags = normalizeReleaseTagPatterns(orgOverrides.releaseIncludeTags);

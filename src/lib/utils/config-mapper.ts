@@ -21,6 +21,7 @@ import { normalizeStarredReposMode } from "@/lib/utils/starred-destination";
 import {
   DEFAULT_ISSUE_STATE,
   normalizeIssueState,
+  normalizePrereleaseAssetLimit,
   normalizePrereleaseLimit,
   normalizeReleaseAssetLimit,
   normalizeReleaseTagPatterns,
@@ -183,6 +184,8 @@ export function mapUiToDbConfig(
     releaseAssetLimit: normalizeReleaseAssetLimit(mirrorOptions.releaseAssetLimit) ?? null,
     // Same for the pre-release limit: null means no separate limit.
     prereleaseLimit: normalizePrereleaseLimit(mirrorOptions.prereleaseLimit) ?? null,
+    // And the pre-release asset limit (#588): null means no separate limit.
+    prereleaseAssetLimit: normalizePrereleaseAssetLimit(mirrorOptions.prereleaseAssetLimit) ?? null,
     // Opt-in pruning: only ever a plain boolean, so an absent switch stores the
     // safe default (never delete what the destination already has).
     pruneOldReleaseAssets: mirrorOptions.pruneOldReleaseAssets === true,
@@ -271,6 +274,7 @@ export function mapDbToUiConfig(dbConfig: any): {
     releaseLimit: dbConfig.giteaConfig?.releaseLimit || 10,
     releaseAssetLimit: normalizeReleaseAssetLimit(dbConfig.giteaConfig?.releaseAssetLimit) ?? null,
     prereleaseLimit: normalizePrereleaseLimit(dbConfig.giteaConfig?.prereleaseLimit) ?? null,
+    prereleaseAssetLimit: normalizePrereleaseAssetLimit(dbConfig.giteaConfig?.prereleaseAssetLimit) ?? null,
     pruneOldReleaseAssets: dbConfig.giteaConfig?.pruneOldReleaseAssets === true,
     releaseType: normalizeReleaseType(dbConfig.giteaConfig?.releaseType) ?? DEFAULT_RELEASE_TYPE,
     releaseIncludeTags: normalizeReleaseTagPatterns(dbConfig.giteaConfig?.releaseIncludeTags) ?? [],

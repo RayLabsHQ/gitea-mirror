@@ -1438,3 +1438,121 @@ describe.skipIf(!isChild)("pruning release assets past the asset limit", () => {
     expect(storageRecords.at(-1)?.summary).toEqual({ count: 3, bytes: 15 });
   });
 });
+
+describe.skipIf(!isChild)("pre-releases with assets (#588)", () => {
+  const withAsset = (tag: string, prerelease: boolean) =>
+    giteaRelease(tag, {
+      prerelease,
+      assets: [
+        { id: 1, name: `${tag}.bin`, size: 4, browser_download_url: `${SOURCE_URL}/attachments/${tag}` },
+      ],
+    });
+
+  it("uploads assets for the newest pre-releases within the cap, notes for every release", async () => {
+    const world = fakeWorld({
+      sourceReleases: [
+        withAsset("v3.0.0-rc3", true),
+        withAsset("v3.0.0-rc2", true),
+        withAsset("v3.0.0-rc1", true),
+        withAsset("v2.1.0", false),
+        withAsset("v2.1.0-rc1", true),
+        withAsset("v2.0.0", false),
+        withAsset("v1.0.0", false),
+      ],
+    });
+
+    await mirrorGiteaSourceReleasesToGitea({
+      config,
+      repository,
+      connection: giteaConnection("source-token"),
+      giteaOwner: DEST_OWNER,
+      giteaRepoName: DEST_REPO,
+      releaseLimit: 10,
+      releaseAssetLimit: 3,
+      prereleaseAssetLimit: 1,
+    });
+
+    // Every release is mirrored with its notes...
+    expect(world.createdTags()).toEqual([
+      "v3.0.0-rc3",
+      "v3.0.0-rc2",
+      "v3.0.0-rc1",
+      "v2.1.0",
+      "v2.1.0-rc1",
+      "v2.0.0",
+      "v1.0.0",
+    ]);
+    // ...and the three places with assets go to one pre-release and the two
+    // newest stable releases; the skipped pre-releases do not use one up.
+    expect(world.downloads().map((r) => r.url)).toEqual([
+      `${SOURCE_URL}/attachments/v3.0.0-rc3`,
+      `${SOURCE_URL}/attachments/v2.1.0`,
+      `${SOURCE_URL}/attachments/v2.0.0`,
+    ]);
+  });
+
+  it("with pruning on, removes the attachments of pre-releases past the cap and keeps the stable ones", async () => {
+    const world = fakeWorld({
+      sourceReleases: [giteaRelease("v2.0.0-rc1", { prerelease: true }), giteaRelease("v1.0.0")],
+      destinationReleases: [
+        {
+          id: 1,
+          tag_name: "v2.0.0-rc1",
+          created_at: "2026-02-01T00:00:00Z",
+          prerelease: true,
+          assets: [{ id: 11, name: "rc.bin", size: 7 }],
+        },
+        {
+          id: 2,
+          tag_name: "v1.0.0",
+          created_at: "2026-01-01T00:00:00Z",
+          prerelease: false,
+          assets: [{ id: 21, name: "stable.bin", size: 5 }],
+        },
+      ],
+      destinationAssets: {
+        "1": [{ id: 11, name: "rc.bin", size: 7 }],
+        "2": [{ id: 21, name: "stable.bin", size: 5 }],
+      },
+    });
+
+    await mirrorGiteaSourceReleasesToGitea({
+      config: {
+        ...config,
+        giteaConfig: { ...(config as any).giteaConfig, pruneOldReleaseAssets: true },
+      } as unknown as Partial<Config>,
+      repository,
+      connection: giteaConnection("source-token"),
+      giteaOwner: DEST_OWNER,
+      giteaRepoName: DEST_REPO,
+      releaseLimit: 10,
+      // No overall asset limit: only the pre-release cap prunes.
+      releaseAssetLimit: null,
+      prereleaseAssetLimit: 0,
+    });
+
+    expect(world.assetDeletes().map((r) => r.url)).toEqual([`${DEST_API}/releases/1/assets/11`]);
+    expect(storageRecords.at(-1)?.summary).toEqual({ count: 1, bytes: 5 });
+  });
+
+  it("has no effect with Stable only", async () => {
+    const world = fakeWorld({
+      sourceReleases: [withAsset("v2.0.0-rc1", true), withAsset("v1.0.0", false)],
+    });
+
+    await mirrorGiteaSourceReleasesToGitea({
+      config,
+      repository,
+      connection: giteaConnection("source-token"),
+      giteaOwner: DEST_OWNER,
+      giteaRepoName: DEST_REPO,
+      releaseLimit: 10,
+      releaseAssetLimit: null,
+      prereleaseAssetLimit: 0,
+      releaseType: "stable",
+    });
+
+    expect(world.createdTags()).toEqual(["v1.0.0"]);
+    expect(world.downloads().map((r) => r.url)).toEqual([`${SOURCE_URL}/attachments/v1.0.0`]);
+  });
+});

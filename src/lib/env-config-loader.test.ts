@@ -66,6 +66,7 @@ const TOUCHED = [
   "GITEA_ORGANIZATION",
   "ENVIRONMENT_SEEDING",
   "RELEASE_PRERELEASE_LIMIT",
+  "RELEASE_PRERELEASE_ASSET_LIMIT",
   "STARRED_REPOS_MODE",
   "MIRROR_SECURITY_ADVISORIES",
 ];
@@ -251,6 +252,23 @@ if (isolated) {
       process.env.RELEASE_PRERELEASE_LIMIT = "3";
       await initializeConfigFromEnv!();
       expect((await stored()).giteaConfig.prereleaseLimit).toBe(3);
+    });
+
+    test("RELEASE_PRERELEASE_ASSET_LIMIT stores 0 as a value, and unset keeps what is stored (#588)", async () => {
+      await initializeConfigFromEnv!();
+      expect((await stored()).giteaConfig.prereleaseAssetLimit).toBeNull();
+
+      process.env.RELEASE_PRERELEASE_ASSET_LIMIT = "0";
+      await initializeConfigFromEnv!();
+      expect((await stored()).giteaConfig.prereleaseAssetLimit).toBe(0);
+
+      delete process.env.RELEASE_PRERELEASE_ASSET_LIMIT;
+      await initializeConfigFromEnv!();
+      expect((await stored()).giteaConfig.prereleaseAssetLimit).toBe(0);
+
+      process.env.RELEASE_PRERELEASE_ASSET_LIMIT = "3";
+      await initializeConfigFromEnv!();
+      expect((await stored()).giteaConfig.prereleaseAssetLimit).toBe(3);
     });
 
     test("STARRED_REPOS_MODE accepts follow-strategy and ignores an unknown value (#551)", async () => {

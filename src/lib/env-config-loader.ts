@@ -12,7 +12,7 @@ import { DESTINATION_PROVIDER_DEFAULT_URLS, isDestinationProviderKind, type Dest
 import { hasDestinationChanged, hasSourceChanged, loadConfigLocks } from '@/lib/config-locks';
 import type { SourceUpdateInput } from '@/lib/sources';
 import { backupDefaultsFromEnv, storedBackupStrategy } from '@/lib/utils/backup-defaults';
-import { normalizePrereleaseLimit, normalizeReleaseAssetLimit, normalizeReleaseTagPatterns, normalizeReleaseType, splitReleaseTagEntries } from '@/lib/utils/mirror-overrides';
+import { normalizePrereleaseAssetLimit, normalizePrereleaseLimit, normalizeReleaseAssetLimit, normalizeReleaseTagPatterns, normalizeReleaseType, splitReleaseTagEntries } from '@/lib/utils/mirror-overrides';
 import { STARRED_REPOS_MODES } from '@/lib/utils/starred-destination';
 
 interface EnvConfig {
@@ -70,6 +70,7 @@ interface EnvConfig {
     releaseLimit?: number;
     releaseAssetLimit?: number;
     prereleaseLimit?: number;
+    prereleaseAssetLimit?: number;
     pruneOldReleaseAssets?: boolean;
     releaseType?: string;
     releaseIncludeTags?: string[];
@@ -256,6 +257,7 @@ function parseEnvConfig(): EnvConfig {
       releaseLimit: process.env.RELEASE_LIMIT ? parseInt(process.env.RELEASE_LIMIT, 10) : undefined,
       releaseAssetLimit: process.env.RELEASE_ASSET_LIMIT ? parseInt(process.env.RELEASE_ASSET_LIMIT, 10) : undefined,
       prereleaseLimit: process.env.RELEASE_PRERELEASE_LIMIT ? parseInt(process.env.RELEASE_PRERELEASE_LIMIT, 10) : undefined,
+      prereleaseAssetLimit: process.env.RELEASE_PRERELEASE_ASSET_LIMIT ? parseInt(process.env.RELEASE_PRERELEASE_ASSET_LIMIT, 10) : undefined,
       pruneOldReleaseAssets: envFlag('PRUNE_OLD_RELEASE_ASSETS'),
       releaseType: process.env.RELEASE_TYPE,
       releaseIncludeTags,
@@ -485,6 +487,11 @@ export async function initializeConfigFromEnv(): Promise<void> {
       prereleaseLimit:
         normalizePrereleaseLimit(envConfig.mirror.prereleaseLimit) ??
         existingConfig?.[0]?.giteaConfig?.prereleaseLimit ??
+        null,
+      // 0 is a real value (no pre-release gets assets); unset means no separate limit.
+      prereleaseAssetLimit:
+        normalizePrereleaseAssetLimit(envConfig.mirror.prereleaseAssetLimit) ??
+        existingConfig?.[0]?.giteaConfig?.prereleaseAssetLimit ??
         null,
       // Unset env var keeps what the UI stored, like every switch here.
       pruneOldReleaseAssets:

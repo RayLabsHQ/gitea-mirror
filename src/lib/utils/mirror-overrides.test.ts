@@ -25,7 +25,7 @@ import {
   normalizeReleaseType,
   orgForkSkipDecision,
   parseMirrorOverrides,
-  releaseGetsAssets,
+  releasesWithAssets,
   releaseMatchesTagFilters,
   releaseMatchesType,
   releaseScanLimit,
@@ -1072,28 +1072,70 @@ describe("release asset limit (#311)", () => {
     });
   });
 
-  describe("releaseGetsAssets", () => {
-    test("null means every release gets assets", () => {
-      expect(releaseGetsAssets(0, null)).toBe(true);
-      expect(releaseGetsAssets(999, null)).toBe(true);
+  describe("releasesWithAssets", () => {
+    const stable = (tag: string) => ({ tag, prerelease: false });
+    const pre = (tag: string) => ({ tag, prerelease: true });
+    const tagsWithAssets = (
+      releases: { tag: string; prerelease?: boolean | null }[],
+      assetLimit: number | null,
+      prereleaseAssetLimit: number | null
+    ) => {
+      const positions = releasesWithAssets(releases, assetLimit, prereleaseAssetLimit);
+      return releases.filter((_, index) => positions.has(index)).map((release) => release.tag);
+    };
+    const five = ["v5", "v4", "v3", "v2", "v1"].map(stable);
+
+    test("no limits means every release gets assets", () => {
+      expect(tagsWithAssets(five, null, null)).toEqual(["v5", "v4", "v3", "v2", "v1"]);
     });
 
     test("0 means no release gets assets", () => {
-      expect(releaseGetsAssets(0, 0)).toBe(false);
+      expect(tagsWithAssets(five, 0, null)).toEqual([]);
     });
 
-    test("N covers exactly the newest N releases, by index", () => {
+    test("the asset limit covers exactly the newest N releases", () => {
       // Newest-first ordering: index 0 is the newest release.
-      expect(releaseGetsAssets(0, 2)).toBe(true);
-      expect(releaseGetsAssets(1, 2)).toBe(true);
-      expect(releaseGetsAssets(2, 2)).toBe(false);
-      expect(releaseGetsAssets(3, 2)).toBe(false);
+      expect([...releasesWithAssets(five, 2, null)]).toEqual([0, 1]);
+      expect(tagsWithAssets(five, 2, null)).toEqual(["v5", "v4"]);
     });
 
-    test("a list of releases splits at the limit", () => {
-      const tags = ["v5", "v4", "v3", "v2", "v1"];
-      const withAssets = tags.filter((_, index) => releaseGetsAssets(index, 2));
-      expect(withAssets).toEqual(["v5", "v4"]);
+    test("the #588 example: 8 with assets, at most 3 of them pre-releases", () => {
+      const releases = [
+        ...Array.from({ length: 10 }, (_, i) => pre(`3.0.0-rc${10 - i}`)),
+        stable("2.7.1"),
+        pre("2.7.1-rc20"),
+        stable("2.7.0"),
+        stable("2.6.1"),
+        stable("2.6.0"),
+        stable("2.5.0"),
+        stable("2.4.0"),
+      ];
+      expect(tagsWithAssets(releases, 8, 3)).toEqual([
+        "3.0.0-rc10",
+        "3.0.0-rc9",
+        "3.0.0-rc8",
+        "2.7.1",
+        "2.7.0",
+        "2.6.1",
+        "2.6.0",
+        "2.5.0",
+      ]);
+    });
+
+    test("without an asset limit every stable release keeps its assets, pre-releases only the newest N", () => {
+      const releases = [pre("rc3"), pre("rc2"), stable("v2"), pre("rc1"), stable("v1")];
+      expect(tagsWithAssets(releases, null, 1)).toEqual(["rc3", "v2", "v1"]);
+    });
+
+    test("0 pre-releases with assets leaves every pre-release with notes only", () => {
+      const releases = [pre("rc2"), stable("v2"), pre("rc1"), stable("v1")];
+      expect(tagsWithAssets(releases, null, 0)).toEqual(["v2", "v1"]);
+      expect(tagsWithAssets(releases, 1, 0)).toEqual(["v2"]);
+    });
+
+    test("a release that does not say counts as stable", () => {
+      const releases = [{ tag: "a" }, { tag: "b", prerelease: null }, pre("c")];
+      expect(tagsWithAssets(releases, null, 0)).toEqual(["a", "b"]);
     });
   });
 
@@ -1123,6 +1165,7 @@ describe("release asset limit (#311)", () => {
         "releaseLimit",
         "releaseAssetLimit",
         "prereleaseLimit",
+        "prereleaseAssetLimit",
       ]);
       for (const key of MIRROR_OVERRIDE_LIMIT_KEYS) {
         expect(MIRROR_OVERRIDE_LABELS[key]).toBeTruthy();
@@ -2018,6 +2061,74 @@ describe("pre-release limit (#560)", () => {
       });
       expect(gating.prereleaseLimit).toBeUndefined();
     });
+  });
+});
+
+describe("pre-release asset limit (#588)", () => {
+  test("no limit at any tier resolves to null", () => {
+    const resolved = resolveMirrorOptions({
+      config: makeConfig({ mirrorReleases: true }),
+      repository: makeRepo(),
+    });
+    expect(resolved.prereleaseAssetLimit).toBeNull();
+  });
+
+  test("organization beats global, repository beats organization, 0 is real", () => {
+    const config = makeConfig({ mirrorReleases: true, prereleaseAssetLimit: 5 });
+    expect(resolveMirrorOptions({ config, repository: makeRepo() }).prereleaseAssetLimit).toBe(5);
+    expect(
+      resolveMirrorOptions({ config, repository: makeRepo(), orgOverrides: { prereleaseAssetLimit: 2 } })
+        .prereleaseAssetLimit
+    ).toBe(2);
+    expect(
+      resolveMirrorOptions({
+        config,
+        repository: makeRepo({ mirrorOverrides: { prereleaseAssetLimit: 0 } }),
+        orgOverrides: { prereleaseAssetLimit: 2 },
+      }).prereleaseAssetLimit
+    ).toBe(0);
+  });
+
+  test("null or junk in an override means inherit", () => {
+    const resolved = resolveMirrorOptions({
+      config: makeConfig({ mirrorReleases: true, prereleaseAssetLimit: 4 }),
+      repository: makeRepo({ mirrorOverrides: { prereleaseAssetLimit: -2 } }),
+      orgOverrides: { prereleaseAssetLimit: null },
+    });
+    expect(resolved.prereleaseAssetLimit).toBe(4);
+  });
+
+  test("0 counts as an override, null does not, and the flags pass it through", () => {
+    expect(hasMirrorOverrides({ prereleaseAssetLimit: 0 })).toBe(true);
+    expect(hasMirrorOverrides({ prereleaseAssetLimit: null })).toBe(false);
+    expect(normalizeMirrorOverrides({ prereleaseAssetLimit: 0 })).toEqual({ prereleaseAssetLimit: 0 });
+    expect(listOverriddenKeys({ prereleaseAssetLimit: 3 })).toEqual(["prereleaseAssetLimit"]);
+    expect(mirrorOptionsToFlags({ prereleaseAssetLimit: 3 }).prereleaseAssetLimit).toBe(3);
+    expect(mirrorOptionsToFlags({ mirrorReleases: true }).prereleaseAssetLimit).toBeNull();
+  });
+
+  test("gated like the pre-release limit", () => {
+    expect(
+      getMirrorOverrideGating({ targetKind: "repository", effective: { mirrorReleases: false } })
+        .prereleaseAssetLimit
+    ).toBe(MIRROR_GATING_REASONS.releasesOff);
+    expect(
+      getMirrorOverrideGating({
+        targetKind: "repository",
+        effective: { mirrorReleases: true },
+        destinationProvider: "github",
+      }).prereleaseAssetLimit
+    ).toBe(MIRROR_GATING_REASONS.pushTarget);
+    expect(
+      getMirrorOverrideGating({
+        targetKind: "organization",
+        effective: { mirrorReleases: true, releaseType: "stable" },
+      }).prereleaseAssetLimit
+    ).toBe(MIRROR_GATING_REASONS.stableOnly);
+    expect(
+      getMirrorOverrideGating({ targetKind: "repository", effective: { mirrorReleases: true, releaseType: "all" } })
+        .prereleaseAssetLimit
+    ).toBeUndefined();
   });
 });
 

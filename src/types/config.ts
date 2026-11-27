@@ -103,6 +103,7 @@ export interface MirrorOptions {
   releaseLimit?: number;  // Limit number of releases to mirror (default: 10)
   releaseAssetLimit?: number | null;  // Upload assets only for the newest N releases; null or absent means all, 0 means none
   prereleaseLimit?: number | null;  // At most N of the mirrored releases may be pre-releases; null or absent means no separate limit, 0 means none
+  prereleaseAssetLimit?: number | null;  // At most N of the releases that get assets may be pre-releases; null or absent means no separate limit, 0 means none
   pruneOldReleaseAssets?: boolean;  // Also delete attachments already on releases past releaseAssetLimit (default: false)
   releaseType?: ReleaseType;  // "all" | "stable": which releases are mirror candidates before the limit applies
   releaseIncludeTags?: string[];  // Glob or /regex/ tag patterns; when set, only matching tags are mirror candidates
