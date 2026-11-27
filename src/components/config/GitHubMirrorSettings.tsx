@@ -1077,12 +1077,12 @@ export function GitHubMirrorSettings({
                       how many of those get assets, for all releases and for
                       pre-releases (#311, #560, #588). Empty boxes mean no limit. */}
                   <div className="max-w-md rounded-lg border bg-muted/30 p-3">
-                    <div className="grid grid-cols-[minmax(0,1fr)_3.25rem_3.25rem] items-center gap-x-2 gap-y-2 sm:grid-cols-[minmax(0,1fr)_4.5rem_4.5rem] sm:gap-x-3">
-                      <span />
+                    <div className="grid grid-cols-[max-content_3.25rem_3.25rem] items-center gap-x-2 gap-y-2 sm:grid-cols-[max-content_5rem_5rem] sm:gap-x-3">
+                      <span className="text-[11px] font-medium text-muted-foreground sm:pr-4">Per repository</span>
                       <span className="text-[11px] font-medium text-muted-foreground">Keep latest</span>
                       <span className="text-[11px] font-medium text-muted-foreground">With assets</span>
 
-                      <span className="whitespace-nowrap text-[13px]">All releases</span>
+                      <span className="whitespace-nowrap text-[13px] sm:pr-4">All releases</span>
                       <input
                         id="release-limit"
                         type="number"
@@ -1108,7 +1108,7 @@ export function GitHubMirrorSettings({
                       />
 
                       <label
-                        className="flex items-center gap-2 whitespace-nowrap text-[13px]"
+                        className="flex items-center gap-2 whitespace-nowrap text-[13px] sm:pr-4"
                         title={
                           !isReleaseCapableSource
                             ? "Release filtering needs a GitHub or Gitea/Forgejo source"
