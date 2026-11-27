@@ -77,15 +77,16 @@ import {
 import {
   compileReleaseTagPattern,
   compileReleaseTagPatterns,
+  normalizePrereleaseAssetLimit,
   normalizePrereleaseLimit,
   normalizeReleaseAssetLimit,
   normalizeReleaseLimit,
   normalizeReleaseTagPatterns,
   normalizeReleaseType,
-  releaseGetsAssets,
   releaseMatchesTagFilters,
   releaseMatchesType,
   releaseScanLimit,
+  releasesWithAssets,
   selectReleases,
   resolveMirrorOptionsForRepository,
   resolveOrganizationSkipForks,
@@ -121,6 +122,7 @@ export async function mirrorRepositoryReleases({
   releaseLimit,
   releaseAssetLimit,
   prereleaseLimit,
+  prereleaseAssetLimit,
   releaseType,
   releaseIncludeTags,
   releaseExcludeTags,
@@ -137,6 +139,7 @@ export async function mirrorRepositoryReleases({
   releaseLimit?: number;
   releaseAssetLimit?: number | null;
   prereleaseLimit?: number | null;
+  prereleaseAssetLimit?: number | null;
   releaseType?: ReleaseType;
   releaseIncludeTags?: string[];
   releaseExcludeTags?: string[];
@@ -158,6 +161,7 @@ export async function mirrorRepositoryReleases({
       releaseLimit,
       releaseAssetLimit,
       prereleaseLimit,
+      prereleaseAssetLimit,
       releaseType,
       releaseIncludeTags,
       releaseExcludeTags,
@@ -175,6 +179,7 @@ export async function mirrorRepositoryReleases({
       releaseLimit,
       releaseAssetLimit,
       prereleaseLimit,
+      prereleaseAssetLimit,
       releaseType,
       releaseIncludeTags,
       releaseExcludeTags,
@@ -1350,6 +1355,7 @@ export const mirrorGithubRepoToGitea = async ({
           releaseLimit: mirrorOptions.releaseLimit,
           releaseAssetLimit: mirrorOptions.releaseAssetLimit,
           prereleaseLimit: mirrorOptions.prereleaseLimit,
+          prereleaseAssetLimit: mirrorOptions.prereleaseAssetLimit,
           releaseType: mirrorOptions.releaseType,
           releaseIncludeTags: mirrorOptions.releaseIncludeTags,
           releaseExcludeTags: mirrorOptions.releaseExcludeTags,
@@ -2194,6 +2200,7 @@ export async function mirrorGitHubRepoToGiteaOrg({
           releaseLimit: mirrorOptions.releaseLimit,
           releaseAssetLimit: mirrorOptions.releaseAssetLimit,
           prereleaseLimit: mirrorOptions.prereleaseLimit,
+          prereleaseAssetLimit: mirrorOptions.prereleaseAssetLimit,
           releaseType: mirrorOptions.releaseType,
           releaseIncludeTags: mirrorOptions.releaseIncludeTags,
           releaseExcludeTags: mirrorOptions.releaseExcludeTags,
@@ -4377,6 +4384,12 @@ type MirrorReleasesParams = {
    */
   prereleaseLimit?: number | null;
   /**
+   * Already-resolved pre-release asset limit (#588): at most N of the releases
+   * that get assets may be pre-releases. `null` means no separate limit, 0
+   * means none, `undefined` means resolve it here like the release limit.
+   */
+  prereleaseAssetLimit?: number | null;
+  /**
    * Already-resolved release type: `all` mirrors every release, `stable` only
    * the ones the source does not flag as a pre-release. `undefined` means
    * resolve it here like the other two.
@@ -4572,6 +4585,7 @@ async function mirrorSourceReleasesToGiteaLocked({
   releaseLimit: releaseLimitOverride,
   releaseAssetLimit: releaseAssetLimitOverride,
   prereleaseLimit: prereleaseLimitOverride,
+  prereleaseAssetLimit: prereleaseAssetLimitOverride,
   releaseType: releaseTypeOverride,
   releaseIncludeTags: releaseIncludeTagsOverride,
   releaseExcludeTags: releaseExcludeTagsOverride,
@@ -4664,6 +4678,14 @@ async function mirrorSourceReleasesToGiteaLocked({
       ? (normalizePrereleaseLimit(prereleaseLimitOverride) ?? null)
       : (await resolveOptions()).prereleaseLimit;
   const prereleaseLimit = releaseType === "all" ? resolvedPrereleaseLimit : null;
+  // At most this many of the releases that get assets may be pre-releases
+  // (#588), so pre-releases can keep their notes without their builds. Stable
+  // only leaves no pre-release for it to act on either.
+  const resolvedPrereleaseAssetLimit =
+    prereleaseAssetLimitOverride !== undefined
+      ? (normalizePrereleaseAssetLimit(prereleaseAssetLimitOverride) ?? null)
+      : (await resolveOptions()).prereleaseAssetLimit;
+  const prereleaseAssetLimit = releaseType === "all" ? resolvedPrereleaseAssetLimit : null;
 
   const hasTypeFilter = releaseType !== "all";
   const hasTagFilter =
@@ -4697,6 +4719,37 @@ async function mirrorSourceReleasesToGiteaLocked({
   const limitedReleases = selectReleases(matchingReleases, releaseLimit, prereleaseLimit);
   const filteredOutCount = fetchedReleases.length - matchingReleases.length;
 
+  // Which of those get their assets, by position in that newest-first list:
+  // the asset limit, with at most prereleaseAssetLimit pre-releases among
+  // them (#588). Uploads and the opt-in pruning below both go by this set.
+  const assetPositions = releasesWithAssets(limitedReleases, releaseAssetLimit, prereleaseAssetLimit);
+  const hasAssetLimit = releaseAssetLimit !== null || prereleaseAssetLimit !== null;
+  const assetLimitDescription =
+    releaseAssetLimit === null
+      ? prereleaseAssetLimit === null
+        ? "assets for every release"
+        : `assets for every stable release and ${
+            prereleaseAssetLimit === 0 ? "no pre-release" : `the newest ${prereleaseAssetLimit} pre-release(s)`
+          }`
+      : `assets for the newest ${releaseAssetLimit}${
+          prereleaseAssetLimit === null
+            ? ""
+            : prereleaseAssetLimit === 0
+              ? ", none of them pre-releases"
+              : `, at most ${prereleaseAssetLimit} of them pre-releases`
+        }`;
+  // Why the release at `index` gets no assets: the asset limit was already
+  // filled by newer releases, or it is a pre-release past the pre-release cap.
+  const assetSkipReason = (index: number) => {
+    let newerWithAssets = 0;
+    for (const position of assetPositions) if (position < index) newerWithAssets++;
+    return releaseAssetLimit !== null && newerWithAssets >= releaseAssetLimit
+      ? `outside the newest ${releaseAssetLimit} release(s) that get assets`
+      : prereleaseAssetLimit === 0
+        ? "pre-releases get no assets"
+        : `past the newest ${prereleaseAssetLimit} pre-release(s) that get assets`;
+  };
+
   // Only the patterns that actually compiled are named in the log, so a broken
   // one cannot look like it is doing something.
   const filterDescriptions: string[] = [];
@@ -4716,11 +4769,7 @@ async function mirrorSourceReleasesToGiteaLocked({
       filterDescriptions.length > 0
         ? `${filterDescriptions.join(", ")}; ${filteredOutCount} filtered out`
         : "any release type"
-    }; ${
-      releaseAssetLimit === null
-        ? "assets for every release"
-        : `assets for the newest ${releaseAssetLimit}`
-    }) to mirror for ${repository.fullName}`
+    }; ${assetLimitDescription}) to mirror for ${repository.fullName}`
   );
 
   if (limitedReleases.length === 0) {
@@ -4817,7 +4866,7 @@ async function mirrorSourceReleasesToGiteaLocked({
         // The asset limit (#311) only gates the upload. Assets that reached
         // Gitea before the limit was set or lowered stay where they are;
         // nothing on this path deletes attachments.
-        if (releaseGetsAssets(releaseIndex, releaseAssetLimit)) {
+        if (assetPositions.has(releaseIndex)) {
           const assetResult = await reconcileReleaseAssets({
             config,
             decryptedConfig,
@@ -4837,7 +4886,7 @@ async function mirrorSourceReleasesToGiteaLocked({
           totalAssetsFailed += assetResult.failed;
         } else if (release.assets && release.assets.length > 0) {
           console.log(
-            `[Releases] Skipping ${release.assets.length} asset(s) for ${release.tag_name}: outside the newest ${releaseAssetLimit} release(s) that get assets${
+            `[Releases] Skipping ${release.assets.length} asset(s) for ${release.tag_name}: ${assetSkipReason(releaseIndex)}${
               pruneOldReleaseAssets
                 ? " (their existing attachments are pruned by the retention pass)"
                 : " (anything already uploaded is kept)"
@@ -4889,7 +4938,7 @@ async function mirrorSourceReleasesToGiteaLocked({
       // Mirror release assets if they exist (idempotent — see reconcileReleaseAssets)
       // and the release sits inside the asset limit (#311).
       if (release.assets && release.assets.length > 0) {
-        if (releaseGetsAssets(releaseIndex, releaseAssetLimit)) {
+        if (assetPositions.has(releaseIndex)) {
           console.log(`[Releases] Mirroring ${release.assets.length} assets for release ${release.tag_name}`);
           const assetResult = await reconcileReleaseAssets({
             config,
@@ -4905,7 +4954,7 @@ async function mirrorSourceReleasesToGiteaLocked({
           totalAssetsFailed += assetResult.failed;
         } else {
           console.log(
-            `[Releases] Skipping ${release.assets.length} asset(s) for ${release.tag_name}: outside the newest ${releaseAssetLimit} release(s) that get assets`
+            `[Releases] Skipping ${release.assets.length} asset(s) for ${release.tag_name}: ${assetSkipReason(releaseIndex)}`
           );
           releasesPastAssetLimit++;
         }
@@ -5113,7 +5162,7 @@ async function mirrorSourceReleasesToGiteaLocked({
     // keeps its attachments - retention removes the release itself if it is
     // past the release limit.
     const prunedReleaseIds = new Set<number>();
-    if (pruneOldReleaseAssets && releaseAssetLimit !== null) {
+    if (pruneOldReleaseAssets && hasAssetLimit) {
       const rankByTag = new Map(
         limitedReleases.map((rel, index) => [rel.tag_name, index])
       );
@@ -5123,12 +5172,12 @@ async function mirrorSourceReleasesToGiteaLocked({
         // has none (one already pruned on an earlier sync) costs no request.
         if (Array.isArray(rel.assets) && rel.assets.length === 0) return false;
         const rank = rankByTag.get(rel.tag_name);
-        return rank !== undefined && !releaseGetsAssets(rank, releaseAssetLimit);
+        return rank !== undefined && !assetPositions.has(rank);
       });
 
       if (prunable.length > 0) {
         console.log(
-          `[Releases] Pruning release assets: ${prunable.length} kept release(s) sit past the newest ${releaseAssetLimit} release(s) that get assets`
+          `[Releases] Pruning release assets: ${prunable.length} kept release(s) get no assets (${assetLimitDescription})`
         );
         let prunedAssets = 0;
         for (const rel of prunable) {

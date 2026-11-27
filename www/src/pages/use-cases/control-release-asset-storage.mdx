@@ -36,6 +36,14 @@ Some projects publish a pre-release every night and a stable release now and the
 
 **At most** under the **Pre-releases** switch is the middle ground: how many of the **Latest** releases may be pre-releases. With **Latest 10** and **At most 3**, the mirror keeps the three newest pre-releases and fills the other seven places with the newest stable releases, looking up to 1,000 releases back for them. It stops reading the source as soon as the places are filled. `0` keeps stable releases only, and leaving it empty means pre-releases count like any other release, as before. On the next sync, pre-releases past the cap are removed from Gitea and the newest are kept. In the per organization and per repository dialog the same setting is **Pre-release limit**.
 
+## Keep pre-release notes without their builds
+
+Some projects publish a run of release candidates before each major release, and each candidate's notes only cover what changed since the one before. Capping pre-releases loses those notes, but keeping them all with their assets can fill a disk when each one carries several gigabytes of builds.
+
+**Assets for the newest** under the **Pre-releases** switch caps how many of the releases that get assets may be pre-releases, newest first. A pre-release past the cap is still mirrored with its notes and tag, just without the files, and its place goes to the next older release. With **Assets for latest** at 8 and **Assets for the newest** 3, the three newest pre-releases and the five newest stable releases get their builds, and every older candidate keeps its notes only. With **Assets for latest** empty, every stable release gets its assets and only the newest pre-releases do. `0` gives no pre-release assets, and leaving it empty means pre-releases get assets like any other release, as before. With **Remove old release assets** on, the attachments of pre-releases past the cap are deleted from Gitea on the next sync. In the per organization and per repository dialog the same setting is **Pre-releases with assets**.
+
+A large **Latest** count, such as 1000 to keep every release's notes, means each sync reads that much of the project's release history from the source.
+
 ## Filter by tag name
 
 Plenty of projects ship a release candidate for every feature and never tick the pre-release box, so the type filter cannot tell them apart. **Custom tag rules...** opens a dialog with two lists that can: **Include tags** mirrors only releases whose tag matches, **Exclude tags** skips the ones that do, and an excluded tag wins when both lists name it.
@@ -55,7 +63,7 @@ Matching ignores case, and a pattern that cannot compile is ignored rather than 
 
 The asset limit only decides whether a sync uploads. Lowering it later never removes assets that already reached Gitea. If you mirrored everything for a year and then set the limit to 2, the old files stay until you delete them in Gitea yourself. That is the safe direction for a backup tool, and it means the setting is cheap to experiment with.
 
-The **Remove old release assets** switch under the release settings changes that on purpose. With it on, a sync also prunes: the attachments of every mirrored release ranked past **Assets for latest** are deleted from Gitea, so lowering the limit actually shrinks what is on disk. It is a global switch, it stays off until you turn it on, and it only touches the files - the release and its notes stay. A release whose attachment listing cannot be read keeps its files and is retried on the next sync.
+The **Remove old release assets** switch under the release settings changes that on purpose. With it on, a sync also prunes: the attachments of every mirrored release ranked past **Assets for latest**, or of a pre-release past **Assets for the newest**, are deleted from Gitea, so lowering the limit actually shrinks what is on disk. It is a global switch, it stays off until you turn it on, and it only touches the files - the release and its notes stay. A release whose attachment listing cannot be read keeps its files and is retried on the next sync.
 
 ## Step-by-step
 
@@ -82,11 +90,12 @@ RELEASE_ASSET_LIMIT=3     # unset for all, 0 for notes only
 PRUNE_OLD_RELEASE_ASSETS=true   # also delete attachments past that count
 RELEASE_TYPE=stable       # all or stable
 RELEASE_PRERELEASE_LIMIT=3   # at most 3 pre-releases among them (with RELEASE_TYPE=all)
+RELEASE_PRERELEASE_ASSET_LIMIT=3   # at most 3 pre-releases get assets (with RELEASE_TYPE=all)
 RELEASE_INCLUDE_TAGS=v*   # comma separated globs or /regex/
 RELEASE_EXCLUDE_TAGS=*-rc.*
 ```
 
-`RELEASE_ASSET_LIMIT`, `RELEASE_TYPE`, `RELEASE_PRERELEASE_LIMIT` and the two tag lists seed the global settings on first boot, the same way the other mirror options do. The [environment variables page](/docs/environment-variables/) lists the rest.
+`RELEASE_ASSET_LIMIT`, `RELEASE_TYPE`, `RELEASE_PRERELEASE_LIMIT`, `RELEASE_PRERELEASE_ASSET_LIMIT` and the two tag lists seed the global settings on first boot, the same way the other mirror options do. The [environment variables page](/docs/environment-variables/) lists the rest.
 
 ## Doing the disk math
 

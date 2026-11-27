@@ -42,9 +42,16 @@ export type MirrorOverrideKey = (typeof MIRROR_OVERRIDE_KEYS)[number];
  * `releaseAssetLimit` (#311) is how many of those also get their assets
  * uploaded; the rest are created with notes and tag only. `prereleaseLimit`
  * (#560) is how many of them may be pre-releases, so nightly builds cannot
- * take every place from the stable releases.
+ * take every place from the stable releases. `prereleaseAssetLimit` (#588) is
+ * how many of the releases that get assets may be pre-releases, so pre-releases
+ * can keep their notes without their builds filling the disk.
  */
-export const MIRROR_OVERRIDE_LIMIT_KEYS = ["releaseLimit", "releaseAssetLimit", "prereleaseLimit"] as const;
+export const MIRROR_OVERRIDE_LIMIT_KEYS = [
+  "releaseLimit",
+  "releaseAssetLimit",
+  "prereleaseLimit",
+  "prereleaseAssetLimit",
+] as const;
 
 export type MirrorOverrideLimitKey = (typeof MIRROR_OVERRIDE_LIMIT_KEYS)[number];
 
@@ -149,6 +156,7 @@ export type ResolvedMirrorOptions = Record<MirrorOverrideKey, boolean> & {
   releaseLimit: number;
   releaseAssetLimit: number | null;
   prereleaseLimit: number | null;
+  prereleaseAssetLimit: number | null;
   // Global only: a cleanup policy for the destination rather than something a
   // single repository argues about. The ranks it prunes by still come from that
   // repository's own effective `releaseAssetLimit`.
@@ -168,6 +176,7 @@ export type InheritedMirrorOptions = Partial<Record<MirrorOverrideKey, boolean>>
   releaseLimit?: number;
   releaseAssetLimit?: number | null;
   prereleaseLimit?: number | null;
+  prereleaseAssetLimit?: number | null;
   releaseType?: ReleaseType;
   releaseIncludeTags?: string[];
   releaseExcludeTags?: string[];
@@ -207,6 +216,19 @@ export function normalizeReleaseAssetLimit(value: unknown): number | undefined {
  * (`null`) means pre-releases count like any other release, as before #560.
  */
 export function normalizePrereleaseLimit(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  const limit = Math.floor(value);
+  return limit >= 0 ? limit : undefined;
+}
+
+/**
+ * Sanitize a pre-release asset limit from any tier into a non-negative
+ * integer, or `undefined` when the value is absent or unusable (so the next
+ * tier out is consulted). 0 is a real value, notes only for every
+ * pre-release; no limit at any tier (`null`) means pre-releases get assets
+ * like any other release, as before #588.
+ */
+export function normalizePrereleaseAssetLimit(value: unknown): number | undefined {
   if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
   const limit = Math.floor(value);
   return limit >= 0 ? limit : undefined;
@@ -505,6 +527,7 @@ const LIMIT_NORMALIZERS: Record<
   releaseLimit: normalizeReleaseLimit,
   releaseAssetLimit: normalizeReleaseAssetLimit,
   prereleaseLimit: normalizePrereleaseLimit,
+  prereleaseAssetLimit: normalizePrereleaseAssetLimit,
 };
 
 /** Per-key sanitizers for the choice overrides. */
@@ -526,18 +549,37 @@ const PATTERN_NORMALIZERS: Record<
 };
 
 /**
- * Whether the release at `index` in the newest-first list gets its assets
- * uploaded. `null` means no limit. A release past the limit still gets its
- * notes and tag, and assets that already reached Gitea are not removed by this
- * rule on its own; it only decides whether a sync uploads. The opt-in
- * `pruneOldReleaseAssets` config switch is what applies the same rank rule in
- * reverse and deletes what an earlier, looser limit had uploaded.
+ * The positions, in the mirrored newest-first list, of the releases that get
+ * their assets: the newest `releaseAssetLimit` of them (every one when null),
+ * with at most `prereleaseAssetLimit` pre-releases among them (#588). A
+ * pre-release past that limit keeps its notes and tag but no assets, and its
+ * place goes to the next older release, so an asset limit of 8 with 3
+ * pre-releases gives assets to the 3 newest pre-releases and the 5 newest
+ * stable releases. A release that does not say whether it is a pre-release
+ * counts as stable, the same rule as `selectReleases`.
+ *
+ * A release outside the set still gets its notes and tag, and assets that
+ * already reached Gitea are not removed by this rule on its own; it only
+ * decides whether a sync uploads. The opt-in `pruneOldReleaseAssets` config
+ * switch is what applies the same set in reverse and deletes what an earlier,
+ * looser limit had uploaded.
  */
-export function releaseGetsAssets(
-  index: number,
-  releaseAssetLimit: number | null
-): boolean {
-  return releaseAssetLimit === null || index < releaseAssetLimit;
+export function releasesWithAssets(
+  releases: readonly { prerelease?: boolean | null }[],
+  releaseAssetLimit: number | null,
+  prereleaseAssetLimit: number | null
+): Set<number> {
+  const withAssets = new Set<number>();
+  let prereleases = 0;
+  for (const [index, release] of releases.entries()) {
+    if (releaseAssetLimit !== null && withAssets.size >= releaseAssetLimit) break;
+    if (release.prerelease === true && prereleaseAssetLimit !== null) {
+      if (prereleases >= prereleaseAssetLimit) continue;
+      prereleases++;
+    }
+    withAssets.add(index);
+  }
+  return withAssets;
 }
 
 /**
@@ -666,6 +708,7 @@ export function mirrorOptionsToFlags(
         releaseLimit?: number;
         releaseAssetLimit?: number | null;
         prereleaseLimit?: number | null;
+        prereleaseAssetLimit?: number | null;
         releaseType?: ReleaseType;
         releaseIncludeTags?: string[];
         releaseExcludeTags?: string[];
@@ -707,6 +750,8 @@ export function mirrorOptionsToFlags(
       normalizeReleaseAssetLimit(mirrorOptions?.releaseAssetLimit) ?? null,
     prereleaseLimit:
       normalizePrereleaseLimit(mirrorOptions?.prereleaseLimit) ?? null,
+    prereleaseAssetLimit:
+      normalizePrereleaseAssetLimit(mirrorOptions?.prereleaseAssetLimit) ?? null,
     releaseType: normalizeReleaseType(mirrorOptions?.releaseType) ?? DEFAULT_RELEASE_TYPE,
     releaseIncludeTags:
       normalizeReleaseTagPatterns(mirrorOptions?.releaseIncludeTags) ?? [],
@@ -777,6 +822,7 @@ export function getMirrorOverrideGating({
     gating.releaseLimit = MIRROR_GATING_REASONS.pushTarget;
     gating.releaseAssetLimit = MIRROR_GATING_REASONS.pushTarget;
     gating.prereleaseLimit = MIRROR_GATING_REASONS.pushTarget;
+    gating.prereleaseAssetLimit = MIRROR_GATING_REASONS.pushTarget;
     gating.releaseType = MIRROR_GATING_REASONS.pushTarget;
     gating.mirrorIssueState = MIRROR_GATING_REASONS.pushTarget;
     gating.releaseIncludeTags = MIRROR_GATING_REASONS.pushTarget;
@@ -828,12 +874,14 @@ export function getMirrorOverrideGating({
   if (gating.releaseLimit) {
     gating.releaseAssetLimit = gating.releaseLimit;
     gating.prereleaseLimit = gating.releaseLimit;
+    gating.prereleaseAssetLimit = gating.releaseLimit;
     for (const patternKey of MIRROR_OVERRIDE_PATTERN_KEYS) {
       gating[patternKey] = gating.releaseLimit;
     }
   } else if (effective.releaseType === "stable") {
     // Stable only already leaves every pre-release out.
     gating.prereleaseLimit = MIRROR_GATING_REASONS.stableOnly;
+    gating.prereleaseAssetLimit = MIRROR_GATING_REASONS.stableOnly;
   }
 
   return gating;
@@ -858,6 +906,7 @@ export const MIRROR_OVERRIDE_LABELS: Record<
   releaseLimit: "Release limit",
   releaseAssetLimit: "Release asset limit",
   prereleaseLimit: "Pre-release limit",
+  prereleaseAssetLimit: "Pre-releases with assets",
   releaseType: "Release type",
   releaseIncludeTags: "Include tags",
   releaseExcludeTags: "Exclude tags",
@@ -1034,6 +1083,15 @@ export function resolveMirrorOptions({
     normalizePrereleaseLimit(repo?.prereleaseLimit) ??
     normalizePrereleaseLimit(org?.prereleaseLimit) ??
     normalizePrereleaseLimit(globalConfig?.prereleaseLimit) ??
+    null;
+
+  // Nor the pre-release asset limit (#588): when no tier pins one,
+  // pre-releases get assets like any other release. A pinned 0 (notes only
+  // for every pre-release) is a real value and must not fall through.
+  resolved.prereleaseAssetLimit =
+    normalizePrereleaseAssetLimit(repo?.prereleaseAssetLimit) ??
+    normalizePrereleaseAssetLimit(org?.prereleaseAssetLimit) ??
+    normalizePrereleaseAssetLimit(globalConfig?.prereleaseAssetLimit) ??
     null;
 
   // Same precedence for the release type. A value no tier recognizes (a typo

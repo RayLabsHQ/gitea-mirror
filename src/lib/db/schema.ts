@@ -86,6 +86,9 @@ export type IssueStateFilter = z.infer<typeof issueStateFilterEnum>;
  * value (notes only); null/absent means inherit. `prereleaseLimit` too
  * (`normalizePrereleaseLimit`, #560): at most N of the mirrored releases may
  * be pre-releases. 0 is a real value (none); null/absent means inherit.
+ * `prereleaseAssetLimit` (`normalizePrereleaseAssetLimit`, #588): at most N
+ * of the releases that get assets may be pre-releases. 0 is a real value
+ * (notes only for pre-releases); null/absent means inherit.
  *
  * `releaseType` sits alongside those limits and decides which releases are
  * candidates at all (`all`, or `stable` = everything the source does not flag as
@@ -131,6 +134,7 @@ export const mirrorOverridesSchema = z.object({
   releaseLimit: z.number().nullable().optional(),
   releaseAssetLimit: z.number().nullable().optional(),
   prereleaseLimit: z.number().nullable().optional(),
+  prereleaseAssetLimit: z.number().nullable().optional(),
   releaseType: z.string().nullable().optional(),
   releaseIncludeTags: z.unknown().nullable().optional(),
   releaseExcludeTags: z.unknown().nullable().optional(),
@@ -176,6 +180,10 @@ export const giteaConfigSchema = z.object({
   // builds leave places for stable releases. null/absent means no separate
   // limit; 0 means no pre-releases.
   prereleaseLimit: z.number().nullable().optional(),
+  // At most N of the releases that get assets may be pre-releases (#588), so
+  // pre-releases keep their notes without their builds. null/absent means no
+  // separate limit; 0 means no pre-release gets assets.
+  prereleaseAssetLimit: z.number().nullable().optional(),
   // Opt-in cleanup for what that limit left behind. Off by default, because
   // the limit alone only gates uploads: attachments a release already has are
   // never removed. Turning this on deletes the attachments of every mirrored

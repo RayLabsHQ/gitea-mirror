@@ -1160,6 +1160,37 @@ export function GitHubMirrorSettings({
                       <span>pre-releases among the latest {mirrorOptions.releaseLimit || 10}</span>
                     </div>
                   )}
+                  {/* How many of the releases with assets may be pre-releases,
+                      so pre-releases keep their notes without their builds
+                      (#588). Empty means pre-releases get assets like any
+                      other release. */}
+                  {mirrorOptions.releaseType !== "stable" && (
+                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                      <label htmlFor="prerelease-asset-limit">Assets for the newest</label>
+                      <input
+                        id="prerelease-asset-limit"
+                        type="number"
+                        min="0"
+                        placeholder="all"
+                        title="Leave empty to give pre-releases assets like any other release, or 0 for notes only"
+                        value={mirrorOptions.prereleaseAssetLimit ?? ''}
+                        onChange={(e) => {
+                          const raw = e.target.value.trim();
+                          if (raw === '') {
+                            handleMirrorChange('prereleaseAssetLimit', null);
+                            return;
+                          }
+                          const value = parseInt(raw, 10);
+                          handleMirrorChange(
+                            'prereleaseAssetLimit',
+                            Number.isFinite(value) ? Math.max(0, value) : null
+                          );
+                        }}
+                        className="w-16 rounded border border-input bg-background px-2 py-1 text-xs text-foreground"
+                      />
+                      <span>pre-releases</span>
+                    </div>
+                  )}
                   <div className="flex items-center gap-2">
                     <Button
                       type="button"
@@ -1191,7 +1222,7 @@ export function GitHubMirrorSettings({
               description={
                 isPushTarget
                   ? pushTargetReason
-                  : "Off by default: attachments stay on the destination even when a release falls outside \u201cAssets for latest\u201d. Turning this on deletes the attachments of every mirrored release past that count"
+                  : "Off by default: attachments stay on the destination even when a release falls outside \u201cAssets for latest\u201d or the pre-release count. Turning this on deletes the attachments of every mirrored release past those counts"
               }
               disabled={!isReleaseCapableSource}
               checked={mirrorOptions.pruneOldReleaseAssets === true}
