@@ -343,6 +343,14 @@ describe("GitLabSourceProvider", () => {
     expect(repos).toHaveLength(1);
   });
 
+  test("without a username or token it refuses to list instead of asking for /users//... (#589)", async () => {
+    installFetch(() => json([project()]));
+    const anonymous = new GitLabSourceProvider({ ...connection, username: "", token: "" });
+    await expect(anonymous.listRepositories({})).rejects.toThrow("no username or token");
+    await expect(anonymous.listStarredRepositories({})).rejects.toThrow("no username or token");
+    expect(calls).toHaveLength(0);
+  });
+
   test("starred projects are flagged as starred", async () => {
     installFetch(() => json([project()]));
     const repos = await new GitLabSourceProvider(connection).listStarredRepositories({});

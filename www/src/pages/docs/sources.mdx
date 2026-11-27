@@ -61,7 +61,7 @@ The card lists the scopes it needs and links to the token page of the selected i
 
 The card asks for `admin:org` on GitHub; `read:org`, one of its checkboxes, is all the app uses. [Tokens and permissions](/docs/tokens/) explains each scope.
 
-Without a token, GitLab and Gitea / Forgejo only show the configured user's public repositories and starred repositories. Adding a public repository by URL works without a token on every source.
+A source without a token is a public only source, described further down: it finds no personal or starred repositories, even with a username filled in. Adding a public repository by URL works without a token on every source.
 
 Tokens are encrypted with AES-256-GCM before they are stored, whether they come from the form or from the environment.
 
@@ -108,7 +108,7 @@ A save that tries to switch a locked source without that confirmation is refused
 
 **Removing a source that has imported repositories asks for confirmation.** Those mirrors keep syncing on the destination with the credentials they were created with, but cleanup leaves them alone.
 
-**Public only sources.** Adding a public organization without an account, see [Repositories and organizations](/docs/repositories-and-organizations/), creates a source with no token, shown as **Public only** on the Sources card. It imports the public repositories of the organizations you add, but finds no personal or starred repositories. Its API calls are anonymous, so on GitHub they share the limit of 60 requests an hour per IP address, and a large organization can end up with partial metadata; the mirrors themselves are plain git clones and use no API requests. Add a username and token to the source to turn it into a normal one.
+**Public only sources.** Adding a public organization without an account, see [Repositories and organizations](/docs/repositories-and-organizations/), creates a source with no token, shown as **Public only** on the Sources card. It imports the public repositories of the organizations you add, but finds no personal or starred repositories. Its API calls are anonymous, so on GitHub they share the limit of 60 requests an hour per IP address, and a large organization can end up with partial metadata; the mirrors themselves are plain git clones and use no API requests. Repository cleanup checks it too: it lists the organizations you added to the source and looks up its other repositories one at a time. Add a username and token to the source to turn it into a normal one.
 
 **Each repository remembers its host.** A row imported from one host is never mirrored with another host's token, so switching sources cannot send a token to the wrong server.
 

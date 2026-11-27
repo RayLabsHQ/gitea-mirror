@@ -239,8 +239,14 @@ export class GiteaSourceProvider implements SourceProvider {
     return this.hasToken ? { Authorization: `token ${this.connection.token}` } : {};
   }
 
+  /** The source's username for the /users/{name}/... listings. */
   private encodedUser(): string {
-    return encodeURIComponent(this.connection.username);
+    const username = this.connection.username.trim();
+    // A blank name would build /users//... and fail on every call (#589).
+    if (!username) {
+      throw new Error("This source has no username or token, so there is no account to list repositories for.");
+    }
+    return encodeURIComponent(username);
   }
 
   private async paginate<T>(

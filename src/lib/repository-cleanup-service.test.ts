@@ -17,7 +17,12 @@
  */
 
 import { describe, test, expect } from "bun:test";
-import { resolveOrphanVerdict, planOrphanedRepoAction } from "./repository-cleanup-service";
+import {
+  resolveOrphanVerdict,
+  planOrphanedRepoAction,
+  organizationsToListForPublicSource,
+  listPublicOnlySourceRepositories,
+} from "./repository-cleanup-service";
 
 describe("resolveOrphanVerdict", () => {
   test("repo present in the bulk fetch is never orphaned, regardless of the direct check", () => {
@@ -80,5 +85,49 @@ describe("planOrphanedRepoAction", () => {
 
   test("delete with deleteFromGitea enabled deletes from Gitea and the local database", () => {
     expect(planOrphanedRepoAction("delete", true)).toEqual({ gitea: "delete", db: "delete" });
+  });
+});
+
+/**
+ * #589: a public only source has no account, so cleanup lists the
+ * organizations added to it and checks the rest one by one.
+ */
+describe("organizationsToListForPublicSource", () => {
+  const repos = [
+    { sourceId: "pub", organization: "Acme" },
+    { sourceId: "pub", organization: "acme" },
+    { sourceId: "pub", organization: "loose-org" },
+    { sourceId: "pub", organization: null },
+    { sourceId: "other", organization: "widgets" },
+  ];
+  const orgs = [
+    { sourceId: "pub", name: "Acme", normalizedName: "acme" },
+    { sourceId: "pub", name: "idle", normalizedName: "idle" },
+    { sourceId: "other", name: "widgets", normalizedName: "widgets" },
+    { sourceId: "other", name: "loose-org", normalizedName: "loose-org" },
+  ];
+
+  test("only organizations added to this source that hold one of its repositories", () => {
+    expect(organizationsToListForPublicSource("pub", repos, orgs)).toEqual(["Acme"]);
+  });
+
+  test("nothing to list when the source holds no organization repositories", () => {
+    expect(organizationsToListForPublicSource("pub", [{ sourceId: "pub", organization: null }], orgs)).toEqual([]);
+  });
+});
+
+describe("listPublicOnlySourceRepositories", () => {
+  test("joins the organization listings and skips one that fails", async () => {
+    const listed: string[] = [];
+    const provider = {
+      async listOrganizationRepositories(name: string) {
+        listed.push(name);
+        if (name === "broken") throw new Error("503");
+        return [{ fullName: `${name}/app` }] as any[];
+      },
+    };
+    const repos = await listPublicOnlySourceRepositories(provider, ["acme", "broken", "tools"], "Codeberg");
+    expect(listed).toEqual(["acme", "broken", "tools"]);
+    expect(repos.map((repo) => repo.fullName)).toEqual(["acme/app", "tools/app"]);
   });
 });

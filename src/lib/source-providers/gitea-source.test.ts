@@ -156,6 +156,14 @@ describe("GiteaSourceProvider", () => {
     expect(calls.every((c) => c.headers.Authorization === undefined)).toBe(true);
   });
 
+  test("without a username or token it refuses to list instead of asking for /users//... (#589)", async () => {
+    installFetch(() => json({ message: "unexpected" }, { status: 500 }));
+    const anonymous = new GiteaSourceProvider({ ...connection, username: "", token: "" });
+    await expect(anonymous.listRepositories({})).rejects.toThrow("no username or token");
+    await expect(anonymous.listStarredRepositories({})).rejects.toThrow("no username or token");
+    expect(calls).toHaveLength(0);
+  });
+
   test("getRepository returns null on 404 and marks org owned repositories", async () => {
     installFetch((url) => {
       if (url.endsWith("/api/v1/repos/acme/tool")) return json(repo({ name: "tool", owner: "acme" }));
