@@ -81,9 +81,31 @@ export interface SettingsExportInput {
   decryptToken?: (stored: string) => string;
 }
 
-/** Drop the user:password part of a URL, keeping everything else as written. */
-function withoutUserInfo(value: string): string {
-  return value.replace(/^([a-z][a-z0-9+.-]*:\/\/)[^/@\s]*@/i, "$1");
+const SPECIAL_SCHEMES = new Set(["http:", "https:", "ws:", "wss:", "ftp:", "file:"]);
+
+/**
+ * Drop the user:password part of a URL, keeping everything else as written.
+ *
+ * Cuts where a URL parser does: at the last "@" before the path, query or
+ * fragment, so a password holding "@" or a space goes too. A string that
+ * does not parse can still hold a password with "/", "?" or "#" in it, so
+ * there the cut is at the last "@" anywhere.
+ */
+export function withoutUserInfo(value: string): string {
+  const scheme = /^([a-z][a-z0-9+.-]*):\/\//i.exec(value);
+  if (!scheme) return value;
+  const rest = value.slice(scheme[0].length);
+  let parses = true;
+  try {
+    new URL(value);
+  } catch {
+    parses = false;
+  }
+  const delimiters = SPECIAL_SCHEMES.has(`${scheme[1].toLowerCase()}:`) ? /[/?#\\]/ : /[/?#]/;
+  const end = parses ? rest.search(delimiters) : -1;
+  const authority = end === -1 ? rest : rest.slice(0, end);
+  const at = authority.lastIndexOf("@");
+  return at === -1 ? value : scheme[0] + rest.slice(at + 1);
 }
 
 /** A copy with credentials removed and URLs cleaned, at any depth. */
