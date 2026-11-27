@@ -263,6 +263,14 @@ Sizes are bytes. `destinationSize` is Git and LFS together as Gitea or Forgejo r
 
 `GET /api/repositories/export` and `GET /api/organizations/export` return the same CSV files as the **Export CSV** buttons, with every repository or organization the account tracks. The columns are listed in [Repositories and organizations](/docs/repositories-and-organizations/#exporting-to-csv).
 
+### Export the settings
+
+`GET /api/config/export` returns the same JSON file as **Export settings** on the Configuration page: the sources, the settings, the organizations and the repositories with a choice of their own, without tokens, passwords, secrets or run state. `?repositories=all` lists every tracked repository. Two exports of unchanged settings are identical, so a scheduled job can commit the file to git and only real changes show up. It works with a read only key. [Exporting the settings](/docs/configuration/#exporting-the-settings) describes what is in it.
+
+```bash
+curl -fsS -H "x-api-key: $KEY" "$URL/api/config/export" -o gitea-mirror-settings.json
+```
+
 ### Run cleanup
 
 `POST /api/cleanup/trigger` runs the [repository cleanup](/docs/cleanup-and-reconcile/) now, with the account's saved cleanup settings, and returns how many orphaned repositories were found and processed, their names, the ones still inside the [wait before acting](/docs/cleanup-and-reconcile/#waiting-before-acting) with the time each will be acted on (`waiting`), whether it was a dry run, and any errors. It answers 409 while a cleanup for the account is already running. `GET /api/cleanup/trigger` returns the cleanup configuration and the last and next run times.
@@ -382,7 +390,7 @@ Every endpoint below takes the key the same way. Ids are the ones the list endpo
 | `POST /api/cleanup/reconcile` | Compares the destination with the database, see [above](#reconcile-the-destination). |
 | `POST /api/mcp` | Body: JSON-RPC. The [MCP server](/docs/mcp/). |
 
-`GET /api/sse` and `GET /api/events` are the live update streams the pages use. The endpoints behind the Configuration page (`/api/config`, `/api/sources`, `/api/sso/*`, `/api/notifications/test` and the test connection calls) are left out here; they follow the forms and may change with them.
+`GET /api/sse` and `GET /api/events` are the live update streams the pages use. Apart from the settings export, the endpoints behind the Configuration page (`/api/config`, `/api/sources`, `/api/sso/*`, `/api/notifications/test` and the test connection calls) are left out here; they follow the forms and may change with them.
 
 ## A complete example
 
