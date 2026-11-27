@@ -654,7 +654,7 @@ export function MirrorOverridesDialog({
                             applyReleaseChoice(next as ReleaseChoice)
                           }
                         >
-                          <SelectTrigger id="override-releases" className="w-36">
+                          <SelectTrigger id="override-releases" className="w-32">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>

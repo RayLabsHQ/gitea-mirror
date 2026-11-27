@@ -39,8 +39,6 @@ import {
   Users,
   UserX,
   X,
-  FlaskConical,
-  Trash2,
 } from "lucide-react";
 import type { GitHubConfig, MirrorOptions, AdvancedOptions, DuplicateNameStrategy, DestinationProvider } from "@/types/config";
 import { DESTINATION_PROVIDER_LABELS, isPushDestinationKind } from "@/lib/destination-kinds";
@@ -94,6 +92,18 @@ interface GitHubMirrorSettingsProps {
    * them is GitHub; `githubConfig.provider` alone only describes the primary.
    */
   sources?: ReadonlyArray<{ provider: string }>;
+}
+
+/** The number boxes in the releases table. */
+const releaseNumberInput =
+  "h-8 w-full rounded-md border border-input bg-background px-2 text-[13px] tabular-nums text-foreground placeholder:text-muted-foreground disabled:opacity-50";
+
+/** An optional count box: empty means no limit (null), otherwise a whole number of 0 or more. */
+function parseOptionalCount(raw: string): number | null {
+  const trimmed = raw.trim();
+  if (trimmed === "") return null;
+  const value = parseInt(trimmed, 10);
+  return Number.isFinite(value) ? Math.max(0, value) : null;
 }
 
 export function GitHubMirrorSettings({
@@ -1054,143 +1064,118 @@ export function GitHubMirrorSettings({
                 : !isReleaseCapableSource
                 ? "Release assets need a GitHub or Gitea/Forgejo source. Tags always come with the code"
                 : mirrorOptions.mirrorReleases
-                  ? "Includes tags. Leave the assets box empty to upload assets for every mirrored release, or set it to 0 for release notes only"
+                  ? "Release notes and tags, with the files attached to each release (assets)"
                   : "Includes release assets and tags"
             }
             disabled={!isReleaseCapableSource}
             checked={mirrorOptions.mirrorReleases}
             onCheckedChange={(checked) => handleMirrorChange('mirrorReleases', checked)}
-            extra={
+            subContent={
               mirrorOptions.mirrorReleases ? (
-                <div className="space-y-1.5 text-xs text-muted-foreground">
-                  <div className="flex items-center gap-2">
-                    <label htmlFor="release-limit">Latest</label>
-                    <input
-                      id="release-limit"
-                      type="number"
-                      min="1"
-                      value={mirrorOptions.releaseLimit || 10}
-                      onChange={(e) => {
-                        const value = parseInt(e.target.value) || 10;
-                        const clampedValue = Math.max(1, value);
-                        handleMirrorChange('releaseLimit', clampedValue);
-                      }}
-                      className="w-16 rounded border border-input bg-background px-2 py-1 text-xs text-foreground"
-                    />
-                  </div>
-                  {/* Empty means every mirrored release gets its assets (the
-                      behaviour before #311); 0 means notes only. */}
-                  <div className="flex items-center gap-2">
-                    <label htmlFor="release-asset-limit">Assets for latest</label>
-                    <input
-                      id="release-asset-limit"
-                      type="number"
-                      min="0"
-                      placeholder="all"
-                      title="Leave empty to upload assets for every mirrored release, or 0 for none"
-                      value={mirrorOptions.releaseAssetLimit ?? ''}
-                      onChange={(e) => {
-                        const raw = e.target.value.trim();
-                        if (raw === '') {
-                          handleMirrorChange('releaseAssetLimit', null);
-                          return;
-                        }
-                        const value = parseInt(raw, 10);
-                        handleMirrorChange(
-                          'releaseAssetLimit',
-                          Number.isFinite(value) ? Math.max(0, value) : null
-                        );
-                      }}
-                      className="w-16 rounded border border-input bg-background px-2 py-1 text-xs text-foreground"
-                    />
-                  </div>
-                </div>
-              ) : undefined
-            }
-          />
+                <div className="space-y-2 pt-2">
+                  {/* The four release numbers in one table: how many to keep and
+                      how many of those get assets, for all releases and for
+                      pre-releases (#311, #560, #588). Empty boxes mean no limit. */}
+                  <div className="max-w-md rounded-lg border bg-muted/30 p-3">
+                    <div className="grid grid-cols-[minmax(0,1fr)_3.25rem_3.25rem] items-center gap-x-2 gap-y-2 sm:grid-cols-[minmax(0,1fr)_4.5rem_4.5rem] sm:gap-x-3">
+                      <span />
+                      <span className="text-[11px] font-medium text-muted-foreground">Keep latest</span>
+                      <span className="text-[11px] font-medium text-muted-foreground">With assets</span>
 
-          {/* Which kind of release counts as a candidate. Its own row because it
-              only means anything once releases are mirrored; the tag patterns
-              live in a dialog because their syntax needs room. */}
-          {mirrorOptions.mirrorReleases && (
-            <SwitchRow
-              icon={FlaskConical}
-              className="pl-6"
-              label="Pre-releases"
-              badge="NEW"
-              description={
-                isPushTarget
-                  ? pushTargetReason
-                  : !isReleaseCapableSource
-                  ? "Release filtering needs a GitHub or Gitea/Forgejo source"
-                  : "Turn off to skip releases the source marks as pre-release. Ones already in Gitea are removed on the next sync"
-              }
-              disabled={!isReleaseCapableSource}
-              checked={mirrorOptions.releaseType !== "stable"}
-              onCheckedChange={(checked) => handleMirrorChange('releaseType', checked ? "all" : "stable")}
-              subContent={
-                <div className="space-y-1.5 pt-0.5">
-                  {/* How many of the kept releases may be pre-releases, so
-                      nightly builds leave room for stable ones (#560). Empty
-                      means pre-releases count like any other release. */}
-                  {mirrorOptions.releaseType !== "stable" && (
-                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                      <label htmlFor="prerelease-limit">At most</label>
+                      <span className="whitespace-nowrap text-[13px]">All releases</span>
                       <input
-                        id="prerelease-limit"
+                        id="release-limit"
                         type="number"
-                        min="0"
-                        placeholder="any"
-                        title="Leave empty to count pre-releases like any other release, or 0 for none"
-                        value={mirrorOptions.prereleaseLimit ?? ''}
+                        min="1"
+                        aria-label="Releases to keep"
+                        value={mirrorOptions.releaseLimit || 10}
                         onChange={(e) => {
-                          const raw = e.target.value.trim();
-                          if (raw === '') {
-                            handleMirrorChange('prereleaseLimit', null);
-                            return;
-                          }
-                          const value = parseInt(raw, 10);
-                          handleMirrorChange(
-                            'prereleaseLimit',
-                            Number.isFinite(value) ? Math.max(0, value) : null
-                          );
+                          const value = parseInt(e.target.value) || 10;
+                          handleMirrorChange('releaseLimit', Math.max(1, value));
                         }}
-                        className="w-16 rounded border border-input bg-background px-2 py-1 text-xs text-foreground"
+                        className={releaseNumberInput}
                       />
-                      <span>pre-releases among the latest {mirrorOptions.releaseLimit || 10}</span>
-                    </div>
-                  )}
-                  {/* How many of the releases with assets may be pre-releases,
-                      so pre-releases keep their notes without their builds
-                      (#588). Empty means pre-releases get assets like any
-                      other release. */}
-                  {mirrorOptions.releaseType !== "stable" && (
-                    <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                      <label htmlFor="prerelease-asset-limit">Assets for the newest</label>
                       <input
-                        id="prerelease-asset-limit"
+                        id="release-asset-limit"
                         type="number"
                         min="0"
                         placeholder="all"
-                        title="Leave empty to give pre-releases assets like any other release, or 0 for notes only"
-                        value={mirrorOptions.prereleaseAssetLimit ?? ''}
-                        onChange={(e) => {
-                          const raw = e.target.value.trim();
-                          if (raw === '') {
-                            handleMirrorChange('prereleaseAssetLimit', null);
-                            return;
-                          }
-                          const value = parseInt(raw, 10);
-                          handleMirrorChange(
-                            'prereleaseAssetLimit',
-                            Number.isFinite(value) ? Math.max(0, value) : null
-                          );
-                        }}
-                        className="w-16 rounded border border-input bg-background px-2 py-1 text-xs text-foreground"
+                        aria-label="Releases with assets"
+                        title="Leave empty to upload assets for every mirrored release, or 0 for notes only"
+                        value={mirrorOptions.releaseAssetLimit ?? ''}
+                        onChange={(e) => handleMirrorChange('releaseAssetLimit', parseOptionalCount(e.target.value))}
+                        className={releaseNumberInput}
                       />
-                      <span>pre-releases</span>
+
+                      <label
+                        className="flex items-center gap-2 whitespace-nowrap text-[13px]"
+                        title={
+                          !isReleaseCapableSource
+                            ? "Release filtering needs a GitHub or Gitea/Forgejo source"
+                            : "Clear to skip releases the source marks as pre-release"
+                        }
+                      >
+                        <Checkbox
+                          id="include-prereleases"
+                          checked={mirrorOptions.releaseType !== "stable"}
+                          disabled={!isReleaseCapableSource}
+                          onCheckedChange={(checked) => handleMirrorChange('releaseType', checked === true ? "all" : "stable")}
+                        />
+                        Pre-releases
+                      </label>
+                      {mirrorOptions.releaseType !== "stable" ? (
+                        <>
+                          <input
+                            id="prerelease-limit"
+                            type="number"
+                            min="0"
+                            placeholder="any"
+                            aria-label="Pre-releases to keep"
+                            title="Leave empty to count pre-releases like any other release, or 0 for none"
+                            value={mirrorOptions.prereleaseLimit ?? ''}
+                            onChange={(e) => handleMirrorChange('prereleaseLimit', parseOptionalCount(e.target.value))}
+                            className={releaseNumberInput}
+                          />
+                          <input
+                            id="prerelease-asset-limit"
+                            type="number"
+                            min="0"
+                            placeholder="all"
+                            aria-label="Pre-releases with assets"
+                            title="Leave empty to give pre-releases assets like any other release, or 0 for notes only"
+                            value={mirrorOptions.prereleaseAssetLimit ?? ''}
+                            onChange={(e) => handleMirrorChange('prereleaseAssetLimit', parseOptionalCount(e.target.value))}
+                            className={releaseNumberInput}
+                          />
+                        </>
+                      ) : (
+                        <span className="col-span-2 flex h-8 items-center text-xs text-muted-foreground">Skipped</span>
+                      )}
                     </div>
-                  )}
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      {mirrorOptions.releaseType !== "stable"
+                        ? "Empty means no limit, and 0 assets keeps only the notes. Pre-releases count toward All releases."
+                        : "Pre-releases are skipped, and ones already in Gitea are removed on the next sync."}
+                    </p>
+                    {/* Deleting what a lowered number already uploaded is
+                        destructive, so it stays off until asked for. It acts on
+                        the "With assets" column, so it sits under it. */}
+                    <label className="mt-3 flex items-start gap-2 border-t pt-3 text-[13px]">
+                      <Checkbox
+                        id="prune-old-release-assets"
+                        className="mt-0.5"
+                        checked={mirrorOptions.pruneOldReleaseAssets === true}
+                        disabled={!isReleaseCapableSource}
+                        onCheckedChange={(checked) => handleMirrorChange('pruneOldReleaseAssets', checked === true)}
+                      />
+                      <span className="space-y-0.5">
+                        <span className="block">Remove old release assets</span>
+                        <span className="block text-xs text-muted-foreground">
+                          Off, assets already uploaded stay. On, every sync deletes the assets of releases past the With assets numbers.
+                        </span>
+                      </span>
+                    </label>
+                  </div>
                   <div className="flex items-center gap-2">
                     <Button
                       type="button"
@@ -1208,27 +1193,9 @@ export function GitHubMirrorSettings({
                     )}
                   </div>
                 </div>
-              }
-            />
-          )}
-
-          {/* Deleting what a lowered limit already uploaded is destructive, so it
-              stays off until the user asks for it. */}
-          {mirrorOptions.mirrorReleases && (
-            <SwitchRow
-              icon={Trash2}
-              className="pl-6"
-              label="Remove old release assets"
-              description={
-                isPushTarget
-                  ? pushTargetReason
-                  : "Off by default: attachments stay on the destination even when a release falls outside \u201cAssets for latest\u201d or the pre-release count. Turning this on deletes the attachments of every mirrored release past those counts"
-              }
-              disabled={!isReleaseCapableSource}
-              checked={mirrorOptions.pruneOldReleaseAssets === true}
-              onCheckedChange={(checked) => handleMirrorChange('pruneOldReleaseAssets', checked)}
-            />
-          )}
+              ) : undefined
+            }
+          />
 
           <SwitchRow
             icon={HardDrive}
