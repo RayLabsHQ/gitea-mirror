@@ -298,6 +298,44 @@ describe("classifyAssetsForReconciliation", () => {
     expect(toDelete).toEqual([]);
   });
 
+  // --- #596: the source gives no size (Forgejo assets added as a link) ---
+
+  it("keeps a copy with the same name when the source gives no size (#596)", () => {
+    const source = [{ name: "app.apk", size: 0 }];
+    const gitea = [{ id: 31, name: "app.apk", size: 18_400_000 }];
+
+    const { toUpload, toSkip, toDelete } = classifyAssetsForReconciliation(source, gitea);
+
+    expect(toUpload).toEqual([]);
+    expect(toSkip).toEqual(["app.apk"]);
+    expect(toDelete).toEqual([]);
+  });
+
+  it("still uploads an asset without a size that the destination does not have yet", () => {
+    const { toUpload, toSkip, toDelete } = classifyAssetsForReconciliation(
+      [{ name: "app.apk", size: 0 }],
+      []
+    );
+
+    expect(toUpload).toEqual(["app.apk"]);
+    expect(toSkip).toEqual([]);
+    expect(toDelete).toEqual([]);
+  });
+
+  it("keeps the lowest id and deletes the duplicates of an asset without a size", () => {
+    const source = [{ name: "app.apk", size: 0 }];
+    const gitea = [
+      { id: 40, name: "app.apk", size: 18_400_000 },
+      { id: 31, name: "app.apk", size: 18_400_000 },
+    ];
+
+    const { toUpload, toSkip, toDelete } = classifyAssetsForReconciliation(source, gitea);
+
+    expect(toUpload).toEqual([]);
+    expect(toSkip).toEqual(["app.apk"]);
+    expect(toDelete).toEqual([40]);
+  });
+
   it("keeps the lowest id whatever order the destination listed the copies in", () => {
     const github = [{ name: "base.zip", size: 10 }];
     const listedOneWay = [

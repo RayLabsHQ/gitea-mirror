@@ -3929,6 +3929,13 @@ export const RELEASE_ASSET_DOWNLOAD_LIMITS: ReleaseAssetDownloadLimits = {
  *   - copies exist but none matches the size -> delete all of them, upload once
  *   - no copy exists                        -> upload
  *
+ * A source size of 0 means the source did not say how big the file is.
+ * Forgejo lists every asset added as a link that way (#596). Comparing sizes
+ * then always fails, so every sync deleted the copy, downloaded the file and
+ * uploaded it again, and a failed download left the release without it. Such
+ * an asset counts as mirrored when a copy with its name exists, and the
+ * lowest id copy is the one kept.
+ *
  * A destination attachment whose name is not in the GitHub list is never
  * deleted: the asset limit (#311), an older upstream release and manual
  * uploads all leave attachments this reconciliation has no claim over.
@@ -3976,7 +3983,8 @@ export function classifyAssetsForReconciliation(
       continue;
     }
 
-    const keep = copies.find((copy) => copy.size === asset.size);
+    const keep =
+      asset.size > 0 ? copies.find((copy) => copy.size === asset.size) : copies[0];
     if (keep) {
       // Already mirrored: keep the first (lowest id) matching copy and drop
       // every other attachment carrying that name.
@@ -4161,7 +4169,9 @@ export async function reconcileReleaseAssets({
       // Download from the source host (see downloadSourceAsset: private GitHub
       // repositories go through the REST asset URL).
       console.log(
-        `[Releases] Downloading asset: ${asset.name} (${asset.size} bytes) for ${tagName}`
+        `[Releases] Downloading asset: ${asset.name} (${
+          asset.size > 0 ? `${asset.size} bytes` : "size not given by the source"
+        }) for ${tagName}`
       );
       const download = await downloadSourceAsset(
         doFetch,
