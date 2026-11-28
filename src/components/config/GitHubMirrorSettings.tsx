@@ -152,6 +152,11 @@ export function GitHubMirrorSettings({
   // and regex syntax, and the fact that a now-unmatching release is deleted
   // from Gitea, both need room to explain themselves.
   const [tagRulesOpen, setTagRulesOpen] = React.useState(false);
+  // What is typed in the All releases / Keep latest box while it has focus.
+  // That box always needs a number (#595): clearing it while typing used to
+  // snap straight back to 10, so the draft can be empty and only a whole
+  // number of 1 or more is saved. Leaving the box puts the saved value back.
+  const [releaseLimitDraft, setReleaseLimitDraft] = React.useState<string | null>(null);
   const tagPatternCount =
     (mirrorOptions.releaseIncludeTags?.length ?? 0) +
     (mirrorOptions.releaseExcludeTags?.length ?? 0);
@@ -1088,11 +1093,16 @@ export function GitHubMirrorSettings({
                         type="number"
                         min="1"
                         aria-label="Releases to keep"
-                        value={mirrorOptions.releaseLimit || 10}
+                        title="How many of the newest releases to mirror. This one always needs a number"
+                        value={releaseLimitDraft ?? String(mirrorOptions.releaseLimit || 10)}
                         onChange={(e) => {
-                          const value = parseInt(e.target.value) || 10;
-                          handleMirrorChange('releaseLimit', Math.max(1, value));
+                          setReleaseLimitDraft(e.target.value);
+                          const value = Number(e.target.value);
+                          if (e.target.value.trim() !== '' && Number.isInteger(value) && value >= 1) {
+                            handleMirrorChange('releaseLimit', value);
+                          }
                         }}
+                        onBlur={() => setReleaseLimitDraft(null)}
                         className={releaseNumberInput}
                       />
                       <input
@@ -1129,7 +1139,7 @@ export function GitHubMirrorSettings({
                             id="prerelease-limit"
                             type="number"
                             min="0"
-                            placeholder="any"
+                            placeholder="all"
                             aria-label="Pre-releases to keep"
                             title="Leave empty to count pre-releases like any other release, or 0 for none"
                             value={mirrorOptions.prereleaseLimit ?? ''}
@@ -1154,7 +1164,7 @@ export function GitHubMirrorSettings({
                     </div>
                     <p className="mt-2 text-xs text-muted-foreground">
                       {mirrorOptions.releaseType !== "stable"
-                        ? "Empty means no limit, and 0 assets keeps only the notes. Pre-releases count toward All releases."
+                        ? "All releases needs a number to keep. The other boxes can stay empty for no limit, and 0 assets keeps only the notes. Pre-releases count toward All releases."
                         : "Pre-releases are skipped, and ones already in Gitea are removed on the next sync."}
                     </p>
                     {/* Deleting what a lowered number already uploaded is

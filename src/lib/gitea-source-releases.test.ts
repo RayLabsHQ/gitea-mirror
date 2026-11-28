@@ -425,6 +425,34 @@ describe.skipIf(!isChild)("mirrorGiteaSourceReleasesToGitea", () => {
     expect(world.patches()).toHaveLength(0);
   });
 
+  it("leaves a Forgejo link asset alone once its copy is on the destination (#596)", async () => {
+    // Forgejo lists an asset added as a link with size 0, so the copy on the
+    // destination never matched it and every sync replaced it.
+    const world = fakeWorld({
+      sourceReleases: [
+        giteaRelease("v1.0.0", {
+          assets: [
+            {
+              id: 1,
+              name: "app.apk",
+              size: 0,
+              type: "external",
+              browser_download_url: "https://downloads.example.org/app.apk",
+            },
+          ],
+        }),
+      ],
+      existingRelease: { id: 3, tag_name: "v1.0.0", name: "Release v1.0.0", body: "old" },
+      destinationAssets: { "3": [{ id: 31, name: "app.apk", size: 18_400_000 }] },
+    });
+
+    await mirrorFromGitea(giteaConnection("source-token"));
+
+    expect(world.downloads()).toHaveLength(0);
+    expect(world.assetDeletes()).toHaveLength(0);
+    expect(world.uploads()).toHaveLength(0);
+  });
+
   it("skips a release whose git tag has not reached the destination yet", async () => {
     const world = fakeWorld({
       sourceReleases: [giteaRelease("v1.0.0")],
