@@ -401,13 +401,13 @@ export function Storage() {
             title="Total stored"
             value={formatBytes(totals.total)}
             icon={<HardDrive className="h-4 w-4" />}
-            description={`Across ${totals.measured} ${totals.measured === 1 ? "repository" : "repositories"}`}
+            description={`Your ${totals.measured} ${totals.measured === 1 ? "mirror" : "mirrors"}, not the whole destination`}
           />
           <StatusCard
             title="Git + LFS"
             value={formatBytes(totals.destinationSize)}
             icon={<Database className="h-4 w-4" />}
-            description="As the destination reports it"
+            description="As the destination reports each mirror"
           />
           <StatusCard
             title="Release assets"
@@ -576,7 +576,9 @@ export function Storage() {
           <p className="text-xs text-muted-foreground">
             Sizes are what the destination reports: Git and LFS together, plus the release assets it stores. Each sync
             records them from data it already fetches, and Refresh sizes reads them from the destination on demand. The
-            Git size a sync records is read before it pulls, so it trails by one sync.
+            Git size a sync records is read before it pulls, so it trails by one sync. Only these mirrors are counted:
+            the destination's own database and search indexes, wikis, files attached to issues and repositories
+            gitea-mirror doesn't manage are not, so its data folder on disk is bigger than the total.
           </p>
         </div>
       </div>

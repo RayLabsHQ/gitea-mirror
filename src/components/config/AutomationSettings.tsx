@@ -101,8 +101,8 @@ function formatIntervalSeconds(interval: number | string | undefined): string {
 
 /**
  * The three choices for a repository whose source is gone. What archive and
- * delete do depends on the destination switch below them: with it off only
- * gitea-mirror's own list changes (#558), so the tiles say so instead of
+ * delete do depends on the destination switch right under them: with it off
+ * only gitea-mirror's own list changes (#558), so the tiles say so instead of
  * promising a change on the destination.
  */
 function orphanActions(applyToDestination: boolean) {
@@ -123,7 +123,7 @@ function orphanActions(applyToDestination: boolean) {
       icon: Archive,
       info: applyToDestination
         ? "Renames the mirror with an archived- prefix and disables automatic syncs. Nothing is lost; use Sync on the Repositories page to refresh."
-        : "The repository is marked archived in gitea-mirror. The copy on the destination stays as it is. Turn on Apply to the destination too to archive it there as well.",
+        : "The repository is marked archived in gitea-mirror. The copy on the destination stays as it is. Turn on Archive on the destination too, under these choices, to archive it there as well.",
     },
     {
       value: "delete" as const,
@@ -134,7 +134,7 @@ function orphanActions(applyToDestination: boolean) {
       icon: Trash2,
       info: applyToDestination
         ? "Permanently deletes the mirror repository from the destination."
-        : "The repository is removed from gitea-mirror. The copy on the destination stays as it is. Turn on Apply to the destination too to delete it there as well.",
+        : "The repository is removed from gitea-mirror. The copy on the destination stays as it is. Turn on Delete from the destination too, under these choices, to delete it there as well.",
     },
   ];
 }
@@ -542,48 +542,59 @@ export function AutomationSettings({
                   />
                 ))}
               </div>
+              {/* Part of the choice above, so it sits right under it and is
+                  named after the action (#601). Off, the action still
+                  happens, in gitea-mirror's own list only. */}
+              {(cleanupConfig.orphanedRepoAction ?? "archive") !== "skip" && (
+                <SwitchRow
+                  label={
+                    cleanupConfig.orphanedRepoAction === "delete"
+                      ? "Delete from the destination too"
+                      : "Archive on the destination too"
+                  }
+                  description={
+                    cleanupConfig.orphanedRepoAction === "delete"
+                      ? "When off, the repository is only removed from gitea-mirror's list, and the copy on the destination stays as it is"
+                      : "When off, the repository is only marked archived in gitea-mirror, which stops syncing it, and the copy on the destination stays as it is"
+                  }
+                  info="Archiving keeps everything: a Gitea or Forgejo mirror gets an archived- prefix and stops syncing automatically, and GitHub or GitLab use their own archive. Deleting cannot be undone. CLEANUP_DELETE_FROM_GITEA, when set, replaces this on every restart."
+                  checked={Boolean(cleanupConfig.deleteFromGitea)}
+                  onCheckedChange={(checked) =>
+                    onCleanupChange({ ...cleanupConfig, deleteFromGitea: checked })
+                  }
+                />
+              )}
             </CardSection>
             <CardDivider />
             <CardSection>
               {(cleanupConfig.orphanedRepoAction ?? "archive") !== "skip" && (
-                <>
-                  <OptionRow
-                    label="Wait before acting"
-                    description="Act only once the source has been gone this many days. 0 acts on the first check that finds it gone"
-                    info="Counted from the first check that finds the source gone. If the source comes back during the wait, nothing happens and the count starts over. With cleanup notifications on, you hear about it when the wait starts. CLEANUP_ORPHANED_REPO_GRACE_DAYS, when set, replaces this on every restart."
-                    right={
-                      <div className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
-                        <input
-                          id="cleanup-grace-days"
-                          type="number"
-                          min="0"
-                          inputMode="numeric"
-                          value={cleanupConfig.orphanedRepoGraceDays ?? 0}
-                          onChange={(event) => {
-                            const value = parseInt(event.target.value, 10);
-                            onCleanupChange({
-                              ...cleanupConfig,
-                              orphanedRepoGraceDays: Number.isFinite(value) ? Math.max(0, value) : 0,
-                            });
-                          }}
-                          className="w-16 rounded border border-input bg-background px-2 py-1 text-xs text-foreground"
-                        />
-                        <label htmlFor="cleanup-grace-days">
-                          {(cleanupConfig.orphanedRepoGraceDays ?? 0) === 1 ? "day" : "days"}
-                        </label>
-                      </div>
-                    }
-                  />
-                  <SwitchRow
-                    label="Apply to the destination too"
-                    description="When off, only gitea-mirror's list changes and the copies on the destination stay as they are"
-                    info="Archiving keeps everything: a Gitea or Forgejo mirror gets an archived- prefix and stops syncing automatically, and GitHub or GitLab use their own archive. Deleting cannot be undone. CLEANUP_DELETE_FROM_GITEA, when set, replaces this on every restart."
-                    checked={Boolean(cleanupConfig.deleteFromGitea)}
-                    onCheckedChange={(checked) =>
-                      onCleanupChange({ ...cleanupConfig, deleteFromGitea: checked })
-                    }
-                  />
-                </>
+                <OptionRow
+                  label="Wait before acting"
+                  description="Act only once the source has been gone this many days. 0 acts on the first check that finds it gone"
+                  info="Counted from the first check that finds the source gone. If the source comes back during the wait, nothing happens and the count starts over. With cleanup notifications on, you hear about it when the wait starts. CLEANUP_ORPHANED_REPO_GRACE_DAYS, when set, replaces this on every restart."
+                  right={
+                    <div className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
+                      <input
+                        id="cleanup-grace-days"
+                        type="number"
+                        min="0"
+                        inputMode="numeric"
+                        value={cleanupConfig.orphanedRepoGraceDays ?? 0}
+                        onChange={(event) => {
+                          const value = parseInt(event.target.value, 10);
+                          onCleanupChange({
+                            ...cleanupConfig,
+                            orphanedRepoGraceDays: Number.isFinite(value) ? Math.max(0, value) : 0,
+                          });
+                        }}
+                        className="w-16 rounded border border-input bg-background px-2 py-1 text-xs text-foreground"
+                      />
+                      <label htmlFor="cleanup-grace-days">
+                        {(cleanupConfig.orphanedRepoGraceDays ?? 0) === 1 ? "day" : "days"}
+                      </label>
+                    </div>
+                  }
+                />
               )}
               <SwitchRow
                 label="Dry run"
