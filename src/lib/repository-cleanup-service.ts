@@ -141,6 +141,17 @@ export async function listPublicOnlySourceRepositories(
 }
 
 /**
+ * The config with the GitHub star list filter removed, for reading the stars
+ * of rows flagged starred while starred import is off (#600). Lists saved from
+ * an earlier setup would narrow the listing, or fail it when a list was
+ * renamed since, and any star is enough to show such a row is still there.
+ */
+export function withEveryStar<T extends { githubConfig?: unknown }>(config: T): T {
+  const githubConfig = (config.githubConfig ?? {}) as Record<string, unknown>;
+  return { ...config, githubConfig: { ...githubConfig, starredLists: [] } };
+}
+
+/**
  * Identify orphaned repositories for a user
  * These are repositories that exist in our database (and likely in Gitea)
  * but are no longer in GitHub based on current criteria
@@ -252,6 +263,21 @@ async function scanForOrphanedRepositories(config: any): Promise<OrphanScan> {
 
       let allGithubRepos: any[] = [];
 
+      // A row flagged starred came in through the star list, and the flag
+      // stays after an unstar (#600). With starred repositories imported, an
+      // unstar counts as gone, as it always has. With them off the star list
+      // is still read for such rows, so a star that is still there costs no
+      // extra request, but only a deleted source counts as gone: a row
+      // missing from the list gets the plain existence check below.
+      const unstarCountsAsGone = config.githubConfig?.includeStarred === true;
+      const hasStarredRows = sourceOwnedRepos.some(
+        repo =>
+          repo.sourceId === source.id &&
+          repo.isStarred &&
+          repo.status !== 'archived' &&
+          !repo.isArchived
+      );
+
       try {
         if (publicOnly) {
           const organizationNames = organizationsToListForPublicSource(
@@ -278,9 +304,11 @@ async function scanForOrphanedRepositories(config: any): Promise<OrphanScan> {
               includeCollaboratorReposOverride: true,
               includeAllOrgsOverride: true,
             }),
-            config.githubConfig?.includeStarred
+            unstarCountsAsGone
               ? sourceProvider.listStarredRepositories(config)
-              : Promise.resolve([]),
+              : hasStarredRows
+                ? sourceProvider.listStarredRepositories(withEveryStar(config))
+                : Promise.resolve([]),
           ]);
 
           allGithubRepos = [...basicAndForkedRepos, ...starredRepos];
@@ -334,12 +362,6 @@ async function scanForOrphanedRepositories(config: any): Promise<OrphanScan> {
           return false;
         }
 
-        // If starred repos are not being fetched from the source, we can't determine
-        // if a starred repo is orphaned - skip it to prevent data loss
-        if (repo.isStarred && !config.githubConfig?.includeStarred) {
-          console.log(`[Repository Cleanup] Skipping starred repo ${repo.fullName} - starred repos not being fetched from the source`);
-          return false;
-        }
         // Stars belong to an account; a public only source has none to ask.
         if (repo.isStarred && publicOnly) {
           console.log(`[Repository Cleanup] Skipping starred repo ${repo.fullName} - source ${source.name} has no account to check stars with`);
@@ -380,7 +402,7 @@ async function scanForOrphanedRepositories(config: any): Promise<OrphanScan> {
           // would not resolve on the source host.
           const upstreamPath = splitFullName(repo.fullName, repo.owner, repo.name);
 
-          if (repo.isStarred) {
+          if (repo.isStarred && unstarCountsAsGone) {
             try {
               const stillStarred = await sourceProvider.isRepositoryStarred(
                 upstreamPath.owner,

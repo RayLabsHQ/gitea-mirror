@@ -150,6 +150,8 @@ The **Storage** page shows how much space your mirrors take on the destination: 
 
 Sizes are recorded during each sync from answers Gitea Mirror already gets, so they trail by one sync and cost no extra requests. Nothing is asked of the source. A repository whose release assets are at least half its size, and at least 50 MB, gets a hint pointing to its release limit.
 
+Only the mirrors Gitea Mirror manages are counted, at the size the destination reports for each: Git and LFS, plus release assets. The destination's own database and search indexes, wikis, files attached to issues and repositories Gitea Mirror doesn't manage are not, so the destination's data folder on disk is bigger than the total.
+
 **Refresh sizes** reads every mirror's size from the destination now instead of waiting for the next sync. It works with Gitea and Forgejo destinations; GitHub and GitLab destinations are not measured.
 
 ## Activity Log

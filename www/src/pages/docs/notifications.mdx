@@ -35,7 +35,7 @@ Only terminal job statuses trigger sync notifications. Jobs that are still queue
 
 New repositories arrive as one notification per group instead of one per repository: one for your account, one per organization, and one for all starred repositories. Each lists up to 10 names, then "and N more".
 
-A cleanup run sends one notification for everything it did, for example "Repository Cleanup: 2 repositories archived", listing up to 10 names, followed by any repository it could not handle. It says whether the destination was changed or only gitea-mirror's own list, which depends on **Apply to the destination too**. A repository is reported once: the next run leaves an archived repository alone.
+A cleanup run sends one notification for everything it did, for example "Repository Cleanup: 2 repositories archived", listing up to 10 names, followed by any repository it could not handle. It says whether the destination was changed or only gitea-mirror's own list, which depends on the **Archive on the destination too** (or **Delete from the destination too**) switch. A repository is reported once: the next run leaves an archived repository alone.
 
 With **Wait before acting** set, the run that first finds a source gone sends a heads-up instead, for example "Repository Cleanup: source gone for 1 repository", saying on which day the repository will be archived or removed if its source is still gone. It is sent once per disappearance, with the same switch and the same `repo_cleanup` type.
 
